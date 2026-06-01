@@ -77,7 +77,14 @@ npm run tauri dev
 
 <https://github.com/ganbo-gab/open-storyboard-canvas/releases/latest>
 
-Windows 用户下载 `.exe` 安装包，macOS 用户下载 `.dmg` 安装包。Windows 如果启动时报 WebView 相关错误，请安装 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/zh-cn/Microsoft-edge/webview2#download)。
+Windows 用户下载 `.exe` 安装包，macOS 用户下载 `.dmg` 安装包。
+
+安装提醒：
+
+- GitHub 的 Tag 页面只会显示源码压缩包；正式安装包请到 Releases 页面下载。
+- macOS 安装包目前未做 Apple Developer ID 签名和公证。首次打开时如果提示“无法验证开发者”“已损坏”或被系统拦截，可以在“系统设置 → 隐私与安全性”里允许打开，或右键应用选择“打开”。
+- Windows 如果启动时报 WebView 相关错误，请安装 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/zh-cn/Microsoft-edge/webview2#download) 后重试。
+- 如果杀毒软件或系统安全策略拦截安装包，请优先从本项目 GitHub Releases 下载，并确认文件名和版本号一致。
 
 ## 开发命令
 

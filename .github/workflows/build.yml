@@ -241,6 +241,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.resolve_release.outputs.tag }}
+          name: Open Storyboard Canvas ${{ steps.resolve_release.outputs.tag }}
           target_commitish: ${{ github.sha }}
           body: ${{ steps.resolve_release.outputs.body }}
           files: |
