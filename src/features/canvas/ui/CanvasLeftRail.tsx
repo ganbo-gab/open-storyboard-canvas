@@ -36,11 +36,11 @@ export const CanvasLeftRail = memo(() => {
   );
 
   return (
-    <div className="absolute left-3 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-2 rounded-xl border border-border-dark bg-surface-dark/90 p-2 shadow-lg backdrop-blur-sm">
+    <div className="absolute left-3 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-2 rounded-xl border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-bg)] p-2 shadow-[var(--canvas-rail-shadow)] backdrop-blur-sm">
       <button
         type="button"
         onClick={() => createAt(CANVAS_NODE_TYPES.panorama)}
-        className="group flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-white/10 bg-bg-dark/60 text-text-muted transition-colors hover:border-accent/60 hover:bg-accent/10 hover:text-accent"
+        className="group flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/10 hover:text-accent"
         title={t('canvasToolbar.addPanorama')}
       >
         <Globe2 className="h-4 w-4" />
@@ -49,7 +49,7 @@ export const CanvasLeftRail = memo(() => {
       <button
         type="button"
         onClick={() => createAt(CANVAS_NODE_TYPES.blueprint, { openDirectorStudioOnCreate: true })}
-        className="group flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-white/10 bg-bg-dark/60 text-text-muted transition-colors hover:border-accent/60 hover:bg-accent/10 hover:text-accent"
+        className="group flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/10 hover:text-accent"
         title={t('canvasToolbar.createDirectorStudio')}
       >
         <Box className="h-4 w-4" />
@@ -60,7 +60,7 @@ export const CanvasLeftRail = memo(() => {
         onClick={() =>
           createAt(CANVAS_NODE_TYPES.blueprint, { mode: 'panorama', openDirectorStudioOnCreate: true })
         }
-        className="group flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-white/10 bg-bg-dark/60 text-text-muted transition-colors hover:border-accent/60 hover:bg-accent/10 hover:text-accent"
+        className="group flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/10 hover:text-accent"
         title={t('canvasToolbar.createPanoramaDirectorStudio')}
       >
         <Map className="h-4 w-4" />

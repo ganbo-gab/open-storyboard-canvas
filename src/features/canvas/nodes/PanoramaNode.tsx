@@ -32,6 +32,7 @@ import { resolveActiveModelForPanel } from '@/features/canvas/application/resolv
 import { resolveImageModelResolution } from '@/features/canvas/models';
 import { imageUrlToDataUrl, reduceAspectRatio, resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
 import { CURRENT_RUNTIME_SESSION_ID } from '@/features/canvas/application/generationErrorReport';
+import { appendGenerationParameterConstraints } from '@/features/canvas/application/generationPromptConstraints';
 import { showErrorDialog } from '@/features/canvas/application/errorDialog';
 import { persistImageSource } from '@/commands/image';
 
@@ -416,6 +417,9 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
   );
   const useLegacyControlDirection = useSettingsStore((s) => s.useLegacyPanoramaControlDirection);
   const panoramaControlSensitivity = useSettingsStore((s) => s.panoramaControlSensitivity);
+  const appendParameterConstraintsToPrompt = useSettingsStore(
+    (s) => s.appendParameterConstraintsToPrompt
+  );
 
   const imageUrl = data.imageUrl ?? null;
   const displayImageUrl = useMemo(
@@ -526,8 +530,14 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
       const requestModel = resolved.builtinModel
         ? resolved.builtinModel.resolveRequest({ referenceImageCount: referenceImages.length }).requestModel
         : resolved.modelForGateway;
+      const promptForRequest = appendGenerationParameterConstraints(prompt.trim(), {
+        enabled: appendParameterConstraintsToPrompt,
+        aspectRatio: panoramaRequestRatio,
+        resolution: sizeForGateway,
+        count: 1,
+      });
       const jobId = await canvasAiGateway.submitGenerateImageJob({
-        prompt: prompt.trim(),
+        prompt: promptForRequest,
         model: requestModel,
         size: sizeForGateway,
         aspectRatio: panoramaRequestRatio,
@@ -551,7 +561,7 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
       });
       await showErrorDialog(error instanceof Error ? error.message : '提交全景生成任务失败', '错误');
     }
-  }, [id, firstUpstreamImage, t, updateNodeData]);
+  }, [appendParameterConstraintsToPrompt, id, firstUpstreamImage, t, updateNodeData]);
 
   const handleCopyPrompt = useCallback(async (prompt: string) => {
     try {
@@ -630,29 +640,29 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
     // panorama → panel-like setup" flow the user expects.
     return (
       <div
-        className={`relative rounded-xl border ${selected ? 'border-accent' : 'border-white/15'} bg-[#1a1a1a] w-[1080px] overflow-hidden`}
+        className={`relative w-[1080px] overflow-hidden rounded-xl border bg-[var(--canvas-node-bg)] shadow-[var(--canvas-node-shadow)] ${selected ? 'border-accent' : 'border-[var(--canvas-node-border)]'}`}
         onDoubleClick={(e) => e.stopPropagation()}
       >
         <Handle type="target" id="target" position={Position.Left} className="!bg-accent/70" />
         <Handle type="source" id="source" position={Position.Right} className="!bg-accent/70" />
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/8">
+        <div className="flex items-center justify-between border-b border-[var(--canvas-node-divider)] px-4 py-2.5">
           <div>
-            <div className="text-sm font-semibold text-white">全景图生成</div>
-            <div className="mt-0.5 text-[11px] text-white/[0.42]">
+            <div className="text-sm font-semibold text-text-dark">全景图生成</div>
+            <div className="mt-0.5 text-[11px] text-text-muted">
               左侧管理素材 · 中间写提示词与参数 · 右侧选择生成方式和比例兜底
             </div>
           </div>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); deleteNode(id); }}
-            className="nodrag nopan nowheel flex items-center justify-center w-6 h-6 rounded-md text-white/50 hover:text-white hover:bg-white/10"
+            className="nodrag nopan nowheel flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-[var(--canvas-node-menu-hover)] hover:text-text-dark"
             title="删除节点"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
         {data.isGenerating ? (
-          <div className="flex items-center justify-center h-[420px] text-white/70 text-sm">
+          <div className="flex h-[420px] items-center justify-center text-sm text-text-muted">
             <Loader2 className="w-4 h-4 animate-spin mr-2" /> 正在生成全景图...
           </div>
         ) : (
@@ -697,7 +707,7 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
   return (
     <>
       <div
-        className={`rounded-xl border ${selected ? 'border-accent' : 'border-white/15'} bg-[#0e0e0e] overflow-hidden shadow-xl w-[560px] h-[340px]`}
+        className={`h-[340px] w-[560px] overflow-hidden rounded-xl border bg-[var(--canvas-node-bg)] shadow-[var(--canvas-node-shadow)] ${selected ? 'border-accent' : 'border-[var(--canvas-node-border)]'}`}
         onDoubleClick={(e) => {
           e.stopPropagation();
           setIsExpanded(true);

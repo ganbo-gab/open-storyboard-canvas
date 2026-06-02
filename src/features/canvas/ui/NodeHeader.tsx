@@ -226,7 +226,7 @@ export function NodeHeader({
         type="button"
         ref={setTitleMeasureElement}
         className={joinClasses(
-          'group/title inline-flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap cursor-grab select-none rounded border border-[rgba(15,23,42,0.10)] bg-white/35 px-1.5 text-left active:cursor-grabbing dark:border-white/10 dark:bg-black/20',
+          'group/title inline-flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap cursor-grab select-none rounded border border-[rgba(15,23,42,0.14)] bg-white/70 px-1.5 text-left shadow-sm active:cursor-grabbing dark:border-white/10 dark:bg-black/20 dark:shadow-none',
           NODE_HEADER_TITLE_MAX_WIDTH_CLASS,
           NODE_HEADER_TITLE_CLASS,
           tone,

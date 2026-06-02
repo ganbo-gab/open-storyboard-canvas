@@ -51,6 +51,7 @@ interface SettingsState {
   storyboardGenDisableTextInImage: boolean;
   storyboardGenAutoInferEmptyFrame: boolean;
   ignoreAtTagWhenCopyingAndGenerating: boolean;
+  appendParameterConstraintsToPrompt: boolean;
   enableStoryboardGenGridPreviewShortcut: boolean;
   showStoryboardGenAdvancedRatioControls: boolean;
   useLegacyPanoramaControlDirection: boolean;
@@ -79,6 +80,7 @@ interface SettingsState {
   setStoryboardGenDisableTextInImage: (enabled: boolean) => void;
   setStoryboardGenAutoInferEmptyFrame: (enabled: boolean) => void;
   setIgnoreAtTagWhenCopyingAndGenerating: (enabled: boolean) => void;
+  setAppendParameterConstraintsToPrompt: (enabled: boolean) => void;
   setEnableStoryboardGenGridPreviewShortcut: (enabled: boolean) => void;
   setShowStoryboardGenAdvancedRatioControls: (enabled: boolean) => void;
   setUseLegacyPanoramaControlDirection: (enabled: boolean) => void;
@@ -372,6 +374,7 @@ export const useSettingsStore = create<SettingsState>()(
       storyboardGenDisableTextInImage: true,
       storyboardGenAutoInferEmptyFrame: true,
       ignoreAtTagWhenCopyingAndGenerating: true,
+      appendParameterConstraintsToPrompt: false,
       enableStoryboardGenGridPreviewShortcut: false,
       showStoryboardGenAdvancedRatioControls: false,
       useLegacyPanoramaControlDirection: false,
@@ -416,6 +419,8 @@ export const useSettingsStore = create<SettingsState>()(
         set({ storyboardGenAutoInferEmptyFrame: enabled }),
       setIgnoreAtTagWhenCopyingAndGenerating: (enabled) =>
         set({ ignoreAtTagWhenCopyingAndGenerating: enabled }),
+      setAppendParameterConstraintsToPrompt: (enabled) =>
+        set({ appendParameterConstraintsToPrompt: enabled }),
       setEnableStoryboardGenGridPreviewShortcut: (enabled) =>
         set({ enableStoryboardGenGridPreviewShortcut: enabled }),
       setShowStoryboardGenAdvancedRatioControls: (enabled) =>
@@ -617,6 +622,7 @@ export const useSettingsStore = create<SettingsState>()(
           apiKey?: string;
           apiKeys?: ProviderApiKeys;
           ignoreAtTagWhenCopyingAndGenerating?: boolean;
+          appendParameterConstraintsToPrompt?: boolean;
           grsaiNanoBananaProModel?: string;
           hideProviderGuidePopover?: boolean;
           canvasEdgeRoutingMode?: CanvasEdgeRoutingMode | string;
@@ -643,6 +649,8 @@ export const useSettingsStore = create<SettingsState>()(
         const migratedApiKeys = normalizeApiKeys(state.apiKeys);
         const ignoreAtTagWhenCopyingAndGenerating =
           state.ignoreAtTagWhenCopyingAndGenerating ?? true;
+        const appendParameterConstraintsToPrompt =
+          state.appendParameterConstraintsToPrompt ?? false;
         const migratedLightingTemplate = (() => {
           const trimmed = state.lightingPromptTemplate?.trim() ?? '';
           if (!trimmed) return DEFAULT_LIGHTING_PROMPT_TEMPLATE;
@@ -666,6 +674,7 @@ export const useSettingsStore = create<SettingsState>()(
             isHydrated: true,
             apiKeys: migratedApiKeys,
             ignoreAtTagWhenCopyingAndGenerating,
+            appendParameterConstraintsToPrompt,
             grsaiNanoBananaProModel: normalizeGrsaiNanoBananaProModel(
               state.grsaiNanoBananaProModel
             ),
@@ -697,6 +706,7 @@ export const useSettingsStore = create<SettingsState>()(
           isHydrated: true,
           apiKeys: state.apiKey ? { ppio: normalizeApiKey(state.apiKey) } : {},
           ignoreAtTagWhenCopyingAndGenerating,
+          appendParameterConstraintsToPrompt,
           grsaiNanoBananaProModel: normalizeGrsaiNanoBananaProModel(
             state.grsaiNanoBananaProModel
           ),

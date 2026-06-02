@@ -20,7 +20,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return tagName === 'input' || tagName === 'textarea' || element.isContentEditable;
 }
 
-function resolveClipboardImageFile(event: ClipboardEvent): File | null {
+export function resolveClipboardImageFile(event: ClipboardEvent): File | null {
   const clipboardItems = event.clipboardData?.items;
   if (!clipboardItems) {
     return null;
@@ -71,6 +71,7 @@ export interface UseCanvasShortcutsArgs {
    *  Canvas-local helpers (size measurement, position resolution). The
    *  hook just needs a stable callable to dispatch through. */
   duplicateNodes: (sourceNodeIds: string[]) => string | null;
+  pasteImageAtCanvasPosition?: (file: File) => void | Promise<void>;
 }
 
 /**
@@ -108,6 +109,7 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
     deleteNode,
     deleteNodes,
     duplicateNodes,
+    pasteImageAtCanvasPosition,
   } = args;
 
   const copiedSnapshotRef = useRef<ClipboardSnapshot | null>(null);
@@ -121,13 +123,14 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
     duplicateNodesRef.current = duplicateNodes;
   }, [duplicateNodes]);
 
-  // Forward image-bearing clipboard events to whichever upload node is
-  // currently selected. Sets a same-tick flag so the keydown handler's
-  // Cmd-V branch knows to skip the node-duplication path.
+  // Forward image-bearing clipboard events to the selected upload node or,
+  // when no upload node is selected, to the canvas-level paste handler.
+  // Sets a same-tick flag so the keydown handler's Cmd-V branch knows to
+  // skip the node-duplication path.
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
       pasteImageHandledRef.current = false;
-      if (!selectedUploadNodeId || isTypingTarget(event.target)) {
+      if (isTypingTarget(event.target)) {
         return;
       }
 
@@ -138,17 +141,22 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
 
       event.preventDefault();
       pasteImageHandledRef.current = true;
-      canvasEventBus.publish('upload-node/paste-image', {
-        nodeId: selectedUploadNodeId,
-        file: imageFile,
-      });
+      if (selectedUploadNodeId) {
+        canvasEventBus.publish('upload-node/paste-image', {
+          nodeId: selectedUploadNodeId,
+          file: imageFile,
+        });
+        return;
+      }
+
+      void pasteImageAtCanvasPosition?.(imageFile);
     };
 
     document.addEventListener('paste', handlePaste);
     return () => {
       document.removeEventListener('paste', handlePaste);
     };
-  }, [selectedUploadNodeId]);
+  }, [pasteImageAtCanvasPosition, selectedUploadNodeId]);
 
   // Use a ref to keep the keydown handler's closure pointed at the
   // latest snapshot of selection / nodes / edges without re-binding
@@ -182,7 +190,7 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
       return;
     }
 
-    const { nodes: latestNodes, edges: latestEdges, selectedNodeId: latestSelectedId, selectedNodeIds: latestSelectedIds, selectedUploadNodeId: latestUpload } = stateRef.current;
+    const { nodes: latestNodes, edges: latestEdges, selectedNodeId: latestSelectedId, selectedNodeIds: latestSelectedIds } = stateRef.current;
     const { undo: doUndo, redo: doRedo, groupNodes: doGroup, deleteNode: doDeleteOne, deleteNodes: doDeleteMany, scheduleCanvasPersist: doPersist } = actionsRef.current;
 
     const commandPressed = event.ctrlKey || event.metaKey;
@@ -209,33 +217,22 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
     }
 
     if (isPaste) {
-      // When the paste target is an upload node, defer one tick so the
-      // separately-bound `paste` listener (above) can claim the event
-      // first if it carries an image. If the flag is still false after
-      // that tick, the clipboard had no image and we fall back to
-      // duplicating the previously-copied node snapshot.
-      if (latestUpload) {
-        pasteImageHandledRef.current = false;
-        window.setTimeout(() => {
-          if (pasteImageHandledRef.current) {
-            pasteImageHandledRef.current = false;
-            return;
-          }
+      // The browser's Cmd/Ctrl+V keydown can arrive before the actual
+      // paste event. Defer one tick so image paste can claim the clipboard
+      // first; if it does not, fall back to duplicating copied canvas nodes.
+      pasteImageHandledRef.current = false;
+      window.setTimeout(() => {
+        if (pasteImageHandledRef.current) {
+          pasteImageHandledRef.current = false;
+          return;
+        }
 
-          if (!copiedSnapshotRef.current || copiedSnapshotRef.current.nodes.length === 0) {
-            return;
-          }
+        if (!copiedSnapshotRef.current || copiedSnapshotRef.current.nodes.length === 0) {
+          return;
+        }
 
-          void duplicateNodesRef.current?.(copiedSnapshotRef.current.nodes.map((node) => node.id));
-        }, 0);
-        return;
-      }
-
-      if (!copiedSnapshotRef.current || copiedSnapshotRef.current.nodes.length === 0) {
-        return;
-      }
-      event.preventDefault();
-      void duplicateNodesRef.current?.(copiedSnapshotRef.current.nodes.map((node) => node.id));
+        void duplicateNodesRef.current?.(copiedSnapshotRef.current.nodes.map((node) => node.id));
+      }, 0);
       return;
     }
 

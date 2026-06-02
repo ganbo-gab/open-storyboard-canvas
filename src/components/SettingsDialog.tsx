@@ -96,6 +96,7 @@ export function SettingsDialog({
     storyboardGenDisableTextInImage,
     storyboardGenAutoInferEmptyFrame,
     ignoreAtTagWhenCopyingAndGenerating,
+    appendParameterConstraintsToPrompt,
     enableStoryboardGenGridPreviewShortcut,
     showStoryboardGenAdvancedRatioControls,
     useLegacyPanoramaControlDirection,
@@ -114,6 +115,7 @@ export function SettingsDialog({
     setStoryboardGenDisableTextInImage,
     setStoryboardGenAutoInferEmptyFrame,
     setIgnoreAtTagWhenCopyingAndGenerating,
+    setAppendParameterConstraintsToPrompt,
     setEnableStoryboardGenGridPreviewShortcut,
     setShowStoryboardGenAdvancedRatioControls,
     setUseLegacyPanoramaControlDirection,
@@ -153,6 +155,8 @@ export function SettingsDialog({
   );
   const [localIgnoreAtTagWhenCopyingAndGenerating, setLocalIgnoreAtTagWhenCopyingAndGenerating] =
     useState(ignoreAtTagWhenCopyingAndGenerating);
+  const [localAppendParameterConstraintsToPrompt, setLocalAppendParameterConstraintsToPrompt] =
+    useState(appendParameterConstraintsToPrompt);
   const [localEnableStoryboardGenGridPreviewShortcut, setLocalEnableStoryboardGenGridPreviewShortcut] =
     useState(enableStoryboardGenGridPreviewShortcut);
   const [localShowStoryboardGenAdvancedRatioControls, setLocalShowStoryboardGenAdvancedRatioControls] =
@@ -206,6 +210,7 @@ export function SettingsDialog({
     setLocalStoryboardGenDisableTextInImage(storyboardGenDisableTextInImage);
     setLocalStoryboardGenAutoInferEmptyFrame(storyboardGenAutoInferEmptyFrame);
     setLocalIgnoreAtTagWhenCopyingAndGenerating(ignoreAtTagWhenCopyingAndGenerating);
+    setLocalAppendParameterConstraintsToPrompt(appendParameterConstraintsToPrompt);
     setLocalEnableStoryboardGenGridPreviewShortcut(enableStoryboardGenGridPreviewShortcut);
     setLocalShowStoryboardGenAdvancedRatioControls(showStoryboardGenAdvancedRatioControls);
     setLocalUseLegacyPanoramaControlDirection(useLegacyPanoramaControlDirection);
@@ -241,6 +246,7 @@ export function SettingsDialog({
     setStoryboardGenDisableTextInImage(localStoryboardGenDisableTextInImage);
     setStoryboardGenAutoInferEmptyFrame(localStoryboardGenAutoInferEmptyFrame);
     setIgnoreAtTagWhenCopyingAndGenerating(localIgnoreAtTagWhenCopyingAndGenerating);
+    setAppendParameterConstraintsToPrompt(localAppendParameterConstraintsToPrompt);
     setEnableStoryboardGenGridPreviewShortcut(localEnableStoryboardGenGridPreviewShortcut);
     setShowStoryboardGenAdvancedRatioControls(localShowStoryboardGenAdvancedRatioControls);
     setUseLegacyPanoramaControlDirection(localUseLegacyPanoramaControlDirection);
@@ -262,6 +268,7 @@ export function SettingsDialog({
     localStoryboardGenDisableTextInImage,
     localStoryboardGenAutoInferEmptyFrame,
     localIgnoreAtTagWhenCopyingAndGenerating,
+    localAppendParameterConstraintsToPrompt,
     localEnableStoryboardGenGridPreviewShortcut,
     localShowStoryboardGenAdvancedRatioControls,
     localUseLegacyPanoramaControlDirection,
@@ -281,6 +288,7 @@ export function SettingsDialog({
     setStoryboardGenDisableTextInImage,
     setStoryboardGenAutoInferEmptyFrame,
     setIgnoreAtTagWhenCopyingAndGenerating,
+    setAppendParameterConstraintsToPrompt,
     setEnableStoryboardGenGridPreviewShortcut,
     setShowStoryboardGenAdvancedRatioControls,
     setUseLegacyPanoramaControlDirection,
@@ -782,6 +790,13 @@ export function SettingsDialog({
                     onCheckedChange={setLocalIgnoreAtTagWhenCopyingAndGenerating}
                     title={t('settings.ignoreAtTagWhenCopyingAndGenerating')}
                     description={t('settings.ignoreAtTagWhenCopyingAndGeneratingDesc')}
+                  />
+
+                  <SettingsCheckboxCard
+                    checked={localAppendParameterConstraintsToPrompt}
+                    onCheckedChange={setLocalAppendParameterConstraintsToPrompt}
+                    title={t('settings.appendParameterConstraintsToPrompt')}
+                    description={t('settings.appendParameterConstraintsToPromptDesc')}
                   />
 
                   <SettingsCheckboxCard

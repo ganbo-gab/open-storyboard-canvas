@@ -306,10 +306,10 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
   return (
     <div
       className={`
-        group relative overflow-visible rounded-[var(--node-radius)] border bg-surface-dark/85 p-0 transition-colors duration-150
+        group relative overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-0 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[rgba(15,23,42,0.22)] hover:border-[rgba(15,23,42,0.34)] dark:border-[rgba(255,255,255,0.22)] dark:hover:border-[rgba(255,255,255,0.34)]'}
+          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
       `}
       style={{ width: resolvedWidth, height: resolvedHeight }}
       onClick={handleNodeClick}
@@ -325,7 +325,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
       />
 
       {data.imageUrl || transientPreviewUrl ? (
-        <div className="relative block h-full w-full overflow-hidden rounded-[var(--node-radius)] bg-bg-dark">
+        <div className="relative block h-full w-full overflow-hidden rounded-[var(--node-radius)] bg-[var(--canvas-node-media-bg)]">
           <CanvasNodeImage
             src={imageSource ?? ''}
             viewerSourceUrl={data.imageUrl ? resolveImageDisplayUrl(data.imageUrl) : null}
@@ -336,7 +336,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
           {/* Reupload button on left side */}
           <button
             type="button"
-            className="absolute left-2 top-2 flex h-7 items-center gap-1 rounded-full border border-[rgba(255,255,255,0.18)] bg-bg-dark/70 px-2 text-xs text-text-dark backdrop-blur-sm transition-colors hover:bg-bg-dark"
+            className="absolute left-2 top-2 flex h-7 items-center gap-1 rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2 text-xs text-text-dark shadow-sm backdrop-blur-sm transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
             onClick={(e) => {
               e.stopPropagation();
               inputRef.current?.click();
@@ -348,7 +348,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
         </div>
       ) : (
         <label
-          className="block h-full w-full overflow-hidden rounded-[var(--node-radius)] bg-bg-dark"
+          className="block h-full w-full overflow-hidden rounded-[var(--node-radius)] bg-[var(--canvas-node-media-bg)]"
         >
           <div className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-2 text-text-muted/85">
             <Upload className="h-7 w-7 opacity-60" />

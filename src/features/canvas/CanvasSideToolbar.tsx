@@ -75,12 +75,12 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
   }, [addNode, reactFlow]);
 
   return (
-    <div className="absolute left-3 top-1/2 z-20 flex -translate-y-1/2 flex-col gap-2 rounded-xl border border-border-dark bg-surface-dark/95 p-2 shadow-lg backdrop-blur">
+    <div className="absolute left-3 top-1/2 z-20 flex -translate-y-1/2 flex-col gap-2 rounded-xl border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-bg)] p-2 shadow-[var(--canvas-rail-shadow)] backdrop-blur">
       <button
         type="button"
         title={t('canvasToolbar.assetsTitle')}
         onClick={(event) => onOpenAssets?.(event.currentTarget.getBoundingClientRect())}
-        className="flex w-16 flex-col items-center gap-0.5 rounded-lg bg-white/5 px-2 py-2 text-[10px] text-white/80 transition-colors hover:bg-accent/25 hover:text-white"
+        className="flex w-16 flex-col items-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] px-2 py-2 text-[10px] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
       >
         <Images className="h-4 w-4" />
         <span className="leading-tight">{t('canvasToolbar.assets')}</span>
@@ -93,7 +93,7 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
             type="button"
             title={t(item.titleKey)}
             onClick={() => handleAdd(item.type, item.data)}
-            className="flex w-16 flex-col items-center gap-0.5 rounded-lg bg-white/5 px-2 py-2 text-[10px] text-white/80 transition-colors hover:bg-accent/25 hover:text-white"
+            className="flex w-16 flex-col items-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] px-2 py-2 text-[10px] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
           >
             <Icon className="h-4 w-4" />
             <span className="leading-tight">{t(item.labelKey)}</span>

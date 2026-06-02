@@ -1168,6 +1168,8 @@
     "storyboardGenDisableTextInImageDesc": "启用后，分镜生成提示词会追加“禁止添加描述文本”。",
     "ignoreAtTagWhenCopyingAndGenerating": "复制/保存文本时忽略 @ 标签",
     "ignoreAtTagWhenCopyingAndGeneratingDesc": "启用后，复制文本和写入图片分镜元数据时会忽略类似“@图1”的标签；发送生成请求时仅移除“@”并保留“图1”。",
+    "appendParameterConstraintsToPrompt": "提示词加强参数约束",
+    "appendParameterConstraintsToPromptDesc": "启用后，提交生成前会把当前比例、分辨率和张数写入最终提示词，减少模型忽略画幅或清晰度设置的情况。",
     "useLegacyPanoramaControlDirection": "全景拖拽使用旧方向",
     "useLegacyPanoramaControlDirectionDesc": "关闭时使用新的反向拖拽方向；开启后恢复旧版全景查看器的拖拽和方向键方向。",
     "panoramaControlSensitivity": "全景操作灵敏度",

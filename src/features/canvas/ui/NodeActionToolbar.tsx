@@ -38,7 +38,7 @@ interface NodeActionToolbarProps {
 
 const TOOLBAR_BUTTON_RADIUS_CLASS = 'rounded-full';
 const TOOLBAR_NEUTRAL_BUTTON_CLASS =
-  'border-[rgba(255,255,255,0.18)] bg-bg-dark/70 text-text-dark hover:border-[rgba(255,255,255,0.32)] hover:bg-bg-dark';
+  'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] text-text-dark shadow-sm hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]';
 const PROMPT_PRESET_MENU_WIDTH = 260;
 const PROMPT_PRESET_MENU_GAP = 8;
 
@@ -429,7 +429,7 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
     ? createPortal(
         <div
           ref={promptPresetMenuRef}
-          className="fixed z-[1000] w-[260px] max-w-[calc(100vw-16px)] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-dark/95 p-2 shadow-2xl backdrop-blur-sm"
+          className="fixed z-[1000] w-[260px] max-w-[calc(100vw-16px)] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-2 shadow-2xl backdrop-blur-sm"
           style={{ left: `${promptPresetMenu.x}px`, top: `${promptPresetMenu.y}px` }}
           onClick={(event) => event.stopPropagation()}
         >
@@ -446,8 +446,8 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
                     type="button"
                     className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
                       active
-                        ? 'bg-accent/18 text-white'
-                        : 'text-text-dark hover:bg-bg-dark'
+                        ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
+                        : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
                     }`}
                     title={preset.prompt}
                     onClick={() => { void handleSelectPromptPreset(preset.id); }}
@@ -460,13 +460,13 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
               })}
             </div>
           ) : (
-            <div className="rounded-lg border border-dashed border-white/12 bg-bg-dark/35 px-3 py-4 text-center text-xs text-text-muted">
+            <div className="rounded-lg border border-dashed border-[var(--canvas-node-border)] bg-[var(--canvas-node-field-bg)] px-3 py-4 text-center text-xs text-text-muted">
               {t('nodeToolbar.promptPresetEmpty')}
             </div>
           )}
           <button
             type="button"
-            className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-white/10 px-2.5 text-sm text-text-dark transition-colors hover:bg-bg-dark"
+            className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-[var(--canvas-node-field-border)] px-2.5 text-sm text-text-dark transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
             onClick={handleManagePromptPresets}
           >
             <Settings2 className="h-3.5 w-3.5" />
@@ -710,12 +710,12 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
       {downloadMenu && (
         <div
           ref={downloadMenuRef}
-          className={`fixed z-[120] min-w-[280px] rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-dark/95 p-2 shadow-2xl backdrop-blur-sm transition-opacity duration-150 ${isDownloadMenuVisible ? 'opacity-100' : 'opacity-0'}`}
+          className={`fixed z-[120] min-w-[280px] rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-2 shadow-2xl backdrop-blur-sm transition-opacity duration-150 ${isDownloadMenuVisible ? 'opacity-100' : 'opacity-0'}`}
           style={{ left: `${downloadMenu.x}px`, top: `${downloadMenu.y}px` }}
         >
           <button
             type="button"
-            className="flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-sm text-text-dark transition-colors hover:bg-bg-dark"
+            className="flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-sm text-text-dark transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
             onClick={() => { void handleDownloadSaveAs(); }}
           >
             <Download className="h-4 w-4" />
@@ -723,12 +723,12 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
           </button>
 
           {normalizedDownloadPresetPaths.length > 0 ? (
-            <div className="mt-1 space-y-1 border-t border-[rgba(255,255,255,0.1)] pt-2">
+            <div className="mt-1 space-y-1 border-t border-[var(--canvas-node-divider)] pt-2">
               {normalizedDownloadPresetPaths.map((path) => (
                 <button
                   key={path}
                   type="button"
-                  className="flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs text-text-dark transition-colors hover:bg-bg-dark"
+                  className="flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs text-text-dark transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
                   onClick={() => { void handleDownloadToPreset(path); }}
                   title={path}
                 >
@@ -738,7 +738,7 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
               ))}
             </div>
           ) : (
-            <div className="mt-1 border-t border-[rgba(255,255,255,0.1)] px-2.5 pt-2 text-xs text-text-muted">
+            <div className="mt-1 border-t border-[var(--canvas-node-divider)] px-2.5 pt-2 text-xs text-text-muted">
               {t('nodeToolbar.noDownloadPresetPathsHint')}
             </div>
           )}

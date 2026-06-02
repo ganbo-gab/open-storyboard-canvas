@@ -44,6 +44,7 @@ import {
   getRuntimeDiagnostics,
   type GenerationDebugContext,
 } from '@/features/canvas/application/generationErrorReport';
+import { appendGenerationParameterConstraints } from '@/features/canvas/application/generationPromptConstraints';
 import {
   sanitizeStoryboardPromptText,
   sanitizeStoryboardText,
@@ -563,6 +564,9 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
   );
   const ignoreAtTagWhenCopyingAndGenerating = useSettingsStore(
     (state) => state.ignoreAtTagWhenCopyingAndGenerating
+  );
+  const appendParameterConstraintsToPrompt = useSettingsStore(
+    (state) => state.appendParameterConstraintsToPrompt
   );
   const enableStoryboardGenGridPreviewShortcut = useSettingsStore(
     (state) => state.enableStoryboardGenGridPreviewShortcut
@@ -1128,8 +1132,15 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
           return sanitizeStoryboardText(description, ignoreAtTagWhenCopyingAndGenerating);
         });
 
+      const promptForRequest = appendGenerationParameterConstraints(prompt, {
+        enabled: appendParameterConstraintsToPrompt,
+        aspectRatio: resolvedRequestAspectRatio,
+        resolution: selectedResolution.value,
+        count: 1,
+      });
+
       const jobId = await canvasAiGateway.submitGenerateImageJob({
-        prompt,
+        prompt: promptForRequest,
         model: requestResolution.requestModel,
         size: selectedResolution.value,
         aspectRatio: resolvedRequestAspectRatio,
@@ -1142,7 +1153,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
         requestModel: requestResolution.requestModel,
         requestSize: selectedResolution.value,
         requestAspectRatio: resolvedRequestAspectRatio,
-        prompt,
+        prompt: promptForRequest,
         extraParams: effectiveExtraParams,
         referenceImageCount: allReferenceImages.length,
         referenceImagePlaceholders: createReferenceImagePlaceholders(allReferenceImages.length),
@@ -1225,6 +1236,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
     resolveEffectiveRequestAspectRatio,
     t,
     ignoreAtTagWhenCopyingAndGenerating,
+    appendParameterConstraintsToPrompt,
   ]);
 
   const handleRowChange = useCallback(
@@ -1423,10 +1435,10 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
     <div
       ref={rootRef}
       className={`
-        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-surface-dark/95 p-3 transition-colors duration-150
+        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-3 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[rgba(15,23,42,0.22)] hover:border-[rgba(15,23,42,0.34)] dark:border-[rgba(255,255,255,0.22)] dark:hover:border-[rgba(255,255,255,0.34)]'
+          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'
         }
       `}
       style={{
@@ -1465,21 +1477,21 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
         </div>
 
         {showStoryboardGenAdvancedRatioControls && (
-          <div className="min-w-0 flex-1 rounded-full border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 text-center text-[10px] text-text-muted">
+          <div className="min-w-0 flex-1 rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2 py-0.5 text-center text-[10px] text-text-muted">
             <span>{t('node.storyboardGen.cellAspectRatio')}: {resolvedAspectRatios.cellAspectRatioLabel}</span>
-            <span className="mx-1 text-[rgba(255,255,255,0.22)]">|</span>
+            <span className="mx-1 text-text-muted/45">|</span>
             <span>{t('node.storyboardGen.overallAspectRatio')}: {resolvedAspectRatios.overallAspectRatioLabel}</span>
           </div>
         )}
 
         <div className="flex items-center gap-1">
           {showStoryboardGenAdvancedRatioControls && (
-            <div className="flex h-5 items-center rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.04)] p-0.5">
+            <div className="flex h-5 items-center rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-0.5">
               <button
                 type="button"
                 className={`${RATIO_CONTROL_MODE_BUTTON_CLASS} ${ratioControlMode === 'overall'
                   ? 'border-accent/55 bg-accent/18 text-text-dark'
-                  : 'border-transparent bg-transparent text-text-muted hover:bg-white/5'
+                  : 'border-transparent bg-transparent text-text-muted hover:bg-[var(--canvas-node-menu-hover)]'
                   }`}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -1492,7 +1504,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
                 type="button"
                 className={`${RATIO_CONTROL_MODE_BUTTON_CLASS} ${ratioControlMode === 'cell'
                   ? 'border-accent/55 bg-accent/18 text-text-dark'
-                  : 'border-transparent bg-transparent text-text-muted hover:bg-white/5'
+                  : 'border-transparent bg-transparent text-text-muted hover:bg-[var(--canvas-node-menu-hover)]'
                   }`}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -1523,7 +1535,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
             return (
               <div
                 key={frame.id}
-                className="relative overflow-hidden rounded border border-[rgba(255,255,255,0.06)] bg-bg-dark/40"
+                className="relative overflow-hidden rounded border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)]"
                 style={{ aspectRatio: frameLayout.cellAspectRatio }}
               >
                 <div
@@ -1575,7 +1587,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
 
       {showImagePicker && incomingImageItems.length > 0 && (
         <div
-          className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.16)] bg-surface-dark shadow-xl"
+          className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
           style={{ left: pickerAnchor.left, top: pickerAnchor.top }}
           onMouseDown={(event) => event.stopPropagation()}
           onWheelCapture={(event) => event.stopPropagation()}
@@ -1593,8 +1605,8 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
                   insertImageReference(imageIndex);
                 }}
                 onMouseEnter={() => setPickerActiveIndex(imageIndex)}
-                className={`flex w-full items-center gap-2 border border-transparent bg-bg-dark/70 px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[rgba(255,255,255,0.18)] ${pickerActiveIndex === imageIndex
-                  ? 'border-[rgba(255,255,255,0.24)] bg-bg-dark'
+                className={`flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[var(--canvas-node-field-border)] hover:bg-[var(--canvas-node-menu-hover)] ${pickerActiveIndex === imageIndex
+                  ? 'border-accent/35 bg-[var(--canvas-node-menu-active)]'
                   : ''
                   }`}
               >

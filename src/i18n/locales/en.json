@@ -1168,6 +1168,8 @@
     "storyboardGenDisableTextInImageDesc": "When enabled, storyboard generation prompt appends \"禁止添加描述文本\".",
     "ignoreAtTagWhenCopyingAndGenerating": "Ignore @ tags when copying/saving text",
     "ignoreAtTagWhenCopyingAndGeneratingDesc": "When enabled, copied text and embedded storyboard metadata remove tags like \"@图1\"; generation requests only remove \"@\" and keep \"图1\".",
+    "appendParameterConstraintsToPrompt": "Strengthen prompt with parameter constraints",
+    "appendParameterConstraintsToPromptDesc": "When enabled, generation submits append the current aspect ratio, resolution, and count to the final prompt so models are less likely to ignore them.",
     "useLegacyPanoramaControlDirection": "Use legacy panorama drag direction",
     "useLegacyPanoramaControlDirectionDesc": "Off uses the new reversed drag direction. Turn on to restore the old panorama viewer drag and arrow-key direction.",
     "panoramaControlSensitivity": "Panorama control sensitivity",

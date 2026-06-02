@@ -1,4 +1,5 @@
 import {
+  type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent,
   type ReactNode,
   memo,
@@ -34,8 +35,11 @@ import {
 import { resolveErrorContent, showErrorDialog } from '@/features/canvas/application/errorDialog';
 import {
   detectAspectRatio,
+  prepareNodeImageFromFile,
   resolveImageDisplayUrl,
 } from '@/features/canvas/application/imageData';
+import { resolveClipboardImageFile } from '@/features/canvas/hooks/useCanvasShortcuts';
+import { appendGenerationParameterConstraints } from '@/features/canvas/application/generationPromptConstraints';
 import {
   buildGenerationErrorReport,
   CURRENT_RUNTIME_SESSION_ID,
@@ -100,6 +104,7 @@ const IMAGE_EDIT_NODE_MAX_HEIGHT = 1000;
 const IMAGE_EDIT_NODE_DEFAULT_WIDTH = 680;
 const IMAGE_EDIT_NODE_DEFAULT_HEIGHT = 380;
 const TEXT_DRAFT_COMMIT_DELAY_MS = 650;
+const PASTED_REFERENCE_NODE_OFFSET_X = 280;
 
 function getTextareaCaretOffset(
   textarea: HTMLTextAreaElement,
@@ -606,6 +611,22 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       }
     }
 
+    const requestSize = '2K';
+    const effectiveExtraParamsRecord = effectiveExtraParams as Record<string, unknown>;
+    const requestResolutionLabel =
+      resolved.extraParams?.['resolutionType'] ??
+      resolved.extraParams?.['size'] ??
+      effectiveExtraParamsRecord['resolutionType'] ??
+      effectiveExtraParamsRecord['size'] ??
+      selectedResolution.value ??
+      requestSize;
+    const promptForRequest = appendGenerationParameterConstraints(prompt, {
+      enabled: latestSettings.appendParameterConstraintsToPrompt,
+      aspectRatio: resolvedRequestAspectRatio,
+      resolution: requestResolutionLabel,
+      count: effectiveCount,
+    });
+
     for (let i = 0; i < effectiveCount; i++) {
       const newNodePosition = findNodePosition(
         id,
@@ -631,9 +652,9 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
 
       try {
         const jobId = await canvasAiGateway.submitGenerateImageJob({
-          prompt,
+          prompt: promptForRequest,
           model: resolved.modelForGateway,
-          size: '2K',
+          size: requestSize,
           aspectRatio: resolvedRequestAspectRatio,
           referenceImages: latestIncomingImages,
           extraParams: { ...effectiveExtraParams, ...resolved.extraParams },
@@ -642,9 +663,9 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
           sourceType: 'imageEdit',
           providerId: resolved.providerId,
           requestModel: resolved.modelForGateway,
-          requestSize: '2K',
+          requestSize,
           requestAspectRatio: resolvedRequestAspectRatio,
-          prompt,
+          prompt: promptForRequest,
           extraParams: { ...effectiveExtraParams, ...resolved.extraParams },
           referenceImageCount: latestIncomingImages.length,
           referenceImagePlaceholders: createReferenceImagePlaceholders(latestIncomingImages.length),
@@ -667,9 +688,9 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
           sourceType: 'imageEdit',
           providerId: resolved.providerId,
           requestModel: resolved.modelForGateway,
-          requestSize: '2K',
+          requestSize,
           requestAspectRatio: resolvedRequestAspectRatio,
-          prompt,
+          prompt: promptForRequest,
           extraParams: { ...effectiveExtraParams, ...resolved.extraParams },
           referenceImageCount: latestIncomingImages.length,
           referenceImagePlaceholders: createReferenceImagePlaceholders(latestIncomingImages.length),
@@ -754,6 +775,70 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     });
   }, [flushPromptDraft, pickerCursor]);
 
+  const handlePromptPaste = useCallback(
+    async (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+      const imageFile = resolveClipboardImageFile(event.nativeEvent);
+      if (!imageFile) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const textarea = event.currentTarget;
+      const cursor = textarea.selectionStart ?? promptDraftRef.current.length;
+
+      try {
+        const prepared = await prepareNodeImageFromFile(imageFile);
+        const latestNode = useCanvasStore
+          .getState()
+          .nodes.find((candidate) => candidate.id === id);
+        const basePosition = latestNode?.position ?? { x: 0, y: 0 };
+        const uploadNodeId = addNode(
+          CANVAS_NODE_TYPES.upload,
+          {
+            x: basePosition.x - PASTED_REFERENCE_NODE_OFFSET_X,
+            y: basePosition.y,
+          },
+          {
+            imageUrl: prepared.imageUrl,
+            previewImageUrl: prepared.previewImageUrl,
+            aspectRatio: prepared.aspectRatio || '1:1',
+            sourceFileName: imageFile.name,
+          }
+        );
+        addEdge(uploadNodeId, id);
+
+        const marker = `@图${incomingImages.length + 1}`;
+        const currentPrompt = promptDraftRef.current;
+        const { nextText: nextPrompt, nextCursor } = insertReferenceToken(
+          currentPrompt,
+          cursor,
+          marker
+        );
+        setPromptDraft(nextPrompt);
+        flushPromptDraft(nextPrompt);
+        setShowImagePicker(false);
+        setPickerCursor(null);
+        setPickerActiveIndex(0);
+
+        requestAnimationFrame(() => {
+          promptRef.current?.focus();
+          promptRef.current?.setSelectionRange(nextCursor, nextCursor);
+          syncPromptHighlightScroll();
+        });
+      } catch (pasteError) {
+        const resolvedError = resolveErrorContent(pasteError, t('common.error'));
+        void showErrorDialog(
+          resolvedError.message,
+          t('common.error'),
+          resolvedError.details
+        );
+      }
+    },
+    [addEdge, addNode, flushPromptDraft, id, incomingImages.length, t]
+  );
+
   const handlePromptKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Backspace' || event.key === 'Delete') {
       const currentPrompt = promptDraftRef.current;
@@ -831,10 +916,10 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     <div
       ref={rootRef}
       className={`
-        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-surface-dark/90 p-2 transition-colors duration-150
+        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-2 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[rgba(15,23,42,0.22)] hover:border-[rgba(15,23,42,0.34)] dark:border-[rgba(255,255,255,0.22)] dark:hover:border-[rgba(255,255,255,0.34)]'}
+          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
       `}
       style={{ width: `${resolvedWidth}px`, height: `${resolvedHeight}px` }}
       onClick={() => setSelectedNode(id)}
@@ -847,7 +932,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
       />
 
-      <div ref={imageBoxRef} className="image-box relative min-h-0 flex-1 rounded-lg border border-[rgba(255,255,255,0.1)] bg-bg-dark/45 p-2">
+      <div ref={imageBoxRef} className="image-box relative min-h-0 flex-1 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-2">
         <div className="relative h-full min-h-0">
           <div
             ref={promptHighlightRef}
@@ -871,6 +956,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
             }}
             onBlur={() => flushPromptDraft()}
             onKeyDown={handlePromptKeyDown}
+            onPaste={handlePromptPaste}
             onScroll={syncPromptHighlightScroll}
             onMouseDown={(event) => event.stopPropagation()}
             placeholder={t('node.imageEdit.promptPlaceholder')}
@@ -881,7 +967,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
 
         {showImagePicker && incomingImageItems.length > 0 && (
           <div
-            className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.16)] bg-surface-dark shadow-xl"
+            className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
             style={{ left: pickerAnchor.left, top: pickerAnchor.top }}
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
@@ -899,8 +985,8 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                     insertImageReference(index);
                   }}
                   onMouseEnter={() => setPickerActiveIndex(index)}
-                  className={`flex w-full items-center gap-2 border border-transparent bg-bg-dark/70 px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[rgba(255,255,255,0.18)] ${pickerActiveIndex === index
-                      ? 'border-[rgba(255,255,255,0.24)] bg-bg-dark'
+                  className={`flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[var(--canvas-node-field-border)] hover:bg-[var(--canvas-node-menu-hover)] ${pickerActiveIndex === index
+                      ? 'border-accent/35 bg-[var(--canvas-node-menu-active)]'
                       : ''
                     }`}
                 >
@@ -961,7 +1047,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
           {showCountPicker && (
             <div
               ref={countPickerRef}
-              className="nowheel absolute bottom-full right-0 z-50 mb-1 w-[120px] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.16)] bg-surface-dark shadow-xl"
+              className="nowheel absolute bottom-full right-0 z-50 mb-1 w-[120px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
               onMouseDown={(event) => event.stopPropagation()}
             >
               {[1, 2, 3, 4].map((count) => (
@@ -974,20 +1060,20 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                     setCustomCount('');
                     setShowCountPicker(false);
                   }}
-                  className={`flex w-full items-center px-3 py-2 text-left text-sm text-text-dark transition-colors hover:bg-bg-dark/70 ${
-                    generateCount === count && !customCount ? 'bg-bg-dark/50' : ''
+                  className={`flex w-full items-center px-3 py-2 text-left text-sm text-text-dark transition-colors hover:bg-[var(--canvas-node-menu-hover)] ${
+                    generateCount === count && !customCount ? 'bg-[var(--canvas-node-menu-active)]' : ''
                   }`}
                 >
                   {count}
                 </button>
               ))}
-              <div className="border-t border-[rgba(255,255,255,0.1)]">
+              <div className="border-t border-[var(--canvas-node-divider)]">
                 <button
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
                   }}
-                  className="flex w-full items-center px-3 py-2 text-left text-sm text-text-dark transition-colors hover:bg-bg-dark/70"
+                  className="flex w-full items-center px-3 py-2 text-left text-sm text-text-dark transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
                 >
                   {t('node.imageEdit.customCount')}
                 </button>
@@ -1002,7 +1088,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                     }}
                     onClick={(event) => event.stopPropagation()}
                     placeholder="1-10"
-                    className="w-full rounded-md border border-[rgba(255,255,255,0.16)] bg-bg-dark/70 px-2 py-1 text-sm text-text-dark outline-none focus:border-accent"
+                    className="w-full rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2 py-1 text-sm text-text-dark outline-none focus:border-accent"
                   />
                 </div>
               </div>

@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import {
   ReactFlow,
@@ -41,7 +42,10 @@ import {
   type CanvasNodeType,
   DEFAULT_NODE_WIDTH,
 } from '@/features/canvas/domain/canvasNodes';
-import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
+import {
+  prepareNodeImageFromFile,
+  resolveImageDisplayUrl,
+} from '@/features/canvas/application/imageData';
 import {
   getConnectMenuNodeTypes,
   nodeHasSourceHandle,
@@ -303,6 +307,7 @@ export function Canvas() {
   const { t } = useTranslation();
   const reactFlowInstance = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const lastCanvasPointerRef = useRef<{ x: number; y: number } | null>(null);
   const suppressNextPaneClickRef = useRef(false);
   const suppressNextEdgeClickRef = useRef(false);
 
@@ -826,6 +831,59 @@ export function Canvas() {
     return selectedNode.id;
   }, [nodes, selectedNodeIds]);
 
+  const pasteImageAtCanvasPosition = useCallback(
+    async (file: File) => {
+      if (!file.type.startsWith('image/')) {
+        return;
+      }
+
+      const containerRect = wrapperRef.current?.getBoundingClientRect();
+      const clientPosition = lastCanvasPointerRef.current ?? (
+        containerRect
+          ? {
+              x: containerRect.left + containerRect.width / 2,
+              y: containerRect.top + containerRect.height / 2,
+            }
+          : {
+              x: window.innerWidth / 2,
+              y: window.innerHeight / 2,
+            }
+      );
+      const flowPosition = reactFlowInstance.screenToFlowPosition(clientPosition);
+
+      try {
+        const prepared = await prepareNodeImageFromFile(file);
+        const newNodeId = addNode(
+          CANVAS_NODE_TYPES.upload,
+          flowPosition,
+          {
+            imageUrl: prepared.imageUrl,
+            previewImageUrl: prepared.previewImageUrl,
+            aspectRatio: prepared.aspectRatio || '1:1',
+            sourceFileName: file.name,
+          }
+        );
+        setSelectedNode(newNodeId);
+        scheduleCanvasPersist(0);
+      } catch (error) {
+        console.error('Failed to paste image onto canvas', error);
+      }
+    },
+    [
+      addNode,
+      reactFlowInstance,
+      scheduleCanvasPersist,
+      setSelectedNode,
+    ]
+  );
+
+  const handleCanvasPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    lastCanvasPointerRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+    };
+  }, []);
+
   useEffect(() => {
     if (selectedNodeIds.length === 1) {
       if (selectedNodeId !== selectedNodeIds[0]) {
@@ -855,6 +913,7 @@ export function Canvas() {
     deleteNode,
     deleteNodes,
     duplicateNodes: (sourceNodeIds) => duplicateNodes(sourceNodeIds)?.firstNodeId ?? null,
+    pasteImageAtCanvasPosition,
   });
 
   const openNodeMenuAtClientPosition = useCallback((clientX: number, clientY: number) => {
@@ -1472,7 +1531,7 @@ export function Canvas() {
   );
 
   return (
-    <div ref={wrapperRef} className="relative h-full w-full">
+    <div ref={wrapperRef} className="relative h-full w-full" onPointerMove={handleCanvasPointerMove}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -1504,14 +1563,19 @@ export function Canvas() {
         onlyRenderVisibleElements
         zoomOnDoubleClick={false}
         proOptions={{ hideAttribution: true }}
-        className="bg-bg-dark"
+        className="canvas-flow"
       >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#2a2a2a" />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={20}
+          size={1}
+          color="var(--canvas-grid-dot)"
+        />
         <MiniMap
-          className="canvas-minimap nopan nowheel !border-border-dark !bg-surface-dark"
+          className="canvas-minimap nopan nowheel"
           style={{ pointerEvents: 'all', zIndex: 10000 }}
-          nodeColor="rgba(120, 120, 120, 0.92)"
-          maskColor="rgba(0, 0, 0, 0.62)"
+          nodeColor="var(--canvas-minimap-node)"
+          maskColor="var(--canvas-minimap-mask)"
           pannable
           zoomable
         />

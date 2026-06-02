@@ -224,8 +224,8 @@ export const ModelConfigPicker = memo(({
   }
 
   const chipCls =
-    'inline-flex h-6 min-w-0 max-w-[110px] items-center gap-1 overflow-hidden rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-white/85 hover:border-white/30 transition-colors whitespace-nowrap shrink';
-  const menuCls = 'ui-scrollbar nowheel absolute bottom-full z-[1200] mb-1 overflow-y-auto rounded-md border border-white/15 bg-[#151515] p-1 shadow-2xl';
+    'inline-flex h-6 min-w-0 max-w-[110px] shrink items-center gap-1 overflow-hidden whitespace-nowrap rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-2 py-1 text-[11px] text-text-dark shadow-sm transition-colors hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]';
+  const menuCls = 'ui-scrollbar nowheel absolute bottom-full z-[1200] mb-1 overflow-y-auto rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1 shadow-2xl';
 
   return (
     <div
@@ -246,7 +246,7 @@ export const ModelConfigPicker = memo(({
                 key={label}
                 type="button"
                 onClick={() => handlePickProvider(label)}
-                className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] text-white/85 hover:bg-white/10"
+                className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] text-text-dark hover:bg-[var(--canvas-node-menu-hover)]"
                 title={label}
               >
                 {currentEntry?.providerLabel === label && <Check className="h-3 w-3 shrink-0 text-accent" />}
@@ -269,7 +269,7 @@ export const ModelConfigPicker = memo(({
                 key={entry.id}
                 type="button"
                 onClick={() => handlePickModel(entry)}
-                className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-[11px] hover:bg-white/10 ${entry.usable ? 'text-white/85' : 'text-white/40'}`}
+                className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-[11px] hover:bg-[var(--canvas-node-menu-hover)] ${entry.usable ? 'text-text-dark' : 'text-text-muted/55'}`}
                 title={entry.modelLabel}
               >
                 <span className="min-w-0 flex-1 truncate">{entry.modelLabel}</span>
@@ -297,11 +297,11 @@ export const ModelConfigPicker = memo(({
           </button>
           {paramsOpen && (
             <div
-              className="nowheel absolute bottom-full right-0 z-[1200] mb-1 min-w-[280px] max-w-[320px] space-y-2 rounded-md border border-white/15 bg-[#151515] p-2 shadow-2xl"
+              className="nowheel absolute bottom-full right-0 z-[1200] mb-1 min-w-[280px] max-w-[320px] space-y-2 rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-2 shadow-2xl"
               onWheelCapture={stopPickerWheel}
             >
               <div>
-                <div className="mb-1 text-[10px] text-white/55">比例</div>
+                <div className="mb-1 text-[10px] text-text-muted">比例</div>
                 <div className="flex flex-wrap gap-1">
                   {supportedRatios.map((r) => {
                     const active = r === current.ratio;
@@ -310,7 +310,7 @@ export const ModelConfigPicker = memo(({
                         key={r}
                         type="button"
                         onClick={() => handlePickRatio(r)}
-                        className={`rounded px-1.5 py-0.5 border text-[11px] transition-colors ${active ? 'border-accent/60 bg-accent/20 text-accent' : 'border-white/15 bg-white/5 text-white/80 hover:border-white/30'}`}
+                        className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${active ? 'border-accent/60 bg-accent/15 text-accent' : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'}`}
                       >{formatRatio(r)}</button>
                     );
                   })}
@@ -318,7 +318,7 @@ export const ModelConfigPicker = memo(({
               </div>
               {hasResolutions && (
                 <div>
-                  <div className="mb-1 text-[10px] text-white/55">分辨率</div>
+                  <div className="mb-1 text-[10px] text-text-muted">分辨率</div>
                   <div className="flex flex-wrap gap-1">
                     {(currentEntry?.supportedResolutions ?? []).map((r) => {
                       const active = (current.extraParams?.resolutionType as string | undefined) === r;
@@ -327,7 +327,7 @@ export const ModelConfigPicker = memo(({
                           key={r}
                           type="button"
                           onClick={() => updateExtra({ resolutionType: active ? undefined : r })}
-                          className={`rounded px-1.5 py-0.5 border text-[11px] transition-colors ${active ? 'border-accent/60 bg-accent/20 text-accent' : 'border-white/15 bg-white/5 text-white/80 hover:border-white/30'}`}
+                          className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${active ? 'border-accent/60 bg-accent/15 text-accent' : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'}`}
                         >{r}</button>
                       );
                     })}
@@ -336,7 +336,7 @@ export const ModelConfigPicker = memo(({
               )}
               {hasModelVersions && (
                 <div>
-                  <div className="mb-1 text-[10px] text-white/55">模型版本</div>
+                  <div className="mb-1 text-[10px] text-text-muted">模型版本</div>
                   <div className="flex flex-wrap gap-1">
                     {(currentEntry?.supportedModelVersions ?? []).map((v) => {
                       const active = (current.extraParams?.modelVersion as string | undefined) === v;
@@ -345,7 +345,7 @@ export const ModelConfigPicker = memo(({
                           key={v}
                           type="button"
                           onClick={() => updateExtra({ modelVersion: active ? undefined : v })}
-                          className={`rounded px-1.5 py-0.5 border text-[11px] transition-colors ${active ? 'border-accent/60 bg-accent/20 text-accent' : 'border-white/15 bg-white/5 text-white/80 hover:border-white/30'}`}
+                          className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${active ? 'border-accent/60 bg-accent/15 text-accent' : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'}`}
                         >{v}</button>
                       );
                     })}
@@ -353,7 +353,7 @@ export const ModelConfigPicker = memo(({
                 </div>
               )}
               {currentEntry?.supportsWebSearch && (
-                <label className="flex items-start gap-2 cursor-pointer rounded px-1 py-0.5 hover:bg-white/5">
+                <label className="flex cursor-pointer items-start gap-2 rounded px-1 py-0.5 hover:bg-[var(--canvas-node-menu-hover)]">
                   <input
                     type="checkbox"
                     checked={webSearchEnabled}
@@ -361,44 +361,44 @@ export const ModelConfigPicker = memo(({
                     className="mt-0.5 h-3 w-3 accent-accent"
                   />
                   <div className="flex-1">
-                    <div className="text-[11px] text-white/85">启用联网搜索</div>
+                    <div className="text-[11px] text-text-dark">启用联网搜索</div>
                   </div>
                 </label>
               )}
-              <div className="rounded-md border border-white/10 bg-white/[0.03] p-2">
+              <div className="rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-2">
                 <button
                   type="button"
                   onClick={() => setAdvancedOpen((v) => !v)}
                   className="flex w-full items-center justify-between gap-2 text-left"
                 >
-                  <span className="text-[11px] font-medium text-white/88">高级可选参数</span>
-                  <span className={`text-[10px] ${hasAdvancedParams ? 'text-accent' : 'text-white/45'}`}>
+                  <span className="text-[11px] font-medium text-text-dark">高级可选参数</span>
+                  <span className={`text-[10px] ${hasAdvancedParams ? 'text-accent' : 'text-text-muted'}`}>
                     {advancedOpen ? '收起' : hasAdvancedParams ? '已设置' : '展开'}
                   </span>
                 </button>
                 {advancedOpen && (
                   <div className="mt-2 space-y-2">
-                    <div className="text-[10px] leading-4 text-white/55">
+                    <div className="text-[10px] leading-4 text-text-muted">
                       一般不用填。未展开或留空时，不会向接口附加 seed / 反向提示词。
                     </div>
                   <div>
-                    <div className="mb-1 text-[10px] text-white/55">种子（seed）</div>
+                    <div className="mb-1 text-[10px] text-text-muted">种子（seed）</div>
                     <input
                       type="number"
                       value={(current.extraParams?.seed as number | undefined) ?? ''}
                       onChange={(e) => updateExtra({ seed: e.target.value.trim() === '' ? undefined : Number(e.target.value) })}
                       placeholder="通常留空；留空 = 随机"
-                      className="w-full rounded border border-white/15 bg-black/30 px-1.5 py-0.5 text-[11px] text-white/90 outline-none focus:border-accent/60"
+                      className="w-full rounded border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-bg-strong)] px-1.5 py-0.5 text-[11px] text-text-dark outline-none focus:border-accent/60"
                     />
                   </div>
                   <div>
-                    <div className="mb-1 text-[10px] text-white/55">反向提示词 / 排除</div>
+                    <div className="mb-1 text-[10px] text-text-muted">反向提示词 / 排除</div>
                     <textarea
                       value={(current.extraParams?.negativePrompt as string | undefined) ?? ''}
                       onChange={(e) => updateExtra({ negativePrompt: e.target.value.trim() || undefined })}
                       placeholder="通常留空；仅在支持时填写排除内容"
                       rows={2}
-                      className="w-full resize-none rounded border border-white/15 bg-black/30 px-1.5 py-0.5 text-[11px] text-white/90 outline-none focus:border-accent/60"
+                      className="w-full resize-none rounded border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-bg-strong)] px-1.5 py-0.5 text-[11px] text-text-dark outline-none focus:border-accent/60"
                     />
                   </div>
                 </div>
@@ -431,7 +431,7 @@ export const ModelConfigButton = memo(({ panelKey }: ModelConfigButtonProps) => 
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/70 hover:border-white/25 hover:text-white/90 transition-colors"
+        className="inline-flex items-center gap-1 rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-2 py-0.5 text-[10px] text-[var(--canvas-node-button-text)] transition-colors hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]"
         title="配置当前面板使用的模型"
       >
         <Settings2 className="h-3 w-3" />
@@ -441,7 +441,7 @@ export const ModelConfigButton = memo(({ panelKey }: ModelConfigButtonProps) => 
         <>
           <div className="fixed inset-0 z-[900]" onClick={() => setOpen(false)} />
           <div
-            className="nowheel absolute bottom-full left-0 z-[1000] mb-1 rounded-lg border border-white/15 bg-[#151515] p-2 shadow-2xl"
+            className="nowheel absolute bottom-full left-0 z-[1000] mb-1 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-2 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
             onWheelCapture={stopPickerWheel}
           >

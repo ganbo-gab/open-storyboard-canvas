@@ -15,6 +15,7 @@ import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData'
 import { showErrorDialog } from '@/features/canvas/application/errorDialog';
 import { canvasAiGateway } from '@/features/canvas/application/canvasServices';
 import { CURRENT_RUNTIME_SESSION_ID } from '@/features/canvas/application/generationErrorReport';
+import { appendGenerationParameterConstraints } from '@/features/canvas/application/generationPromptConstraints';
 import {
   resolveImageModelResolution,
 } from '@/features/canvas/models';
@@ -70,6 +71,9 @@ export const SelectedNodeOverlay = memo(() => {
   const panelState = usePanelStateStore();
   const setPointerOverPanel = usePanelStateStore((state) => state.setPointerOverPanel);
   const closePanel = usePanelStateStore((state) => state.closePanel);
+  const appendParameterConstraintsToPrompt = useSettingsStore(
+    (state) => state.appendParameterConstraintsToPrompt
+  );
 
   // Live rect of the toolbar button that opened the panel. Updated every
   // animation frame so the panel follows when the user drags the node around
@@ -206,8 +210,14 @@ export const SelectedNodeOverlay = memo(() => {
     addEdge(selectedNode.id, newNodeId);
 
     try {
+      const promptForRequest = appendGenerationParameterConstraints(prompt.trim(), {
+        enabled: appendParameterConstraintsToPrompt,
+        aspectRatio: ratioForGateway,
+        resolution: sizeForGateway,
+        count: 1,
+      });
       const jobId = await canvasAiGateway.submitGenerateImageJob({
-        prompt: prompt.trim(),
+        prompt: promptForRequest,
         model: requestModel,
         size: sizeForGateway,
         aspectRatio: ratioForGateway,
@@ -232,7 +242,7 @@ export const SelectedNodeOverlay = memo(() => {
       });
       await showErrorDialog(error instanceof Error ? error.message : '提交生成任务失败', '错误');
     }
-  }, [selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState, t]);
+  }, [appendParameterConstraintsToPrompt, selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState, t]);
 
   const handleSubmitPromptPreset = useCallback(async (presetId: string, modelConfig: ModelConfigValue) => {
     if (!selectedNode) {
@@ -318,8 +328,14 @@ export const SelectedNodeOverlay = memo(() => {
       const requestModel = resolved.builtinModel
         ? resolved.builtinModel.resolveRequest({ referenceImageCount: 1 }).requestModel
         : resolved.modelForGateway;
+      const promptForRequest = appendGenerationParameterConstraints(prompt, {
+        enabled: appendParameterConstraintsToPrompt,
+        aspectRatio: ratioForGateway,
+        resolution: sizeForGateway,
+        count: 1,
+      });
       const jobId = await canvasAiGateway.submitGenerateImageJob({
-        prompt,
+        prompt: promptForRequest,
         model: requestModel,
         size: sizeForGateway,
         aspectRatio: ratioForGateway,
@@ -353,6 +369,7 @@ export const SelectedNodeOverlay = memo(() => {
     selectedNode,
     selectedNodeImageData,
     setSelectedNode,
+    appendParameterConstraintsToPrompt,
     t,
     updateNodeData,
   ]);
@@ -468,8 +485,14 @@ export const SelectedNodeOverlay = memo(() => {
       const requestModel = resolved.builtinModel
         ? resolved.builtinModel.resolveRequest({ referenceImageCount: referenceImages.length }).requestModel
         : resolved.modelForGateway;
+      const promptForRequest = appendGenerationParameterConstraints(prompt.trim(), {
+        enabled: appendParameterConstraintsToPrompt,
+        aspectRatio: panoramaRequestRatio,
+        resolution: sizeForGateway,
+        count: 1,
+      });
       const jobId = await canvasAiGateway.submitGenerateImageJob({
-        prompt: prompt.trim(),
+        prompt: promptForRequest,
         model: requestModel,
         size: sizeForGateway,
         aspectRatio: panoramaRequestRatio,
@@ -494,7 +517,7 @@ export const SelectedNodeOverlay = memo(() => {
       });
       await showErrorDialog(error instanceof Error ? error.message : '提交全景生成任务失败', '错误');
     }
-  }, [selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState]);
+  }, [appendParameterConstraintsToPrompt, selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState]);
 
   /**
    * Blueprint submission. Spatial layout + identity references are packaged into
@@ -573,8 +596,14 @@ export const SelectedNodeOverlay = memo(() => {
       const ratioForGateway = resolved.ratio === 'auto'
         ? selectedNodeImageData.aspectRatio
         : resolved.ratio;
+      const promptForRequest = appendGenerationParameterConstraints(prompt.trim(), {
+        enabled: appendParameterConstraintsToPrompt,
+        aspectRatio: ratioForGateway,
+        resolution: sizeForGateway,
+        count: 1,
+      });
       const jobId = await canvasAiGateway.submitGenerateImageJob({
-        prompt: prompt.trim(),
+        prompt: promptForRequest,
         model: requestModel,
         size: sizeForGateway,
         aspectRatio: ratioForGateway,
@@ -602,7 +631,7 @@ export const SelectedNodeOverlay = memo(() => {
         t('common.error'),
       );
     }
-  }, [selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState, t]);
+  }, [appendParameterConstraintsToPrompt, selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState, t]);
 
 
   if (!selectedNode) {
