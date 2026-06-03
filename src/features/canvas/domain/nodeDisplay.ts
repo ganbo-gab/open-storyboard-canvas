@@ -9,8 +9,8 @@ export const DEFAULT_NODE_DISPLAY_NAME: Record<CanvasNodeType, string> = {
   [CANVAS_NODE_TYPES.upload]: '上传图片',
   [CANVAS_NODE_TYPES.imageEdit]: 'AI 图片',
   [CANVAS_NODE_TYPES.aiVideo]: 'AI 视频',
-  [CANVAS_NODE_TYPES.exportImage]: '结果图片',
-  [CANVAS_NODE_TYPES.video]: '结果视频',
+  [CANVAS_NODE_TYPES.exportImage]: '生成图像',
+  [CANVAS_NODE_TYPES.video]: '生成视频',
   [CANVAS_NODE_TYPES.textAnnotation]: '文本注释',
   [CANVAS_NODE_TYPES.group]: '分组',
   [CANVAS_NODE_TYPES.storyboardSplit]: '切割结果',
@@ -20,7 +20,7 @@ export const DEFAULT_NODE_DISPLAY_NAME: Record<CanvasNodeType, string> = {
 };
 
 export const EXPORT_RESULT_DISPLAY_NAME: Record<ExportImageNodeResultKind, string> = {
-  generic: '结果图片',
+  generic: '生成图像',
   storyboardGenOutput: '分镜输出',
   storyboardSplitExport: '切割导出',
   storyboardFrameEdit: '分镜帧',

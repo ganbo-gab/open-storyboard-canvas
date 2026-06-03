@@ -185,6 +185,7 @@ pub fn run() {
             image::persist_image_source,
             image::persist_video_source,
             image::persist_image_binary,
+            image::rename_local_media_files,
             image::save_image_source_to_downloads,
             image::save_image_source_to_path,
             image::save_image_source_to_directory,

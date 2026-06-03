@@ -3,6 +3,7 @@ import {
   getGenerateImageJob,
   setApiKey,
   submitGenerateImageJob,
+  type GenerateRequest,
 } from '@/commands/ai';
 import { imageUrlToDataUrl, persistImageLocally } from '@/features/canvas/application/imageData';
 
@@ -12,6 +13,8 @@ import {
   submitCustomProviderJob,
   getCustomProviderJob,
   submitCustomVideoJob,
+  buildCustomProviderRequestDebugPreview,
+  type CustomProviderRequestDebugPreview,
 } from './customProviderGateway';
 import type { GenerateVideoPayload } from '../application/ports';
 
@@ -43,6 +46,65 @@ async function normalizeVideoReferenceImages(payload: GenerateVideoPayload): Pro
   ];
   if (sources.length === 0) return undefined;
   return await Promise.all(sources.map(async (imageUrl) => await imageUrlToDataUrl(imageUrl)));
+}
+
+export interface GenerateImageDebugPreview {
+  route: 'builtin' | 'dreamina' | 'custom' | 'agnes';
+  gatewayRequest: GenerateRequest;
+  customProviderRequest?: CustomProviderRequestDebugPreview | null;
+}
+
+function summarizeDebugValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (value.startsWith('data:')) {
+      const [meta, payload = ''] = value.split(',', 2);
+      if (payload.length <= 140) return value;
+      return `${meta},${payload.slice(0, 96)}...${payload.slice(-24)}(${payload.length} chars)`;
+    }
+    if (value.length > 600) {
+      return `${value.slice(0, 300)}...${value.slice(-80)}(${value.length} chars)`;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => summarizeDebugValue(item));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, entryValue]) => [
+      key,
+      summarizeDebugValue(entryValue),
+    ])
+  );
+}
+
+export async function buildGenerateImageDebugPreview(
+  payload: GenerateImagePayload
+): Promise<GenerateImageDebugPreview> {
+  const normalizedReferenceImages = await normalizeReferenceImages(payload);
+  const gatewayRequest: GenerateRequest = {
+    prompt: payload.prompt,
+    model: payload.model,
+    size: payload.size,
+    aspect_ratio: payload.aspectRatio,
+    reference_images: normalizedReferenceImages,
+    extra_params: payload.extraParams,
+  };
+
+  if (isCustomModel(payload.model) || isAgnesModel(payload.model)) {
+    return {
+      route: isAgnesModel(payload.model) ? 'agnes' : 'custom',
+      gatewayRequest: summarizeDebugValue(gatewayRequest) as GenerateRequest,
+      customProviderRequest: buildCustomProviderRequestDebugPreview(gatewayRequest),
+    };
+  }
+
+  return {
+    route: isDreaminaModel(payload.model) ? 'dreamina' : 'builtin',
+    gatewayRequest: summarizeDebugValue(gatewayRequest) as GenerateRequest,
+  };
 }
 
 export const tauriAiGateway: AiGateway = {

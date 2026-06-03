@@ -1,6 +1,7 @@
 use ab_glyph::{FontArc, PxScale};
 use arboard::{Clipboard, ImageData};
 use base64::{engine::general_purpose::STANDARD, Engine};
+use chrono::Local;
 use directories::UserDirs;
 use fast_image_resize as fir;
 use fast_image_resize::images::Image as FirImage;
@@ -24,6 +25,7 @@ const FAST_PREVIEW_BYPASS_MAX_BYTES: usize = 2_000_000;
 const FAST_PREVIEW_BYPASS_MAX_DIMENSION: u32 = 2048;
 const REMOTE_IMAGE_DOWNLOAD_TIMEOUT_MS: u64 = 45_000;
 const REMOTE_IMAGE_DOWNLOAD_ATTEMPTS: usize = 3;
+const GENERATED_MEDIA_COUNTERS_FILE_NAME: &str = "generated-media-counters.json";
 static REMOTE_IMAGE_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn remote_image_client() -> &'static reqwest::Client {
@@ -47,6 +49,43 @@ pub struct StoryboardImageMetadata {
     pub grid_rows: u32,
     pub grid_cols: u32,
     pub frame_notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct DailyGeneratedMediaCounter {
+    date: String,
+    sequence: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct GeneratedMediaCounters {
+    image: DailyGeneratedMediaCounter,
+    video: DailyGeneratedMediaCounter,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameLocalMediaFilesPayload {
+    pub primary_path: String,
+    pub preview_path: Option<String>,
+    pub desired_file_name: Option<String>,
+    pub media_kind: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameLocalMediaFilesResult {
+    pub primary_path: String,
+    pub preview_path: Option<String>,
+    pub file_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocalMediaKind {
+    Image,
+    Video,
 }
 
 #[tauri::command]
@@ -1203,6 +1242,91 @@ fn resolve_images_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(images_dir)
 }
 
+fn resolve_generated_media_counters_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
+
+    std::fs::create_dir_all(&app_data_dir)
+        .map_err(|e| format!("Failed to create app data dir: {}", e))?;
+
+    Ok(app_data_dir.join(GENERATED_MEDIA_COUNTERS_FILE_NAME))
+}
+
+fn read_generated_media_counters(app: &AppHandle) -> Result<GeneratedMediaCounters, String> {
+    let counters_path = resolve_generated_media_counters_path(app)?;
+    if !counters_path.exists() {
+        return Ok(GeneratedMediaCounters::default());
+    }
+
+    let content = std::fs::read_to_string(&counters_path)
+        .map_err(|e| format!("Failed to read generated media counters: {}", e))?;
+    serde_json::from_str::<GeneratedMediaCounters>(&content)
+        .map_err(|e| format!("Failed to parse generated media counters: {}", e))
+}
+
+fn write_generated_media_counters(
+    app: &AppHandle,
+    counters: &GeneratedMediaCounters,
+) -> Result<(), String> {
+    let counters_path = resolve_generated_media_counters_path(app)?;
+    let content = serde_json::to_string_pretty(counters)
+        .map_err(|e| format!("Failed to serialize generated media counters: {}", e))?;
+    std::fs::write(counters_path, content)
+        .map_err(|e| format!("Failed to write generated media counters: {}", e))?;
+    Ok(())
+}
+
+fn resolve_local_media_kind(raw: &str) -> Result<LocalMediaKind, String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "image" => Ok(LocalMediaKind::Image),
+        "video" => Ok(LocalMediaKind::Video),
+        other => Err(format!("Unsupported media kind: {}", other)),
+    }
+}
+
+fn next_generated_media_file_stem(
+    app: &AppHandle,
+    media_kind: LocalMediaKind,
+) -> Result<String, String> {
+    let mut counters = read_generated_media_counters(app).unwrap_or_default();
+    let today = Local::now().format("%Y%m%d").to_string();
+    let sequence = {
+        let counter = match media_kind {
+            LocalMediaKind::Image => &mut counters.image,
+            LocalMediaKind::Video => &mut counters.video,
+        };
+
+        if counter.date == today {
+            counter.sequence = counter.sequence.saturating_add(1);
+        } else {
+            counter.date = today.clone();
+            counter.sequence = 1;
+        }
+
+        counter.sequence
+    };
+
+    write_generated_media_counters(app, &counters)?;
+
+    let prefix = match media_kind {
+        LocalMediaKind::Image => "genimg",
+        LocalMediaKind::Video => "genvideo",
+    };
+
+    Ok(format!("{}_{}_{:04}", prefix, today, sequence))
+}
+
+fn sanitize_requested_file_stem(raw: &str, fallback: &str) -> String {
+    let stem_candidate = Path::new(raw)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(raw);
+    sanitize_file_stem(stem_candidate)
+        .replace("storyboard-image", fallback)
+}
+
 fn persist_image_bytes(app: &AppHandle, bytes: &[u8], extension: &str) -> Result<String, String> {
     let images_dir = resolve_images_dir(app)?;
     let digest = md5::compute(bytes);
@@ -1236,6 +1360,36 @@ fn normalize_video_extension(raw_ext: &str) -> String {
         "mp4" | "webm" | "mov" | "m4v" | "avi" | "mkv" | "mpeg" | "mpg" => ext,
         _ => "mp4".to_string(),
     }
+}
+
+fn rename_local_file_to_stem(path: &Path, target_stem: &str) -> Result<PathBuf, String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Path has no parent directory: {}", path.display()))?;
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    let candidate = if extension.is_empty() {
+        parent.join(target_stem)
+    } else {
+        parent.join(format!("{}.{}", target_stem, extension))
+    };
+
+    if candidate == path {
+        return Ok(path.to_path_buf());
+    }
+
+    let output_path = ensure_unique_path(candidate);
+    std::fs::rename(path, &output_path).map_err(|e| {
+        format!(
+            "Failed to rename local media file from {} to {}: {}",
+            path.display(),
+            output_path.display(),
+            e
+        )
+    })?;
+    Ok(output_path)
 }
 
 fn persist_video_bytes(app: &AppHandle, bytes: &[u8], extension: &str) -> Result<String, String> {
@@ -2170,6 +2324,72 @@ fn ensure_output_path_with_extension(path: &Path, extension: &str) -> PathBuf {
     let mut with_extension = path.to_path_buf();
     with_extension.set_extension(normalize_extension(extension));
     with_extension
+}
+
+#[tauri::command]
+pub async fn rename_local_media_files(
+    app: AppHandle,
+    payload: RenameLocalMediaFilesPayload,
+) -> Result<RenameLocalMediaFilesResult, String> {
+    let primary_raw = payload.primary_path.trim();
+    if primary_raw.is_empty() {
+        return Err("Primary media path is empty".to_string());
+    }
+
+    let media_kind = resolve_local_media_kind(&payload.media_kind)?;
+    let primary_path = PathBuf::from(primary_raw);
+    if !primary_path.exists() {
+        return Err(format!(
+            "Primary media file does not exist: {}",
+            primary_path.display()
+        ));
+    }
+
+    let default_stem = next_generated_media_file_stem(&app, media_kind)?;
+    let requested_stem = payload
+        .desired_file_name
+        .as_deref()
+        .map(|value| sanitize_requested_file_stem(value, &default_stem))
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default_stem);
+
+    let renamed_primary_path = rename_local_file_to_stem(&primary_path, &requested_stem)?;
+    let renamed_preview_path = payload
+        .preview_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| {
+            let preview_path = PathBuf::from(value);
+            if preview_path == primary_path || preview_path == renamed_primary_path {
+                Some(Ok(renamed_primary_path.clone()))
+            } else if preview_path.exists() {
+                Some(rename_local_file_to_stem(
+                    &preview_path,
+                    &format!("{}-preview", requested_stem),
+                ))
+            } else {
+                None
+            }
+        })
+        .transpose()?;
+
+    let file_name = renamed_primary_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            format!(
+                "Failed to resolve renamed file name: {}",
+                renamed_primary_path.display()
+            )
+        })?
+        .to_string();
+
+    Ok(RenameLocalMediaFilesResult {
+        primary_path: renamed_primary_path.to_string_lossy().to_string(),
+        preview_path: renamed_preview_path.map(|path| path.to_string_lossy().to_string()),
+        file_name,
+    })
 }
 
 #[tauri::command]

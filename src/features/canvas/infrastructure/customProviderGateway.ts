@@ -161,6 +161,19 @@ function buildAgnesProviderConfig(mediaType: 'image' | 'video', apiKey: string):
   };
 }
 
+export interface CustomProviderRequestDebugPreview {
+  providerLabel: string;
+  providerId: string;
+  modelId: string;
+  modelName: string;
+  method: 'GET' | 'POST';
+  bodyMode: CustomProviderBodyMode;
+  url: string;
+  headers: Record<string, string>;
+  body?: unknown;
+  multipart?: CustomHttpMultipartBody;
+}
+
 function resolveProviderAndModel(modelId: string): { cfg: CustomProviderConfig; model: string } | null {
   if (modelId.startsWith('agnes:image:') || modelId.startsWith('agnes:video:')) {
     const [, mediaType, ...modelParts] = modelId.split(':');
@@ -2294,6 +2307,86 @@ async function sendGenerationRequest(
     timeoutMs: timeoutMs ?? GENERATION_REQUEST_TIMEOUT_MS,
   });
   return parsed;
+}
+
+function maskAuthorizationHeaderValue(value: string): string {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(\S+)\s+(.+)$/);
+  if (!match) {
+    if (trimmed.length <= 10) return '***';
+    return `${trimmed.slice(0, 4)}***${trimmed.slice(-4)}`;
+  }
+  const [, scheme, token] = match;
+  if (token.length <= 10) {
+    return `${scheme} ***`;
+  }
+  return `${scheme} ${token.slice(0, 4)}***${token.slice(-4)}`;
+}
+
+function summarizePreviewPayload(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (value.startsWith('data:')) {
+      const [meta, payload = ''] = value.split(',', 2);
+      if (payload.length <= 140) {
+        return value;
+      }
+      return `${meta},${payload.slice(0, 96)}...${payload.slice(-24)}(${payload.length} chars)`;
+    }
+    if (value.length > 600) {
+      return `${value.slice(0, 300)}...${value.slice(-80)}(${value.length} chars)`;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => summarizePreviewPayload(item));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.entries(record).map(([key, entryValue]) => [key, summarizePreviewPayload(entryValue)])
+  );
+}
+
+export function buildCustomProviderRequestDebugPreview(
+  request: GenerateRequest
+): CustomProviderRequestDebugPreview | null {
+  const resolved = resolveProviderAndModel(request.model);
+  if (!resolved) return null;
+  const { cfg, model } = resolved;
+  const method = cfg.httpMethod ?? 'POST';
+  const bodyMode = resolveCustomProviderBodyMode(cfg, request.extra_params);
+  const body = bodyMode === 'json' || bodyMode === 'form-urlencoded'
+    ? buildRequestBody(cfg, model, request)
+    : undefined;
+  const multipart = bodyMode === 'multipart' ? buildMultipartBody(cfg, model, request) : undefined;
+  const url = resolveEndpointUrlForRequest(
+    cfg,
+    model,
+    request,
+    method === 'GET' && body ? buildQueryParamsFromRequestBody(body) : undefined,
+  );
+  const rawHeaders = buildRequestHeaders(cfg, bodyMode, method);
+  const headers = Object.fromEntries(
+    Object.entries(rawHeaders).map(([key, value]) => [
+      key,
+      /^authorization$/i.test(key) ? maskAuthorizationHeaderValue(value) : value,
+    ])
+  );
+
+  return {
+    providerLabel: cfg.label,
+    providerId: cfg.id,
+    modelId: request.model,
+    modelName: model,
+    method,
+    bodyMode,
+    url,
+    headers,
+    body: summarizePreviewPayload(body),
+    multipart: summarizePreviewPayload(multipart) as CustomHttpMultipartBody | undefined,
+  };
 }
 
 function unwrapProviderPayload(payload: unknown): unknown {
