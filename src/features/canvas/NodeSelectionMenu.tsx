@@ -1,6 +1,6 @@
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Image, Images, Upload, Sparkles, LayoutGrid, Type } from 'lucide-react';
+import { Image, Images, Upload, Sparkles, LayoutGrid, Type, Video } from 'lucide-react';
 import { UI_POPOVER_TRANSITION_MS } from '@/components/ui/motion';
 
 import type { CanvasNodeType } from '@/features/canvas/domain/canvasNodes';
@@ -21,6 +21,7 @@ const iconMap: Record<MenuIconKey, typeof Upload> = {
   sparkles: Sparkles,
   layout: LayoutGrid,
   text: Type,
+  video: Video,
 };
 
 export function NodeSelectionMenu({

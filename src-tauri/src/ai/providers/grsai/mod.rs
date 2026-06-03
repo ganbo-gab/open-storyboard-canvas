@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
 use reqwest::Client;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -6,7 +7,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
 use tracing::info;
-use base64::{engine::general_purpose::STANDARD, Engine};
 
 use crate::ai::error::AIError;
 use crate::ai::{
@@ -145,7 +145,10 @@ impl GrsaiProvider {
                     .get("msg")
                     .and_then(|raw| raw.as_str())
                     .unwrap_or("unknown error");
-                return Err(AIError::Provider(format!("GRSAI API code {}: {}", code, msg)));
+                return Err(AIError::Provider(format!(
+                    "GRSAI API code {}: {}",
+                    code, msg
+                )));
             }
             return value
                 .get("data")
@@ -165,7 +168,11 @@ impl GrsaiProvider {
             .map(|url| url.to_string())
     }
 
-    async fn request_draw(&self, request: &GenerateRequest, model: String) -> Result<Value, AIError> {
+    async fn request_draw(
+        &self,
+        request: &GenerateRequest,
+        model: String,
+    ) -> Result<Value, AIError> {
         let body = DrawRequestBody {
             model,
             prompt: request.prompt.clone(),
@@ -272,16 +279,23 @@ impl GrsaiProvider {
                     .unwrap_or("unknown failure");
                 Ok(ProviderTaskPollResult::Failed(reason.to_string()))
             }
-            Some(other) => Err(AIError::Provider(format!("GRSAI unexpected task status: {}", other))),
+            Some(other) => Err(AIError::Provider(format!(
+                "GRSAI unexpected task status: {}",
+                other
+            ))),
         }
     }
 
     async fn poll_result_until_complete(&self, task_id: &str) -> Result<String, AIError> {
         loop {
             match self.poll_result_once(task_id).await? {
-                ProviderTaskPollResult::Running => sleep(Duration::from_millis(POLL_INTERVAL_MS)).await,
+                ProviderTaskPollResult::Running => {
+                    sleep(Duration::from_millis(POLL_INTERVAL_MS)).await
+                }
                 ProviderTaskPollResult::Succeeded(url) => return Ok(url),
-                ProviderTaskPollResult::Failed(message) => return Err(AIError::TaskFailed(message)),
+                ProviderTaskPollResult::Failed(message) => {
+                    return Err(AIError::TaskFailed(message))
+                }
             }
         }
     }
@@ -323,7 +337,10 @@ impl AIProvider for GrsaiProvider {
         true
     }
 
-    async fn submit_task(&self, request: GenerateRequest) -> Result<ProviderTaskSubmission, AIError> {
+    async fn submit_task(
+        &self,
+        request: GenerateRequest,
+    ) -> Result<ProviderTaskSubmission, AIError> {
         let model = self.normalize_requested_model(&request);
         let draw_response = self.request_draw(&request, model).await?;
         let payload = Self::resolve_task_payload(&draw_response)?;
@@ -342,7 +359,10 @@ impl AIProvider for GrsaiProvider {
         }))
     }
 
-    async fn poll_task(&self, handle: ProviderTaskHandle) -> Result<ProviderTaskPollResult, AIError> {
+    async fn poll_task(
+        &self,
+        handle: ProviderTaskHandle,
+    ) -> Result<ProviderTaskPollResult, AIError> {
         self.poll_result_once(handle.task_id.as_str()).await
     }
 

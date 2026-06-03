@@ -7,11 +7,15 @@ import {
 import {
   prepareNodeImageSource,
   prepareNodeImageSourceWithHeaders,
+  persistVideoSource,
 } from '@/commands/image';
 import {
+  AGNES_PROVIDER_DEFAULTS,
+  isVideoCustomProvider,
   useCustomProvidersStore,
   type CustomProviderConfig,
 } from '@/stores/customProvidersStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { hasCustomProviderCredential } from '@/features/canvas/application/providerAvailability';
 import {
   asPlainRecord,
@@ -43,6 +47,7 @@ import {
 interface CachedJob extends GenerationJobStatus {}
 const cache = new Map<string, CachedJob>();
 const POLL_TIMEOUT_MS = 120000;
+const VIDEO_POLL_TIMEOUT_MS = 15 * 60 * 1000;
 const CONNECTIVITY_TEST_POLL_TIMEOUT_MS = 180000;
 const GENERATION_REQUEST_TIMEOUT_MS = 180000;
 const RESULT_POLL_INTERVAL_MS = 1000;
@@ -50,6 +55,7 @@ const RESULT_POLL_REQUEST_TIMEOUT_MS = 30000;
 const RESULT_POLL_NETWORK_RETRY_ATTEMPTS = 3;
 const RESULT_POLL_MAX_CONSECUTIVE_NETWORK_FAILURES = 8;
 const RESULT_POLL_RETRY_HTTP_STATUSES = [408, 425, 429, 500, 502, 503, 504, 520, 522, 524];
+const DEFAULT_OPENAI_VIDEO_ENDPOINT_PATH = '/v1/videos';
 
 class NetworkRequestError extends Error {
   constructor(message: string) {
@@ -90,7 +96,80 @@ interface AsyncTaskConfig {
   timeoutMs: number;
 }
 
+function buildAgnesProviderConfig(mediaType: 'image' | 'video', apiKey: string): CustomProviderConfig {
+  if (mediaType === 'video') {
+    return {
+      id: 'agnes',
+      label: 'Agnes Video',
+      mediaType: 'video',
+      baseUrl: AGNES_PROVIDER_DEFAULTS.baseUrl,
+      endpointPath: AGNES_PROVIDER_DEFAULTS.videoEndpointPath,
+      modelListEndpointPath: AGNES_PROVIDER_DEFAULTS.modelListEndpointPath,
+      httpMethod: 'POST',
+      apiKey,
+      apiStyle: 'openai-compatible',
+      models: [AGNES_PROVIDER_DEFAULTS.models.video20, AGNES_PROVIDER_DEFAULTS.models.video12],
+      supportsWebSearch: false,
+      supportedResolutions: [...AGNES_PROVIDER_DEFAULTS.videoResolutions],
+      responseFormat: 'generic',
+      extraParams: {
+        providerConfigVersion: 'video-v1',
+        mediaType: 'video',
+        providerKind: 'agnes-video',
+        requestComposer: 'video-agnes-json',
+        videoRequestBodyMode: 'json',
+        supportedDurations: ['4', '8', '12'],
+        supportedRatios: ['16:9', '9:16', '1:1'],
+        supportedResolutions: [...AGNES_PROVIDER_DEFAULTS.videoResolutions],
+        videoPollTimeoutMs: VIDEO_POLL_TIMEOUT_MS,
+        videoTaskIdPath: 'task_id',
+        videoStatusEndpointPath: AGNES_PROVIDER_DEFAULTS.videoStatusEndpointPath,
+        responseVideoPath: 'video_url',
+        videoStatusPath: 'status',
+        videoSuccessValues: ['completed'],
+        videoFailedValues: ['failed'],
+        videoReferenceField: 'image',
+        defaultRequestParams: {
+          frame_rate: 24,
+          negative_prompt: '',
+        },
+      },
+      note: 'Agnes settings key routed through the JSON async video gateway.',
+    };
+  }
+
+  return {
+    id: 'agnes',
+    label: 'Agnes Image',
+    mediaType: 'image',
+    baseUrl: AGNES_PROVIDER_DEFAULTS.baseUrl,
+    endpointPath: AGNES_PROVIDER_DEFAULTS.imageEndpointPath,
+    modelListEndpointPath: AGNES_PROVIDER_DEFAULTS.modelListEndpointPath,
+    httpMethod: 'POST',
+    apiKey,
+    apiStyle: 'openai-compatible',
+    models: [AGNES_PROVIDER_DEFAULTS.models.image21Flash, AGNES_PROVIDER_DEFAULTS.models.image20Flash, AGNES_PROVIDER_DEFAULTS.models.image12],
+    supportsWebSearch: false,
+    supportedResolutions: [...AGNES_PROVIDER_DEFAULTS.imageResolutions],
+    responseFormat: 'openai-images',
+    extraParams: {
+      providerConfigVersion: 'new-v1',
+      providerKind: 'openai-images',
+      supportedRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4'],
+    },
+    note: 'Agnes settings key routed through the OpenAI Images-compatible gateway.',
+  };
+}
+
 function resolveProviderAndModel(modelId: string): { cfg: CustomProviderConfig; model: string } | null {
+  if (modelId.startsWith('agnes:image:') || modelId.startsWith('agnes:video:')) {
+    const [, mediaType, ...modelParts] = modelId.split(':');
+    const model = modelParts.join(':').trim();
+    const apiKey = useSettingsStore.getState().agnesApiKey.trim();
+    if (!model || !apiKey || (mediaType !== 'image' && mediaType !== 'video')) return null;
+    return { cfg: buildAgnesProviderConfig(mediaType, apiKey), model };
+  }
+
   // modelId shape: `custom:<providerId>:<modelId>`
   const parts = modelId.split(':');
   if (parts.length < 3 || parts[0] !== 'custom') return null;
@@ -782,7 +861,7 @@ function buildRequestHeaders(
   method: 'GET' | 'POST' = 'POST',
 ): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (modernProviderKind(cfg) === 'google-gemini' && cfg.apiKey?.trim()) {
+  if ((modernProviderKind(cfg) === 'google-gemini' || modernProviderKind(cfg) === 'google-video') && cfg.apiKey?.trim()) {
     headers['x-goog-api-key'] = cfg.apiKey.trim();
   } else if (cfg.apiKey?.trim()) {
     headers.Authorization = `Bearer ${cfg.apiKey.trim()}`;
@@ -1428,7 +1507,18 @@ async function runCustomProviderJob(
       });
       return;
     }
-    const preparedImageSource = await materializeGeneratedImageSource(cfg, imageUrl);
+    let preparedImageSource: string;
+    try {
+      preparedImageSource = await materializeGeneratedImageSource(cfg, imageUrl);
+    } catch (materializeError) {
+      cache.set(jobId, {
+        job_id: jobId,
+        status: 'failed',
+        result: asLightweightRetryResultSource(imageUrl),
+        error: formatUnknownError(materializeError),
+      });
+      return;
+    }
     cache.set(jobId, { job_id: jobId, status: 'succeeded', result: preparedImageSource, error: null });
   } catch (err) {
     cache.set(jobId, {
@@ -1449,9 +1539,18 @@ function formatUnknownError(error: unknown): string {
   return String(error);
 }
 
+function asLightweightRetryResultSource(source: string): string | null {
+  const trimmed = source.trim();
+  if (!trimmed) return null;
+  const normalizedPrefix = trimmed.slice(0, 16).toLowerCase();
+  return normalizedPrefix.startsWith('data:') || normalizedPrefix.startsWith('blob:')
+    ? null
+    : trimmed;
+}
+
 function buildAuthenticatedImageFetchHeaders(cfg: CustomProviderConfig): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (modernProviderKind(cfg) === 'google-gemini' && cfg.apiKey?.trim()) {
+  if ((modernProviderKind(cfg) === 'google-gemini' || modernProviderKind(cfg) === 'google-video') && cfg.apiKey?.trim()) {
     headers['x-goog-api-key'] = cfg.apiKey.trim();
   } else if (cfg.apiKey?.trim()) {
     headers.Authorization = `Bearer ${cfg.apiKey.trim()}`;
@@ -1497,6 +1596,667 @@ async function materializeGeneratedImageSource(
         ].join('\n')
       );
     }
+  }
+}
+
+function isRemoteHttpSource(source: string): boolean {
+  return /^https?:\/\//i.test(source.trim());
+}
+
+function valueHasVideoExtension(value: string): boolean {
+  return /\.(mp4|webm|mov|m4v|avi|mkv|mpeg|mpg)(\?|#|$)/i.test(value.trim());
+}
+
+function isProbablyVideoSource(value: string, key: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('data:video/')) return true;
+  if (/^https?:\/\//i.test(trimmed)) {
+    if (valueHasVideoExtension(trimmed)) return true;
+    return /(video|videos|download|content|file|media|output|result|url)/i.test(key);
+  }
+  if (/^[A-Za-z0-9+/=]+$/.test(trimmed) && trimmed.length > 1000) {
+    return /(video|mp4|webm|data|result|output|content)/i.test(key);
+  }
+  return false;
+}
+
+function normalizeVideoSource(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('data:video/')) return trimmed;
+  const base64Like = /^[A-Za-z0-9+/=]+$/.test(trimmed) && trimmed.length > 1000;
+  return base64Like ? `data:video/mp4;base64,${trimmed}` : trimmed;
+}
+
+function normalizeVideoSourceForProvider(cfg: CustomProviderConfig, value: string): string {
+  const normalized = normalizeVideoSource(value);
+  if (normalized.startsWith('data:video/') || /^https?:\/\//i.test(normalized)) {
+    return normalized;
+  }
+  if (normalized.startsWith('//')) {
+    const protocol = resolveProviderProtocol(cfg) ?? 'https:';
+    return `${protocol}${normalized}`;
+  }
+  if (normalized.startsWith('/') || normalized.startsWith('./') || normalized.startsWith('../')) {
+    return absolutizeProviderUrl(cfg, normalized);
+  }
+  return normalized;
+}
+
+function extractEmbeddedVideoUrl(cfg: CustomProviderConfig, value: string, key: string): string | null {
+  if (!value || value.length > 30000) return null;
+  if (!/(content|message|text|output|result|video|url|download)/i.test(key)) return null;
+  const markdownVideo = /!?\[[^\]]*]\((https?:\/\/[^)\s]+)\)/i.exec(value);
+  if (markdownVideo?.[1] && isProbablyVideoSource(markdownVideo[1], 'video_url')) {
+    return normalizeVideoSourceForProvider(cfg, markdownVideo[1]);
+  }
+  const urls = value.match(/https?:\/\/[^\s"'<>）)]+/gi) ?? [];
+  for (const raw of urls) {
+    const candidate = raw.replace(/[.,;:!?，。；：！？]+$/g, '');
+    if (isProbablyVideoSource(candidate, 'video_url')) {
+      return normalizeVideoSourceForProvider(cfg, candidate);
+    }
+  }
+  return null;
+}
+
+function scanFirstVideoSource(cfg: CustomProviderConfig, payload: unknown): string | null {
+  const stack: Array<{ value: unknown; keyPath: string; depth: number }> = [
+    { value: payload, keyPath: '', depth: 0 },
+  ];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    const value = current?.value;
+    const keyPath = current?.keyPath ?? '';
+    const depth = current?.depth ?? 0;
+    if (depth > 8) continue;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (isProbablyVideoSource(trimmed, keyPath)) {
+        return normalizeVideoSourceForProvider(cfg, trimmed);
+      }
+      const embedded = extractEmbeddedVideoUrl(cfg, trimmed, keyPath);
+      if (embedded) return embedded;
+      const nested = parseNestedJsonString(trimmed);
+      if (nested !== null) stack.push({ value: nested, keyPath, depth: depth + 1 });
+    } else if (Array.isArray(value)) {
+      value.forEach((item, index) => {
+        stack.push({ value: item, keyPath: keyPath ? `${keyPath}.${index}` : String(index), depth: depth + 1 });
+      });
+    } else if (value && typeof value === 'object') {
+      Object.entries(value as Record<string, unknown>).forEach(([childKey, childValue]) => {
+        stack.push({ value: childValue, keyPath: keyPath ? `${keyPath}.${childKey}` : childKey, depth: depth + 1 });
+      });
+    }
+  }
+  return null;
+}
+
+function extractFirstVideoSource(cfg: CustomProviderConfig, payload: unknown): string | null {
+  const hintedPath =
+    cfg.extraParams?.responseVideoPath
+    ?? cfg.extraParams?.responseVideoUrlPath
+    ?? cfg.extraParams?.videoPath
+    ?? cfg.extraParams?.videoUrlPath;
+  const hinted = extractVideoByPath(cfg, payload, hintedPath);
+  if (hinted) return hinted;
+  return scanFirstVideoSource(cfg, payload);
+}
+
+function extractVideoByPath(cfg: CustomProviderConfig, payload: unknown, rawPath: unknown): string | null {
+  const current = getValueByPath(payload, rawPath);
+  if (current === undefined || current === null) return null;
+  if (typeof current === 'string' && current.trim()) {
+    const trimmed = current.trim();
+    return isProbablyVideoSource(trimmed, 'video')
+      ? normalizeVideoSourceForProvider(cfg, trimmed)
+      : extractEmbeddedVideoUrl(cfg, trimmed, 'video');
+  }
+  return scanFirstVideoSource(cfg, current);
+}
+
+function buildOpenAiVideoContentUrl(cfg: CustomProviderConfig, taskId: string): string {
+  const configuredPath = typeof cfg.extraParams?.videoContentEndpointPath === 'string'
+    ? cfg.extraParams.videoContentEndpointPath.trim()
+    : '';
+  const pathTemplate = configuredPath || `${resolveDefaultOpenAiVideoEndpointPath(cfg)}/{taskId}/content`;
+  return resolveAsyncTaskUrl(cfg, pathTemplate, taskId);
+}
+
+function resolveDefaultOpenAiVideoEndpointPath(cfg: CustomProviderConfig): string {
+  try {
+    const path = new URL(cfg.baseUrl).pathname.replace(/\/+$/, '');
+    return path.endsWith('/v1') ? '/videos' : DEFAULT_OPENAI_VIDEO_ENDPOINT_PATH;
+  } catch {
+    return DEFAULT_OPENAI_VIDEO_ENDPOINT_PATH;
+  }
+}
+
+function buildVideoRequestFields(
+  cfg: CustomProviderConfig,
+  modelName: string,
+  request: GenerateRequest,
+): Record<string, unknown> {
+  const defaultRequestParams = resolveDefaultRequestParams(cfg);
+  const userExtra = { ...(request.extra_params ?? {}) } as Record<string, unknown>;
+  const seconds =
+    userExtra.seconds
+    ?? userExtra.duration
+    ?? defaultRequestParams.seconds
+    ?? defaultRequestParams.duration;
+  delete userExtra.seconds;
+  delete userExtra.duration;
+  delete userExtra.resolutionType;
+  delete userExtra.aspect_ratio;
+  delete userExtra.aspectRatio;
+  delete userExtra.reference_images;
+  delete userExtra.input_reference;
+  delete userExtra.inputReference;
+
+  return compactRecord({
+    model: modelName,
+    prompt: request.prompt,
+    size: request.extra_params?.resolutionType ?? request.extra_params?.size ?? request.size,
+    seconds,
+    ...defaultRequestParams,
+    ...userExtra,
+  });
+}
+
+function resolveVideoSeconds(
+  request: GenerateRequest,
+  defaultRequestParams: Record<string, unknown>,
+): number | undefined {
+  const raw =
+    request.extra_params?.seconds
+    ?? request.extra_params?.duration
+    ?? defaultRequestParams.seconds
+    ?? defaultRequestParams.duration;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
+}
+
+function parseVideoPixelSize(value: unknown): { width: number; height: number } | null {
+  if (typeof value !== 'string') return null;
+  const match = /^(\d{2,5})x(\d{2,5})$/i.exec(value.trim());
+  if (!match) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+    ? { width, height }
+    : null;
+}
+
+function normalizeVideoResolutionTier(value: unknown): '1k' | '2k' | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (/^(1k|720p|1280)$/.test(normalized)) return '1k';
+  if (/^(2k|1080p|1920)$/.test(normalized)) return '2k';
+  return null;
+}
+
+function normalizeVideoAspectRatio(value: unknown): '16:9' | '9:16' | '1:1' {
+  if (typeof value !== 'string') return '16:9';
+  const normalized = value.trim();
+  return normalized === '9:16' || normalized === '1:1' ? normalized : '16:9';
+}
+
+const AGNES_VIDEO_SIZE_BY_TIER: Record<'1k' | '2k', Record<'16:9' | '9:16' | '1:1', { width: number; height: number }>> = {
+  '1k': {
+    '16:9': { width: 1280, height: 720 },
+    '9:16': { width: 720, height: 1280 },
+    '1:1': { width: 1024, height: 1024 },
+  },
+  '2k': {
+    '16:9': { width: 1920, height: 1080 },
+    '9:16': { width: 1080, height: 1920 },
+    '1:1': { width: 1536, height: 1536 },
+  },
+};
+
+function resolveAgnesVideoPixelSize(request: GenerateRequest, userExtra: Record<string, unknown>): { width: number; height: number } {
+  const directSize =
+    parseVideoPixelSize(request.size)
+    ?? parseVideoPixelSize(userExtra.size)
+    ?? parseVideoPixelSize(userExtra.resolutionType);
+  if (directSize) return directSize;
+
+  const tier = normalizeVideoResolutionTier(userExtra.resolutionType ?? userExtra.size ?? request.size);
+  if (tier) {
+    const aspectRatio = normalizeVideoAspectRatio(userExtra.aspectRatio ?? userExtra.aspect_ratio ?? request.aspect_ratio);
+    return AGNES_VIDEO_SIZE_BY_TIER[tier][aspectRatio];
+  }
+
+  return AGNES_VIDEO_SIZE_BY_TIER['1k']['16:9'];
+}
+
+function normalizeAgnesFrameCount(seconds: number, frameRate: number): number {
+  const requestedFrames = Math.max(1, Math.round(seconds * frameRate));
+  const maxFrames = 441;
+  const constrainedFrames = Math.min(requestedFrames, maxFrames);
+  return Math.max(1, Math.floor((constrainedFrames - 1) / 8) * 8 + 1);
+}
+
+function buildAgnesVideoJsonBody(
+  cfg: CustomProviderConfig,
+  modelName: string,
+  request: GenerateRequest,
+): Record<string, unknown> {
+  const defaultRequestParams = resolveDefaultRequestParams(cfg);
+  const userExtra = { ...(request.extra_params ?? {}) } as Record<string, unknown>;
+  const frameRateRaw = userExtra.frame_rate ?? userExtra.frameRate ?? defaultRequestParams.frame_rate ?? 24;
+  const frameRate = Number(frameRateRaw);
+  const normalizedFrameRate = Number.isFinite(frameRate) && frameRate > 0 ? frameRate : 24;
+  const seconds = resolveVideoSeconds(request, defaultRequestParams) ?? 4;
+  const pixelSize = resolveAgnesVideoPixelSize(request, userExtra);
+  const referenceImage = request.reference_images?.[0];
+  delete userExtra.seconds;
+  delete userExtra.duration;
+  delete userExtra.size;
+  delete userExtra.resolutionType;
+  delete userExtra.aspect_ratio;
+  delete userExtra.aspectRatio;
+  delete userExtra.reference_images;
+  delete userExtra.input_reference;
+  delete userExtra.inputReference;
+  delete userExtra.image;
+  delete userExtra.frameRate;
+
+  return compactRecord({
+    model: modelName,
+    prompt: request.prompt,
+    width: pixelSize.width,
+    height: pixelSize.height,
+    num_frames: normalizeAgnesFrameCount(seconds, normalizedFrameRate),
+    frame_rate: normalizedFrameRate,
+    ...defaultRequestParams,
+    ...userExtra,
+    ...(referenceImage ? {
+      image: referenceImage,
+      extra_body: {
+        ...(asPlainRecord(defaultRequestParams.extra_body) ?? {}),
+        ...(asPlainRecord(userExtra.extra_body) ?? {}),
+        image: referenceImage,
+      },
+    } : {}),
+  });
+}
+
+function buildXaiVideoJsonBody(
+  cfg: CustomProviderConfig,
+  modelName: string,
+  request: GenerateRequest,
+): Record<string, unknown> {
+  const defaultRequestParams = resolveDefaultRequestParams(cfg);
+  const userExtra = { ...(request.extra_params ?? {}) } as Record<string, unknown>;
+  const seconds = resolveVideoSeconds(request, defaultRequestParams);
+  const referenceImage = request.reference_images?.[0];
+  delete userExtra.seconds;
+  delete userExtra.duration;
+  delete userExtra.size;
+  delete userExtra.resolutionType;
+  delete userExtra.aspect_ratio;
+  delete userExtra.aspectRatio;
+  delete userExtra.reference_images;
+  delete userExtra.input_reference;
+  delete userExtra.inputReference;
+  delete userExtra.image;
+
+  return compactRecord({
+    model: modelName,
+    prompt: request.prompt,
+    duration: seconds,
+    aspect_ratio: defaultRequestParams.aspect_ratio ?? '16:9',
+    resolution: request.size,
+    ...defaultRequestParams,
+    ...userExtra,
+    ...(referenceImage ? { image: { url: referenceImage } } : {}),
+  });
+}
+
+function buildVolcengineSeedanceVideoJsonBody(
+  cfg: CustomProviderConfig,
+  modelName: string,
+  request: GenerateRequest,
+): Record<string, unknown> {
+  const defaultRequestParams = resolveDefaultRequestParams(cfg);
+  const userExtra = { ...(request.extra_params ?? {}) } as Record<string, unknown>;
+  const seconds = resolveVideoSeconds(request, defaultRequestParams);
+  const aspectRatio = userExtra.aspectRatio ?? userExtra.aspect_ratio ?? request.aspect_ratio;
+  const resolution = userExtra.resolutionType ?? userExtra.size ?? request.size;
+  const referenceImages = request.reference_images ?? [];
+  delete userExtra.seconds;
+  delete userExtra.duration;
+  delete userExtra.size;
+  delete userExtra.resolutionType;
+  delete userExtra.aspect_ratio;
+  delete userExtra.aspectRatio;
+  delete userExtra.reference_images;
+  delete userExtra.input_reference;
+  delete userExtra.inputReference;
+
+  const content = [
+    ...referenceImages.map((url) => ({
+      type: 'image_url',
+      image_url: { url },
+    })),
+    {
+      type: 'text',
+      text: request.prompt,
+    },
+  ];
+
+  return compactRecord({
+    model: modelName,
+    content,
+    duration: seconds,
+    ratio: aspectRatio && aspectRatio !== 'auto' ? aspectRatio : undefined,
+    resolution,
+    ...defaultRequestParams,
+    ...userExtra,
+  });
+}
+
+function buildVideoMultipartBody(
+  cfg: CustomProviderConfig,
+  modelName: string,
+  request: GenerateRequest,
+): CustomHttpMultipartBody {
+  const fields: NonNullable<CustomHttpMultipartBody['fields']> = [];
+  Object.entries(buildVideoRequestFields(cfg, modelName, request)).forEach(([key, value]) => {
+    appendMultipartField(fields, key, value);
+  });
+
+  const rawReference =
+    request.reference_images?.[0]
+    ?? (typeof request.extra_params?.input_reference === 'string' ? request.extra_params.input_reference : undefined)
+    ?? (typeof request.extra_params?.inputReference === 'string' ? request.extra_params.inputReference : undefined);
+  const files: NonNullable<CustomHttpMultipartBody['files']> = [];
+  if (typeof rawReference === 'string' && rawReference.trim()) {
+    const fieldName = typeof cfg.extraParams?.videoReferenceField === 'string' && cfg.extraParams.videoReferenceField.trim()
+      ? cfg.extraParams.videoReferenceField.trim()
+      : 'input_reference';
+    files.push(buildMultipartFile(fieldName, rawReference, 0));
+  }
+  return { fields, files };
+}
+
+function resolveVideoRequestBodyMode(cfg: CustomProviderConfig): 'json' | 'multipart' {
+  const rawMode = cfg.extraParams?.videoRequestBodyMode ?? cfg.extraParams?.requestBodyMode;
+  return rawMode === 'json' ? 'json' : 'multipart';
+}
+
+function buildVideoJsonBody(
+  cfg: CustomProviderConfig,
+  modelName: string,
+  request: GenerateRequest,
+): Record<string, unknown> {
+  const providerKind = modernProviderKind(cfg);
+  if (providerKind === 'agnes-video') {
+    return buildAgnesVideoJsonBody(cfg, modelName, request);
+  }
+  if (providerKind === 'xai-grok-video') {
+    return buildXaiVideoJsonBody(cfg, modelName, request);
+  }
+  if (providerKind === 'seedance-video') {
+    return buildVolcengineSeedanceVideoJsonBody(cfg, modelName, request);
+  }
+
+  const body = buildVideoRequestFields(cfg, modelName, request);
+  const references = request.reference_images ?? [];
+  if (references.length > 0) {
+    const fieldName = typeof cfg.extraParams?.videoReferenceField === 'string' && cfg.extraParams.videoReferenceField.trim()
+      ? cfg.extraParams.videoReferenceField.trim()
+      : 'reference_images';
+    body[fieldName] = references.length === 1 ? references[0] : references;
+  }
+  return body;
+}
+
+function resolveVideoSubmitUrl(cfg: CustomProviderConfig, modelName: string, request: GenerateRequest): string {
+  const configuredEndpointPath =
+    typeof cfg.endpointPath === 'string' && cfg.endpointPath.trim()
+      ? cfg.endpointPath.trim()
+      : '';
+  if (!configuredEndpointPath && cfg.extraParams?.requiresExplicitVideoEndpoint === true) {
+    throw new Error(`${cfg.label} 需要先按服务商文档填写视频接口路径，不能使用默认 /v1/videos。`);
+  }
+  const endpointPath = configuredEndpointPath || resolveDefaultOpenAiVideoEndpointPath(cfg);
+  return resolveEndpointUrlForRequest(
+    { ...cfg, endpointPath },
+    modelName,
+    request,
+  );
+}
+
+async function sendVideoGenerationRequest(
+  cfg: CustomProviderConfig,
+  model: string,
+  request: GenerateRequest,
+): Promise<unknown> {
+  const method = cfg.httpMethod ?? 'POST';
+  if (method !== 'POST') {
+    throw new Error('视频生成接口当前仅支持 POST 提交任务。请将 httpMethod 设置为 POST。');
+  }
+  if (cfg.extraParams?.requiresDedicatedVideoGateway === true) {
+    throw new Error(`${cfg.label} 的视频格式需要专用 gateway 组装请求体，当前模板仅保存官方字段元数据，不能直接提交。`);
+  }
+  const url = resolveVideoSubmitUrl(cfg, model, request);
+  const bodyMode = resolveVideoRequestBodyMode(cfg);
+  const headers = buildRequestHeaders(cfg, bodyMode, method);
+  const multipart = bodyMode === 'multipart' ? buildVideoMultipartBody(cfg, model, request) : undefined;
+  const body = bodyMode === 'json' ? buildVideoJsonBody(cfg, model, request) : undefined;
+  const { parsed } = await requestJson(url, {
+    method,
+    headers,
+    bodyMode,
+    body,
+    multipart,
+    timeoutMs: GENERATION_REQUEST_TIMEOUT_MS,
+  });
+  return parsed;
+}
+
+function resolveVideoStatusEndpointPath(cfg: CustomProviderConfig): string {
+  const configured = typeof cfg.extraParams?.videoStatusEndpointPath === 'string'
+    ? cfg.extraParams.videoStatusEndpointPath.trim()
+    : '';
+  if (configured) return configured;
+  const submitPath = (cfg.endpointPath ?? resolveDefaultOpenAiVideoEndpointPath(cfg)).trim()
+    || resolveDefaultOpenAiVideoEndpointPath(cfg);
+  return `${submitPath.replace(/\/+$/, '')}/{taskId}`;
+}
+
+async function resolveGeneratedVideoSource(
+  cfg: CustomProviderConfig,
+  parsed: unknown,
+): Promise<string | null> {
+  const unwrappedParsed = unwrapProviderPayload(parsed);
+  const direct =
+    extractFirstVideoSource(cfg, parsed)
+    ?? (Object.is(unwrappedParsed, parsed) ? null : extractFirstVideoSource(cfg, unwrappedParsed));
+  if (direct) return direct;
+
+  const configuredTaskIdPath = typeof cfg.extraParams?.videoTaskIdPath === 'string' ? cfg.extraParams.videoTaskIdPath : '';
+  const taskIdRaw = configuredTaskIdPath
+    ? getValueByPath(parsed, configuredTaskIdPath)
+    : extractTaskId(parsed);
+  const taskId = typeof taskIdRaw === 'string' && taskIdRaw.trim()
+    ? taskIdRaw.trim()
+    : (typeof taskIdRaw === 'number' && Number.isFinite(taskIdRaw) ? String(taskIdRaw) : null);
+  if (!taskId) return null;
+  const statusPath = typeof cfg.extraParams?.videoStatusPath === 'string' ? cfg.extraParams.videoStatusPath : 'status';
+  const errorPath = typeof cfg.extraParams?.videoErrorPath === 'string' ? cfg.extraParams.videoErrorPath : 'error';
+  const pendingValues = normalizeAsyncStatusValues(
+    cfg.extraParams?.videoPendingValues,
+    ['queued', 'running', 'processing', 'pending', 'in_progress'],
+  );
+  const successValues = normalizeAsyncStatusValues(
+    cfg.extraParams?.videoSuccessValues,
+    ['succeeded', 'success', 'completed', 'complete', 'done', 'finished'],
+  );
+  const failedValues = normalizeAsyncStatusValues(
+    cfg.extraParams?.videoFailedValues,
+    ['failed', 'error', 'canceled', 'cancelled'],
+  );
+  const intervalMs = Number.isFinite(Number(cfg.extraParams?.videoPollIntervalMs))
+    ? Math.max(500, Number(cfg.extraParams?.videoPollIntervalMs))
+    : RESULT_POLL_INTERVAL_MS;
+  const timeoutMs = Number.isFinite(Number(cfg.extraParams?.videoPollTimeoutMs))
+    ? Math.max(5000, Number(cfg.extraParams?.videoPollTimeoutMs))
+    : VIDEO_POLL_TIMEOUT_MS;
+  const statusEndpointPath = resolveVideoStatusEndpointPath(cfg);
+  const startedAt = Date.now();
+  let pollCount = 0;
+  let consecutiveNetworkFailures = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (pollCount > 0) {
+      await sleep(intervalMs);
+    }
+    pollCount += 1;
+
+    let payload: unknown;
+    try {
+      const response = await requestJson(resolveAsyncTaskUrl(cfg, statusEndpointPath, taskId), {
+        method: 'GET',
+        headers: buildRequestHeaders(cfg, 'json', 'GET'),
+        timeoutMs: RESULT_POLL_REQUEST_TIMEOUT_MS,
+        errorPrefix: '视频状态轮询失败 HTTP',
+        networkRetryAttempts: RESULT_POLL_NETWORK_RETRY_ATTEMPTS,
+        networkRetryDelayMs: 700,
+        retryHttpStatuses: RESULT_POLL_RETRY_HTTP_STATUSES,
+      });
+      payload = response.parsed;
+      consecutiveNetworkFailures = 0;
+    } catch (err) {
+      if (err instanceof NetworkRequestError || err instanceof RetryableHttpStatusError) {
+        consecutiveNetworkFailures += 1;
+        if (consecutiveNetworkFailures < RESULT_POLL_MAX_CONSECUTIVE_NETWORK_FAILURES) {
+          continue;
+        }
+        throw new Error(`视频状态接口连续临时请求失败 ${consecutiveNetworkFailures} 次，已停止轮询。最后错误：${err.message}`);
+      }
+      throw err;
+    }
+
+    const unwrapped = unwrapProviderPayload(payload);
+    const videoSource =
+      extractFirstVideoSource(cfg, payload)
+      ?? (Object.is(unwrapped, payload) ? null : extractFirstVideoSource(cfg, unwrapped));
+    if (videoSource) return videoSource;
+
+    const statusRaw =
+      getValueByPath(payload, statusPath)
+      ?? getValueByPath(unwrapped, statusPath);
+    const status = normalizeAsyncStatusValue(statusRaw);
+    if (status && failedValues.includes(status)) {
+      const messageRaw =
+        getValueByPath(payload, errorPath)
+        ?? getValueByPath(unwrapped, errorPath);
+      throw new Error(formatAsyncErrorValue(messageRaw) ?? `视频任务失败：${status}`);
+    }
+    if (status && successValues.includes(status)) {
+      const providerKind = modernProviderKind(cfg);
+      if (providerKind === 'openai-videos' || providerKind === 'openai-video-compatible') {
+        return buildOpenAiVideoContentUrl(cfg, taskId);
+      }
+      throw new Error(`视频任务状态为 ${status}，但未按 responseVideoPath/videoUrlPath 找到视频 URL。请检查响应路径配置。`);
+    }
+    if (status && !pendingValues.includes(status)) {
+      console.warn('[CustomProvider] unrecognized video status, keep polling', { status, taskId });
+    }
+  }
+
+  throw new Error('视频任务轮询超时，未获取到结果');
+}
+
+async function materializeGeneratedVideoSource(
+  cfg: CustomProviderConfig,
+  videoSource: string,
+): Promise<string> {
+  const authHeaders = buildAuthenticatedImageFetchHeaders(cfg);
+  if (!isRemoteHttpSource(videoSource)) {
+    return await persistVideoSource(videoSource, Object.keys(authHeaders).length > 0 ? authHeaders : undefined);
+  }
+
+  try {
+    return await persistVideoSource(videoSource);
+  } catch (publicError) {
+    if (Object.keys(authHeaders).length === 0) {
+      throw new Error(
+        `已获取到生成视频地址，但视频下载或解析失败：${formatUnknownError(publicError)}`
+      );
+    }
+    try {
+      return await persistVideoSource(videoSource, authHeaders);
+    } catch (authenticatedError) {
+      throw new Error(
+        [
+          '已获取到生成视频地址，但视频下载或解析失败。',
+          `无鉴权下载：${formatUnknownError(publicError)}`,
+          `带服务商鉴权下载：${formatUnknownError(authenticatedError)}`,
+        ].join('\n')
+      );
+    }
+  }
+}
+
+export async function submitCustomVideoJob(request: GenerateRequest): Promise<string> {
+  const resolved = resolveProviderAndModel(request.model);
+  const jobId = `custom-local-video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  if (!resolved) {
+    cache.set(jobId, { job_id: jobId, status: 'failed', result: null, error: '未找到对应的视频服务商配置' });
+    return jobId;
+  }
+  const { cfg, model } = resolved;
+  if (!hasCustomProviderCredential(cfg)) {
+    cache.set(jobId, { job_id: jobId, status: 'failed', result: null, error: `${cfg.label} 未填写 API Key` });
+    return jobId;
+  }
+  cache.set(jobId, { job_id: jobId, status: 'running', result: null, error: null });
+  void runCustomVideoJob(jobId, cfg, model, request);
+  return jobId;
+}
+
+async function runCustomVideoJob(
+  jobId: string,
+  cfg: CustomProviderConfig,
+  model: string,
+  request: GenerateRequest,
+): Promise<void> {
+  try {
+    const parsed = await sendVideoGenerationRequest(cfg, model, request);
+    const videoSource = await resolveGeneratedVideoSource(cfg, parsed);
+    if (!videoSource) {
+      cache.set(jobId, {
+        job_id: jobId,
+        status: 'failed',
+        result: null,
+        error: `响应中未找到视频任务或视频 URL。响应预览：${previewPayload(parsed)}`,
+      });
+      return;
+    }
+    let preparedVideoSource: string;
+    try {
+      preparedVideoSource = await materializeGeneratedVideoSource(cfg, videoSource);
+    } catch (materializeError) {
+      cache.set(jobId, {
+        job_id: jobId,
+        status: 'failed',
+        result: asLightweightRetryResultSource(videoSource),
+        error: formatUnknownError(materializeError),
+      });
+      return;
+    }
+    cache.set(jobId, { job_id: jobId, status: 'succeeded', result: preparedVideoSource, error: null });
+  } catch (err) {
+    cache.set(jobId, {
+      job_id: jobId,
+      status: 'failed',
+      result: null,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -1567,7 +2327,7 @@ function extractTaskId(payload: unknown): string | null {
   const unwrapped = unwrapProviderPayload(payload);
   if (!unwrapped || typeof unwrapped !== 'object' || Array.isArray(unwrapped)) return null;
   const record = unwrapped as Record<string, unknown>;
-  const candidates = [record.id, record.task_id, record.taskId, record.job_id, record.jobId];
+  const candidates = [record.id, record.task_id, record.taskId, record.job_id, record.jobId, record.request_id, record.requestId, record.name];
   const found = candidates.find((value) => typeof value === 'string' && value.trim());
   return typeof found === 'string' ? found.trim() : null;
 }
@@ -1939,12 +2699,28 @@ export async function testCustomProviderConnectivity(
   const request = {
     prompt: 'a small red square, test pattern',
     model: `custom:${cfg.id}:${modelName}`,
-    size: '1K',
+    size: isVideoCustomProvider(cfg) ? (cfg.supportedResolutions?.[0] ?? '1280x720') : '1K',
     aspect_ratio: '1:1',
     reference_images: [],
-    extra_params: {},
+    extra_params: isVideoCustomProvider(cfg) ? { seconds: 1 } : {},
   } as GenerateRequest;
   try {
+    if (isVideoCustomProvider(cfg)) {
+      const parsed = await sendVideoGenerationRequest(cfg, modelName, request);
+      const rawPreview = JSON.stringify(parsed).slice(0, 300);
+      const videoSource =
+        extractFirstVideoSource(cfg, parsed)
+        ?? (extractTaskId(parsed) ? 'pending-video-task' : null);
+      if (videoSource) {
+        return { ok: true, status: 200, imageUrl: videoSource, rawPreview };
+      }
+      return {
+        ok: false,
+        status: 200,
+        errorMessage: `响应中未找到视频任务或视频 URL。响应预览：${previewPayload(parsed)}`,
+        rawPreview,
+      };
+    }
     const parsed = await sendGenerationRequest(cfg, modelName, request, 30000);
     const rawPreview = JSON.stringify(parsed).slice(0, 300);
     const imageUrl = await resolveGeneratedImageUrl(cfg, parsed, CONNECTIVITY_TEST_POLL_TIMEOUT_MS);

@@ -4,6 +4,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
@@ -46,6 +47,11 @@ import {
   prepareNodeImageFromFile,
   resolveImageDisplayUrl,
 } from '@/features/canvas/application/imageData';
+import {
+  dataTransferHasFile,
+  dataTransferHasImageFile,
+  resolveDroppedImageFile,
+} from '@/features/canvas/application/imageDragDrop';
 import {
   getConnectMenuNodeTypes,
   nodeHasSourceHandle,
@@ -157,7 +163,9 @@ function resolveAllowedNodeTypes(handleType: HandleType): CanvasNodeType[] {
 }
 
 function canNodeTypeBeManualConnectionSource(type: CanvasNodeType): boolean {
-  return type === CANVAS_NODE_TYPES.upload || type === CANVAS_NODE_TYPES.exportImage;
+  return type === CANVAS_NODE_TYPES.upload
+    || type === CANVAS_NODE_TYPES.imageEdit
+    || type === CANVAS_NODE_TYPES.exportImage;
 }
 
 function canNodeBeManualConnectionSource(nodeId: string | null | undefined, nodes: CanvasNode[]): boolean {
@@ -831,24 +839,8 @@ export function Canvas() {
     return selectedNode.id;
   }, [nodes, selectedNodeIds]);
 
-  const pasteImageAtCanvasPosition = useCallback(
-    async (file: File) => {
-      if (!file.type.startsWith('image/')) {
-        return;
-      }
-
-      const containerRect = wrapperRef.current?.getBoundingClientRect();
-      const clientPosition = lastCanvasPointerRef.current ?? (
-        containerRect
-          ? {
-              x: containerRect.left + containerRect.width / 2,
-              y: containerRect.top + containerRect.height / 2,
-            }
-          : {
-              x: window.innerWidth / 2,
-              y: window.innerHeight / 2,
-            }
-      );
+  const createUploadImageNodeAtClientPosition = useCallback(
+    async (file: File, clientPosition: { x: number; y: number }) => {
       const flowPosition = reactFlowInstance.screenToFlowPosition(clientPosition);
 
       try {
@@ -866,7 +858,7 @@ export function Canvas() {
         setSelectedNode(newNodeId);
         scheduleCanvasPersist(0);
       } catch (error) {
-        console.error('Failed to paste image onto canvas', error);
+        console.error('Failed to import image onto canvas', error);
       }
     },
     [
@@ -875,6 +867,87 @@ export function Canvas() {
       scheduleCanvasPersist,
       setSelectedNode,
     ]
+  );
+
+  const pasteImageAtCanvasPosition = useCallback(
+    async (file: File) => {
+      const containerRect = wrapperRef.current?.getBoundingClientRect();
+      const clientPosition = lastCanvasPointerRef.current ?? (
+        containerRect
+          ? {
+              x: containerRect.left + containerRect.width / 2,
+              y: containerRect.top + containerRect.height / 2,
+            }
+          : {
+              x: window.innerWidth / 2,
+              y: window.innerHeight / 2,
+            }
+      );
+      await createUploadImageNodeAtClientPosition(file, clientPosition);
+    },
+    [createUploadImageNodeAtClientPosition]
+  );
+
+  useEffect(() => {
+    const handleWindowFileDragOver = (event: DragEvent) => {
+      if (!dataTransferHasFile(event.dataTransfer)) {
+        return;
+      }
+
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = dataTransferHasImageFile(event.dataTransfer)
+          ? 'copy'
+          : 'none';
+      }
+    };
+
+    const handleWindowFileDrop = (event: DragEvent) => {
+      if (!dataTransferHasFile(event.dataTransfer)) {
+        return;
+      }
+
+      event.preventDefault();
+    };
+
+    window.addEventListener('dragover', handleWindowFileDragOver, true);
+    window.addEventListener('drop', handleWindowFileDrop, true);
+
+    return () => {
+      window.removeEventListener('dragover', handleWindowFileDragOver, true);
+      window.removeEventListener('drop', handleWindowFileDrop, true);
+    };
+  }, []);
+
+  const handleCanvasDragOver = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
+    if (!dataTransferHasFile(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = dataTransferHasImageFile(event.dataTransfer)
+      ? 'copy'
+      : 'none';
+  }, []);
+
+  const handleCanvasDrop = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!dataTransferHasFile(event.dataTransfer)) {
+        return;
+      }
+
+      event.preventDefault();
+      const file = resolveDroppedImageFile(event.dataTransfer);
+      if (!file) {
+        return;
+      }
+
+      void createUploadImageNodeAtClientPosition(file, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+    },
+    [createUploadImageNodeAtClientPosition]
   );
 
   const handleCanvasPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1082,6 +1155,9 @@ export function Canvas() {
         }
         if ('generationDebugContext' in (data as Record<string, unknown>)) {
           (data as { generationDebugContext?: unknown }).generationDebugContext = undefined;
+        }
+        if ('generationRetryResultUrl' in (data as Record<string, unknown>)) {
+          (data as { generationRetryResultUrl?: string | null }).generationRetryResultUrl = null;
         }
 
         const nextNodeId = addNode(
@@ -1549,6 +1625,8 @@ export function Canvas() {
         onMove={handleMove}
         onMoveStart={handleMoveStart}
         onMoveEnd={handleMoveEnd}
+        onDragOver={handleCanvasDragOver}
+        onDrop={handleCanvasDrop}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={{ type: 'disconnectableEdge' }}

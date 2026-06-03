@@ -3,14 +3,15 @@ import { useTranslation } from 'react-i18next';
 
 import { useCanvasStore, type CanvasNode, type CanvasNodeData } from '@/stores/canvasStore';
 import { CANVAS_NODE_TYPES } from '@/features/canvas/domain/canvasNodes';
-import { canvasAiGateway } from '@/features/canvas/application/canvasServices';
+import { canvasAiGateway, canvasVideoGateway } from '@/features/canvas/application/canvasServices';
 import { prepareNodeImage } from '@/features/canvas/application/imageData';
 import {
   buildGenerationErrorReport,
   CURRENT_RUNTIME_SESSION_ID,
 } from '@/features/canvas/application/generationErrorReport';
+import { isLightweightGenerationRetryResultUrl } from '@/features/canvas/application/generationRetry';
 import { showErrorDialog } from '@/features/canvas/application/errorDialog';
-import { embedStoryboardImageMetadata } from '@/commands/image';
+import { embedStoryboardImageMetadata, persistVideoSource } from '@/commands/image';
 
 interface GenerationStoryboardMetadata {
   gridRows: number;
@@ -28,6 +29,10 @@ const GENERATION_JOB_POLL_INTERVAL_MS = 1000;
  * indefinitely-spinning node.
  */
 const GENERATION_JOB_TIMEOUT_MS = 10 * 60 * 1000;
+// Custom video providers may spend the full 15 minutes in their own async
+// poll loop after the initial submit request; keep the UI guard slightly
+// longer so it does not fail the node just before the gateway resolves.
+const VIDEO_GENERATION_JOB_TIMEOUT_MS = 16 * 60 * 1000;
 /**
  * Soft cap on how often we re-issue `set_api_key` for the same provider
  * per polling-loop iteration. The original code re-issued it on every
@@ -46,16 +51,22 @@ const API_KEY_RESET_INTERVAL_MS = 60 * 1000;
  * feel slow.
  */
 const PREPARE_IMAGE_MAX_ATTEMPTS = 3;
+const PREPARE_VIDEO_MAX_ATTEMPTS = 3;
 
 function isPollableNode(node: CanvasNode): boolean {
-  if (node.type !== CANVAS_NODE_TYPES.exportImage && node.type !== CANVAS_NODE_TYPES.panorama) {
+  if (
+    node.type !== CANVAS_NODE_TYPES.exportImage
+    && node.type !== CANVAS_NODE_TYPES.panorama
+    && node.type !== CANVAS_NODE_TYPES.video
+  ) {
     return false;
   }
   const data = node.data as Record<string, unknown>;
+  const hasJobId = typeof data.generationJobId === 'string' && (data.generationJobId as string).trim().length > 0;
+  const hasRetryResultUrl = isLightweightGenerationRetryResultUrl(data.generationRetryResultUrl);
   return (
     data.isGenerating === true &&
-    typeof data.generationJobId === 'string' &&
-    (data.generationJobId as string).length > 0
+    (hasJobId || hasRetryResultUrl)
   );
 }
 
@@ -68,6 +79,7 @@ function buildPollableNodesSignature(nodes: CanvasNode[]): string {
         node.id,
         typeof data.generationJobId === 'string' ? data.generationJobId : '',
         typeof data.generationProviderId === 'string' ? data.generationProviderId : '',
+        typeof data.generationRetryResultUrl === 'string' ? data.generationRetryResultUrl : '',
         data.generationClientSessionId === CURRENT_RUNTIME_SESSION_ID ? CURRENT_RUNTIME_SESSION_ID : '',
       ].join(':');
     })
@@ -157,6 +169,202 @@ interface PollContext {
   translateError: (key: string) => string;
 }
 
+async function prepareCompletedImageResult(
+  nodeId: string,
+  resultUrl: string,
+  currentData: Record<string, unknown>,
+  updateNodeData: (id: string, patch: Partial<CanvasNodeData>) => void,
+  translateError: (key: string) => string,
+): Promise<boolean> {
+  let prepared;
+  let lastPrepareError: unknown = null;
+  for (let attempt = 0; attempt < PREPARE_IMAGE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      prepared = await prepareNodeImage(resultUrl);
+      lastPrepareError = null;
+      break;
+    } catch (error) {
+      lastPrepareError = error;
+      console.warn('[GenerationJob] prepareNodeImage attempt failed', {
+        nodeId,
+        attempt: attempt + 1,
+        of: PREPARE_IMAGE_MAX_ATTEMPTS,
+        error,
+      });
+      if (attempt < PREPARE_IMAGE_MAX_ATTEMPTS - 1) {
+        // 500 ms, 1 s, 2 s — keeps total worst-case retry under 3.5 s
+        // so the user doesn't perceive a long stall.
+        await sleep(500 * 2 ** attempt);
+      }
+    }
+  }
+  if (!prepared) {
+    const errorMessage = translateError('node.imageNode.fetchResultFailed') || '获取生成结果失败';
+    const errorDetails = lastPrepareError instanceof Error
+      ? lastPrepareError.message
+      : String(lastPrepareError);
+    const generationClientSessionId =
+      typeof currentData.generationClientSessionId === 'string'
+        ? currentData.generationClientSessionId
+        : '';
+    if (generationClientSessionId === CURRENT_RUNTIME_SESSION_ID) {
+      const reportText = buildGenerationErrorReport({
+        errorMessage,
+        errorDetails,
+        context: currentData.generationDebugContext,
+      });
+      void showErrorDialog(
+        errorMessage,
+        translateError('common.error'),
+        errorDetails,
+        reportText,
+      );
+    }
+    markGenerationFailed(
+      nodeId,
+      errorMessage,
+      errorDetails,
+      updateNodeData,
+      { preserveRetryMetadata: true, retryResultUrl: resultUrl },
+    );
+    return false;
+  }
+
+  const storyboardMetadataRaw = currentData.generationStoryboardMetadata as
+    | GenerationStoryboardMetadata
+    | undefined;
+  const hasStoryboardMetadata = Boolean(
+    storyboardMetadataRaw &&
+      Number.isFinite(storyboardMetadataRaw.gridRows) &&
+      Number.isFinite(storyboardMetadataRaw.gridCols) &&
+      Array.isArray(storyboardMetadataRaw.frameNotes),
+  );
+
+  let imageWithMetadata = prepared.imageUrl;
+  if (hasStoryboardMetadata && storyboardMetadataRaw) {
+    imageWithMetadata = await embedStoryboardImageMetadata(prepared.imageUrl, {
+      gridRows: Math.max(1, Math.round(storyboardMetadataRaw.gridRows)),
+      gridCols: Math.max(1, Math.round(storyboardMetadataRaw.gridCols)),
+      frameNotes: storyboardMetadataRaw.frameNotes,
+    }).catch((error) => {
+      console.warn('[GenerationJob] embed storyboard metadata failed', { nodeId, error });
+      return prepared.imageUrl;
+    });
+  }
+  const previewWithMetadata =
+    prepared.previewImageUrl === prepared.imageUrl ? imageWithMetadata : prepared.previewImageUrl;
+
+  updateNodeData(nodeId, {
+    imageUrl: imageWithMetadata,
+    previewImageUrl: previewWithMetadata,
+    aspectRatio: prepared.aspectRatio,
+    isGenerating: false,
+    generationStartedAt: null,
+    generationJobId: null,
+    generationProviderId: null,
+    generationClientSessionId: null,
+    generationStoryboardMetadata: undefined,
+    generationError: null,
+    generationErrorDetails: null,
+    generationDebugContext: undefined,
+    generationRetryResultUrl: null,
+  });
+  return true;
+}
+
+function translateOrFallback(
+  translateError: (key: string) => string,
+  key: string,
+  fallback: string,
+): string {
+  const translated = translateError(key);
+  return translated && translated !== key ? translated : fallback;
+}
+
+async function prepareCompletedVideoResult(
+  nodeId: string,
+  resultUrl: string,
+  currentData: Record<string, unknown>,
+  updateNodeData: (id: string, patch: Partial<CanvasNodeData>) => void,
+  translateError: (key: string) => string,
+): Promise<boolean> {
+  const trimmedResultUrl = resultUrl.trim();
+  let localVideoUrl: string | null = null;
+  let lastPrepareError: unknown = null;
+  for (let attempt = 0; attempt < PREPARE_VIDEO_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      localVideoUrl = await persistVideoSource(trimmedResultUrl);
+      lastPrepareError = null;
+      break;
+    } catch (error) {
+      lastPrepareError = error;
+      console.warn('[GenerationJob] persistVideoSource attempt failed', {
+        nodeId,
+        attempt: attempt + 1,
+        of: PREPARE_VIDEO_MAX_ATTEMPTS,
+        error,
+      });
+      if (attempt < PREPARE_VIDEO_MAX_ATTEMPTS - 1) {
+        await sleep(500 * 2 ** attempt);
+      }
+    }
+  }
+
+  if (!localVideoUrl) {
+    const errorMessage = translateOrFallback(
+      translateError,
+      'node.videoNode.fetchResultFailed',
+      '获取视频生成结果失败',
+    );
+    const errorDetails = lastPrepareError instanceof Error
+      ? lastPrepareError.message
+      : String(lastPrepareError);
+    const generationClientSessionId =
+      typeof currentData.generationClientSessionId === 'string'
+        ? currentData.generationClientSessionId
+        : '';
+    if (generationClientSessionId === CURRENT_RUNTIME_SESSION_ID) {
+      const reportText = buildGenerationErrorReport({
+        errorMessage,
+        errorDetails,
+        context: currentData.generationDebugContext,
+      });
+      void showErrorDialog(
+        errorMessage,
+        translateError('common.error'),
+        errorDetails,
+        reportText,
+      );
+    }
+    markGenerationFailed(
+      nodeId,
+      errorMessage,
+      errorDetails,
+      updateNodeData,
+      { preserveRetryMetadata: true, retryResultUrl: trimmedResultUrl },
+    );
+    return false;
+  }
+
+  const lightweightResultUrl = isLightweightGenerationRetryResultUrl(trimmedResultUrl)
+    ? trimmedResultUrl
+    : null;
+  updateNodeData(nodeId, {
+    videoUrl: lightweightResultUrl ?? localVideoUrl,
+    localVideoUrl,
+    isGenerating: false,
+    generationStartedAt: null,
+    generationJobId: null,
+    generationProviderId: null,
+    generationClientSessionId: null,
+    generationError: null,
+    generationErrorDetails: null,
+    generationDebugContext: undefined,
+    generationRetryResultUrl: null,
+  });
+  return true;
+}
+
 /**
  * One self-contained poll loop for a single in-flight job. Runs until
  * the job resolves, the user cancels (`isGenerating` flips false), the
@@ -170,23 +378,58 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
 
   try {
     while (true) {
-      // Ten-minute cap. Anything past this is almost always a hung
-      // provider — surface the timeout instead of spinning forever.
-      if (Date.now() - startedAt > GENERATION_JOB_TIMEOUT_MS) {
-        markGenerationFailed(nodeId, 'generation timed out after 10 minutes', null, updateNodeData);
-        return;
-      }
-
       const currentNode = useCanvasStore.getState().nodes.find((node) => node.id === nodeId);
       if (!currentNode) {
         return;
       }
 
       const currentData = currentNode.data as Record<string, unknown>;
+      const isVideoNode = currentNode.type === CANVAS_NODE_TYPES.video;
+      const timeoutMs = isVideoNode ? VIDEO_GENERATION_JOB_TIMEOUT_MS : GENERATION_JOB_TIMEOUT_MS;
+      if (Date.now() - startedAt > timeoutMs) {
+        markGenerationFailed(
+          nodeId,
+          isVideoNode ? 'video generation timed out after 16 minutes' : 'generation timed out after 10 minutes',
+          null,
+          updateNodeData,
+          { preserveRetryMetadata: true },
+        );
+        return;
+      }
       const jobId =
-        typeof currentData.generationJobId === 'string' ? currentData.generationJobId : '';
+        typeof currentData.generationJobId === 'string' ? currentData.generationJobId.trim() : '';
+      const retryResultUrlRaw =
+        typeof currentData.generationRetryResultUrl === 'string'
+          ? currentData.generationRetryResultUrl.trim()
+          : '';
+      const retryResultUrl = isLightweightGenerationRetryResultUrl(retryResultUrlRaw)
+        ? retryResultUrlRaw
+        : '';
       const isGenerating = currentData.isGenerating === true;
-      if (!jobId || !isGenerating) {
+      if (!isGenerating) {
+        return;
+      }
+      if (!jobId && retryResultUrl) {
+        if (isVideoNode) {
+          await prepareCompletedVideoResult(
+            nodeId,
+            retryResultUrl,
+            currentData,
+            updateNodeData,
+            translateError,
+          );
+        } else {
+          await prepareCompletedImageResult(
+            nodeId,
+            retryResultUrl,
+            currentData,
+            updateNodeData,
+            translateError,
+          );
+        }
+        return;
+      }
+      if (!jobId) {
         return;
       }
 
@@ -194,7 +437,7 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
       // provider. The original loop re-issued every poll tick.
       const generationProviderId =
         typeof currentData.generationProviderId === 'string' ? currentData.generationProviderId : '';
-      if (generationProviderId) {
+      if (generationProviderId && !isVideoNode) {
         const sinceLastReset = Date.now() - lastApiKeyResetAt;
         const providerChanged = lastApiKeyResetProvider !== generationProviderId;
         if (providerChanged || sinceLastReset > API_KEY_RESET_INTERVAL_MS) {
@@ -213,7 +456,10 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
         }
       }
 
-      const status = await canvasAiGateway.getGenerateImageJob(jobId).catch((error) => {
+      const status = await (isVideoNode
+        ? canvasVideoGateway.getGenerateVideoJob(jobId)
+        : canvasAiGateway.getGenerateImageJob(jobId)
+      ).catch((error) => {
         console.warn('[GenerationJob] poll failed', { nodeId, jobId, error });
         return null;
       });
@@ -228,102 +474,55 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
       }
 
       if (status.status === 'succeeded' && typeof status.result === 'string' && status.result.trim()) {
-        // The image fetch + decode can fail for reasons that aren't the
-        // user's fault (transient network, provider CDN hiccup, expired
-        // result URL). Retry a small number of times with exponential
-        // backoff before declaring the job failed — most intermittent
-        // failures clear within a few seconds.
-        let prepared;
-        let lastPrepareError: unknown = null;
-        for (let attempt = 0; attempt < PREPARE_IMAGE_MAX_ATTEMPTS; attempt += 1) {
-          try {
-            prepared = await prepareNodeImage(status.result);
-            lastPrepareError = null;
-            break;
-          } catch (error) {
-            lastPrepareError = error;
-            console.warn('[GenerationJob] prepareNodeImage attempt failed', {
-              nodeId,
-              attempt: attempt + 1,
-              of: PREPARE_IMAGE_MAX_ATTEMPTS,
-              error,
-            });
-            if (attempt < PREPARE_IMAGE_MAX_ATTEMPTS - 1) {
-              // 500 ms, 1 s, 2 s — keeps total worst-case retry under
-              // 3.5 s so the user doesn't perceive a long stall.
-              await sleep(500 * 2 ** attempt);
-            }
-          }
-        }
-        if (!prepared) {
-          const errorMessage = translateError('node.imageNode.fetchResultFailed') || '获取生成结果失败';
-          const errorDetails = lastPrepareError instanceof Error
-            ? lastPrepareError.message
-            : String(lastPrepareError);
-          const generationClientSessionId =
-            typeof currentData.generationClientSessionId === 'string'
-              ? currentData.generationClientSessionId
-              : '';
-          if (generationClientSessionId === CURRENT_RUNTIME_SESSION_ID) {
-            const reportText = buildGenerationErrorReport({
-              errorMessage,
-              errorDetails,
-              context: currentData.generationDebugContext,
-            });
-            void showErrorDialog(
-              errorMessage,
-              translateError('common.error'),
-              errorDetails,
-              reportText,
-            );
-          }
-          markGenerationFailed(
+        if (isVideoNode) {
+          await prepareCompletedVideoResult(
             nodeId,
-            errorMessage,
-            errorDetails,
+            status.result.trim(),
+            currentData,
             updateNodeData,
+            translateError,
           );
           return;
         }
 
-        const storyboardMetadataRaw = currentData.generationStoryboardMetadata as
-          | GenerationStoryboardMetadata
-          | undefined;
-        const hasStoryboardMetadata = Boolean(
-          storyboardMetadataRaw &&
-            Number.isFinite(storyboardMetadataRaw.gridRows) &&
-            Number.isFinite(storyboardMetadataRaw.gridCols) &&
-            Array.isArray(storyboardMetadataRaw.frameNotes),
+        await prepareCompletedImageResult(
+          nodeId,
+          status.result.trim(),
+          currentData,
+          updateNodeData,
+          translateError,
         );
+        return;
+      }
 
-        let imageWithMetadata = prepared.imageUrl;
-        if (hasStoryboardMetadata && storyboardMetadataRaw) {
-          imageWithMetadata = await embedStoryboardImageMetadata(prepared.imageUrl, {
-            gridRows: Math.max(1, Math.round(storyboardMetadataRaw.gridRows)),
-            gridCols: Math.max(1, Math.round(storyboardMetadataRaw.gridCols)),
-            frameNotes: storyboardMetadataRaw.frameNotes,
-          }).catch((error) => {
-            console.warn('[GenerationJob] embed storyboard metadata failed', { nodeId, error });
-            return prepared.imageUrl;
-          });
+      if (status.status === 'succeeded') {
+        markGenerationFailed(
+          nodeId,
+          isVideoNode ? 'video generation succeeded without a result URL' : 'generation succeeded without a result URL',
+          null,
+          updateNodeData,
+        );
+        return;
+      }
+
+      if (status.status === 'not_found' && retryResultUrl) {
+        if (isVideoNode) {
+          await prepareCompletedVideoResult(
+            nodeId,
+            retryResultUrl,
+            currentData,
+            updateNodeData,
+            translateError,
+          );
+        } else {
+          await prepareCompletedImageResult(
+            nodeId,
+            retryResultUrl,
+            currentData,
+            updateNodeData,
+            translateError,
+          );
         }
-        const previewWithMetadata =
-          prepared.previewImageUrl === prepared.imageUrl ? imageWithMetadata : prepared.previewImageUrl;
-
-        updateNodeData(nodeId, {
-          imageUrl: imageWithMetadata,
-          previewImageUrl: previewWithMetadata,
-          aspectRatio: prepared.aspectRatio,
-          isGenerating: false,
-          generationStartedAt: null,
-          generationJobId: null,
-          generationProviderId: null,
-          generationClientSessionId: null,
-          generationStoryboardMetadata: undefined,
-          generationError: null,
-          generationErrorDetails: null,
-          generationDebugContext: undefined,
-        });
         return;
       }
 
@@ -348,7 +547,19 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
           reportText,
         );
       }
-      markGenerationFailed(nodeId, errorMessage, status.error ?? null, updateNodeData);
+      const statusRetryResultUrl =
+        typeof status.result === 'string' && isLightweightGenerationRetryResultUrl(status.result)
+          ? status.result.trim()
+          : null;
+      markGenerationFailed(
+        nodeId,
+        errorMessage,
+        status.error ?? null,
+        updateNodeData,
+        statusRetryResultUrl
+          ? { preserveRetryMetadata: true, retryResultUrl: statusRetryResultUrl, clearJobMetadata: true }
+          : undefined,
+      );
       return;
     }
   } finally {
@@ -361,15 +572,40 @@ function markGenerationFailed(
   errorMessage: string,
   errorDetails: string | null,
   updateNodeData: (id: string, patch: Partial<CanvasNodeData>) => void,
+  options?: {
+    preserveRetryMetadata?: boolean;
+    retryResultUrl?: string | null;
+    clearJobMetadata?: boolean;
+  },
 ): void {
-  updateNodeData(nodeId, {
+  const patch: Partial<CanvasNodeData> = {
     isGenerating: false,
     generationStartedAt: null,
-    generationJobId: null,
-    generationProviderId: null,
-    generationClientSessionId: null,
     generationStoryboardMetadata: undefined,
     generationError: errorMessage,
     generationErrorDetails: errorDetails,
-  });
+  };
+
+  if (options?.preserveRetryMetadata) {
+    if (options.clearJobMetadata) {
+      patch.generationJobId = null;
+      patch.generationProviderId = null;
+      patch.generationClientSessionId = null;
+    }
+    const retryResultUrl = typeof options.retryResultUrl === 'string'
+      ? options.retryResultUrl.trim()
+      : '';
+    if (isLightweightGenerationRetryResultUrl(retryResultUrl)) {
+      patch.generationRetryResultUrl = retryResultUrl;
+    } else if (retryResultUrl) {
+      patch.generationRetryResultUrl = null;
+    }
+  } else {
+    patch.generationJobId = null;
+    patch.generationProviderId = null;
+    patch.generationClientSessionId = null;
+    patch.generationRetryResultUrl = null;
+  }
+
+  updateNodeData(nodeId, patch);
 }

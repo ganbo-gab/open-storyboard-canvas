@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use super::AIProvider;
 
-pub mod ppio;
+pub mod fal;
 pub mod grsai;
 pub mod kie;
-pub mod fal;
+pub mod ppio;
 
 pub use fal::FalProvider;
 pub use grsai::GrsaiProvider;

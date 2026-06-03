@@ -609,6 +609,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
     return {
       id: editingId ?? generateProviderId(),
       label: label.trim() || template.defaultLabel,
+      mediaType: 'image',
       baseUrl: normalizedBaseUrl,
       endpointPath: normalizedEndpointPath,
       modelListEndpointPath: normalizedModelListEndpointPath,
@@ -624,6 +625,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
       supportedModelVersions: template.supportedModelVersions,
       extraParams: {
         providerConfigVersion: 'new-v1',
+        mediaType: 'image',
         providerKind: template.kind,
         requestComposer: 'modern',
         supportedRatios: selectedRatios,
@@ -765,7 +767,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-base font-semibold text-text-dark">添加供应商（新）</h2>
+        <h2 className="text-base font-semibold text-text-dark">图片生成（新）</h2>
         <p className="mt-1 text-xs leading-5 text-text-muted">
           推荐使用这个入口：选择接口类型，填写 Base URL 和 API Key，再同步或勾选模型。应用会根据模型类型自动组装请求，不再让主流接口手写整段 JSON。
         </p>

@@ -74,6 +74,7 @@
     "copySuccess": "Copy succeeded",
     "copyFailed": "Copy failed",
     "download": "Download",
+    "retryFetch": "Retry Fetch",
     "downloadSuccess": "Download succeeded",
     "downloadFailed": "Download failed",
     "ungroup": "Ungroup",
@@ -131,6 +132,7 @@
     "assets": "Assets",
     "assetsTitle": "View current project assets",
     "addAiImage": "Add AI image node",
+    "addAiVideo": "Add AI video node",
     "addPanorama": "Add panorama node",
     "createDirectorStudio": "Create and open Director Studio",
     "createPanoramaDirectorStudio": "Create and open Panorama Director Studio",
@@ -737,6 +739,7 @@
     "menu": {
       "uploadImage": "Upload Image",
       "aiImageGeneration": "AI Image",
+      "aiVideoGeneration": "AI Video",
       "storyboard": "Storyboard Node",
       "storyboardGen": "Storyboard Generation",
       "textAnnotation": "Text Annotation",
@@ -770,6 +773,21 @@
       "promptPlaceholder": "Describe anything you want to generate or edit",
       "generateCount": "Count",
       "customCount": "Custom"
+    },
+    "aiVideo": {
+      "promptPlaceholder": "Describe the video, camera motion, action timing; type @ to reference connected images",
+      "promptRequired": "Please enter a video prompt",
+      "noVideoProvider": "Add an available video provider in Settings > My Config > Video Generation first.",
+      "noModel": "Choose video model",
+      "duration": "Duration",
+      "aspectRatio": "Aspect Ratio",
+      "resolution": "Resolution"
+    },
+    "videoNode": {
+      "waitingResult": "Waiting for video result",
+      "waitingResultDelayed": "Already waited {{minutes}} minutes with no video result yet. Still waiting...",
+      "generationFailed": "Video generation failed",
+      "empty": "No video yet"
     },
     "panoramaViewer": {
       "expand": "Enlarge panorama",

@@ -1,5 +1,5 @@
 export interface GenerationDebugContext {
-  sourceType: 'imageEdit' | 'storyboardGen' | 'unknown';
+  sourceType: 'imageEdit' | 'storyboardGen' | 'aiVideo' | 'unknown';
   providerId?: string;
   requestModel?: string;
   requestSize?: string;

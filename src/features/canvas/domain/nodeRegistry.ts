@@ -6,6 +6,7 @@ import {
   type BlueprintNodeData,
   type CanvasNodeData,
   type CanvasNodeType,
+  type AiVideoNodeData,
   type ExportImageNodeData,
   type GroupNodeData,
   type ImageEditNodeData,
@@ -14,11 +15,12 @@ import {
   type StoryboardGenNodeData,
   type TextAnnotationNodeData,
   type UploadImageNodeData,
+  type VideoNodeData,
 } from './canvasNodes';
 import { DEFAULT_NODE_DISPLAY_NAME } from './nodeDisplay';
 import { DEFAULT_IMAGE_MODEL_ID } from '../models';
 
-export type MenuIconKey = 'upload' | 'sparkles' | 'layout' | 'text';
+export type MenuIconKey = 'upload' | 'sparkles' | 'layout' | 'text' | 'video';
 export type CanvasNodeSelectionToolbarMode = 'full' | 'deleteOnly' | 'none';
 
 export interface CanvasNodeCapabilities {
@@ -109,6 +111,35 @@ const imageEditNodeDefinition: CanvasNodeDefinition<ImageEditNodeData> = {
   }),
 };
 
+const aiVideoNodeDefinition: CanvasNodeDefinition<AiVideoNodeData> = {
+  type: CANVAS_NODE_TYPES.aiVideo,
+  menuLabelKey: 'node.menu.aiVideoGeneration',
+  menuIcon: 'video',
+  visibleInMenu: true,
+  capabilities: {
+    toolbar: true,
+    selectionToolbar: 'deleteOnly',
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: true,
+    targetHandle: true,
+    connectMenu: {
+      fromSource: true,
+      fromTarget: false,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.aiVideo],
+    prompt: '',
+    modelConfig: undefined,
+    extraParams: {},
+    isGenerating: false,
+    generationStartedAt: null,
+    generationDurationMs: 15 * 60 * 1000,
+  }),
+};
+
 const exportImageNodeDefinition: CanvasNodeDefinition<ExportImageNodeData> = {
   type: CANVAS_NODE_TYPES.exportImage,
   menuLabelKey: 'node.menu.uploadImage',
@@ -133,6 +164,52 @@ const exportImageNodeDefinition: CanvasNodeDefinition<ExportImageNodeData> = {
     aspectRatio: DEFAULT_ASPECT_RATIO,
     isSizeManuallyAdjusted: false,
     resultKind: 'generic',
+    isGenerating: false,
+    generationStartedAt: null,
+    generationDurationMs: 60000,
+    generationJobId: null,
+    generationProviderId: null,
+    generationClientSessionId: null,
+    generationError: null,
+    generationErrorDetails: null,
+    generationRetryResultUrl: null,
+  }),
+};
+
+const videoNodeDefinition: CanvasNodeDefinition<VideoNodeData> = {
+  type: CANVAS_NODE_TYPES.video,
+  menuLabelKey: 'node.menu.aiVideoGeneration',
+  menuIcon: 'video',
+  visibleInMenu: false,
+  capabilities: {
+    toolbar: true,
+    selectionToolbar: 'full',
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: false,
+    targetHandle: true,
+    connectMenu: {
+      fromSource: false,
+      fromTarget: false,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.video],
+    videoUrl: null,
+    localVideoUrl: null,
+    thumbnailUrl: null,
+    aspectRatio: '16:9',
+    durationSeconds: null,
+    isGenerating: false,
+    generationStartedAt: null,
+    generationDurationMs: 15 * 60 * 1000,
+    generationJobId: null,
+    generationProviderId: null,
+    generationClientSessionId: null,
+    generationError: null,
+    generationErrorDetails: null,
+    generationRetryResultUrl: null,
   }),
 };
 
@@ -287,6 +364,14 @@ const panoramaNodeDefinition: CanvasNodeDefinition<PanoramaNodeData> = {
     initialPitch: 0,
     initialFov: 50,
     isGenerating: false,
+    generationStartedAt: null,
+    generationDurationMs: 60000,
+    generationJobId: null,
+    generationProviderId: null,
+    generationClientSessionId: null,
+    generationError: null,
+    generationErrorDetails: null,
+    generationRetryResultUrl: null,
   }),
 };
 
@@ -355,7 +440,9 @@ const blueprintNodeDefinition: CanvasNodeDefinition<BlueprintNodeData> = {
 export const canvasNodeDefinitions: Record<CanvasNodeType, CanvasNodeDefinition> = {
   [CANVAS_NODE_TYPES.upload]: uploadNodeDefinition,
   [CANVAS_NODE_TYPES.imageEdit]: imageEditNodeDefinition,
+  [CANVAS_NODE_TYPES.aiVideo]: aiVideoNodeDefinition,
   [CANVAS_NODE_TYPES.exportImage]: exportImageNodeDefinition,
+  [CANVAS_NODE_TYPES.video]: videoNodeDefinition,
   [CANVAS_NODE_TYPES.textAnnotation]: textAnnotationNodeDefinition,
   [CANVAS_NODE_TYPES.group]: groupNodeDefinition,
   [CANVAS_NODE_TYPES.storyboardSplit]: storyboardSplitDefinition,

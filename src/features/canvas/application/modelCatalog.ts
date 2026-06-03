@@ -1,6 +1,11 @@
 import { useMemo } from 'react';
 
-import { useCustomProvidersStore, type CustomProviderConfig } from '@/stores/customProvidersStore';
+import {
+  isImageCustomProvider,
+  AGNES_PROVIDER_DEFAULTS,
+  useCustomProvidersStore,
+  type CustomProviderConfig,
+} from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { listImageModels, listModelProviders } from '@/features/canvas/models';
 import { hasConfiguredCustomProvider } from './providerAvailability';
@@ -20,9 +25,9 @@ import { hasConfiguredCustomProvider } from './providerAvailability';
  * 内置 · GRSAI card on the settings page keeps working.
  */
 export interface CatalogEntry {
-  /** Compound id: `custom:<providerId>:<modelId>` | `dreamina:<sub>`. */
+  /** Compound id: `custom:<providerId>:<modelId>` | `dreamina:<sub>` | `agnes:image:<modelId>`. */
   id: string;
-  kind: 'custom' | 'dreamina';
+  kind: 'custom' | 'dreamina' | 'agnes';
   providerId: string;
   providerLabel: string;
   modelId: string;
@@ -50,6 +55,7 @@ interface DreaminaProviderStatus {
 interface ImageModelCatalogSnapshot {
   customProviders: readonly CustomProviderConfig[];
   dreaminaStatus?: DreaminaProviderStatus | null;
+  agnesApiKey?: string;
 }
 
 function normalizeSupportedRatios(rawRatios: unknown, fallback: string[] = ['auto', '16:9']): string[] {
@@ -70,11 +76,15 @@ function normalizeSupportedRatios(rawRatios: unknown, fallback: string[] = ['aut
 export function buildImageModelCatalog({
   customProviders,
   dreaminaStatus,
+  agnesApiKey,
 }: ImageModelCatalogSnapshot): CatalogEntry[] {
   const entries: CatalogEntry[] = [];
 
   // 1. Custom providers (我的配置) — one entry per provider × model.
   for (const cfg of customProviders) {
+    if (!isImageCustomProvider(cfg)) {
+      continue;
+    }
     const ratios = normalizeSupportedRatios(
       (cfg.extraParams as { supportedRatios?: unknown } | undefined)?.supportedRatios
     );
@@ -158,12 +168,53 @@ export function buildImageModelCatalog({
     });
   }
 
+  if (agnesApiKey?.trim()) {
+    const supportedRatios = ['auto', '16:9', '9:16', '1:1', '4:3', '3:4'];
+    const supportedResolutions = [...AGNES_PROVIDER_DEFAULTS.imageResolutions];
+    entries.push(
+      {
+        id: `agnes:image:${AGNES_PROVIDER_DEFAULTS.models.image12}`,
+        kind: 'agnes',
+        providerId: 'agnes',
+        providerLabel: 'Agnes',
+        modelId: AGNES_PROVIDER_DEFAULTS.models.image12,
+        modelLabel: 'Agnes Image 1.2',
+        supportedRatios,
+        usable: true,
+        supportedResolutions,
+      },
+      {
+        id: `agnes:image:${AGNES_PROVIDER_DEFAULTS.models.image21Flash}`,
+        kind: 'agnes',
+        providerId: 'agnes',
+        providerLabel: 'Agnes',
+        modelId: AGNES_PROVIDER_DEFAULTS.models.image21Flash,
+        modelLabel: 'Agnes Image 2.1 Flash',
+        supportedRatios,
+        usable: true,
+        supportedResolutions,
+      },
+      {
+        id: `agnes:image:${AGNES_PROVIDER_DEFAULTS.models.image20Flash}`,
+        kind: 'agnes',
+        providerId: 'agnes',
+        providerLabel: 'Agnes',
+        modelId: AGNES_PROVIDER_DEFAULTS.models.image20Flash,
+        modelLabel: 'Agnes Image 2.0 Flash',
+        supportedRatios,
+        usable: true,
+        supportedResolutions,
+      }
+    );
+  }
+
   return entries;
 }
 
 export function useImageModelCatalog(): CatalogEntry[] {
   const customProviders = useCustomProvidersStore((s) => s.providers);
   const dreaminaStatus = useSettingsStore((s) => s.dreaminaStatus);
+  const agnesApiKey = useSettingsStore((s) => s.agnesApiKey);
   // Force the hook to still subscribe to apiKeys so we re-render when the
   // user toggles keys (keeps parity with prior behaviour).
   useSettingsStore((s) => s.apiKeys);
@@ -173,8 +224,8 @@ export function useImageModelCatalog(): CatalogEntry[] {
   void listModelProviders;
 
   return useMemo(
-    () => buildImageModelCatalog({ customProviders, dreaminaStatus }),
-    [customProviders, dreaminaStatus]
+    () => buildImageModelCatalog({ customProviders, dreaminaStatus, agnesApiKey }),
+    [agnesApiKey, customProviders, dreaminaStatus]
   );
 }
 

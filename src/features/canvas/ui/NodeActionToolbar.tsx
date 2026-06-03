@@ -1,14 +1,16 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { NodeToolbar as ReactFlowNodeToolbar } from '@xyflow/react';
-import { AlertCircle, Camera, Check, ChevronDown, Copy, Download, FolderOpen, Grid3x3, Maximize2, PenLine, Scissors, Settings2, Sparkles, Sun, Trash2 } from 'lucide-react';
+import { AlertCircle, Camera, Check, ChevronDown, Copy, Download, FolderOpen, Grid3x3, Maximize2, PenLine, RotateCcw, Scissors, Settings2, Sparkles, Sun, Trash2, X } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { useTranslation } from 'react-i18next';
 
 import {
   isExportImageNode,
+  isAiVideoNode,
   isImageEditNode,
   isUploadNode,
+  isVideoNode,
   type CanvasNode,
 } from '@/features/canvas/domain/canvasNodes';
 import { MULTI_FUNCTION_ITEMS } from '@/features/canvas/ui/MultiFunctionPanel';
@@ -17,12 +19,18 @@ import {
   copyImageSourceToClipboard,
   saveImageSourceToDirectory,
   saveImageSourceToPath,
+  saveVideoSourceToDirectory,
+  saveVideoSourceToPath,
 } from '@/commands/image';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { usePanelStateStore } from '@/stores/panelStateStore';
 import { openSettingsDialog } from '@/features/settings/settingsEvents';
 import { showErrorDialog } from '@/features/canvas/application/errorDialog';
+import {
+  buildRetryGenerationFetchPatch,
+  canRetryGenerationFetch,
+} from '@/features/canvas/application/generationRetry';
 import { UI_POPOVER_TRANSITION_MS } from '@/components/ui/motion';
 import { UiChipButton, UiPanel } from '@/components/ui';
 import {
@@ -71,7 +79,9 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
    *       module chips + delete; click a chip to select/deselect it, and the chip's
    *       prompt template is composed at submit time.
    *  - C: image-bearing AI node (imageEdit with image OR exportImage) — same as A. */
-  const caseKind: 'A' | 'B' | 'C' = useMemo(() => {
+  const caseKind: 'A' | 'B' | 'C' | 'V' | 'AI_VIDEO_INPUT' = useMemo(() => {
+    if (isAiVideoNode(node)) return 'AI_VIDEO_INPUT';
+    if (isVideoNode(node)) return 'V';
     if (isUploadNode(node)) return 'A';
     if (isImageEditNode(node)) {
       return node.data.imageUrl ? 'C' : 'B';
@@ -106,6 +116,7 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
   const [isDownloadMenuVisible, setIsDownloadMenuVisible] = useState(false);
   const [isCopySuccess, setIsCopySuccess] = useState(false);
   const [feedbackToast, setFeedbackToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
+  const [videoPreviewSource, setVideoPreviewSource] = useState<string | null>(null);
   const downloadMenuRef = useRef<HTMLDivElement | null>(null);
   const promptPresetMenuRef = useRef<HTMLDivElement | null>(null);
   const promptPresetAnchorRef = useRef<HTMLButtonElement | null>(null);
@@ -164,9 +175,19 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
     }
     return null;
   }, [node]);
+  const rawVideoSource = useMemo(() => {
+    if (isVideoNode(node)) {
+      return node.data.localVideoUrl || node.data.videoUrl || null;
+    }
+    return null;
+  }, [node]);
   const imageSource = useMemo(
     () => (rawImageSource ? resolveImageDisplayUrl(rawImageSource) : null),
     [rawImageSource]
+  );
+  const videoSource = useMemo(
+    () => (rawVideoSource ? resolveImageDisplayUrl(rawVideoSource) : null),
+    [rawVideoSource]
   );
   const referenceImageSource = useMemo(() => {
     if (isUploadNode(node) || isImageEditNode(node) || isExportImageNode(node)) {
@@ -175,6 +196,8 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
     return null;
   }, [node]);
   const canHandleImage = Boolean(imageSource);
+  const canHandleVideo = Boolean(rawVideoSource && videoSource);
+  const canRetryGeneration = canRetryGenerationFetch(node);
 
   const closePromptPresetMenu = useCallback(() => {
     setPromptPresetMenu(null);
@@ -202,6 +225,14 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
       feedbackToastTimerRef.current = null;
     }, 1800);
   }, []);
+
+  const handleRetryGenerationFetch = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!canRetryGenerationFetch(node)) {
+      return;
+    }
+    updateNodeData(node.id, buildRetryGenerationFetchPatch(node));
+  }, [node, updateNodeData]);
 
   useEffect(() => {
     if (!downloadMenu) {
@@ -248,6 +279,21 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
       window.removeEventListener('pointerdown', onPointerDown, true);
     };
   }, [closePromptPresetMenu, isPromptPresetMenuOpen]);
+
+  useEffect(() => {
+    if (!videoPreviewSource) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setVideoPreviewSource(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [videoPreviewSource]);
 
   useEffect(() => {
     if (!isPromptPresetMenuOpen) {
@@ -328,6 +374,26 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
     }
   }, [rawImageSource, showFeedbackToast, t]);
 
+  const handleCopyVideoSource = useCallback(async () => {
+    if (!rawVideoSource) return;
+    try {
+      await navigator.clipboard.writeText(rawVideoSource);
+      setIsCopySuccess(true);
+      if (copyFeedbackTimerRef.current) {
+        clearTimeout(copyFeedbackTimerRef.current);
+      }
+      copyFeedbackTimerRef.current = setTimeout(() => {
+        setIsCopySuccess(false);
+        copyFeedbackTimerRef.current = null;
+      }, 1100);
+      showFeedbackToast(t('nodeToolbar.copySuccess'));
+    } catch (error) {
+      console.error('Failed to copy video source to clipboard', error);
+      setIsCopySuccess(false);
+      showFeedbackToast(t('nodeToolbar.copyFailed'), 'error');
+    }
+  }, [rawVideoSource, showFeedbackToast, t]);
+
   const handleDownloadSaveAs = useCallback(async () => {
     if (!rawImageSource) return;
     try {
@@ -355,6 +421,35 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
       }
     },
     [closeDownloadMenu, node.id, rawImageSource, showFeedbackToast, t]
+  );
+
+  const handleDownloadVideoSaveAs = useCallback(async () => {
+    if (!rawVideoSource) return;
+    try {
+      const selectedPath = await save({ defaultPath: `node-${node.id}.mp4` });
+      if (!selectedPath || Array.isArray(selectedPath)) return;
+      await saveVideoSourceToPath(rawVideoSource, selectedPath);
+      closeDownloadMenu();
+      showFeedbackToast(t('nodeToolbar.downloadSuccess'));
+    } catch (error) {
+      console.error('Failed to save video with save-as', error);
+      showFeedbackToast(t('nodeToolbar.downloadFailed'), 'error');
+    }
+  }, [closeDownloadMenu, node.id, rawVideoSource, showFeedbackToast, t]);
+
+  const handleDownloadVideoToPreset = useCallback(
+    async (targetDir: string) => {
+      if (!rawVideoSource) return;
+      try {
+        await saveVideoSourceToDirectory(rawVideoSource, targetDir, `node-${node.id}`);
+        closeDownloadMenu();
+        showFeedbackToast(t('nodeToolbar.downloadSuccess'));
+      } catch (error) {
+        console.error('Failed to save video to preset dir', error);
+        showFeedbackToast(t('nodeToolbar.downloadFailed'), 'error');
+      }
+    },
+    [closeDownloadMenu, node.id, rawVideoSource, showFeedbackToast, t]
   );
 
   const handleOpenPromptPresetMenu = useCallback((event: MouseEvent<HTMLButtonElement>) => {
@@ -504,6 +599,37 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
       )
     : null;
 
+  const videoPreviewElement = videoPreviewSource && typeof document !== 'undefined'
+    ? createPortal(
+        <div
+          className="fixed inset-0 z-[1250] flex items-center justify-center bg-black/82 p-6 backdrop-blur-sm"
+          onClick={() => setVideoPreviewSource(null)}
+        >
+          <div
+            className="relative flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/15 bg-black shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-3 top-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-black/70 text-white shadow-lg transition-colors hover:bg-white/15"
+              aria-label={t('common.close')}
+              onClick={() => setVideoPreviewSource(null)}
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <video
+              src={videoPreviewSource}
+              className="max-h-[88vh] w-full bg-black object-contain"
+              controls
+              autoPlay
+              playsInline
+            />
+          </div>
+        </div>,
+        document.body
+      )
+    : null;
+
   return (
     <>
     <ReactFlowNodeToolbar
@@ -543,7 +669,7 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
         {caseKind === 'B' && renderPromptPresetButton()}
 
         {/* Case A / C: full tool chips. */}
-        {caseKind !== 'B' && (<>
+        {caseKind !== 'B' && caseKind !== 'V' && caseKind !== 'AI_VIDEO_INPUT' && (<>
         {/* 多角度 - Multi-angle */}
         <UiChipButton
           ref={multiAngleButtonRef}
@@ -701,7 +827,64 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
         )}
         </>)}{/* end case A/C */}
 
-        {/* 删除 - Delete (shared by A / B / C) */}
+        {caseKind === 'V' && canHandleVideo && videoSource && (<>
+        <UiChipButton
+          className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            setVideoPreviewSource(videoSource);
+          }}
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+          {t('nodeToolbar.zoomPreview')}
+        </UiChipButton>
+
+        <UiChipButton
+          className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS} ${
+            isCopySuccess ? '!border-emerald-400/70 !bg-emerald-500/20 !text-emerald-200' : ''
+          }`}
+          onClick={(event) => {
+            event.stopPropagation();
+            void handleCopyVideoSource();
+          }}
+        >
+          <Copy className="h-3.5 w-3.5" />
+          {t('nodeToolbar.copy')}
+        </UiChipButton>
+
+        <UiChipButton
+          className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (normalizedDownloadPresetPaths.length === 0) {
+              void handleDownloadVideoSaveAs();
+              return;
+            }
+            if (normalizedDownloadPresetPaths.length === 1) {
+              void handleDownloadVideoToPreset(normalizedDownloadPresetPaths[0]);
+              return;
+            }
+            setDownloadMenu({ x: event.clientX, y: event.clientY });
+            setIsDownloadMenuVisible(false);
+          }}
+        >
+          <Download className="h-3.5 w-3.5" />
+          {t('nodeToolbar.download')}
+        </UiChipButton>
+        </>)}
+
+        {canRetryGeneration && (
+          <UiChipButton
+            className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS}`}
+            onClick={handleRetryGenerationFetch}
+            title={t('nodeToolbar.retryFetch') as string}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            {t('nodeToolbar.retryFetch')}
+          </UiChipButton>
+        )}
+
+        {/* 删除 - Delete (shared by A / B / C / V) */}
         <UiChipButton
           className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} border-red-500/45 bg-red-500/15 px-2.5 text-xs text-red-300 hover:bg-red-500/25`}
           onClick={(event) => {
@@ -723,7 +906,11 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
           <button
             type="button"
             className="flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-sm text-text-dark transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
-            onClick={() => { void handleDownloadSaveAs(); }}
+            onClick={() => {
+              void (caseKind === 'V'
+                ? handleDownloadVideoSaveAs()
+                : handleDownloadSaveAs());
+            }}
           >
             <Download className="h-4 w-4" />
             {t('nodeToolbar.saveAs')}
@@ -736,7 +923,11 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
                   key={path}
                   type="button"
                   className="flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs text-text-dark transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
-                  onClick={() => { void handleDownloadToPreset(path); }}
+                  onClick={() => {
+                    void (caseKind === 'V'
+                      ? handleDownloadVideoToPreset(path)
+                      : handleDownloadToPreset(path));
+                  }}
                   title={path}
                 >
                   <FolderOpen className="h-3.5 w-3.5 shrink-0 text-text-muted" />
@@ -755,6 +946,7 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
     </ReactFlowNodeToolbar>
     {promptPresetMenuElement}
     {feedbackToastElement}
+    {videoPreviewElement}
     </>
   );
 });

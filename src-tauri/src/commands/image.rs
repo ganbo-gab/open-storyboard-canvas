@@ -1,10 +1,10 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
 use ab_glyph::{FontArc, PxScale};
 use arboard::{Clipboard, ImageData};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use directories::UserDirs;
 use fast_image_resize as fir;
 use fast_image_resize::images::Image as FirImage;
-use image::{DynamicImage, GenericImageView, ImageReader, Rgba, RgbaImage};
+use image::{DynamicImage, GenericImageView, ImageFormat, ImageReader, Rgba, RgbaImage};
 use imageproc::drawing::{draw_text_mut, text_size};
 use md5;
 use png::{BitDepth, ColorType, Decoder, Encoder};
@@ -32,6 +32,10 @@ fn remote_image_client() -> &'static reqwest::Client {
             .timeout(Duration::from_millis(REMOTE_IMAGE_DOWNLOAD_TIMEOUT_MS))
             .pool_idle_timeout(Duration::from_secs(90))
             .tcp_keepalive(Duration::from_secs(60))
+            .no_gzip()
+            .no_brotli()
+            .no_zstd()
+            .no_deflate()
             .build()
             .unwrap_or_else(|_| reqwest::Client::new())
     })
@@ -70,8 +74,10 @@ pub async fn split_image(
 
     let (width, height) = img.dimensions();
     let resolved_line = resolve_line_thickness(width, height, safe_rows, safe_cols, requested_line);
-    let usable_width = width.saturating_sub((safe_cols.saturating_sub(1)).saturating_mul(resolved_line));
-    let usable_height = height.saturating_sub((safe_rows.saturating_sub(1)).saturating_mul(resolved_line));
+    let usable_width =
+        width.saturating_sub((safe_cols.saturating_sub(1)).saturating_mul(resolved_line));
+    let usable_height =
+        height.saturating_sub((safe_rows.saturating_sub(1)).saturating_mul(resolved_line));
 
     if usable_width < safe_cols || usable_height < safe_rows {
         return Err("分割线过粗，无法完成切割".to_string());
@@ -155,8 +161,10 @@ pub async fn split_image_source(
 
     let (width, height) = image.dimensions();
     let resolved_line = resolve_line_thickness(width, height, safe_rows, safe_cols, requested_line);
-    let usable_width = width.saturating_sub((safe_cols.saturating_sub(1)).saturating_mul(resolved_line));
-    let usable_height = height.saturating_sub((safe_rows.saturating_sub(1)).saturating_mul(resolved_line));
+    let usable_width =
+        width.saturating_sub((safe_cols.saturating_sub(1)).saturating_mul(resolved_line));
+    let usable_height =
+        height.saturating_sub((safe_rows.saturating_sub(1)).saturating_mul(resolved_line));
 
     if usable_width < safe_cols || usable_height < safe_rows {
         return Err("分割线过粗，无法完成切割".to_string());
@@ -342,9 +350,8 @@ fn resolve_line_thickness(
 
 fn parse_hex_color(color: &str) -> Rgba<u8> {
     let value = color.trim().trim_start_matches('#');
-    let parse_pair = |start: usize| -> Option<u8> {
-        u8::from_str_radix(value.get(start..start + 2)?, 16).ok()
-    };
+    let parse_pair =
+        |start: usize| -> Option<u8> { u8::from_str_radix(value.get(start..start + 2)?, 16).ok() };
 
     match value.len() {
         6 => {
@@ -354,12 +361,9 @@ fn parse_hex_color(color: &str) -> Rgba<u8> {
             Rgba([r, g, b, 255])
         }
         8 => {
-            let (Some(r), Some(g), Some(b), Some(a)) = (
-                parse_pair(0),
-                parse_pair(2),
-                parse_pair(4),
-                parse_pair(6),
-            ) else {
+            let (Some(r), Some(g), Some(b), Some(a)) =
+                (parse_pair(0), parse_pair(2), parse_pair(4), parse_pair(6))
+            else {
                 return Rgba([15, 17, 21, 255]);
             };
             Rgba([r, g, b, a])
@@ -513,7 +517,14 @@ fn fill_rect_alpha_blend(
     }
 }
 
-fn stroke_right_edge(image: &mut RgbaImage, x: u32, y: u32, width: u32, height: u32, color: Rgba<u8>) {
+fn stroke_right_edge(
+    image: &mut RgbaImage,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    color: Rgba<u8>,
+) {
     if width < 1 || height < 1 {
         return;
     }
@@ -531,7 +542,14 @@ fn stroke_right_edge(image: &mut RgbaImage, x: u32, y: u32, width: u32, height: 
     }
 }
 
-fn stroke_bottom_edge(image: &mut RgbaImage, x: u32, y: u32, width: u32, height: u32, color: Rgba<u8>) {
+fn stroke_bottom_edge(
+    image: &mut RgbaImage,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    color: Rgba<u8>,
+) {
     if width < 1 || height < 1 {
         return;
     }
@@ -549,7 +567,11 @@ fn stroke_bottom_edge(image: &mut RgbaImage, x: u32, y: u32, width: u32, height:
     }
 }
 
-fn resize_image_fast(source: &DynamicImage, target_width: u32, target_height: u32) -> Result<RgbaImage, String> {
+fn resize_image_fast(
+    source: &DynamicImage,
+    target_width: u32,
+    target_height: u32,
+) -> Result<RgbaImage, String> {
     let source_rgba = source.to_rgba8();
     let source_width = source_rgba.width().max(1);
     let source_height = source_rgba.height().max(1);
@@ -562,18 +584,25 @@ fn resize_image_fast(source: &DynamicImage, target_width: u32, target_height: u3
         fir::PixelType::U8x4,
     )
     .map_err(|e| format!("Failed to create source image for fast resize: {}", e))?;
-    let mut target_image =
-        FirImage::new(target_width.max(1), target_height.max(1), fir::PixelType::U8x4);
+    let mut target_image = FirImage::new(
+        target_width.max(1),
+        target_height.max(1),
+        fir::PixelType::U8x4,
+    );
 
     let mut resizer = fir::Resizer::new();
-    let resize_options =
-        fir::ResizeOptions::new().resize_alg(fir::ResizeAlg::Convolution(fir::FilterType::Bilinear));
+    let resize_options = fir::ResizeOptions::new()
+        .resize_alg(fir::ResizeAlg::Convolution(fir::FilterType::Bilinear));
     resizer
         .resize(&source_image, &mut target_image, Some(&resize_options))
         .map_err(|e| format!("Failed to run fast image resize: {}", e))?;
 
-    RgbaImage::from_raw(target_width.max(1), target_height.max(1), target_image.into_vec())
-        .ok_or_else(|| "Failed to build RGBA image from resized buffer".to_string())
+    RgbaImage::from_raw(
+        target_width.max(1),
+        target_height.max(1),
+        target_image.into_vec(),
+    )
+    .ok_or_else(|| "Failed to build RGBA image from resized buffer".to_string())
 }
 
 async fn load_dynamic_image_from_source(source: &str) -> Result<DynamicImage, String> {
@@ -594,17 +623,44 @@ fn prepare_node_image_from_bytes(
 ) -> Result<PrepareNodeImageResult, String> {
     let started = Instant::now();
     let probe_started = Instant::now();
-    let (raw_width, raw_height) = ImageReader::new(Cursor::new(bytes))
+    let reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
-        .map_err(|e| format!("Failed to guess image format: {}", e))?
-        .into_dimensions()
-        .map_err(|e| format!("Failed to parse image dimensions: {}", e))?;
+        .map_err(|e| {
+            format_image_probe_error("Failed to guess image format", e, bytes, extension)
+        })?;
+    let guessed_format = reader.format();
+    let effective_extension = extension_from_image_format(guessed_format)
+        .unwrap_or_else(|| normalize_extension(extension));
+    let (raw_width, raw_height) = reader.into_dimensions().map_err(|e| {
+        format_image_probe_error(
+            "Failed to parse image dimensions",
+            e,
+            bytes,
+            &effective_extension,
+        )
+    })?;
     let probe_elapsed = probe_started.elapsed().as_millis();
     let width = raw_width.max(1);
     let height = raw_height.max(1);
 
     let persist_started = Instant::now();
-    let image_path = persist_image_bytes(app, bytes, extension)?;
+    let should_transcode_original = effective_extension == "avif";
+    let mut decoded_original: Option<DynamicImage> = None;
+    let image_path = if should_transcode_original {
+        let image = image::load_from_memory(bytes).map_err(|e| {
+            format_image_probe_error(
+                "Failed to decode image source",
+                e,
+                bytes,
+                &effective_extension,
+            )
+        })?;
+        let png_bytes = encode_dynamic_image_as_png(&image)?;
+        decoded_original = Some(image);
+        persist_image_bytes(app, &png_bytes, "png")?
+    } else {
+        persist_image_bytes(app, bytes, &effective_extension)?
+    };
     let persist_elapsed = persist_started.elapsed().as_millis();
     let longest_side = width.max(height);
     let bypass_preview = longest_side <= safe_max_dimension
@@ -615,7 +671,7 @@ fn prepare_node_image_from_bytes(
             "prepare_node_image done [{}]: bytes={}, ext={}, size={}x{}, max_preview={}, probe={}ms, decode=0ms, persist_original={}ms, resize=0ms, bypass_preview=true, total={}ms",
             trace_tag,
             bytes.len(),
-            extension,
+            effective_extension,
             width,
             height,
             safe_max_dimension,
@@ -631,18 +687,31 @@ fn prepare_node_image_from_bytes(
     }
 
     let decode_started = Instant::now();
-    let image = image::load_from_memory(bytes)
-        .map_err(|e| format!("Failed to decode image source: {}", e))?;
+    let image = match decoded_original {
+        Some(image) => image,
+        None => image::load_from_memory(bytes).map_err(|e| {
+            format_image_probe_error(
+                "Failed to decode image source",
+                e,
+                bytes,
+                &effective_extension,
+            )
+        })?,
+    };
     let decode_elapsed = decode_started.elapsed().as_millis();
 
     let resize_started = Instant::now();
     let scale = safe_max_dimension as f64 / longest_side as f64;
     let target_width = ((width as f64) * scale).round().max(1.0) as u32;
     let target_height = ((height as f64) * scale).round().max(1.0) as u32;
-    let resized_rgba = resize_image_fast(&image, target_width, target_height)
-        .unwrap_or_else(|_| {
+    let resized_rgba =
+        resize_image_fast(&image, target_width, target_height).unwrap_or_else(|_| {
             image
-                .resize(target_width, target_height, image::imageops::FilterType::Triangle)
+                .resize(
+                    target_width,
+                    target_height,
+                    image::imageops::FilterType::Triangle,
+                )
                 .to_rgba8()
         });
     let resized = DynamicImage::ImageRgba8(resized_rgba);
@@ -658,7 +727,7 @@ fn prepare_node_image_from_bytes(
         "prepare_node_image done [{}]: bytes={}, ext={}, size={}x{}, max_preview={}, probe={}ms, decode={}ms, persist_original={}ms, resize={}ms, total={}ms",
         trace_tag,
         bytes.len(),
-        extension,
+        effective_extension,
         width,
         height,
         safe_max_dimension,
@@ -692,13 +761,8 @@ pub async fn prepare_node_image_source(
     let resolve_started = Instant::now();
     let (bytes, extension) = resolve_source_bytes(trimmed).await?;
     let resolve_elapsed = resolve_started.elapsed().as_millis();
-    let result = prepare_node_image_from_bytes(
-        &app,
-        &bytes,
-        &extension,
-        safe_max_dimension,
-        "source",
-    )?;
+    let result =
+        prepare_node_image_from_bytes(&app, &bytes, &extension, safe_max_dimension, "source")?;
     info!(
         "prepare_node_image_source resolved: bytes={}, ext={}, resolve_source={}ms, total={}ms",
         bytes.len(),
@@ -724,8 +788,7 @@ pub async fn prepare_node_image_source_with_headers(
 
     let safe_max_dimension = max_preview_dimension.unwrap_or(512).clamp(64, 4096);
     let resolve_started = Instant::now();
-    let (bytes, extension) =
-        resolve_source_bytes_with_headers(trimmed, headers.as_ref()).await?;
+    let (bytes, extension) = resolve_source_bytes_with_headers(trimmed, headers.as_ref()).await?;
     let resolve_elapsed = resolve_started.elapsed().as_millis();
     let result = prepare_node_image_from_bytes(
         &app,
@@ -949,7 +1012,11 @@ pub async fn merge_storyboard_images(
     );
     let placeholder = Rgba([0, 0, 0, 90]);
     let border = Rgba([255, 255, 255, 56]);
-    let overlay_font = if overlay_requested { load_overlay_font() } else { None };
+    let overlay_font = if overlay_requested {
+        load_overlay_font()
+    } else {
+        None
+    };
     let overlay_scale = PxScale::from(font_size.max(9) as f32);
     let text_overlay_applied = !overlay_requested || overlay_font.is_some();
 
@@ -957,7 +1024,8 @@ pub async fn merge_storyboard_images(
         let row = (index as u32) / cols;
         let col = (index as u32) % cols;
         let x = padding + col.saturating_mul(cell_width.saturating_add(gap));
-        let y = padding + row.saturating_mul(cell_height.saturating_add(note_height).saturating_add(gap));
+        let y = padding
+            + row.saturating_mul(cell_height.saturating_add(note_height).saturating_add(gap));
 
         fill_rect(&mut canvas, x, y, cell_width, cell_height, placeholder);
 
@@ -972,7 +1040,8 @@ pub async fn merge_storyboard_images(
             let draw_w = (src_w * ratio).round().max(1.0) as u32;
             let draw_h = (src_h * ratio).round().max(1.0) as u32;
 
-            let mut cell_canvas = RgbaImage::from_pixel(cell_width.max(1), cell_height.max(1), placeholder);
+            let mut cell_canvas =
+                RgbaImage::from_pixel(cell_width.max(1), cell_height.max(1), placeholder);
             let draw_x = (cell_width as i64 - draw_w as i64) / 2;
             let draw_y = (cell_height as i64 - draw_h as i64) / 2;
 
@@ -1020,7 +1089,15 @@ pub async fn merge_storyboard_images(
                 let text_y = badge_y
                     .saturating_add(badge_height.saturating_sub(label_h) / 2)
                     .max(0) as i32;
-                draw_text_mut(&mut canvas, text_color, text_x, text_y, overlay_scale, font, &label);
+                draw_text_mut(
+                    &mut canvas,
+                    text_color,
+                    text_x,
+                    text_y,
+                    overlay_scale,
+                    font,
+                    &label,
+                );
             }
 
             if show_frame_note {
@@ -1029,7 +1106,12 @@ pub async fn merge_storyboard_images(
                     .map(|value| value.trim())
                     .unwrap_or("");
                 if !note_raw.is_empty() {
-                    let note = trim_text_to_width(font, overlay_scale, note_raw, cell_width.saturating_sub(14));
+                    let note = trim_text_to_width(
+                        font,
+                        overlay_scale,
+                        note_raw,
+                        cell_width.saturating_sub(14),
+                    );
                     if !note.is_empty() {
                         let (note_w, note_h) = text_size(overlay_scale, font, &note);
                         if note_placement == "bottom" && note_height > 0 {
@@ -1039,12 +1121,19 @@ pub async fn merge_storyboard_images(
                                 .saturating_add(note_height.saturating_sub(note_h) / 2)
                                 .max(0) as i32;
                             let _ = note_w;
-                            draw_text_mut(&mut canvas, text_color, note_x, note_y, overlay_scale, font, &note);
+                            draw_text_mut(
+                                &mut canvas,
+                                text_color,
+                                note_x,
+                                note_y,
+                                overlay_scale,
+                                font,
+                                &note,
+                            );
                         } else {
                             let overlay_height = (font_size as f32 * 1.35).round().max(18.0) as u32;
-                            let overlay_y = y
-                                .saturating_add(cell_height)
-                                .saturating_sub(overlay_height);
+                            let overlay_y =
+                                y.saturating_add(cell_height).saturating_sub(overlay_height);
                             fill_rect_alpha_blend(
                                 &mut canvas,
                                 x,
@@ -1057,7 +1146,15 @@ pub async fn merge_storyboard_images(
                             let note_y = overlay_y
                                 .saturating_add(overlay_height.saturating_sub(note_h) / 2)
                                 .max(0) as i32;
-                            draw_text_mut(&mut canvas, text_color, note_x, note_y, overlay_scale, font, &note);
+                            draw_text_mut(
+                                &mut canvas,
+                                text_color,
+                                note_x,
+                                note_y,
+                                overlay_scale,
+                                font,
+                                &note,
+                            );
                         }
                     }
                 }
@@ -1120,6 +1217,41 @@ fn persist_image_bytes(app: &AppHandle, bytes: &[u8], extension: &str) -> Result
     Ok(output_path.to_string_lossy().to_string())
 }
 
+fn resolve_videos_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
+
+    let videos_dir = app_data_dir.join("videos");
+    std::fs::create_dir_all(&videos_dir)
+        .map_err(|e| format!("Failed to create videos dir: {}", e))?;
+
+    Ok(videos_dir)
+}
+
+fn normalize_video_extension(raw_ext: &str) -> String {
+    let ext = raw_ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    match ext.as_str() {
+        "mp4" | "webm" | "mov" | "m4v" | "avi" | "mkv" | "mpeg" | "mpg" => ext,
+        _ => "mp4".to_string(),
+    }
+}
+
+fn persist_video_bytes(app: &AppHandle, bytes: &[u8], extension: &str) -> Result<String, String> {
+    let videos_dir = resolve_videos_dir(app)?;
+    let digest = md5::compute(bytes);
+    let filename = format!("{:x}.{}", digest, normalize_video_extension(extension));
+    let output_path = videos_dir.join(filename);
+
+    if !output_path.exists() {
+        std::fs::write(&output_path, bytes)
+            .map_err(|e| format!("Failed to persist generated video: {}", e))?;
+    }
+
+    Ok(output_path.to_string_lossy().to_string())
+}
+
 fn normalize_extension(raw_ext: &str) -> String {
     let ext = raw_ext.trim().trim_start_matches('.').to_ascii_lowercase();
     if ext.is_empty() {
@@ -1133,8 +1265,35 @@ fn normalize_extension(raw_ext: &str) -> String {
     ext
 }
 
+fn extension_from_image_format(format: Option<ImageFormat>) -> Option<String> {
+    let ext = match format? {
+        ImageFormat::Png => "png",
+        ImageFormat::Jpeg => "jpg",
+        ImageFormat::Gif => "gif",
+        ImageFormat::WebP => "webp",
+        ImageFormat::Pnm => "pnm",
+        ImageFormat::Tiff => "tiff",
+        ImageFormat::Tga => "tga",
+        ImageFormat::Dds => "dds",
+        ImageFormat::Bmp => "bmp",
+        ImageFormat::Ico => "ico",
+        ImageFormat::Hdr => "hdr",
+        ImageFormat::OpenExr => "exr",
+        ImageFormat::Farbfeld => "ff",
+        ImageFormat::Avif => "avif",
+        ImageFormat::Qoi => "qoi",
+        _ => return None,
+    };
+    Some(ext.to_string())
+}
+
 fn extension_from_mime(mime: &str) -> String {
-    let normalized = mime.trim().to_ascii_lowercase();
+    let normalized = mime
+        .split(';')
+        .next()
+        .unwrap_or(mime)
+        .trim()
+        .to_ascii_lowercase();
     match normalized.as_str() {
         "image/png" => "png".to_string(),
         "image/jpeg" => "jpg".to_string(),
@@ -1143,8 +1302,85 @@ fn extension_from_mime(mime: &str) -> String {
         "image/gif" => "gif".to_string(),
         "image/bmp" => "bmp".to_string(),
         "image/avif" => "avif".to_string(),
+        "video/mp4" => "mp4".to_string(),
+        "video/webm" => "webm".to_string(),
+        "video/quicktime" => "mov".to_string(),
+        "video/x-m4v" => "m4v".to_string(),
+        "video/x-msvideo" => "avi".to_string(),
+        "video/x-matroska" => "mkv".to_string(),
+        "video/mpeg" => "mpg".to_string(),
         _ => "png".to_string(),
     }
+}
+
+fn extension_from_video_mime(mime: &str) -> Option<String> {
+    let normalized = mime
+        .split(';')
+        .next()
+        .unwrap_or(mime)
+        .trim()
+        .to_ascii_lowercase();
+    match normalized.as_str() {
+        "video/mp4" => Some("mp4".to_string()),
+        "video/webm" => Some("webm".to_string()),
+        "video/quicktime" => Some("mov".to_string()),
+        "video/x-m4v" => Some("m4v".to_string()),
+        "video/x-msvideo" => Some("avi".to_string()),
+        "video/x-matroska" => Some("mkv".to_string()),
+        "video/mpeg" => Some("mpg".to_string()),
+        "application/octet-stream" => None,
+        _ => None,
+    }
+}
+
+fn encode_dynamic_image_as_png(image: &DynamicImage) -> Result<Vec<u8>, String> {
+    let mut buffer = Cursor::new(Vec::new());
+    image
+        .write_to(&mut buffer, image::ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode image as PNG: {}", e))?;
+    Ok(buffer.into_inner())
+}
+
+fn compact_text_preview(value: &str, max_chars: usize) -> String {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= max_chars {
+        collapsed
+    } else {
+        let preview: String = collapsed.chars().take(max_chars).collect();
+        format!("{}...", preview)
+    }
+}
+
+fn bytes_text_preview(bytes: &[u8], max_chars: usize) -> Option<String> {
+    let sample_len = bytes.len().min(4096);
+    let sample = &bytes[..sample_len];
+    let text = std::str::from_utf8(sample).ok()?;
+    Some(compact_text_preview(text, max_chars))
+}
+
+fn format_image_probe_error(
+    label: &str,
+    error: impl std::fmt::Display,
+    bytes: &[u8],
+    extension: &str,
+) -> String {
+    let mut message = format!(
+        "{}: {} (ext={}, bytes={})",
+        label,
+        error,
+        normalize_extension(extension),
+        bytes.len()
+    );
+    if let Some(preview) = bytes_text_preview(bytes, 240) {
+        if looks_like_json_text(&preview) {
+            message.push_str(&format!("; body looks like JSON: {}", preview));
+        } else if looks_like_html_text(&preview) {
+            message.push_str(&format!("; body looks like HTML/error page: {}", preview));
+        } else if looks_like_textual_error(&preview) {
+            message.push_str(&format!("; text preview: {}", preview));
+        }
+    }
+    message
 }
 
 fn extension_from_path_like(value: &str) -> Option<String> {
@@ -1180,6 +1416,331 @@ fn decode_file_url_path(value: &str) -> String {
     }
 }
 
+fn looks_like_json_text(value: &str) -> bool {
+    let trimmed = value.trim_start_matches('\u{feff}').trim_start();
+    trimmed.starts_with('{') || trimmed.starts_with('[')
+}
+
+fn looks_like_html_text(value: &str) -> bool {
+    let trimmed = value
+        .trim_start_matches('\u{feff}')
+        .trim_start()
+        .to_ascii_lowercase();
+    trimmed.starts_with("<!doctype html")
+        || trimmed.starts_with("<html")
+        || trimmed.starts_with("<head")
+        || trimmed.starts_with("<body")
+}
+
+fn looks_like_textual_error(value: &str) -> bool {
+    let trimmed = value.trim_start_matches('\u{feff}').trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let printable = trimmed
+        .chars()
+        .take(240)
+        .filter(|ch| !ch.is_control() || ch.is_whitespace())
+        .count();
+    printable >= trimmed.chars().take(240).count().saturating_sub(4)
+}
+
+fn content_type_primary(content_type: &str) -> String {
+    content_type
+        .split(';')
+        .next()
+        .unwrap_or(content_type)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn content_type_is_textual_non_image(content_type: &str) -> bool {
+    let primary = content_type_primary(content_type);
+    primary == "application/json"
+        || primary == "application/problem+json"
+        || primary.ends_with("+json")
+        || primary == "text/html"
+        || primary == "application/xhtml+xml"
+        || primary.starts_with("text/")
+}
+
+fn describe_non_image_remote_body(content_type: &str, bytes: &[u8]) -> String {
+    let preview = bytes_text_preview(bytes, 360)
+        .unwrap_or_else(|| format!("{} bytes, binary preview unavailable", bytes.len()));
+    format!(
+        "Remote result did not return image bytes (content-type={}, bytes={}). Body preview: {}",
+        content_type,
+        bytes.len(),
+        preview
+    )
+}
+
+fn describe_non_video_remote_body(content_type: &str, bytes: &[u8]) -> String {
+    let preview = bytes_text_preview(bytes, 360)
+        .unwrap_or_else(|| format!("{} bytes, binary preview unavailable", bytes.len()));
+    format!(
+        "Remote result did not return video bytes (content-type={}, bytes={}). Body preview: {}",
+        content_type,
+        bytes.len(),
+        preview
+    )
+}
+
+async fn resolve_video_source_bytes_with_headers(
+    source: &str,
+    headers: Option<&HashMap<String, String>>,
+) -> Result<(Vec<u8>, String), String> {
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        return Err("Video source is empty".to_string());
+    }
+
+    if trimmed.starts_with("data:") {
+        let (bytes, extension) = parse_data_url(trimmed)?;
+        return Ok((bytes, normalize_video_extension(&extension)));
+    }
+
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        let client = remote_image_client();
+        let mut last_error = String::new();
+        for attempt in 1..=REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
+            let mut request = client
+                .get(trimmed)
+                .header(
+                    reqwest::header::ACCEPT,
+                    "video/mp4,video/webm,video/quicktime,video/*,*/*;q=0.8",
+                )
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
+                .header(reqwest::header::USER_AGENT, "Open-Storyboard-Canvas/1.0");
+            if let Some(headers) = headers {
+                for (key, value) in headers {
+                    let trimmed_key = key.trim();
+                    if trimmed_key.is_empty() || !should_forward_remote_image_header(trimmed_key) {
+                        continue;
+                    }
+                    request = request.header(trimmed_key, value.as_str());
+                }
+            }
+
+            match request.send().await {
+                Ok(response) => {
+                    if !response.status().is_success() {
+                        let status = response.status();
+                        let status_message =
+                            format!("Remote video request failed with status {}", status);
+                        if status.is_client_error() {
+                            return Err(status_message);
+                        }
+                        last_error = status_message;
+                    } else {
+                        let content_type = response
+                            .headers()
+                            .get(reqwest::header::CONTENT_TYPE)
+                            .and_then(|value| value.to_str().ok())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let mime_ext = extension_from_video_mime(&content_type);
+                        let bytes = response
+                            .bytes()
+                            .await
+                            .map_err(|e| format!("Failed to read remote video body: {}", e))?
+                            .to_vec();
+
+                        if content_type_is_textual_non_image(&content_type)
+                            || bytes_text_preview(&bytes, 120)
+                                .map(|preview| {
+                                    looks_like_json_text(&preview) || looks_like_html_text(&preview)
+                                })
+                                .unwrap_or(false)
+                        {
+                            return Err(describe_non_video_remote_body(&content_type, &bytes));
+                        }
+
+                        let ext = mime_ext
+                            .or_else(|| extension_from_path_like(trimmed))
+                            .map(|value| normalize_video_extension(&value))
+                            .unwrap_or_else(|| "mp4".to_string());
+
+                        return Ok((bytes, ext));
+                    }
+                }
+                Err(error) => {
+                    last_error = format!("Failed to download remote video: {}", error);
+                }
+            }
+
+            if attempt < REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
+                sleep(Duration::from_millis(350 * attempt as u64)).await;
+            }
+        }
+        if !last_error.is_empty() {
+            return Err(last_error);
+        }
+        return Err("Remote video download failed".to_string());
+    }
+
+    if trimmed.starts_with("file://") {
+        let file_path = decode_file_url_path(trimmed);
+        let local_path = PathBuf::from(file_path);
+        let bytes = std::fs::read(&local_path)
+            .map_err(|e| format!("Failed to read file:// video source: {}", e))?;
+        let ext = local_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(normalize_video_extension)
+            .unwrap_or_else(|| "mp4".to_string());
+        return Ok((bytes, ext));
+    }
+
+    let local_path = PathBuf::from(trimmed);
+    let bytes = std::fs::read(&local_path)
+        .map_err(|e| format!("Failed to read local video source: {}", e))?;
+    let ext = local_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(normalize_video_extension)
+        .unwrap_or_else(|| "mp4".to_string());
+    Ok((bytes, ext))
+}
+
+fn is_likely_non_image_result_key(key_path: &str) -> bool {
+    let key = key_path.to_ascii_lowercase();
+    key.contains("status_url")
+        || key.contains("statusurl")
+        || key.contains("poll_url")
+        || key.contains("pollurl")
+        || key.contains("callback")
+        || key.contains("webhook")
+        || key.contains("submit_url")
+        || key.contains("queue_url")
+        || key.contains("endpoint")
+}
+
+fn is_likely_image_result_key(key_path: &str) -> bool {
+    let key = key_path.to_ascii_lowercase();
+    key.contains("image")
+        || key.contains("img")
+        || key.contains("url")
+        || key.contains("output")
+        || key.contains("result")
+        || key.contains("asset")
+        || key.contains("file")
+        || key.contains("media")
+        || key.contains("b64")
+        || key.contains("base64")
+        || key.contains("data")
+}
+
+fn value_has_image_extension(value: &str) -> bool {
+    let cleaned = value
+        .split('#')
+        .next()
+        .unwrap_or(value)
+        .split('?')
+        .next()
+        .unwrap_or(value)
+        .to_ascii_lowercase();
+    [
+        "png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "tif", "tiff",
+    ]
+    .iter()
+    .any(|ext| cleaned.ends_with(&format!(".{}", ext)))
+}
+
+fn looks_like_base64_image_payload(value: &str) -> bool {
+    let compact: String = value.chars().filter(|ch| !ch.is_whitespace()).collect();
+    compact.len() > 300
+        && compact
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '+' || ch == '/' || ch == '=')
+}
+
+fn normalize_wrapped_image_source_candidate(value: &str, key_path: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with("data:image/") {
+        return Some(trimmed.to_string());
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        if !is_likely_non_image_result_key(key_path)
+            && (value_has_image_extension(trimmed) || is_likely_image_result_key(key_path))
+        {
+            return Some(trimmed.to_string());
+        }
+        return None;
+    }
+    if looks_like_base64_image_payload(trimmed) && is_likely_image_result_key(key_path) {
+        let compact: String = trimmed.chars().filter(|ch| !ch.is_whitespace()).collect();
+        return Some(format!("data:image/png;base64,{}", compact));
+    }
+    None
+}
+
+fn extract_wrapped_image_source_from_json(
+    value: &serde_json::Value,
+    key_path: &str,
+    depth: usize,
+) -> Option<String> {
+    if depth > 8 {
+        return None;
+    }
+    match value {
+        serde_json::Value::String(text) => {
+            if let Some(candidate) = normalize_wrapped_image_source_candidate(text, key_path) {
+                return Some(candidate);
+            }
+            let trimmed = text.trim();
+            if looks_like_json_text(trimmed) {
+                if let Ok(nested) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    return extract_wrapped_image_source_from_json(&nested, key_path, depth + 1);
+                }
+            }
+            None
+        }
+        serde_json::Value::Array(items) => items.iter().enumerate().find_map(|(index, item)| {
+            let child_path = if key_path.is_empty() {
+                index.to_string()
+            } else {
+                format!("{}.{}", key_path, index)
+            };
+            extract_wrapped_image_source_from_json(item, &child_path, depth + 1)
+        }),
+        serde_json::Value::Object(map) => map.iter().find_map(|(key, item)| {
+            let child_path = if key_path.is_empty() {
+                key.to_string()
+            } else {
+                format!("{}.{}", key_path, key)
+            };
+            extract_wrapped_image_source_from_json(item, &child_path, depth + 1)
+        }),
+        _ => None,
+    }
+}
+
+fn extract_wrapped_image_source_from_text(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if let Some(candidate) = normalize_wrapped_image_source_candidate(trimmed, "image") {
+        return Some(candidate);
+    }
+    if looks_like_base64_image_payload(trimmed) {
+        let compact: String = trimmed.chars().filter(|ch| !ch.is_whitespace()).collect();
+        return Some(format!("data:image/png;base64,{}", compact));
+    }
+    if looks_like_json_text(trimmed) {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            return extract_wrapped_image_source_from_json(&parsed, "", 0);
+        }
+    }
+    None
+}
+
+fn extract_wrapped_image_source_from_bytes(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    extract_wrapped_image_source_from_text(text)
+}
+
 fn parse_data_url(source: &str) -> Result<(Vec<u8>, String), String> {
     let (meta, payload) = source
         .split_once(',')
@@ -1201,7 +1762,9 @@ fn parse_data_url(source: &str) -> Result<(Vec<u8>, String), String> {
     Ok((bytes, extension_from_mime(mime)))
 }
 
-fn read_storyboard_metadata_from_png_bytes(bytes: &[u8]) -> Result<Option<StoryboardImageMetadata>, String> {
+fn read_storyboard_metadata_from_png_bytes(
+    bytes: &[u8],
+) -> Result<Option<StoryboardImageMetadata>, String> {
     let decoder = Decoder::new(Cursor::new(bytes));
     let reader = decoder
         .read_info()
@@ -1257,10 +1820,7 @@ fn encode_png_with_storyboard_metadata(
         encoder.set_color(ColorType::Rgba);
         encoder.set_depth(BitDepth::Eight);
         encoder
-            .add_itxt_chunk(
-                STORYBOARD_METADATA_PNG_TEXT_KEY.to_string(),
-                metadata_json,
-            )
+            .add_itxt_chunk(STORYBOARD_METADATA_PNG_TEXT_KEY.to_string(), metadata_json)
             .map_err(|e| format!("Failed to attach storyboard metadata into PNG: {}", e))?;
         let mut writer = encoder
             .write_header()
@@ -1277,78 +1837,149 @@ async fn resolve_source_bytes(source: &str) -> Result<(Vec<u8>, String), String>
     resolve_source_bytes_with_headers(source, None).await
 }
 
+fn should_forward_remote_image_header(key: &str) -> bool {
+    !key.eq_ignore_ascii_case("accept-encoding")
+}
+
 async fn resolve_source_bytes_with_headers(
     source: &str,
     headers: Option<&HashMap<String, String>>,
 ) -> Result<(Vec<u8>, String), String> {
-    if source.starts_with("data:") {
-        return parse_data_url(source);
-    }
+    let mut current_source = source.trim().to_string();
+    let mut unwrap_count = 0usize;
 
-    if source.starts_with("http://") || source.starts_with("https://") {
-        let client = remote_image_client();
-        let mut last_error = String::new();
-        for attempt in 1..=REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
-            let mut request = client
-                .get(source)
-                .header(
-                    reqwest::header::ACCEPT,
-                    "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
-                )
-                .header(reqwest::header::USER_AGENT, "Open-Storyboard-Canvas/1.0");
-            if let Some(headers) = headers {
-                for (key, value) in headers {
-                    let trimmed_key = key.trim();
-                    if trimmed_key.is_empty() {
-                        continue;
-                    }
-                    request = request.header(trimmed_key, value.as_str());
-                }
-            }
-            match request.send().await {
-                Ok(response) => {
-                    if !response.status().is_success() {
-                        let status = response.status();
-                        let status_message =
-                            format!("Remote image request failed with status {}", status);
-                        if status.is_client_error() {
-                            return Err(status_message);
-                        }
-                        last_error = status_message;
-                    } else {
-                        let mime_ext = response
-                            .headers()
-                            .get(reqwest::header::CONTENT_TYPE)
-                            .and_then(|value| value.to_str().ok())
-                            .map(extension_from_mime);
+    'resolve_source: loop {
+        if current_source.starts_with("data:") {
+            return parse_data_url(&current_source);
+        }
 
-                        let bytes = response
-                            .bytes()
-                            .await
-                            .map_err(|e| format!("Failed to read remote image body: {}", e))?
-                            .to_vec();
-
-                        let ext = mime_ext
-                            .or_else(|| extension_from_path_like(source))
-                            .unwrap_or_else(|| "png".to_string());
-
-                        return Ok((bytes, ext));
-                    }
-                }
-                Err(error) => {
-                    last_error = format!("Failed to download remote image: {}", error);
-                }
-            }
-
-            if attempt < REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
-                sleep(Duration::from_millis(350 * attempt as u64)).await;
+        if let Some(unwrapped_source) = extract_wrapped_image_source_from_text(&current_source) {
+            if unwrapped_source != current_source && unwrap_count < 3 {
+                unwrap_count += 1;
+                current_source = unwrapped_source;
+                continue;
             }
         }
-        return Err(last_error);
+
+        if current_source.starts_with("http://") || current_source.starts_with("https://") {
+            let client = remote_image_client();
+            let mut last_error = String::new();
+            for attempt in 1..=REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
+                let mut request = client
+                    .get(&current_source)
+                    .header(
+                        reqwest::header::ACCEPT,
+                        "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
+                    )
+                    .header(reqwest::header::ACCEPT_ENCODING, "identity")
+                    .header(reqwest::header::USER_AGENT, "Open-Storyboard-Canvas/1.0");
+                if let Some(headers) = headers {
+                    for (key, value) in headers {
+                        let trimmed_key = key.trim();
+                        if trimmed_key.is_empty()
+                            || !should_forward_remote_image_header(trimmed_key)
+                        {
+                            continue;
+                        }
+                        request = request.header(trimmed_key, value.as_str());
+                    }
+                }
+                match request.send().await {
+                    Ok(response) => {
+                        if !response.status().is_success() {
+                            let status = response.status();
+                            let status_message =
+                                format!("Remote image request failed with status {}", status);
+                            if status.is_client_error() {
+                                return Err(status_message);
+                            }
+                            last_error = status_message;
+                        } else {
+                            let mime_ext = response
+                                .headers()
+                                .get(reqwest::header::CONTENT_TYPE)
+                                .and_then(|value| value.to_str().ok())
+                                .map(extension_from_mime);
+                            let content_type = response
+                                .headers()
+                                .get(reqwest::header::CONTENT_TYPE)
+                                .and_then(|value| value.to_str().ok())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            let content_encoding = response
+                                .headers()
+                                .get(reqwest::header::CONTENT_ENCODING)
+                                .and_then(|value| value.to_str().ok())
+                                .unwrap_or("none")
+                                .to_string();
+
+                            let bytes = match response.bytes().await {
+                                Ok(bytes) => bytes.to_vec(),
+                                Err(error) => {
+                                    last_error = format!(
+                                        "Failed to read remote image body (attempt {}/{}, content-type={}, content-encoding={}): {}",
+                                        attempt,
+                                        REMOTE_IMAGE_DOWNLOAD_ATTEMPTS,
+                                        content_type,
+                                        content_encoding,
+                                        error
+                                    );
+                                    if attempt < REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
+                                        sleep(Duration::from_millis(350 * attempt as u64)).await;
+                                        continue;
+                                    }
+                                    return Err(last_error);
+                                }
+                            };
+
+                            if unwrap_count < 3 {
+                                if let Some(unwrapped_source) =
+                                    extract_wrapped_image_source_from_bytes(&bytes)
+                                {
+                                    unwrap_count += 1;
+                                    current_source = unwrapped_source;
+                                    continue 'resolve_source;
+                                }
+                            }
+
+                            if content_type_is_textual_non_image(&content_type)
+                                || bytes_text_preview(&bytes, 120)
+                                    .map(|preview| {
+                                        looks_like_json_text(&preview)
+                                            || looks_like_html_text(&preview)
+                                    })
+                                    .unwrap_or(false)
+                            {
+                                return Err(describe_non_image_remote_body(&content_type, &bytes));
+                            }
+
+                            let ext = mime_ext
+                                .or_else(|| extension_from_path_like(&current_source))
+                                .unwrap_or_else(|| "png".to_string());
+
+                            return Ok((bytes, ext));
+                        }
+                    }
+                    Err(error) => {
+                        last_error = format!("Failed to download remote image: {}", error);
+                    }
+                }
+
+                if attempt < REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
+                    sleep(Duration::from_millis(350 * attempt as u64)).await;
+                }
+            }
+            if !last_error.is_empty() {
+                return Err(last_error);
+            }
+            return Err("Remote image download failed".to_string());
+        }
+
+        break;
     }
 
-    if source.starts_with("file://") {
-        let file_path = decode_file_url_path(source);
+    if current_source.starts_with("file://") {
+        let file_path = decode_file_url_path(&current_source);
         let local_path = PathBuf::from(file_path);
         let bytes = std::fs::read(&local_path)
             .map_err(|e| format!("Failed to read file:// image source: {}", e))?;
@@ -1360,7 +1991,7 @@ async fn resolve_source_bytes_with_headers(
         return Ok((bytes, ext));
     }
 
-    let local_path = PathBuf::from(source);
+    let local_path = PathBuf::from(&current_source);
     let bytes = std::fs::read(&local_path)
         .map_err(|e| format!("Failed to read local image source: {}", e))?;
     let ext = local_path
@@ -1430,6 +2061,30 @@ pub async fn persist_image_source(app: AppHandle, source: String) -> Result<Stri
 }
 
 #[tauri::command]
+pub async fn persist_video_source(
+    app: AppHandle,
+    source: String,
+    headers: Option<HashMap<String, String>>,
+) -> Result<String, String> {
+    let started = Instant::now();
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        return Err("Video source is empty".to_string());
+    }
+
+    let (bytes, extension) =
+        resolve_video_source_bytes_with_headers(trimmed, headers.as_ref()).await?;
+    let output = persist_video_bytes(&app, &bytes, &extension)?;
+    info!(
+        "persist_video_source done: bytes={}, ext={}, elapsed={}ms",
+        bytes.len(),
+        extension,
+        started.elapsed().as_millis()
+    );
+    Ok(output)
+}
+
+#[tauri::command]
 pub async fn persist_image_binary(
     app: AppHandle,
     bytes: Vec<u8>,
@@ -1484,12 +2139,18 @@ fn ensure_unique_path(path: PathBuf) -> PathBuf {
         return path;
     }
 
-    let parent = path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+    let parent = path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
     let stem = path
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("storyboard-image");
-    let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("png");
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("png");
 
     for index in 1..10_000_u32 {
         let candidate = parent.join(format!("{}-{}.{}", stem, index, ext));
@@ -1554,7 +2215,10 @@ pub async fn save_image_source_to_downloads(
 }
 
 #[tauri::command]
-pub async fn save_image_source_to_path(source: String, target_path: String) -> Result<String, String> {
+pub async fn save_image_source_to_path(
+    source: String,
+    target_path: String,
+) -> Result<String, String> {
     let trimmed_source = source.trim();
     if trimmed_source.is_empty() {
         return Err("Image source is empty".to_string());
@@ -1624,6 +2288,79 @@ pub async fn save_image_source_to_directory(
 }
 
 #[tauri::command]
+pub async fn save_video_source_to_path(
+    source: String,
+    target_path: String,
+) -> Result<String, String> {
+    let trimmed_source = source.trim();
+    if trimmed_source.is_empty() {
+        return Err("Video source is empty".to_string());
+    }
+
+    let trimmed_target = target_path.trim();
+    if trimmed_target.is_empty() {
+        return Err("Target path is empty".to_string());
+    }
+
+    let (bytes, extension) = resolve_video_source_bytes_with_headers(trimmed_source, None).await?;
+    let raw_path = PathBuf::from(trimmed_target);
+    let output_path = ensure_output_path_with_extension(&raw_path, &extension);
+
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create output dir: {}", e))?;
+    }
+
+    std::fs::write(&output_path, bytes)
+        .map_err(|e| format!("Failed to save video to target path: {}", e))?;
+
+    Ok(output_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn save_video_source_to_directory(
+    source: String,
+    target_dir: String,
+    suggested_file_name: Option<String>,
+) -> Result<String, String> {
+    let trimmed_source = source.trim();
+    if trimmed_source.is_empty() {
+        return Err("Video source is empty".to_string());
+    }
+
+    let trimmed_dir = target_dir.trim();
+    if trimmed_dir.is_empty() {
+        return Err("Target directory is empty".to_string());
+    }
+
+    let (bytes, extension) = resolve_video_source_bytes_with_headers(trimmed_source, None).await?;
+    let dir_path = PathBuf::from(trimmed_dir);
+    std::fs::create_dir_all(&dir_path)
+        .map_err(|e| format!("Failed to create target dir: {}", e))?;
+
+    let now_millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("Failed to resolve current time: {}", e))?
+        .as_millis();
+    let stem = sanitize_file_stem(suggested_file_name.as_deref().unwrap_or(""));
+    let default_stem = if stem == "storyboard-image" {
+        format!("storyboard-video-{}", now_millis)
+    } else {
+        stem
+    };
+
+    let output_path = ensure_unique_path(dir_path.join(format!(
+        "{}.{}",
+        default_stem,
+        normalize_video_extension(&extension)
+    )));
+    std::fs::write(&output_path, bytes)
+        .map_err(|e| format!("Failed to save video to target directory: {}", e))?;
+
+    Ok(output_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 pub async fn save_image_source_to_app_debug_dir(
     app: AppHandle,
     source: String,
@@ -1682,8 +2419,8 @@ pub async fn copy_image_source_to_clipboard(source: String) -> Result<(), String
     let height = image.height() as usize;
     let pixels = image.into_raw();
 
-    let mut clipboard = Clipboard::new()
-        .map_err(|e| format!("Failed to access clipboard: {}", e))?;
+    let mut clipboard =
+        Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
     clipboard
         .set_image(ImageData {
             width,

@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -22,16 +23,77 @@ pub struct DreaminaStatus {
 /// that Tauri's subprocess environment often DOESN'T inherit (because it skips
 /// the user's login shell). This covers Homebrew (Intel + Apple Silicon),
 /// the Dreamina one-line installer's default, pip/uv `--user`, and Windows npm.
+fn non_empty_env(name: &str) -> Option<OsString> {
+    std::env::var_os(name).filter(|value| !value.as_os_str().is_empty())
+}
+
+fn dreamina_home_dir() -> Option<PathBuf> {
+    if let Some(home) = non_empty_env("HOME") {
+        return Some(PathBuf::from(home));
+    }
+
+    #[cfg(windows)]
+    {
+        for key in ["USERPROFILE", "APPDATA", "LOCALAPPDATA"] {
+            if let Some(value) = non_empty_env(key) {
+                return Some(PathBuf::from(value));
+            }
+        }
+    }
+
+    None
+}
+
+fn dreamina_staging_dir() -> Option<PathBuf> {
+    if let Some(home) = non_empty_env("HOME") {
+        return Some(
+            PathBuf::from(home)
+                .join("Library/Application Support/open-storyboard-canvas/dreamina-staging"),
+        );
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = non_empty_env("APPDATA") {
+            return Some(PathBuf::from(appdata).join("open-storyboard-canvas/dreamina-staging"));
+        }
+        if let Some(local_appdata) = non_empty_env("LOCALAPPDATA") {
+            return Some(
+                PathBuf::from(local_appdata).join("open-storyboard-canvas/dreamina-staging"),
+            );
+        }
+        if let Some(user_profile) = non_empty_env("USERPROFILE") {
+            return Some(
+                PathBuf::from(user_profile)
+                    .join("AppData/Local/open-storyboard-canvas/dreamina-staging"),
+            );
+        }
+    }
+
+    None
+}
+
+fn push_path_once(paths: &mut Vec<PathBuf>, candidate: PathBuf) {
+    if candidate.as_os_str().is_empty() || paths.iter().any(|path| path == &candidate) {
+        return;
+    }
+    paths.push(candidate);
+}
+
 fn locate_dreamina_binary() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let home = dreamina_home_dir();
     let mut candidates: Vec<PathBuf> = Vec::new();
 
     // PATH first (may or may not contain it depending on how the app was launched).
-    if let Some(path_env) = std::env::var_os("PATH") {
+    if let Some(path_env) = non_empty_env("PATH") {
         for p in std::env::split_paths(&path_env) {
             candidates.push(p.join("dreamina"));
             #[cfg(windows)]
             candidates.push(p.join("dreamina.exe"));
+            #[cfg(windows)]
+            candidates.push(p.join("dreamina.cmd"));
+            #[cfg(windows)]
+            candidates.push(p.join("dreamina.bat"));
         }
     }
 
@@ -41,6 +103,15 @@ fn locate_dreamina_binary() -> Option<PathBuf> {
         candidates.push(h.join(".local/bin/dreamina"));
         candidates.push(h.join(".cargo/bin/dreamina"));
         candidates.push(h.join("bin/dreamina"));
+    }
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = non_empty_env("APPDATA") {
+            let npm_dir = PathBuf::from(appdata).join("npm");
+            candidates.push(npm_dir.join("dreamina.cmd"));
+            candidates.push(npm_dir.join("dreamina.exe"));
+            candidates.push(npm_dir.join("dreamina"));
+        }
     }
     candidates.push(PathBuf::from("/opt/homebrew/bin/dreamina"));
     candidates.push(PathBuf::from("/usr/local/bin/dreamina"));
@@ -53,22 +124,50 @@ fn locate_dreamina_binary() -> Option<PathBuf> {
 /// login-shell env, so we hand the child a PATH that includes the common
 /// install prefixes + carry HOME/USER through so the CLI finds its session.
 fn build_cli_env(cmd: &mut Command) {
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(home) = non_empty_env("HOME") {
+        cmd.env("HOME", home);
+    } else if let Some(home) = dreamina_home_dir() {
         cmd.env("HOME", home);
     }
-    if let Some(user) = std::env::var_os("USER") {
+    if let Some(user) = non_empty_env("USER") {
         cmd.env("USER", user);
     }
-    let mut extra_path = std::env::var("PATH").unwrap_or_default();
-    for p in ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"] {
-        if !extra_path.split(':').any(|part| part == p) {
-            if !extra_path.is_empty() {
-                extra_path.push(':');
-            }
-            extra_path.push_str(p);
+    for key in ["USERPROFILE", "APPDATA", "LOCALAPPDATA"] {
+        if let Some(value) = non_empty_env(key) {
+            cmd.env(key, value);
         }
     }
-    cmd.env("PATH", extra_path);
+
+    let mut paths = non_empty_env("PATH")
+        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = non_empty_env("APPDATA") {
+            push_path_once(&mut paths, PathBuf::from(appdata).join("npm"));
+        }
+        if let Some(local_appdata) = non_empty_env("LOCALAPPDATA") {
+            push_path_once(
+                &mut paths,
+                PathBuf::from(local_appdata).join("Microsoft/WindowsApps"),
+            );
+        }
+        if let Some(home) = dreamina_home_dir() {
+            push_path_once(&mut paths, home.join(".dreamina/bin"));
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        for p in ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"] {
+            push_path_once(&mut paths, PathBuf::from(p));
+        }
+    }
+
+    if let Ok(path) = std::env::join_paths(paths) {
+        cmd.env("PATH", path);
+    }
 }
 
 /// Classify a CLI failure message as (network error, explicit auth failure).
@@ -94,7 +193,13 @@ fn classify_cli_error(combined: &str) -> (bool, bool) {
         "temporary failure in name resolution",
     ];
     let auth_patterns = [
-        "login", "auth", "token", "session", "未登录", "请先登录", "unauthor",
+        "login",
+        "auth",
+        "token",
+        "session",
+        "未登录",
+        "请先登录",
+        "unauthor",
     ];
     let is_network = network_patterns.iter().any(|p| lower.contains(p));
     let is_auth = auth_patterns.iter().any(|p| lower.contains(p));
@@ -148,7 +253,11 @@ pub async fn check_dreamina_login() -> DreaminaStatus {
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
     if !output.status.success() {
-        let combined = if stderr.is_empty() { stdout.clone() } else { stderr.clone() };
+        let combined = if stderr.is_empty() {
+            stdout.clone()
+        } else {
+            stderr.clone()
+        };
         let (is_network, is_auth) = classify_cli_error(&combined);
 
         // Explicit auth failure → not logged in. This is the only branch that
@@ -184,7 +293,11 @@ pub async fn check_dreamina_login() -> DreaminaStatus {
             // list_task also failed — inspect its error to decide.
             let ls_stderr = String::from_utf8_lossy(&list_out.stderr).to_string();
             let ls_stdout = String::from_utf8_lossy(&list_out.stdout).to_string();
-            let ls_combined = if ls_stderr.is_empty() { ls_stdout } else { ls_stderr };
+            let ls_combined = if ls_stderr.is_empty() {
+                ls_stdout
+            } else {
+                ls_stderr
+            };
             let (_, ls_auth) = classify_cli_error(&ls_combined);
             if ls_auth {
                 return DreaminaStatus {
@@ -206,7 +319,10 @@ pub async fn check_dreamina_login() -> DreaminaStatus {
             logged_in: false,
             credits: None,
             error: Some(if is_network {
-                format!("网络不可达，无法确认登录状态：{}", combined.chars().take(200).collect::<String>())
+                format!(
+                    "网络不可达，无法确认登录状态：{}",
+                    combined.chars().take(200).collect::<String>()
+                )
             } else {
                 combined.chars().take(400).collect()
             }),
@@ -221,7 +337,13 @@ pub async fn check_dreamina_login() -> DreaminaStatus {
     //    reasonable integer ≥ 0.
     let credits = stdout
         .split(|c: char| !c.is_ascii_digit())
-        .filter_map(|s| if s.is_empty() { None } else { s.parse::<i64>().ok() })
+        .filter_map(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                s.parse::<i64>().ok()
+            }
+        })
         .find(|v| *v >= 0);
 
     DreaminaStatus {
@@ -261,7 +383,8 @@ fn extract_submit_id(text: &str) -> Option<String> {
     for line in text.lines() {
         if let Some(idx) = line.find("submit_id") {
             let after = &line[idx + "submit_id".len()..];
-            let after = after.trim_start_matches(|c: char| c == ':' || c == '=' || c == ' ' || c == '"');
+            let after =
+                after.trim_start_matches(|c: char| c == ':' || c == '=' || c == ' ' || c == '"');
             let id: String = after
                 .chars()
                 .take_while(|c| c.is_ascii_hexdigit())
@@ -316,10 +439,20 @@ async fn run_dreamina_subcommand(args: Vec<String>) -> DreaminaSubmitResult {
     let error = if ok {
         None
     } else {
-        let combined = if stderr.is_empty() { stdout.clone() } else { stderr.clone() };
+        let combined = if stderr.is_empty() {
+            stdout.clone()
+        } else {
+            stderr.clone()
+        };
         Some(combined.chars().take(400).collect::<String>())
     };
-    DreaminaSubmitResult { ok, submit_id, stdout, stderr, error }
+    DreaminaSubmitResult {
+        ok,
+        submit_id,
+        stdout,
+        stderr,
+        error,
+    }
 }
 
 #[tauri::command]
@@ -331,9 +464,15 @@ pub async fn dreamina_text2image(
     poll_seconds: Option<u32>,
 ) -> DreaminaSubmitResult {
     let mut args: Vec<String> = vec!["text2image".into(), format!("--prompt={prompt}")];
-    if let Some(m) = model_version { args.push(format!("--model_version={m}")); }
-    if let Some(r) = ratio.filter(|s| s != "auto") { args.push(format!("--ratio={r}")); }
-    if let Some(rt) = resolution_type { args.push(format!("--resolution_type={rt}")); }
+    if let Some(m) = model_version {
+        args.push(format!("--model_version={m}"));
+    }
+    if let Some(r) = ratio.filter(|s| s != "auto") {
+        args.push(format!("--ratio={r}"));
+    }
+    if let Some(rt) = resolution_type {
+        args.push(format!("--resolution_type={rt}"));
+    }
     args.push(format!("--poll={}", poll_seconds.unwrap_or(60)));
     run_dreamina_subcommand(args).await
 }
@@ -359,9 +498,15 @@ pub async fn dreamina_image2image(
     let mut args: Vec<String> = vec!["image2image".into(), format!("--prompt={prompt}")];
     // The CLI accepts --images repeated OR comma-joined; comma is simpler.
     args.push(format!("--images={}", image_paths.join(",")));
-    if let Some(m) = model_version { args.push(format!("--model_version={m}")); }
-    if let Some(r) = ratio.filter(|s| s != "auto") { args.push(format!("--ratio={r}")); }
-    if let Some(rt) = resolution_type { args.push(format!("--resolution_type={rt}")); }
+    if let Some(m) = model_version {
+        args.push(format!("--model_version={m}"));
+    }
+    if let Some(r) = ratio.filter(|s| s != "auto") {
+        args.push(format!("--ratio={r}"));
+    }
+    if let Some(rt) = resolution_type {
+        args.push(format!("--resolution_type={rt}"));
+    }
     args.push(format!("--poll={}", poll_seconds.unwrap_or(120)));
     run_dreamina_subcommand(args).await
 }
@@ -372,7 +517,9 @@ pub async fn dreamina_query_result(
     download_dir: Option<String>,
 ) -> DreaminaSubmitResult {
     let mut args: Vec<String> = vec!["query_result".into(), format!("--submit_id={submit_id}")];
-    if let Some(d) = download_dir { args.push(format!("--download_dir={d}")); }
+    if let Some(d) = download_dir {
+        args.push(format!("--download_dir={d}"));
+    }
     run_dreamina_subcommand(args).await
 }
 
@@ -400,11 +547,10 @@ pub async fn dreamina_image_upscale(
             error: Some("image_upscale 需要一张本地图片路径".into()),
         };
     }
-    let mut args: Vec<String> = vec![
-        "image_upscale".into(),
-        format!("--image={image_path}"),
-    ];
-    if let Some(rt) = resolution_type { args.push(format!("--resolution_type={rt}")); }
+    let mut args: Vec<String> = vec!["image_upscale".into(), format!("--image={image_path}")];
+    if let Some(rt) = resolution_type {
+        args.push(format!("--resolution_type={rt}"));
+    }
     args.push(format!("--poll={}", poll_seconds.unwrap_or(120)));
     run_dreamina_subcommand(args).await
 }
@@ -419,16 +565,20 @@ pub async fn dreamina_stage_reference_image(data_url: String) -> Result<String, 
     if !data_url.starts_with("data:") {
         return Err("not a data URL".into());
     }
-    let comma = data_url.find(',').ok_or_else(|| "invalid data URL".to_string())?;
+    let comma = data_url
+        .find(',')
+        .ok_or_else(|| "invalid data URL".to_string())?;
     let payload = &data_url[comma + 1..];
 
     // base64 decode using a tiny inline decoder to avoid adding a new dep.
     let bytes = base64_decode(payload).map_err(|e| format!("base64 decode failed: {e}"))?;
 
-    let home = std::env::var_os("HOME").ok_or_else(|| "HOME not set".to_string())?;
-    let dir = std::path::PathBuf::from(home).join("Library/Application Support/open-storyboard-canvas/dreamina-staging");
+    let dir = dreamina_staging_dir().ok_or_else(|| "HOME not set".to_string())?;
     fs::create_dir_all(&dir).map_err(|e| format!("mkdir failed: {e}"))?;
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
     let file = dir.join(format!("ref-{ts}.png"));
     fs::write(&file, &bytes).map_err(|e| format!("write failed: {e}"))?;
     Ok(file.to_string_lossy().to_string())
@@ -470,10 +620,19 @@ pub async fn dreamina_network_diagnose() -> NetworkDiagnoseResult {
     // 1. DNS
     let dns = match (host, port).to_socket_addrs() {
         Ok(mut it) => match it.next() {
-            Some(addr) => NetworkStage { ok: true, detail: format!("解析到 {}", addr.ip()) },
-            None => NetworkStage { ok: false, detail: "域名无可用 IP".into() },
+            Some(addr) => NetworkStage {
+                ok: true,
+                detail: format!("解析到 {}", addr.ip()),
+            },
+            None => NetworkStage {
+                ok: false,
+                detail: "域名无可用 IP".into(),
+            },
         },
-        Err(e) => NetworkStage { ok: false, detail: format!("DNS 解析失败：{e}") },
+        Err(e) => NetworkStage {
+            ok: false,
+            detail: format!("DNS 解析失败：{e}"),
+        },
     };
     if !dns.ok {
         return NetworkDiagnoseResult {
@@ -485,15 +644,27 @@ pub async fn dreamina_network_diagnose() -> NetworkDiagnoseResult {
         };
     }
 
-    let sock_addr = (host, port).to_socket_addrs().ok().and_then(|mut it| it.next());
+    let sock_addr = (host, port)
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut it| it.next());
 
     // 2. TCP connect
     let tcp = match sock_addr {
         Some(addr) => match std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
-            Ok(_) => NetworkStage { ok: true, detail: format!("TCP 443 端口连通（{}）", addr.ip()) },
-            Err(e) => NetworkStage { ok: false, detail: format!("TCP 连接失败：{e}") },
+            Ok(_) => NetworkStage {
+                ok: true,
+                detail: format!("TCP 443 端口连通（{}）", addr.ip()),
+            },
+            Err(e) => NetworkStage {
+                ok: false,
+                detail: format!("TCP 连接失败：{e}"),
+            },
         },
-        None => NetworkStage { ok: false, detail: "DNS 结果为空".into() },
+        None => NetworkStage {
+            ok: false,
+            detail: "DNS 结果为空".into(),
+        },
     };
     if !tcp.ok {
         return NetworkDiagnoseResult {
@@ -514,13 +685,25 @@ pub async fn dreamina_network_diagnose() -> NetworkDiagnoseResult {
 
     let (tls, http) = match client_result {
         Err(e) => (
-            NetworkStage { ok: false, detail: format!("reqwest 初始化失败：{e}") },
-            NetworkStage { ok: false, detail: "未开始".into() },
+            NetworkStage {
+                ok: false,
+                detail: format!("reqwest 初始化失败：{e}"),
+            },
+            NetworkStage {
+                ok: false,
+                detail: "未开始".into(),
+            },
         ),
         Ok(c) => match c.get(format!("https://{host}/")).send().await {
             Ok(resp) => (
-                NetworkStage { ok: true, detail: "TLS 握手成功".into() },
-                NetworkStage { ok: true, detail: format!("HTTP {}", resp.status().as_u16()) },
+                NetworkStage {
+                    ok: true,
+                    detail: "TLS 握手成功".into(),
+                },
+                NetworkStage {
+                    ok: true,
+                    detail: format!("HTTP {}", resp.status().as_u16()),
+                },
             ),
             Err(e) => {
                 let err_str = format!("{e}");
@@ -534,18 +717,36 @@ pub async fn dreamina_network_diagnose() -> NetworkDiagnoseResult {
                     || e.is_connect();
                 if looks_like_tls {
                     (
-                        NetworkStage { ok: false, detail: format!("TLS 握手失败：{err_str}") },
-                        NetworkStage { ok: false, detail: "未开始（TLS 失败）".into() },
+                        NetworkStage {
+                            ok: false,
+                            detail: format!("TLS 握手失败：{err_str}"),
+                        },
+                        NetworkStage {
+                            ok: false,
+                            detail: "未开始（TLS 失败）".into(),
+                        },
                     )
                 } else if e.is_timeout() {
                     (
-                        NetworkStage { ok: false, detail: format!("请求超时：{err_str}") },
-                        NetworkStage { ok: false, detail: "未开始（超时）".into() },
+                        NetworkStage {
+                            ok: false,
+                            detail: format!("请求超时：{err_str}"),
+                        },
+                        NetworkStage {
+                            ok: false,
+                            detail: "未开始（超时）".into(),
+                        },
                     )
                 } else {
                     (
-                        NetworkStage { ok: true, detail: "TLS 握手成功".into() },
-                        NetworkStage { ok: false, detail: format!("HTTP 请求失败：{err_str}") },
+                        NetworkStage {
+                            ok: true,
+                            detail: "TLS 握手成功".into(),
+                        },
+                        NetworkStage {
+                            ok: false,
+                            detail: format!("HTTP 请求失败：{err_str}"),
+                        },
                     )
                 }
             }
@@ -560,7 +761,13 @@ pub async fn dreamina_network_diagnose() -> NetworkDiagnoseResult {
         "网络通畅。若即梦生图仍失败，可能是账号积分不足或账号被限流；请在网页端登录核对。".into()
     };
 
-    NetworkDiagnoseResult { dns, tcp, tls, http, overall_advice }
+    NetworkDiagnoseResult {
+        dns,
+        tcp,
+        tls,
+        http,
+        overall_advice,
+    }
 }
 
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {

@@ -1054,13 +1054,13 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
     const latestNodeData = latestNode?.data as StoryboardGenNodeData | undefined;
     const latestNodeModelConfig = latestNodeData?.modelConfig ?? nodeModelConfig ?? null;
     const resolved = resolveActiveModelForPanel('storyboardGenNode', latestNodeModelConfig);
-    if (resolved.entryId.startsWith('custom:') && resolved.requiresApiKey && !resolved.apiKey) {
-      const errorMessage = `自定义服务商「${resolved.providerLabel}」未填写 API Key`;
+    if ((resolved.entryId.startsWith('custom:') || resolved.entryId.startsWith('agnes:')) && resolved.requiresApiKey && !resolved.apiKey) {
+      const errorMessage = `服务商「${resolved.providerLabel}」未填写 API Key`;
       setError(errorMessage);
       void showErrorDialog(errorMessage, '错误');
       return;
     }
-    if (!resolved.entryId.startsWith('dreamina:') && !resolved.entryId.startsWith('custom:')) {
+    if (!resolved.entryId.startsWith('dreamina:') && !resolved.entryId.startsWith('custom:') && !resolved.entryId.startsWith('agnes:')) {
       const errorMessage = '请先在「设置 → 我的配置」里添加至少一个服务商，或在「Dreamina」里登录 CLI 后再生成。';
       setError(errorMessage);
       void showErrorDialog(errorMessage, '错误');

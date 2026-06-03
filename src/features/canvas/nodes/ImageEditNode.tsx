@@ -602,13 +602,13 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     // dispatch instead of the old `selectedModel.resolveRequest(...)` path.
     const latestNodeModelConfig = latestData.modelConfig ?? nodeModelConfig ?? null;
     const resolved = resolveActiveModelForPanel('aiImageNode', latestNodeModelConfig);
-    if (resolved.entryId.startsWith('custom:') && resolved.requiresApiKey && !resolved.apiKey) {
-      const msg = `自定义服务商「${resolved.providerLabel}」未填写 API Key`;
+    if ((resolved.entryId.startsWith('custom:') || resolved.entryId.startsWith('agnes:')) && resolved.requiresApiKey && !resolved.apiKey) {
+      const msg = `服务商「${resolved.providerLabel}」未填写 API Key`;
       setError(msg);
       void showErrorDialog(msg, t('common.error'));
       return;
     }
-    if (!resolved.entryId.startsWith('dreamina:') && !resolved.entryId.startsWith('custom:')) {
+    if (!resolved.entryId.startsWith('dreamina:') && !resolved.entryId.startsWith('custom:') && !resolved.entryId.startsWith('agnes:')) {
       // Fallback: no custom provider configured and no Dreamina login. Prompt
       // the user to set one up in 我的配置.
       const msg = '请先在「设置 → 我的配置」里添加至少一个服务商，或在「Dreamina」里登录 CLI 后再生成。';

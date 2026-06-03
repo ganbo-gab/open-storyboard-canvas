@@ -9,6 +9,8 @@ import { persist } from 'zustand/middleware';
 export interface CustomProviderConfig {
   id: string;
   label: string;
+  /** Persisted configuration target. Missing means legacy image config. */
+  mediaType?: 'image' | 'video';
   baseUrl: string;
   /** Concrete endpoint path appended to baseUrl. Different vendors wildly
    *  disagree — some use /images/generations, some /create, some /v1/chat/completions.
@@ -40,6 +42,21 @@ export interface CustomProviderConfig {
   supportedModelVersions?: string[];
   extraParams?: Record<string, unknown>;
   note?: string;
+}
+
+function customProviderMediaType(provider: Pick<CustomProviderConfig, 'mediaType' | 'extraParams'>): 'image' | 'video' {
+  if (provider.mediaType === 'video' || provider.extraParams?.mediaType === 'video') {
+    return 'video';
+  }
+  return 'image';
+}
+
+export function isVideoCustomProvider(provider: Pick<CustomProviderConfig, 'mediaType' | 'extraParams'>): boolean {
+  return customProviderMediaType(provider) === 'video';
+}
+
+export function isImageCustomProvider(provider: Pick<CustomProviderConfig, 'mediaType' | 'extraParams'>): boolean {
+  return customProviderMediaType(provider) === 'image';
 }
 
 interface CustomProvidersState {
@@ -84,6 +101,31 @@ export interface CustomProviderPreset {
   template: Omit<CustomProviderConfig, 'id' | 'apiKey'>;
 }
 
+export const OPENAI_VIDEO_PROVIDER_DEFAULTS = {
+  baseUrl: 'https://api.openai.com',
+  endpointPath: '/v1/videos',
+  modelListEndpointPath: '/v1/models',
+  contentEndpointPath: '/v1/videos/{taskId}/content',
+  statusEndpointPath: '/v1/videos/{taskId}',
+} as const;
+
+export const AGNES_PROVIDER_DEFAULTS = {
+  baseUrl: 'https://apihub.agnes-ai.com/v1',
+  imageEndpointPath: '/images/generations',
+  videoEndpointPath: '/videos',
+  videoStatusEndpointPath: '/videos/{taskId}',
+  modelListEndpointPath: '/models',
+  imageResolutions: ['1k', '2k', '1024x1024', '1536x1024', '1024x1536', 'auto'],
+  videoResolutions: ['1k', '2k', '1280x720', '720x1280', '1024x1024'],
+  models: {
+    image12: 'agnes-image-1.2',
+    image21Flash: 'agnes-image-2.1-flash',
+    image20Flash: 'agnes-image-2.0-flash',
+    video20: 'agnes-video-v2.0',
+    video12: 'agnes-video-v1.2',
+  },
+} as const;
+
 export const CUSTOM_PROVIDER_PRESETS: CustomProviderPreset[] = [
   {
     key: 'openai_images',
@@ -101,6 +143,98 @@ export const CUSTOM_PROVIDER_PRESETS: CustomProviderPreset[] = [
       supportsWebSearch: false,
       supportedResolutions: ['1024x1024', '1536x1024', '1024x1536', 'auto'],
       note: '标准 OpenAI Images 格式，通常可直接使用；图生图/编辑需确认上游是否支持 image 字段。',
+    },
+  },
+  {
+    key: 'openai_videos',
+    label: 'OpenAI Videos 兼容',
+    hint: 'Sora / Videos API：提交视频任务、轮询、下载 mp4',
+    template: {
+      label: 'OpenAI Videos',
+      mediaType: 'video',
+      baseUrl: OPENAI_VIDEO_PROVIDER_DEFAULTS.baseUrl,
+      endpointPath: OPENAI_VIDEO_PROVIDER_DEFAULTS.endpointPath,
+      modelListEndpointPath: OPENAI_VIDEO_PROVIDER_DEFAULTS.modelListEndpointPath,
+      httpMethod: 'POST',
+      apiStyle: 'openai-compatible',
+      responseFormat: 'generic',
+      models: ['sora-2', 'sora-2-pro'],
+      supportsWebSearch: false,
+      supportedResolutions: ['1280x720', '720x1280', '1024x1024'],
+      extraParams: {
+        mediaType: 'video',
+        supportedRatios: ['16:9', '9:16', '1:1'],
+        requestBodyMode: 'multipart',
+        videoStatusEndpointPath: OPENAI_VIDEO_PROVIDER_DEFAULTS.statusEndpointPath,
+        videoContentEndpointPath: OPENAI_VIDEO_PROVIDER_DEFAULTS.contentEndpointPath,
+        videoReferenceField: 'input_reference',
+        defaultRequestParams: {
+          seconds: 8,
+        },
+      },
+      note: 'OpenAI Videos API 兼容路线：multipart/form-data 提交 model/prompt/size/seconds/input_reference，GET /v1/videos/{id} 轮询，完成后 GET /v1/videos/{id}/content 下载视频。官方文档当前标注 Sora 2 Videos API 将在 2026-09-24 关闭，保留此预设用于兼容。',
+    },
+  },
+  {
+    key: 'agnes_image_flash',
+    label: 'Agnes Image Flash',
+    hint: 'Agnes image 2.1 / 2.0 flash，可按文档修正 endpoint',
+    template: {
+      label: 'Agnes Image',
+      mediaType: 'image',
+      baseUrl: AGNES_PROVIDER_DEFAULTS.baseUrl,
+      endpointPath: AGNES_PROVIDER_DEFAULTS.imageEndpointPath,
+      modelListEndpointPath: AGNES_PROVIDER_DEFAULTS.modelListEndpointPath,
+      httpMethod: 'POST',
+      apiStyle: 'openai-compatible',
+      responseFormat: 'openai-images',
+      models: [AGNES_PROVIDER_DEFAULTS.models.image21Flash, AGNES_PROVIDER_DEFAULTS.models.image20Flash, AGNES_PROVIDER_DEFAULTS.models.image12],
+      supportsWebSearch: false,
+      supportedResolutions: [...AGNES_PROVIDER_DEFAULTS.imageResolutions],
+      extraParams: {
+        providerConfigVersion: 'new-v1',
+        providerKind: 'openai-images',
+        supportedRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4'],
+      },
+      note: 'Agnes 官方网关：Base URL https://apihub.agnes-ai.com/v1，POST /images/generations，Bearer 鉴权，OpenAI Images-compatible data[].url 响应。',
+    },
+  },
+  {
+    key: 'agnes_video',
+    label: 'Agnes Video v2.0',
+    hint: 'Agnes JSON async video，可按文档修正参数',
+    template: {
+      label: 'Agnes Video',
+      mediaType: 'video',
+      baseUrl: AGNES_PROVIDER_DEFAULTS.baseUrl,
+      endpointPath: AGNES_PROVIDER_DEFAULTS.videoEndpointPath,
+      modelListEndpointPath: AGNES_PROVIDER_DEFAULTS.modelListEndpointPath,
+      httpMethod: 'POST',
+      apiStyle: 'openai-compatible',
+      responseFormat: 'generic',
+      models: [AGNES_PROVIDER_DEFAULTS.models.video20, AGNES_PROVIDER_DEFAULTS.models.video12],
+      supportsWebSearch: false,
+      supportedResolutions: [...AGNES_PROVIDER_DEFAULTS.videoResolutions],
+      extraParams: {
+        mediaType: 'video',
+        supportedRatios: ['16:9', '9:16', '1:1'],
+        providerKind: 'agnes-video',
+        requestComposer: 'video-agnes-json',
+        videoRequestBodyMode: 'json',
+        videoTaskIdPath: 'task_id',
+        videoStatusEndpointPath: AGNES_PROVIDER_DEFAULTS.videoStatusEndpointPath,
+        responseVideoPath: 'video_url',
+        videoStatusPath: 'status',
+        videoSuccessValues: ['completed'],
+        videoFailedValues: ['failed'],
+        videoReferenceField: 'image',
+        videoPollTimeoutMs: 15 * 60 * 1000,
+        defaultRequestParams: {
+          frame_rate: 24,
+          negative_prompt: '',
+        },
+      },
+      note: 'Agnes 官方文档为 JSON 异步视频：POST /videos 返回 task_id，GET /videos/{task_id} 返回 status 与 video_url。',
     },
   },
   {
@@ -534,6 +668,7 @@ export const CUSTOM_PROVIDER_TUTORIAL_PROMPT = `\
 1. 只输出纯 JSON，不要任何解释、markdown 包装或 \`\`\` 代码块。
 2. 必须由你判断最合适的 templateKey，不要让我选择模板。先判断接口形态，再选模板。可选值和判断规则：
    - openai_images：OpenAI 官方 Images API。
+   - openai_videos：OpenAI 官方 / 兼容 Videos API，通常是 /v1/videos，multipart/form-data 提交后轮询并下载视频。
    - openai_proxy：兼容 OpenAI Images API 的中转、代理、聚合器，通常是 /v1/images/generations，返回 data[].url 或 data[].b64_json。
    - openai_chat_image：通过 /v1/chat/completions 或兼容 Chat Completions 生成图片的模型。
    - openai_responses_image：通过 /v1/responses + image_generation 工具生成图片。
@@ -551,7 +686,7 @@ export const CUSTOM_PROVIDER_TUTORIAL_PROMPT = `\
    - manual：资料不足或完全无法判断。
 3. 字段严格按这个结构，缺失的就用空字符串 / 空数组 / 空对象：
 {
-  "templateKey": "openai_images | openai_proxy | openai_chat_image | openai_responses_image | grsai_draw_async | fal | fal_queue_async | replicate_prediction_async | generic_async_poll | volc_jimeng | stability | multipart_proxy_required | form_urlencoded | signed_proxy_required | generic_json | manual",
+  "templateKey": "openai_images | openai_videos | openai_proxy | openai_chat_image | openai_responses_image | grsai_draw_async | fal | fal_queue_async | replicate_prediction_async | generic_async_poll | volc_jimeng | stability | multipart_proxy_required | form_urlencoded | signed_proxy_required | generic_json | manual",
   "templateReason": "为什么选择这个模板，说明接口属于同步 OpenAI / 异步轮询 / multipart / 签名代理等哪一类",
   "compatibility": {
     "canDirectCall": true,
@@ -614,9 +749,9 @@ export const CUSTOM_PROVIDER_TUTORIAL_PROMPT = `\
   },
   "note": "一句话描述本服务商的注意事项、鉴权限制、是否需要轮询、是否需要 multipart/form-data 或 x-www-form-urlencoded"
 }
-4. templateKey 和 apiStyle / endpointPath / responseFormat / extraParams 要互相匹配：例如 templateKey=openai_proxy 时，通常 apiStyle=openai-compatible、endpointPath=/images/generations、responseFormat=openai-images。
+4. templateKey 和 apiStyle / endpointPath / responseFormat / extraParams 要互相匹配：例如 templateKey=openai_proxy 时，通常 apiStyle=openai-compatible、endpointPath=/images/generations、responseFormat=openai-images；templateKey=openai_videos 时，通常 mediaType=video、apiStyle=openai-compatible、endpointPath=/v1/videos、requestBodyMode=multipart、responseFormat=generic。
 5. 如果文档里有多个可用于图像生成/编辑的模型，models 数组尽量只列图像相关模型；不要把纯文本、embedding、语音模型混进去。
-6. apiStyle 选最接近的一个：OpenAI Images / 兼容中转选 openai-compatible；Fal.ai 选 fal；Replicate 选 replicate；Stability AI 选 stability；火山引擎方舟/即梦选 volcengine；完全不匹配就选 generic-json。
+6. apiStyle 选最接近的一个：OpenAI Images / Videos / 兼容中转选 openai-compatible；Fal.ai 选 fal；Replicate 选 replicate；Stability AI 选 stability；火山引擎方舟/即梦选 volcengine；完全不匹配就选 generic-json。
 7. responseFormat：返回是 OpenAI Images 格式（含 data[].url / b64_json）→ openai-images；返回是纯 url 数组 → url-array；返回 base64/dataurl 字符串 → data-url；完全不规则 → generic。
 8. supportedRatios：列出该服务商真实支持的生图比例；若没限制或接口参数叫「智能」「自动」等则首项填 "auto"。
 9. supportedResolutions：只要文档、模型页或 cURL 示例里出现 size / resolution / quality / output_resolution / image_size 等字段，就提取成可选项，例如 ["auto", "1024x1024", "1536x1024", "1K", "2K"]；确实完全没有才留空数组。

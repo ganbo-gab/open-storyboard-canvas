@@ -1,4 +1,5 @@
 import type { CustomProviderConfig } from '@/stores/customProvidersStore';
+import { isImageCustomProvider } from '@/stores/customProvidersStore';
 import {
   getConfiguredApiKeyCount,
   type ProviderApiKeys,
@@ -74,7 +75,9 @@ export function getConfiguredImageProviderCount({
   dreaminaStatus,
 }: ProviderAvailabilityInput): number {
   const builtInCount = getConfiguredApiKeyCount(apiKeys, builtInProviderIds);
-  const customCount = customProviders.filter(hasConfiguredCustomProvider).length;
+  const customCount = customProviders.filter((provider) => (
+    isImageCustomProvider(provider) && hasConfiguredCustomProvider(provider)
+  )).length;
   const dreaminaCount = dreaminaStatus?.loggedIn ? 1 : 0;
 
   return builtInCount + customCount + dreaminaCount;

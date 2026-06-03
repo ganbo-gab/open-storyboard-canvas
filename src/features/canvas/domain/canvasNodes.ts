@@ -3,7 +3,9 @@ import type { Edge, Node, XYPosition } from '@xyflow/react';
 export const CANVAS_NODE_TYPES = {
   upload: 'uploadNode',
   imageEdit: 'imageNode',
+  aiVideo: 'aiVideoNode',
   exportImage: 'exportImageNode',
+  video: 'videoNode',
   textAnnotation: 'textAnnotationNode',
   group: 'groupNode',
   storyboardSplit: 'storyboardNode',
@@ -62,6 +64,16 @@ export interface ExportImageNodeData extends NodeImageData {
   batchId?: string;
   batchIndex?: number;
   batchTotal?: number;
+  isGenerating?: boolean;
+  generationStartedAt?: number | null;
+  generationDurationMs?: number;
+  generationJobId?: string | null;
+  generationProviderId?: string | null;
+  generationClientSessionId?: string | null;
+  generationError?: string | null;
+  generationErrorDetails?: string | null;
+  generationDebugContext?: unknown;
+  generationRetryResultUrl?: string | null;
 }
 
 export interface GroupNodeData extends NodeDisplayData {
@@ -101,6 +113,43 @@ export interface ImageEditNodeData extends NodeImageData {
   /** Optional settings prompt preset selected from the node toolbar. Mutually
    *  exclusive with selectedFunctionChip and resolved by id at submit time. */
   selectedPromptPresetId?: string | null;
+}
+
+export interface AiVideoNodeData extends NodeDisplayData {
+  prompt: string;
+  modelConfig?: {
+    entryId: string;
+    duration: string;
+    resolution: string;
+    aspectRatio?: string;
+    extraParams?: Record<string, unknown>;
+  };
+  extraParams?: Record<string, unknown>;
+  isGenerating?: boolean;
+  generationStartedAt?: number | null;
+  generationDurationMs?: number;
+  generationJobId?: string;
+}
+
+export interface VideoNodeData extends NodeDisplayData {
+  videoUrl: string | null;
+  localVideoUrl?: string | null;
+  thumbnailUrl?: string | null;
+  aspectRatio: string;
+  durationSeconds?: number | null;
+  isGenerating?: boolean;
+  generationStartedAt?: number | null;
+  generationDurationMs?: number;
+  generationJobId?: string | null;
+  generationProviderId?: string | null;
+  generationClientSessionId?: string | null;
+  generationError?: string | null;
+  generationErrorDetails?: string | null;
+  generationDebugContext?: unknown;
+  generationRetryResultUrl?: string | null;
+  sourcePrompt?: string;
+  sourceReferenceCount?: number;
+  [key: string]: unknown;
 }
 
 export interface CameraControlOptions {
@@ -191,6 +240,15 @@ export interface PanoramaNodeData extends NodeDisplayData {
   initialPitch?: number;
   initialFov?: number;
   isGenerating?: boolean;
+  generationStartedAt?: number | null;
+  generationDurationMs?: number;
+  generationJobId?: string | null;
+  generationProviderId?: string | null;
+  generationClientSessionId?: string | null;
+  generationError?: string | null;
+  generationErrorDetails?: string | null;
+  generationDebugContext?: unknown;
+  generationRetryResultUrl?: string | null;
   [key: string]: unknown;
 }
 
@@ -422,9 +480,11 @@ export interface BlueprintNodeData extends NodeDisplayData {
 export type CanvasNodeData =
   | UploadImageNodeData
   | ExportImageNodeData
+  | VideoNodeData
   | TextAnnotationNodeData
   | GroupNodeData
   | ImageEditNodeData
+  | AiVideoNodeData
   | StoryboardSplitNodeData
   | StoryboardGenNodeData
   | PanoramaNodeData
@@ -484,10 +544,22 @@ export function isImageEditNode(
   return node?.type === CANVAS_NODE_TYPES.imageEdit;
 }
 
+export function isAiVideoNode(
+  node: CanvasNode | null | undefined
+): node is Node<AiVideoNodeData, typeof CANVAS_NODE_TYPES.aiVideo> {
+  return node?.type === CANVAS_NODE_TYPES.aiVideo;
+}
+
 export function isExportImageNode(
   node: CanvasNode | null | undefined
 ): node is Node<ExportImageNodeData, typeof CANVAS_NODE_TYPES.exportImage> {
   return node?.type === CANVAS_NODE_TYPES.exportImage;
+}
+
+export function isVideoNode(
+  node: CanvasNode | null | undefined
+): node is Node<VideoNodeData, typeof CANVAS_NODE_TYPES.video> {
+  return node?.type === CANVAS_NODE_TYPES.video;
 }
 
 export function isGroupNode(

@@ -1,9 +1,11 @@
 export type SettingsCategory =
   | 'providers'
+  | 'providersAdd'
   | 'providersNew'
   | 'providersOld'
   | 'customProviders'
   | 'dreamina'
+  | 'agnes'
   | 'promptManagement'
   | 'promptPresets'
   | 'appearance'

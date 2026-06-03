@@ -105,7 +105,8 @@ impl FalProvider {
             .and_then(|raw| raw.as_str())
             .map(|raw| raw.to_string());
 
-        let model_path = model_path_from_metadata.unwrap_or_else(|| FAL_NANO_BANANA_2_T2I_MODEL_PATH.to_string());
+        let model_path = model_path_from_metadata
+            .unwrap_or_else(|| FAL_NANO_BANANA_2_T2I_MODEL_PATH.to_string());
         let status_endpoint = format!(
             "{}/{}/requests/{}/status",
             FAL_QUEUE_BASE_URL, model_path, request_id
@@ -114,7 +115,8 @@ impl FalProvider {
             "{}/{}/requests/{}",
             FAL_QUEUE_BASE_URL, model_path, request_id
         );
-        let fallback_status_endpoint = format!("{}/requests/{}/status", FAL_QUEUE_BASE_URL, request_id);
+        let fallback_status_endpoint =
+            format!("{}/requests/{}/status", FAL_QUEUE_BASE_URL, request_id);
         let fallback_result_endpoint = format!("{}/requests/{}", FAL_QUEUE_BASE_URL, request_id);
 
         let mut status_endpoints = Vec::new();
@@ -171,7 +173,10 @@ impl AIProvider for FalProvider {
         true
     }
 
-    async fn submit_task(&self, request: GenerateRequest) -> Result<ProviderTaskSubmission, AIError> {
+    async fn submit_task(
+        &self,
+        request: GenerateRequest,
+    ) -> Result<ProviderTaskSubmission, AIError> {
         let api_key = self
             .api_key
             .read()
@@ -211,7 +216,11 @@ impl AIProvider for FalProvider {
             "enable_web_search": enable_web_search
         });
 
-        if let Some(reference_images) = request.reference_images.as_ref().filter(|images| !images.is_empty()) {
+        if let Some(reference_images) = request
+            .reference_images
+            .as_ref()
+            .filter(|images| !images.is_empty())
+        {
             input["image_urls"] = json!(reference_images);
         }
 
@@ -248,12 +257,13 @@ impl AIProvider for FalProvider {
         }
 
         let submit_raw = submit_response.text().await.unwrap_or_default();
-        let submit_body = serde_json::from_str::<FalSubmitResponse>(&submit_raw).map_err(|err| {
-            AIError::Provider(format!(
-                "FAL submit invalid JSON response: {}; raw={}",
-                err, submit_raw
-            ))
-        })?;
+        let submit_body =
+            serde_json::from_str::<FalSubmitResponse>(&submit_raw).map_err(|err| {
+                AIError::Provider(format!(
+                    "FAL submit invalid JSON response: {}; raw={}",
+                    err, submit_raw
+                ))
+            })?;
 
         Ok(ProviderTaskSubmission::Queued(ProviderTaskHandle {
             task_id: submit_body.request_id,
@@ -265,7 +275,10 @@ impl AIProvider for FalProvider {
         }))
     }
 
-    async fn poll_task(&self, handle: ProviderTaskHandle) -> Result<ProviderTaskPollResult, AIError> {
+    async fn poll_task(
+        &self,
+        handle: ProviderTaskHandle,
+    ) -> Result<ProviderTaskPollResult, AIError> {
         let api_key = self
             .api_key
             .read()
@@ -361,7 +374,10 @@ impl AIProvider for FalProvider {
                 "FAL task ended with status {}",
                 status_body.status
             ))),
-            other => Err(AIError::Provider(format!("FAL unexpected status: {}", other))),
+            other => Err(AIError::Provider(format!(
+                "FAL unexpected status: {}",
+                other
+            ))),
         }
     }
 
@@ -377,7 +393,9 @@ impl AIProvider for FalProvider {
                     sleep(Duration::from_millis(POLL_INTERVAL_MS)).await;
                 }
                 ProviderTaskPollResult::Succeeded(url) => return Ok(url),
-                ProviderTaskPollResult::Failed(message) => return Err(AIError::TaskFailed(message)),
+                ProviderTaskPollResult::Failed(message) => {
+                    return Err(AIError::TaskFailed(message))
+                }
             }
         }
     }

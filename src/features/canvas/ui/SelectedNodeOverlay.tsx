@@ -237,8 +237,8 @@ export const SelectedNodeOverlay = memo(() => {
       await showErrorDialog(`「${resolved.providerLabel}」模型缺少 API Key，请先在设置中配置`, '错误');
       return;
     }
-    if (resolved.entryId.startsWith('custom:') && resolved.requiresApiKey && !resolved.apiKey) {
-      await showErrorDialog(`自定义服务商「${resolved.providerLabel}」未填写 API Key`, '错误');
+    if ((resolved.entryId.startsWith('custom:') || resolved.entryId.startsWith('agnes:')) && resolved.requiresApiKey && !resolved.apiKey) {
+      await showErrorDialog(`服务商「${resolved.providerLabel}」未填写 API Key`, '错误');
       return;
     }
 
@@ -340,7 +340,7 @@ export const SelectedNodeOverlay = memo(() => {
       await showErrorDialog(t('promptPresetPanel.errors.noModel'), t('common.error'));
       return;
     }
-    if (resolved.entryId.startsWith('custom:') && resolved.requiresApiKey && !resolved.apiKey) {
+    if ((resolved.entryId.startsWith('custom:') || resolved.entryId.startsWith('agnes:')) && resolved.requiresApiKey && !resolved.apiKey) {
       await showErrorDialog(
         t('promptPresetPanel.errors.missingCustomApiKey', { provider: resolved.providerLabel }),
         t('common.error'),
@@ -505,8 +505,8 @@ export const SelectedNodeOverlay = memo(() => {
       await showErrorDialog(`「${resolved.providerLabel}」模型缺少 API Key，请先在设置中配置`, '错误');
       return;
     }
-    if (resolved.entryId.startsWith('custom:') && resolved.requiresApiKey && !resolved.apiKey) {
-      await showErrorDialog(`自定义服务商「${resolved.providerLabel}」未填写 API Key`, '错误');
+    if ((resolved.entryId.startsWith('custom:') || resolved.entryId.startsWith('agnes:')) && resolved.requiresApiKey && !resolved.apiKey) {
+      await showErrorDialog(`服务商「${resolved.providerLabel}」未填写 API Key`, '错误');
       return;
     }
 
@@ -614,7 +614,7 @@ export const SelectedNodeOverlay = memo(() => {
       );
       return;
     }
-    if (resolved.entryId.startsWith('custom:') && resolved.requiresApiKey && !resolved.apiKey) {
+    if ((resolved.entryId.startsWith('custom:') || resolved.entryId.startsWith('agnes:')) && resolved.requiresApiKey && !resolved.apiKey) {
       await showErrorDialog(
         t('directorStudio.overlay.missingCustomApiKey', { provider: resolved.providerLabel }),
         t('common.error'),
@@ -738,7 +738,9 @@ export const SelectedNodeOverlay = memo(() => {
           offset={shouldCollapseActionToolbar ? EXPANDED_ACTION_TOOLBAR_OFFSET : undefined}
         />
       )}
-      {selectedNodeToolbarMode === 'deleteOnly' && <NodeDeleteToolbar nodeId={selectedNode.id} />}
+      {selectedNodeToolbarMode === 'deleteOnly' && (
+        <NodeDeleteToolbar nodeId={selectedNode.id} node={selectedNode} />
+      )}
 
       {/* Global panel rendering — works for all node types */}
       {panelState.isOpen && panelState.anchor && liveButtonRect && (

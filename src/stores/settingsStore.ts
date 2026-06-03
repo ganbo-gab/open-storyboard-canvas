@@ -43,6 +43,7 @@ export interface PromptPreset {
 interface SettingsState {
   isHydrated: boolean;
   apiKeys: ProviderApiKeys;
+  agnesApiKey: string;
   grsaiNanoBananaProModel: string;
   hideProviderGuidePopover: boolean;
   downloadPresetPaths: string[];
@@ -73,6 +74,7 @@ interface SettingsState {
   /** Per-panel memory of the model/provider/ratio picker selection. */
   lastModelConfigByPanel?: Record<string, { entryId: string; ratio: string; extraParams?: Record<string, unknown> } | undefined>;
   setProviderApiKey: (providerId: string, key: string) => void;
+  setAgnesApiKey: (key: string) => void;
   setGrsaiNanoBananaProModel: (model: string) => void;
   setHideProviderGuidePopover: (hide: boolean) => void;
   setDownloadPresetPaths: (paths: string[]) => void;
@@ -368,6 +370,7 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       isHydrated: false,
       apiKeys: {},
+      agnesApiKey: '',
       grsaiNanoBananaProModel: DEFAULT_GRSAI_NANO_BANANA_PRO_MODEL,
       hideProviderGuidePopover: false,
       downloadPresetPaths: [],
@@ -402,6 +405,7 @@ export const useSettingsStore = create<SettingsState>()(
             [providerId]: normalizeApiKey(key),
           },
         })),
+      setAgnesApiKey: (key) => set({ agnesApiKey: normalizeApiKey(key) }),
       setGrsaiNanoBananaProModel: (model) =>
         set({
           grsaiNanoBananaProModel: normalizeGrsaiNanoBananaProModel(model),
@@ -626,6 +630,7 @@ export const useSettingsStore = create<SettingsState>()(
         const state = (persistedState ?? {}) as {
           apiKey?: string;
           apiKeys?: ProviderApiKeys;
+          agnesApiKey?: string;
           ignoreAtTagWhenCopyingAndGenerating?: boolean;
           appendParameterConstraintsToPrompt?: boolean;
           collapseNodeActionToolbarByDefault?: boolean;
@@ -681,6 +686,7 @@ export const useSettingsStore = create<SettingsState>()(
             ...persistedWithoutPricing,
             isHydrated: true,
             apiKeys: migratedApiKeys,
+            agnesApiKey: normalizeApiKey(state.agnesApiKey ?? ''),
             ignoreAtTagWhenCopyingAndGenerating,
             appendParameterConstraintsToPrompt,
             collapseNodeActionToolbarByDefault,
@@ -714,6 +720,7 @@ export const useSettingsStore = create<SettingsState>()(
           ...persistedWithoutPricing,
           isHydrated: true,
           apiKeys: state.apiKey ? { ppio: normalizeApiKey(state.apiKey) } : {},
+          agnesApiKey: normalizeApiKey(state.agnesApiKey ?? ''),
           ignoreAtTagWhenCopyingAndGenerating,
           appendParameterConstraintsToPrompt,
           collapseNodeActionToolbarByDefault,

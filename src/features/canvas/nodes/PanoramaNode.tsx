@@ -486,8 +486,8 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
       await showErrorDialog(t('directorStudio.importErrors.noModel'), t('common.error'));
       return;
     }
-    if (resolved.entryId.startsWith('custom:') && resolved.requiresApiKey && !resolved.apiKey) {
-      await showErrorDialog(`自定义服务商「${resolved.providerLabel}」未填写 API Key`, '错误');
+    if ((resolved.entryId.startsWith('custom:') || resolved.entryId.startsWith('agnes:')) && resolved.requiresApiKey && !resolved.apiKey) {
+      await showErrorDialog(`服务商「${resolved.providerLabel}」未填写 API Key`, '错误');
       return;
     }
     if (resolved.builtinModel && !resolved.apiKey) {

@@ -10,5 +10,6 @@ export const canvasEventBus = new InMemoryCanvasEventBus();
 export const canvasNodeFactory = new CanvasNodeFactory(uuidGenerator, nodeCatalog);
 export const canvasToolProcessor = new CanvasToolProcessor(tauriImageSplitGateway, uuidGenerator, tauriAiGateway);
 export const canvasAiGateway = tauriAiGateway;
+export const canvasVideoGateway = tauriAiGateway;
 
 export { graphImageResolver } from './graphImageResolver';

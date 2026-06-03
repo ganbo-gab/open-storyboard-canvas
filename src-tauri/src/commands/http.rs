@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::multipart::{Form, Part};
 use serde::{Deserialize, Serialize};
@@ -77,7 +77,11 @@ fn parse_data_url(value: &str) -> Result<(Vec<u8>, Option<String>), String> {
         .next()
         .filter(|item| !item.trim().is_empty())
         .map(|item| item.trim().to_string());
-    if !metadata.to_ascii_lowercase().split(';').any(|part| part == "base64") {
+    if !metadata
+        .to_ascii_lowercase()
+        .split(';')
+        .any(|part| part == "base64")
+    {
         return Err("multipart file dataUrl must be base64 encoded".to_string());
     }
     let bytes = BASE64_STANDARD
@@ -87,10 +91,18 @@ fn parse_data_url(value: &str) -> Result<(Vec<u8>, Option<String>), String> {
 }
 
 fn decode_multipart_file(file: &MultipartFileDto) -> Result<(Vec<u8>, Option<String>), String> {
-    if let Some(data_url) = file.data_url.as_deref().filter(|value| !value.trim().is_empty()) {
+    if let Some(data_url) = file
+        .data_url
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
         return parse_data_url(data_url);
     }
-    if let Some(base64) = file.base64.as_deref().filter(|value| !value.trim().is_empty()) {
+    if let Some(base64) = file
+        .base64
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
         let bytes = BASE64_STANDARD
             .decode(base64.trim())
             .map_err(|err| format!("multipart file base64 decode failed: {err}"))?;
@@ -138,10 +150,7 @@ fn build_multipart_form(body: MultipartBodyDto) -> Result<Form, String> {
 }
 
 fn normalize_body_mode(value: Option<&str>) -> String {
-    let token = value
-        .unwrap_or("json")
-        .trim()
-        .to_ascii_lowercase();
+    let token = value.unwrap_or("json").trim().to_ascii_lowercase();
     match token.as_str() {
         "json" => "json".to_string(),
         "multipart" | "multipart/form-data" => "multipart".to_string(),
@@ -155,7 +164,8 @@ fn normalize_body_mode(value: Option<&str>) -> String {
         _ if token.contains("x-www-form-urlencoded")
             || token.contains("form-urlencoded")
             || token.contains("form-url-encoded")
-            || token.contains("urlencoded") => {
+            || token.contains("urlencoded") =>
+        {
             "form-urlencoded".to_string()
         }
         _ => token,

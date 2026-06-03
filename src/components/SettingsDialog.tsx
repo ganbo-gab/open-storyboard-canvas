@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { X, FolderOpen, Plus, Trash2, Copy, CheckCircle2, ExternalLink } from 'lucide-react';
+import { X, FolderOpen, Plus, Trash2, CheckCircle2, ExternalLink } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -11,11 +11,11 @@ import { useDialogTransition } from '@/components/ui/useDialogTransition';
 import { listModelProviders } from '@/features/canvas/models';
 import type { SettingsCategory } from '@/features/settings/settingsEvents';
 import { CustomProvidersSection } from '@/components/settings/CustomProvidersSection';
-import { ModernProvidersSection } from '@/components/settings/ModernProvidersSection';
+import { AddProvidersSection, type AddProviderTab } from '@/components/settings/AddProvidersSection';
+import { AgnesSettingsSection } from '@/components/settings/AgnesSettingsSection';
 import { DreaminaSection } from '@/components/settings/DreaminaSection';
 import { PromptManagementSection } from '@/components/settings/PromptManagementSection';
 import { PromptPresetsSection } from '@/components/settings/PromptPresetsSection';
-import { CUSTOM_PROVIDER_TUTORIAL_PROMPT } from '@/stores/customProvidersStore';
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -47,7 +47,17 @@ const PROJECT_REPOSITORY_URL = 'https://github.com/ganbo-gab/open-storyboard-can
 const ORIGINAL_PROJECT_URL = 'https://github.com/henjicc/Storyboard-Copilot';
 
 function normalizeSettingsCategory(category: SettingsCategory): SettingsCategory {
-  return category === 'providers' ? 'providersNew' : category;
+  if (category === 'providers' || category === 'providersNew' || category === 'providersOld') {
+    return 'providersAdd';
+  }
+  return category;
+}
+
+function providerTabFromSettingsCategory(category: SettingsCategory): AddProviderTab {
+  if (category === 'providersOld') {
+    return 'imageOld';
+  }
+  return 'imageNew';
 }
 
 function SettingsCheckboxCard({
@@ -144,6 +154,9 @@ export function SettingsDialog({
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>(
     normalizeSettingsCategory(initialCategory)
   );
+  const [activeProviderAddTab, setActiveProviderAddTab] = useState<AddProviderTab>(
+    providerTabFromSettingsCategory(initialCategory)
+  );
   const [appVersion, setAppVersion] = useState<string>('');
   const [localApiKeys, setLocalApiKeys] = useState<Record<string, string>>(apiKeys);
   const [localGrsaiNanoBananaProModel, setLocalGrsaiNanoBananaProModel] = useState(
@@ -185,7 +198,6 @@ export function SettingsDialog({
   );
   const [localEnableUpdateDialog, setLocalEnableUpdateDialog] = useState(enableUpdateDialog);
   const [checkUpdateStatus, setCheckUpdateStatus] = useState<'' | 'checking' | 'has-update' | 'up-to-date' | 'failed'>('');
-  const [tutorialPromptCopied, setTutorialPromptCopied] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const { shouldRender, isVisible } = useDialogTransition(isOpen, UI_DIALOG_TRANSITION_MS);
 
@@ -245,6 +257,7 @@ export function SettingsDialog({
     }
 
     setActiveCategory(normalizeSettingsCategory(initialCategory));
+    setActiveProviderAddTab(providerTabFromSettingsCategory(initialCategory));
   }, [initialCategory, isOpen]);
 
   const handleSave = useCallback(() => {
@@ -416,31 +429,17 @@ export function SettingsDialog({
               </button>
 
               <button
-                onClick={() => setActiveCategory('providersNew')}
+                onClick={() => setActiveCategory('providersAdd')}
                 className={`
                 w-full flex items-center gap-3 px-4 py-2.5 text-left
                 transition-colors
-                ${activeCategory === 'providersNew'
+                ${activeCategory === 'providersAdd'
                     ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
                     : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
                   }
               `}
               >
-                <span className="text-sm">添加供应商（新）</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('providersOld')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'providersOld'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">添加供应商（老）</span>
+                <span className="text-sm">添加供应商</span>
               </button>
 
               <button
@@ -469,6 +468,20 @@ export function SettingsDialog({
               `}
               >
                 <span className="text-sm">Dreamina 即梦</span>
+              </button>
+
+              <button
+                onClick={() => setActiveCategory('agnes')}
+                className={`
+                w-full flex items-center gap-3 px-4 py-2.5 text-left
+                transition-colors
+                ${activeCategory === 'agnes'
+                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
+                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
+                  }
+              `}
+              >
+                <span className="text-sm">Agnes</span>
               </button>
 
               <button
@@ -536,7 +549,12 @@ export function SettingsDialog({
                 <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">
                   <CustomProvidersSection
                     mode="list"
-                    onRequestAdd={(target) => setActiveCategory(target === 'old' ? 'providersOld' : 'providersNew')}
+                    onRequestAdd={(target) => {
+                      setActiveProviderAddTab(
+                        target === 'old' ? 'imageOld' : target === 'video' ? 'video' : 'imageNew'
+                      );
+                      setActiveCategory('providersAdd');
+                    }}
                   />
                 </div>
               </div>
@@ -574,10 +592,13 @@ export function SettingsDialog({
 
             {activeCategory === 'promptPresets' && <PromptPresetsSection />}
 
-            {activeCategory === 'providersNew' && (
+            {activeCategory === 'providersAdd' && (
               <div className="flex flex-1 flex-col overflow-hidden">
                 <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">
-                  <ModernProvidersSection />
+                  <AddProvidersSection
+                    activeTab={activeProviderAddTab}
+                    onTabChange={setActiveProviderAddTab}
+                  />
                 </div>
 
                 <div className="shrink-0 flex justify-end border-t border-border-dark px-6 py-4">
@@ -591,98 +612,10 @@ export function SettingsDialog({
               </div>
             )}
 
-            {activeCategory === 'providersOld' && (
+            {activeCategory === 'agnes' && (
               <div className="flex flex-1 flex-col overflow-hidden">
                 <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">
-                  <div className="grid grid-cols-[1fr_280px] gap-4">
-                    <div className="space-y-5 min-w-0">
-                      <div className="rounded-lg border border-accent/30 bg-accent/10 p-4">
-                        <div className="text-sm font-medium text-text-dark">推荐使用新供应商接入</div>
-                        <p className="mt-1 text-xs leading-5 text-text-muted">
-                          如果你的供应商 API 基本符合 OpenAI Images、Gemini、Fal 等官方或主流调用格式，推荐使用新供应商。只有接口存在自定义路由、特殊请求体、multipart/form-data、轮询或签名代理等复杂规则时，再用老供应商精细配置。
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setActiveCategory('providersNew')}
-                          className="mt-3 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent/90"
-                        >
-                          去添加供应商（新）
-                        </button>
-                      </div>
-                      {/* Top action: copy tutorial prompt — replaces the
-                          previously visible GRSAI built-in key card at this
-                          position. */}
-                      <div className="rounded-lg border border-border-dark bg-bg-dark p-4 flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium text-text-dark">不知道从哪儿开始？</div>
-                          <p className="text-xs text-text-muted mt-0.5 leading-5">
-                            点右侧按钮复制一份「给 AI 用的教程提示词」，粘贴到任意 AI，把服务商 API 文档也发给 AI，它会返回可直接导入的 JSON。
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await navigator.clipboard.writeText(CUSTOM_PROVIDER_TUTORIAL_PROMPT);
-                              setTutorialPromptCopied(true);
-                              setTimeout(() => setTutorialPromptCopied(false), 1800);
-                            } catch { /* ignore */ }
-                          }}
-                          className="shrink-0 inline-flex items-center gap-1 rounded-md bg-accent/20 px-3 py-2 text-xs text-accent hover:bg-accent/30"
-                        >
-                          {tutorialPromptCopied ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                          {tutorialPromptCopied ? '已复制' : '复制教程提示词'}
-                        </button>
-                      </div>
-
-                      {/* Custom provider add flow (form + one-click import) */}
-                      <CustomProvidersSection mode="add" />
-                    </div>
-
-                    {/* Right-side tips column — mirrors the Dreamina layout. */}
-                    <div className="space-y-3">
-                      <div className="rounded-lg border border-border-dark bg-bg-dark p-3">
-                        <div className="text-xs font-medium text-text-dark">{t('settings.customProviderHelp.title')}</div>
-                        <ol className="mt-2 space-y-1.5 text-[11px] text-text-muted leading-5 list-decimal pl-4">
-                          <li>{t('settings.customProviderHelp.step1')}</li>
-                          <li>{t('settings.customProviderHelp.step2')}</li>
-                          <li>{t('settings.customProviderHelp.step3')}</li>
-                          <li>{t('settings.customProviderHelp.step4')}</li>
-                        </ol>
-                      </div>
-
-                      <div className="rounded-lg border border-border-dark bg-bg-dark p-3 min-w-0">
-                        <div className="text-xs font-medium text-text-dark">字段说明 · 关键</div>
-                        <ul className="mt-2 space-y-1.5 text-[11px] text-text-muted leading-5 list-disc pl-4">
-                          <li>
-                            <strong className="text-text-dark">生图接口路径</strong>：各家 API 路径不同。留空时会用 apiStyle 的默认路径。常见有：
-                            <div className="mt-1 space-y-0.5">
-                              <div><code className="rounded bg-surface-dark px-1 break-all">/images/generations</code></div>
-                              <div><code className="rounded bg-surface-dark px-1 break-all">/create</code></div>
-                              <div><code className="rounded bg-surface-dark px-1 break-all">/v1/chat/completions</code></div>
-                            </div>
-                          </li>
-                          <li><strong className="text-text-dark">API 风格</strong>：决定请求体格式，如 openai-compatible、fal 等。</li>
-                          <li><strong className="text-text-dark">响应格式</strong>：决定怎么从返回 JSON 里挑出图片 URL。</li>
-                          <li><strong className="text-text-dark">supportsWebSearch</strong>：勾上以后，这个服务商在面板「参数 ⚙」里会多一个「启用联网搜索」开关，生图时会把 <code className="rounded bg-surface-dark px-1">web_search: true</code> 加到请求里。</li>
-                          <li><strong className="text-text-dark">支持比例</strong>：点击智能芯片使用模型默认；点 <strong>+</strong> 自定义；自定义比例右上角 × 可删除。</li>
-                        </ul>
-                      </div>
-
-                      <div className="rounded-lg border border-border-dark bg-bg-dark p-3">
-                        <div className="text-xs font-medium text-text-dark">预设覆盖</div>
-                        <div className="mt-2 text-[11px] leading-5 text-text-muted">
-                          已内置 OpenAI Images、OpenAI 兼容接口、Chat Completions 图像、Responses 图像工具、任务轮询、队列异步、Prediction、Multipart、签名代理等常见格式。非 OpenAI-compatible 的接口可能存在请求体或轮询差异，保存前建议点「测试连通」。
-                        </div>
-                      </div>
-
-                      <div className="rounded-lg border border-dashed border-border-dark bg-bg-dark/50 p-3">
-                        <div className="text-[11px] text-text-muted leading-5">
-                          ⓘ 保存后这条配置会出现在左侧「我的配置」里，并出现在画布上的模型选择器里。
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <AgnesSettingsSection />
                 </div>
 
                 <div className="shrink-0 flex justify-end border-t border-border-dark px-6 py-4">

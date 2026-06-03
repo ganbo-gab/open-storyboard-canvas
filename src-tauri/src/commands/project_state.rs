@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -209,7 +209,9 @@ fn collect_director_snapshot_image_paths(
         insert_image_ref_from_object(snapshot, key, image_pool, paths);
     }
     collect_image_paths_from_array(
-        snapshot.get("snapshotHistory").and_then(|value| value.as_array()),
+        snapshot
+            .get("snapshotHistory")
+            .and_then(|value| value.as_array()),
         image_pool,
         paths,
     );
@@ -219,7 +221,9 @@ fn collect_director_snapshot_image_paths(
         paths,
     );
     collect_blueprint_reference_image_paths(
-        snapshot.get("referenceImages").and_then(|value| value.as_array()),
+        snapshot
+            .get("referenceImages")
+            .and_then(|value| value.as_array()),
         image_pool,
         paths,
     );
@@ -276,12 +280,14 @@ fn collect_image_paths_from_nodes(
             paths,
         );
         collect_blueprint_reference_image_paths(
-            data.get("referenceImages").and_then(|value| value.as_array()),
+            data.get("referenceImages")
+                .and_then(|value| value.as_array()),
             image_pool,
             paths,
         );
         collect_image_paths_from_array(
-            data.get("snapshotHistory").and_then(|value| value.as_array()),
+            data.get("snapshotHistory")
+                .and_then(|value| value.as_array()),
             image_pool,
             paths,
         );
@@ -296,7 +302,9 @@ fn collect_image_paths_from_nodes(
                 };
                 insert_image_ref_from_object(project_obj, "coverUrl", image_pool, paths);
                 collect_director_snapshot_image_paths(
-                    project_obj.get("snapshot").and_then(|value| value.as_object()),
+                    project_obj
+                        .get("snapshot")
+                        .and_then(|value| value.as_object()),
                     image_pool,
                     paths,
                 );
@@ -317,7 +325,10 @@ fn extract_project_image_paths(nodes_json: &str, history_json: &str) -> HashSet<
 
     if let Ok(parsed_history) = serde_json::from_str::<serde_json::Value>(history_json) {
         for timeline_key in ["past", "future"] {
-            let Some(timeline) = parsed_history.get(timeline_key).and_then(|value| value.as_array()) else {
+            let Some(timeline) = parsed_history
+                .get(timeline_key)
+                .and_then(|value| value.as_array())
+            else {
                 continue;
             };
 
@@ -361,8 +372,8 @@ fn prune_unreferenced_images(app: &AppHandle, conn: &Connection) -> Result<(), S
     }
 
     let images_dir = resolve_images_dir(app)?;
-    let entries = std::fs::read_dir(&images_dir)
-        .map_err(|e| format!("Failed to read images dir: {}", e))?;
+    let entries =
+        std::fs::read_dir(&images_dir).map_err(|e| format!("Failed to read images dir: {}", e))?;
 
     for entry_result in entries {
         let entry = entry_result.map_err(|e| format!("Failed to iterate images dir: {}", e))?;
@@ -434,10 +445,9 @@ fn with_db<F, R>(app: &AppHandle, db: &State<ProjectDb>, f: F) -> Result<R, Stri
 where
     F: FnOnce(&mut Connection) -> Result<R, String>,
 {
-    let mut slot = db
-        .0
-        .lock()
-        .map_err(|err| format!("project DB mutex poisoned: {}", err))?;
+    let mut slot =
+        db.0.lock()
+            .map_err(|err| format!("project DB mutex poisoned: {}", err))?;
     if slot.is_none() {
         *slot = Some(open_db(app)?);
     }

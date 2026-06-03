@@ -56,14 +56,20 @@ pub trait AIProvider: Send + Sync {
         false
     }
 
-    async fn submit_task(&self, _request: GenerateRequest) -> Result<ProviderTaskSubmission, AIError> {
+    async fn submit_task(
+        &self,
+        _request: GenerateRequest,
+    ) -> Result<ProviderTaskSubmission, AIError> {
         Err(AIError::Provider(format!(
             "Provider '{}' does not support resumable task submission",
             self.name()
         )))
     }
 
-    async fn poll_task(&self, _handle: ProviderTaskHandle) -> Result<ProviderTaskPollResult, AIError> {
+    async fn poll_task(
+        &self,
+        _handle: ProviderTaskHandle,
+    ) -> Result<ProviderTaskPollResult, AIError> {
         Err(AIError::Provider(format!(
             "Provider '{}' does not support resumable task polling",
             self.name()

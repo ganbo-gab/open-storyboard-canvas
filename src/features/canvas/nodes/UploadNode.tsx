@@ -41,6 +41,10 @@ import {
   resolveImageDisplayUrl,
   shouldUseOriginalImageByZoom,
 } from '@/features/canvas/application/imageData';
+import {
+  isImageFile,
+  resolveDroppedImageFile,
+} from '@/features/canvas/application/imageDragDrop';
 import { CanvasNodeImage } from '@/features/canvas/ui/CanvasNodeImage';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -56,18 +60,6 @@ function resolveNodeDimension(value: number | undefined, fallback: number): numb
     return Math.round(value);
   }
   return fallback;
-}
-
-function resolveDroppedImageFile(event: DragEvent<HTMLElement>): File | null {
-  const directFile = event.dataTransfer.files?.[0];
-  if (directFile) {
-    return directFile;
-  }
-
-  const item = Array.from(event.dataTransfer.items || []).find(
-    (candidate) => candidate.kind === 'file' && candidate.type.startsWith('image/')
-  );
-  return item?.getAsFile() ?? null;
 }
 
 export const UploadNode = memo(({ id, data, selected, width, height }: UploadNodeProps) => {
@@ -230,8 +222,8 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
     async (event: DragEvent<HTMLElement>) => {
       event.preventDefault();
       event.stopPropagation();
-      const file = resolveDroppedImageFile(event);
-      if (!file || !file.type.startsWith('image/')) {
+      const file = resolveDroppedImageFile(event.dataTransfer);
+      if (!file) {
         return;
       }
 
@@ -248,7 +240,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
   const handleFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
-      if (!file || !file.type.startsWith('image/')) {
+      if (!isImageFile(file)) {
         return;
       }
 
@@ -269,7 +261,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
 
   useEffect(() => {
     return canvasEventBus.subscribe('upload-node/paste-image', ({ nodeId, file }) => {
-      if (nodeId !== id || !file.type.startsWith('image/')) {
+      if (nodeId !== id || !isImageFile(file)) {
         return;
       }
       void processFile(file);

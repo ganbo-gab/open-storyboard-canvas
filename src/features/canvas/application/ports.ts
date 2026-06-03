@@ -40,11 +40,29 @@ export interface GenerateImagePayload {
   extraParams?: Record<string, unknown>;
 }
 
+export interface GenerateVideoPayload {
+  prompt: string;
+  model: string;
+  size: string;
+  aspectRatio?: string;
+  seconds?: number;
+  inputReference?: string;
+  referenceImages?: string[];
+  extraParams?: Record<string, unknown>;
+}
+
 export interface AiGateway {
   setApiKey: (provider: string, apiKey: string) => Promise<void>;
   generateImage: (payload: GenerateImagePayload) => Promise<string>;
   submitGenerateImageJob: (payload: GenerateImagePayload) => Promise<string>;
   getGenerateImageJob: (jobId: string) => Promise<{
+    job_id: string;
+    status: 'queued' | 'running' | 'succeeded' | 'failed' | 'not_found';
+    result?: string | null;
+    error?: string | null;
+  }>;
+  submitGenerateVideoJob: (payload: GenerateVideoPayload) => Promise<string>;
+  getGenerateVideoJob: (jobId: string) => Promise<{
     job_id: string;
     status: 'queued' | 'running' | 'succeeded' | 'failed' | 'not_found';
     result?: string | null;

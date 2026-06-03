@@ -4,6 +4,7 @@ import { Copy, CheckCircle2, Trash2, Upload, Plus, Eye, EyeOff, Lightbulb, Save,
 import {
   CUSTOM_PROVIDER_PRESETS,
   CUSTOM_PROVIDER_TUTORIAL_PROMPT,
+  isVideoCustomProvider,
   useCustomProvidersStore,
   type CustomProviderConfig,
 } from '@/stores/customProvidersStore';
@@ -28,7 +29,7 @@ interface CustomProvidersSectionProps {
   mode?: SectionMode;
   /** Callback for `list` mode — lets the host switch the sidebar to the add tab
    *  when the user clicks "+ 新增配置" from an empty list. */
-  onRequestAdd?: (target?: 'new' | 'old') => void;
+  onRequestAdd?: (target?: 'new' | 'old' | 'video') => void;
 }
 
 const PRESET_RATIOS = ['21:9', '16:9', '4:1', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16', '2:1'] as const;
@@ -85,6 +86,7 @@ interface DraftConfig extends Omit<CustomProviderConfig, 'id'> {
 function emptyDraft(): DraftConfig {
   return {
     id: null,
+    mediaType: 'image',
     label: '',
     baseUrl: '',
     endpointPath: '',
@@ -107,6 +109,28 @@ function emptyDraft(): DraftConfig {
 
 function isModernProviderConfig(provider: CustomProviderConfig): boolean {
   return provider.extraParams?.providerConfigVersion === 'new-v1';
+}
+
+function providerKindLabel(provider: CustomProviderConfig): {
+  label: string;
+  className: string;
+} {
+  if (isVideoCustomProvider(provider)) {
+    return {
+      label: '视频配置',
+      className: 'border-sky-500/30 bg-sky-500/10 text-sky-300',
+    };
+  }
+  if (isModernProviderConfig(provider)) {
+    return {
+      label: '图片新配置',
+      className: 'border-accent/35 bg-accent/15 text-accent',
+    };
+  }
+  return {
+    label: '图片老配置',
+    className: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+  };
 }
 
 /** Turn a stored provider into an editable draft. */
@@ -132,6 +156,7 @@ function fromDraft(d: DraftConfig, fallbackId: string): CustomProviderConfig {
   return {
     id: d.id ?? fallbackId,
     label: d.label.trim() || '未命名配置',
+    mediaType: d.mediaType ?? 'image',
     baseUrl: d.baseUrl.trim(),
     endpointPath: d.endpointPath?.trim() || '',
     modelListEndpointPath: d.modelListEndpointPath?.trim() || '',
@@ -145,7 +170,7 @@ function fromDraft(d: DraftConfig, fallbackId: string): CustomProviderConfig {
     responseFormat: d.responseFormat ?? 'openai-images',
     supportedResolutions: (d.supportedResolutions ?? []).length > 0 ? d.supportedResolutions : undefined,
     supportedModelVersions: (d.supportedModelVersions ?? []).length > 0 ? d.supportedModelVersions : undefined,
-    extraParams: { ...(d.extraParams ?? {}), supportedRatios: d.supportedRatios },
+    extraParams: { ...(d.extraParams ?? {}), mediaType: d.mediaType ?? 'image', supportedRatios: d.supportedRatios },
     note: d.note ?? '',
   };
 }
@@ -195,6 +220,9 @@ function resolveImportPreset(block: Record<string, unknown>) {
   }
   const explicitAlias: Record<string, string> = {
     replicate: 'replicate_prediction_async',
+    openai_video: 'openai_videos',
+    openai_videos: 'openai_videos',
+    video: 'openai_videos',
   };
   const resolvedExplicitKey = explicitAlias[explicitKey] ?? explicitKey;
   const explicitPreset = CUSTOM_PROVIDER_PRESETS.find((preset) => preset.key === resolvedExplicitKey);
@@ -220,6 +248,9 @@ function resolveImportPreset(block: Record<string, unknown>) {
   }
   if (apiStyle === 'volcengine' || baseUrl.includes('volcengineapi.com') || endpointPath.includes('volcengine')) {
     return CUSTOM_PROVIDER_PRESETS.find((preset) => preset.key === 'volc_jimeng');
+  }
+  if (endpointPath.includes('/videos') || String(block.mediaType ?? '').toLowerCase() === 'video') {
+    return CUSTOM_PROVIDER_PRESETS.find((preset) => preset.key === 'openai_videos');
   }
   if (endpointPath.includes('/responses')) {
     return CUSTOM_PROVIDER_PRESETS.find((preset) => preset.key === 'openai_responses_image');
@@ -585,6 +616,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
         ...emptyDraft(),
         ...baseTemplate,
         label: String(blockRecord.label ?? baseTemplate.label ?? ''),
+        mediaType: (blockRecord.mediaType === 'video' || baseTemplate.mediaType === 'video') ? 'video' : 'image',
         baseUrl: String(blockRecord.baseUrl ?? baseTemplate.baseUrl ?? ''),
         endpointPath: String(blockRecord.endpointPath ?? baseTemplate.endpointPath ?? ''),
         modelListEndpointPath: String(blockRecord.modelListEndpointPath ?? baseTemplate.modelListEndpointPath ?? ''),
@@ -690,7 +722,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
     }
     if (mode === 'list') {
       setPendingEditId(id);
-      onRequestAdd?.(isModernProviderConfig(p) ? 'new' : 'old');
+      onRequestAdd?.(isVideoCustomProvider(p) ? 'video' : (isModernProviderConfig(p) ? 'new' : 'old'));
     }
   }, [providers, mode, onRequestAdd, setPendingEditId]);
 
@@ -735,7 +767,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
       {mode !== 'list' && (
         <div>
           <h2 className="text-base font-semibold text-text-dark">
-            {mode === 'add' ? '添加供应商（老）' : '配置模型服务'}
+            {mode === 'add' ? '图片生成（老）' : '配置模型服务'}
           </h2>
           <p className="mt-1 text-xs text-text-muted">
             如果供应商 API 符合官方或常见中转站调用格式，推荐使用「添加供应商（新）」。如果接口有自己的特殊路由、轮询任务、multipart、签名代理或复杂字段映射，再用这里的老版高级配置。
@@ -747,7 +779,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
           <div>
             <h2 className="text-base font-semibold text-text-dark">我的配置</h2>
             <p className="mt-1 text-xs text-text-muted">
-              已保存的服务商配置。查看配置可回到表单继续编辑；查看模型展示该配置支持的模型与能力。
+              已保存的图片新配置、图片老配置和视频配置。查看配置可回到对应表单继续编辑；查看模型展示该配置支持的模型与能力。
             </p>
           </div>
           <button
@@ -810,6 +842,29 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
             {importError && <div className="mt-2 text-[11px] text-red-400">{importError}</div>}
             {importSuccess && <div className="mt-2 text-[11px] text-emerald-400 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> 已填入下方表单，检查无误后点「保存配置」</div>}
           </div>
+
+          {mode === 'add' && (
+            <div className="rounded-lg border border-border-dark bg-bg-dark p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-text-dark">
+                    <Lightbulb className="h-3.5 w-3.5 text-accent" /> 不知道怎么配？
+                  </div>
+                  <p className="mt-1 text-[11px] leading-5 text-text-muted">
+                    复制教程提示词到任意 AI，贴上服务商文档 / cURL，让 AI 返回可导入 JSON；这里适合特殊路由、轮询、multipart、签名代理或复杂字段映射。普通 OpenAI Images、Gemini、Fal 等格式优先用「图片生成（新）」。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyTutorialPrompt}
+                  className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md bg-accent/20 px-2.5 text-[11px] text-accent hover:bg-accent/30"
+                >
+                  {promptCopied ? <CheckCircle2 className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                  {promptCopied ? '已复制' : '复制教程提示词'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {mode === 'add' && (
             <details className="rounded-lg border border-border-dark bg-bg-dark p-3">
@@ -1561,7 +1616,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                 onClick={() => onRequestAdd?.('new')}
                 className="mt-3 inline-flex items-center gap-1 rounded-md bg-accent/20 px-3 py-1.5 text-xs text-accent hover:bg-accent/30"
               >
-                <Plus className="h-3 w-3" /> 去「添加供应商（新）」新建
+                <Plus className="h-3 w-3" /> 去「添加供应商」新建
               </button>
             </div>
           ) : (
@@ -1570,18 +1625,15 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                 {(() => {
                   const savedTestResult = providerTestResults[p.id];
                   const isTestingThisProvider = testingProviderId === p.id;
-                  const isModern = isModernProviderConfig(p);
+                  const isVideo = isVideoCustomProvider(p);
+                  const kind = providerKindLabel(p);
                   return (
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-center gap-2">
                       <div className="truncate text-sm font-medium text-text-dark">{p.label}</div>
-                      <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] ${
-                        isModern
-                          ? 'border-accent/35 bg-accent/15 text-accent'
-                          : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                      }`}>
-                        {isModern ? '新配置' : '老配置'}
+                      <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] ${kind.className}`}>
+                        {kind.label}
                       </span>
                     </div>
                     <div className="mt-0.5 text-[11px] text-text-muted truncate font-mono">{p.baseUrl || '(未填 baseUrl)'}</div>
@@ -1604,9 +1656,9 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                     <button
                       type="button"
                       onClick={() => { void handleTestSavedProvider(p); }}
-                      disabled={isTestingThisProvider || !p.apiKey.trim() || !p.baseUrl.trim()}
+                      disabled={isVideo || isTestingThisProvider || !p.apiKey.trim() || !p.baseUrl.trim()}
                       className="inline-flex items-center gap-1 rounded-md bg-white/5 px-2.5 py-1 text-[11px] text-text-dark hover:bg-white/10 disabled:opacity-40"
-                      title="用这条已保存配置发一次测试请求"
+                      title={isVideo ? '视频配置暂不走图片连通测试' : '用这条已保存配置发一次测试请求'}
                     >
                       {isTestingThisProvider ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plug className="h-3 w-3" />}
                       {isTestingThisProvider ? '测试中' : '测试连通'}
@@ -1679,13 +1731,36 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                 )}
               </div>
               <div>
-                <div className="text-text-muted mb-1">生图比例</div>
-                <div className="flex flex-wrap gap-1">
-                  {(((modelsDialogProvider.extraParams as { supportedRatios?: string[] })?.supportedRatios) ?? []).map((r) => (
-                    <span key={r} className="rounded bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{r}</span>
-                  ))}
-                </div>
+                {isVideoCustomProvider(modelsDialogProvider) ? (
+                  <>
+                    <div className="text-text-muted mb-1">支持秒数</div>
+                    <div className="flex flex-wrap gap-1">
+                      {(((modelsDialogProvider.extraParams as { supportedDurations?: string[] })?.supportedDurations) ?? []).map((duration) => (
+                        <span key={duration} className="rounded bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{duration}s</span>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-text-muted mb-1">生图比例</div>
+                    <div className="flex flex-wrap gap-1">
+                      {(((modelsDialogProvider.extraParams as { supportedRatios?: string[] })?.supportedRatios) ?? []).map((r) => (
+                        <span key={r} className="rounded bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{r}</span>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
+              {isVideoCustomProvider(modelsDialogProvider) && (
+                <div>
+                  <div className="text-text-muted mb-1">支持分辨率</div>
+                  <div className="flex flex-wrap gap-1">
+                    {(modelsDialogProvider.supportedResolutions ?? []).map((resolution) => (
+                      <span key={resolution} className="rounded bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{resolution}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <div className="text-text-muted mb-1">联网搜索</div>
                 <div className="text-text-dark">{modelsDialogProvider.supportsWebSearch ? '支持 ✓' : '不支持'}</div>

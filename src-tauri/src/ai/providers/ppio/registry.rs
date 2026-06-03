@@ -39,7 +39,11 @@ impl PPIOModelRegistry {
         let mut seen = HashSet::new();
         let mut models = Vec::new();
 
-        for model in self.adapters.iter().map(|adapter| adapter.canonical_model()) {
+        for model in self
+            .adapters
+            .iter()
+            .map(|adapter| adapter.canonical_model())
+        {
             if seen.insert(model) {
                 models.push(model.to_string());
             }

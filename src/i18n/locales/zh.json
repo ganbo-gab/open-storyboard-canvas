@@ -74,6 +74,7 @@
     "copySuccess": "复制成功",
     "copyFailed": "复制失败",
     "download": "下载",
+    "retryFetch": "重新获取",
     "downloadSuccess": "下载成功",
     "downloadFailed": "下载失败",
     "ungroup": "解散",
@@ -131,6 +132,7 @@
     "assets": "资产",
     "assetsTitle": "查看当前项目资产",
     "addAiImage": "添加 AI 图片节点",
+    "addAiVideo": "添加 AI 视频节点",
     "addPanorama": "添加全景图节点",
     "createDirectorStudio": "新建并打开导演台",
     "createPanoramaDirectorStudio": "新建并打开全景导演台",
@@ -737,6 +739,7 @@
     "menu": {
       "uploadImage": "上传图片",
       "aiImageGeneration": "AI 图片",
+      "aiVideoGeneration": "AI 视频",
       "storyboard": "分镜节点",
       "storyboardGen": "分镜生成",
       "textAnnotation": "文本注释",
@@ -770,6 +773,21 @@
       "promptPlaceholder": "描述任何你想要生成或编辑的内容",
       "generateCount": "数量",
       "customCount": "自定义"
+    },
+    "aiVideo": {
+      "promptPlaceholder": "描述视频内容、镜头运动、动作节奏；输入 @ 可引用已连接图片",
+      "promptRequired": "请输入视频提示词",
+      "noVideoProvider": "请先在「设置 → 我的配置 → 视频生成」中添加可用的视频供应商。",
+      "noModel": "选择视频模型",
+      "duration": "时长",
+      "aspectRatio": "宽高比",
+      "resolution": "分辨率"
+    },
+    "videoNode": {
+      "waitingResult": "等待视频生成结果",
+      "waitingResultDelayed": "已经等待 {{minutes}} 分钟了，还没有视频结果。继续等待中...",
+      "generationFailed": "视频生成失败",
+      "empty": "暂无视频"
     },
     "panoramaViewer": {
       "expand": "放大全景图",

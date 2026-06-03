@@ -1,5 +1,6 @@
 import type { NodeTypes } from '@xyflow/react';
 
+import { AiVideoNode } from './AiVideoNode';
 import { BlueprintNode } from './BlueprintNode';
 import { GroupNode } from './GroupNode';
 import { ImageEditNode } from './ImageEditNode';
@@ -9,8 +10,10 @@ import { StoryboardGenNode } from './StoryboardGenNode';
 import { StoryboardNode } from './StoryboardNode';
 import { TextAnnotationNode } from './TextAnnotationNode';
 import { UploadNode } from './UploadNode';
+import { VideoNode } from './VideoNode';
 
 export const nodeTypes: NodeTypes = {
+  aiVideoNode: AiVideoNode,
   blueprintNode: BlueprintNode,
   exportImageNode: ImageNode,
   groupNode: GroupNode,
@@ -20,6 +23,7 @@ export const nodeTypes: NodeTypes = {
   storyboardNode: StoryboardNode,
   textAnnotationNode: TextAnnotationNode,
   uploadNode: UploadNode,
+  videoNode: VideoNode,
 };
 
-export { BlueprintNode, GroupNode, ImageEditNode, ImageNode, PanoramaNode, StoryboardGenNode, StoryboardNode, TextAnnotationNode, UploadNode };
+export { AiVideoNode, BlueprintNode, GroupNode, ImageEditNode, ImageNode, PanoramaNode, StoryboardGenNode, StoryboardNode, TextAnnotationNode, UploadNode, VideoNode };

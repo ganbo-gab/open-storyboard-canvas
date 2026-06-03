@@ -150,6 +150,13 @@ export async function persistImageSource(source: string): Promise<string> {
   return await invoke('persist_image_source', { source });
 }
 
+export async function persistVideoSource(
+  source: string,
+  headers?: Record<string, string>
+): Promise<string> {
+  return await invoke('persist_video_source', { source, headers });
+}
+
 export async function persistImageBinary(
   bytes: Uint8Array,
   extension = 'png'
@@ -186,6 +193,28 @@ export async function saveImageSourceToDirectory(
   suggestedFileName?: string
 ): Promise<string> {
   return await invoke('save_image_source_to_directory', {
+    source,
+    targetDir,
+    suggestedFileName,
+  });
+}
+
+export async function saveVideoSourceToPath(
+  source: string,
+  targetPath: string
+): Promise<string> {
+  return await invoke('save_video_source_to_path', {
+    source,
+    targetPath,
+  });
+}
+
+export async function saveVideoSourceToDirectory(
+  source: string,
+  targetDir: string,
+  suggestedFileName?: string
+): Promise<string> {
+  return await invoke('save_video_source_to_directory', {
     source,
     targetDir,
     suggestedFileName,

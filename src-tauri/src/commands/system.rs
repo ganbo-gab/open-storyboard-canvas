@@ -26,7 +26,8 @@ fn run_command(program: &str, args: &[&str]) -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn resolve_windows_info() -> RuntimeSystemInfo {
-    let ver_text = run_command("cmd", &["/C", "ver"]).unwrap_or_else(|| "Microsoft Windows".to_string());
+    let ver_text =
+        run_command("cmd", &["/C", "ver"]).unwrap_or_else(|| "Microsoft Windows".to_string());
     let version_token = ver_text
         .split_once('[')
         .and_then(|(_, right)| right.split_once(']'))
@@ -54,7 +55,12 @@ fn resolve_windows_info() -> RuntimeSystemInfo {
     .and_then(|raw| {
         raw.lines()
             .find(|line| line.contains("ProductName"))
-            .map(|line| line.split_whitespace().last().unwrap_or("Windows").to_string())
+            .map(|line| {
+                line.split_whitespace()
+                    .last()
+                    .unwrap_or("Windows")
+                    .to_string()
+            })
     })
     .unwrap_or_else(|| "Windows".to_string());
 
@@ -67,7 +73,8 @@ fn resolve_windows_info() -> RuntimeSystemInfo {
 
 #[cfg(target_os = "macos")]
 fn resolve_macos_info() -> RuntimeSystemInfo {
-    let version = run_command("sw_vers", &["-productVersion"]).unwrap_or_else(|| "unknown".to_string());
+    let version =
+        run_command("sw_vers", &["-productVersion"]).unwrap_or_else(|| "unknown".to_string());
     let build = run_command("sw_vers", &["-buildVersion"]).unwrap_or_else(|| "unknown".to_string());
 
     RuntimeSystemInfo {

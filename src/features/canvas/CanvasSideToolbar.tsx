@@ -1,7 +1,7 @@
 import { memo, useCallback } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
-import { ImagePlus, Globe2, LayoutGrid, Images } from 'lucide-react';
+import { ImagePlus, Globe2, LayoutGrid, Images, Video } from 'lucide-react';
 
 import { CANVAS_NODE_TYPES, type CanvasNodeData, type CanvasNodeType } from '@/features/canvas/domain/canvasNodes';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -20,6 +20,12 @@ const TOOLBAR_ITEMS: SideToolbarItem[] = [
     labelKey: 'node.menu.aiImageGeneration',
     titleKey: 'canvasToolbar.addAiImage',
     icon: ImagePlus,
+  },
+  {
+    type: CANVAS_NODE_TYPES.aiVideo,
+    labelKey: 'node.menu.aiVideoGeneration',
+    titleKey: 'canvasToolbar.addAiVideo',
+    icon: Video,
   },
   {
     type: CANVAS_NODE_TYPES.panorama,

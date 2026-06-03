@@ -282,6 +282,15 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+function isLightweightRetryResultUrl(value: unknown): boolean {
+  const url = typeof value === 'string' ? value.trim() : '';
+  if (!url) {
+    return false;
+  }
+  const normalizedPrefix = url.slice(0, 16).toLowerCase();
+  return !normalizedPrefix.startsWith('data:') && !normalizedPrefix.startsWith('blob:');
+}
+
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -632,13 +641,28 @@ function normalizeNodes(rawNodes: CanvasNode[]): CanvasNode[] {
         mergedData.aspectRatio = DEFAULT_ASPECT_RATIO;
       }
 
-      // Keep generation state only when there is a recoverable job id.
+      if (
+        'generationRetryResultUrl' in mergedData
+        && !isLightweightRetryResultUrl((mergedData as { generationRetryResultUrl?: unknown }).generationRetryResultUrl)
+      ) {
+        (mergedData as { generationRetryResultUrl?: string | null }).generationRetryResultUrl = null;
+      }
+
+      // Keep generation state only when there is lightweight metadata that
+      // can resume polling or refetch an already-completed result.
       if ('isGenerating' in mergedData && mergedData.isGenerating) {
         const generationJobId =
           typeof (mergedData as { generationJobId?: unknown }).generationJobId === 'string'
             ? (mergedData as { generationJobId?: string }).generationJobId?.trim() ?? ''
             : '';
-        if (!generationJobId) {
+        const generationRetryResultUrl =
+          (node.type === CANVAS_NODE_TYPES.exportImage
+            || node.type === CANVAS_NODE_TYPES.panorama
+            || node.type === CANVAS_NODE_TYPES.video)
+          && isLightweightRetryResultUrl((mergedData as { generationRetryResultUrl?: unknown }).generationRetryResultUrl)
+            ? ((mergedData as { generationRetryResultUrl?: string }).generationRetryResultUrl ?? '').trim()
+            : '';
+        if (!generationJobId && !generationRetryResultUrl) {
           mergedData.isGenerating = false;
           if ('generationStartedAt' in mergedData) {
             mergedData.generationStartedAt = null;

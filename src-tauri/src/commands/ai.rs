@@ -206,7 +206,10 @@ fn touch_generation_job(app: &AppHandle, job_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn get_generation_job(app: &AppHandle, job_id: &str) -> Result<Option<GenerationJobRecord>, String> {
+fn get_generation_job(
+    app: &AppHandle,
+    job_id: &str,
+) -> Result<Option<GenerationJobRecord>, String> {
     let conn = open_db(app)?;
     let mut stmt = conn
         .prepare(

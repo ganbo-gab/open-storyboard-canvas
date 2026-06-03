@@ -40,6 +40,7 @@ function greatestCommonDivisor(a: number, b: number): number {
 
 const DEFAULT_PREVIEW_MAX_DIMENSION = 512;
 const LOCAL_PATH_PREFIX_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\|\/)/;
+const BASE64_IMAGE_PAYLOAD_PATTERN = /^[A-Za-z0-9+/=\r\n]+$/;
 
 export interface PreparedNodeImage {
   imageUrl: string;
@@ -78,6 +79,109 @@ function createImagePipelineError(message: string, details?: string, cause?: unk
     error.details = detailParts.join('\n');
   }
   return error;
+}
+
+function tryParseJsonString(value: string): unknown | null {
+  const trimmed = value.trim();
+  if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeBase64ImagePayload(value: string): boolean {
+  const compact = value.replace(/\s+/g, '');
+  return compact.length > 300 && BASE64_IMAGE_PAYLOAD_PATTERN.test(compact);
+}
+
+function isLikelyImageResultKey(keyPath: string): boolean {
+  return /(image|img|url|output|result|asset|file|media|b64|base64|data)/i.test(keyPath);
+}
+
+function isLikelyNonImageResultKey(keyPath: string): boolean {
+  return /(^|[._-])(status|poll|callback|webhook|request|submit|queue|endpoint)[._-]?(url)?($|[._-])/i.test(keyPath)
+    || /(^|[._-])url[._-]?(status|poll|callback|webhook|request|submit|queue|endpoint)($|[._-])/i.test(keyPath);
+}
+
+function normalizeGeneratedImageSourceCandidate(value: string, keyPath: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('data:image/')) return trimmed;
+  if (/^https?:\/\//i.test(trimmed) && !isLikelyNonImageResultKey(keyPath)) {
+    const hasImageExtension = /\.(png|jpe?g|webp|gif|bmp|avif|tiff?)(\?|#|$)/i.test(trimmed);
+    return hasImageExtension || isLikelyImageResultKey(keyPath) ? trimmed : null;
+  }
+  if (looksLikeBase64ImagePayload(trimmed) && isLikelyImageResultKey(keyPath)) {
+    return `data:image/png;base64,${trimmed.replace(/\s+/g, '')}`;
+  }
+  return null;
+}
+
+function extractGeneratedImageSourceFromPayload(payload: unknown): string | null {
+  const stack: Array<{ value: unknown; keyPath: string; depth: number }> = [
+    { value: payload, keyPath: '', depth: 0 },
+  ];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    const value = current?.value;
+    const keyPath = current?.keyPath ?? '';
+    const depth = current?.depth ?? 0;
+    if (depth > 8) continue;
+
+    if (typeof value === 'string') {
+      const candidate = normalizeGeneratedImageSourceCandidate(value, keyPath);
+      if (candidate) return candidate;
+
+      const nested = tryParseJsonString(value);
+      if (nested !== null) {
+        stack.push({ value: nested, keyPath, depth: depth + 1 });
+      }
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => {
+        const childPath = keyPath ? `${keyPath}.${index}` : String(index);
+        stack.push({ value: item, keyPath: childPath, depth: depth + 1 });
+      });
+      continue;
+    }
+
+    if (value && typeof value === 'object') {
+      Object.entries(value as Record<string, unknown>).forEach(([childKey, childValue]) => {
+        const childPath = keyPath ? `${keyPath}.${childKey}` : childKey;
+        stack.push({ value: childValue, keyPath: childPath, depth: depth + 1 });
+      });
+    }
+  }
+
+  return null;
+}
+
+function normalizeGeneratedImageSource(rawSource: string): { source: string; note?: string } {
+  const trimmed = rawSource.trim();
+  const wrapped = tryParseJsonString(trimmed);
+  if (wrapped !== null) {
+    const extracted = extractGeneratedImageSourceFromPayload(wrapped);
+    if (extracted) {
+      return { source: extracted, note: 'extracted image source from JSON result wrapper' };
+    }
+  }
+
+  if (looksLikeBase64ImagePayload(trimmed)) {
+    return {
+      source: `data:image/png;base64,${trimmed.replace(/\s+/g, '')}`,
+      note: 'normalized bare base64 image result to data URL',
+    };
+  }
+
+  return { source: trimmed };
 }
 
 const ORIGINAL_IMAGE_ZOOM_THRESHOLD = 1.45;
@@ -360,12 +464,15 @@ export async function prepareNodeImage(
   imageUrl: string,
   maxPreviewDimension = DEFAULT_PREVIEW_MAX_DIMENSION
 ): Promise<PreparedNodeImage> {
-  const trimmedImageUrl = imageUrl.trim();
+  const originalImageUrl = imageUrl.trim();
+  const normalizedSource = normalizeGeneratedImageSource(originalImageUrl);
+  const trimmedImageUrl = normalizedSource.source;
   if (!trimmedImageUrl) {
     throw createImagePipelineError('未获取到可用图片结果', 'imageUrl is empty');
   }
 
   const started = performance.now();
+  let nativePrepareError: unknown = null;
   if (isTauri()) {
     const safeMaxDimension = Math.max(64, Math.floor(maxPreviewDimension));
     try {
@@ -380,6 +487,7 @@ export async function prepareNodeImage(
         aspectRatio: prepared.aspectRatio,
       };
     } catch (error) {
+      nativePrepareError = error;
       console.warn('[imageData] prepareNodeImage tauri-source failed, fallback to browser path', {
         source: trimmedImageUrl,
         error,
@@ -408,9 +516,15 @@ export async function prepareNodeImage(
       aspectRatio: reduceAspectRatio(image.naturalWidth, image.naturalHeight),
     };
   } catch (error) {
+    const detailParts = [
+      `source=${trimmedImageUrl}`,
+      originalImageUrl !== trimmedImageUrl ? `originalSource=${originalImageUrl}` : '',
+      normalizedSource.note ? `normalization=${normalizedSource.note}` : '',
+      nativePrepareError !== null ? `nativePrepareError=${stringifyUnknown(nativePrepareError)}` : '',
+    ].filter(Boolean);
     throw createImagePipelineError(
       '生成结果无法解析为图片',
-      `source=${trimmedImageUrl}`,
+      detailParts.join('\n'),
       error
     );
   }

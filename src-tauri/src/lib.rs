@@ -106,7 +106,8 @@ pub fn run() {
                 .ok_or_else(|| "missing main window config".to_string())?;
 
             #[cfg(not(target_os = "macos"))]
-            let main_window = tauri::WebviewWindowBuilder::from_config(app, &window_config)?.build()?;
+            let main_window =
+                tauri::WebviewWindowBuilder::from_config(app, &window_config)?.build()?;
 
             #[cfg(not(target_os = "macos"))]
             {
@@ -121,7 +122,8 @@ pub fn run() {
                 // Window effects radius only works for transparent windows on macOS.
                 mac_window_config.transparent = true;
 
-                let window = tauri::WebviewWindowBuilder::from_config(app, &mac_window_config)?.build()?;
+                let window =
+                    tauri::WebviewWindowBuilder::from_config(app, &mac_window_config)?.build()?;
 
                 if let Err(err) = window.hide() {
                     warn!("failed to hide main window on startup: {err}");
@@ -181,10 +183,13 @@ pub fn run() {
             image::embed_storyboard_image_metadata,
             image::load_image,
             image::persist_image_source,
+            image::persist_video_source,
             image::persist_image_binary,
             image::save_image_source_to_downloads,
             image::save_image_source_to_path,
             image::save_image_source_to_directory,
+            image::save_video_source_to_path,
+            image::save_video_source_to_directory,
             image::save_image_source_to_app_debug_dir,
             image::copy_image_source_to_clipboard,
             ai_commands::set_api_key,

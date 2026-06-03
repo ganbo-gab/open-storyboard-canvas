@@ -14,7 +14,7 @@ import {
   hasConfiguredCustomProvider,
 } from '@/features/canvas/application/providerAvailability';
 import type { CustomProviderConfig } from '@/stores/customProvidersStore';
-import { useCustomProvidersStore } from '@/stores/customProvidersStore';
+import { isImageCustomProvider, useCustomProvidersStore } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 export interface PanelModelConfigValue {
@@ -132,6 +132,7 @@ function resolveCustomModel(
   const parsed = parseCustomEntryId(entryId);
   const providerId = parsed?.providerId ?? '';
   const cfg = customProviders.find((provider) => provider.id === providerId);
+  const isImageProvider = cfg ? isImageCustomProvider(cfg) : false;
   const catalogEntry = catalog.find((entry) => entry.id === entryId);
   const allowsMissingApiKey = cfg ? customProviderAllowsMissingApiKey(cfg) : false;
   const supportedRatios = catalogEntry?.supportedRatios ?? normalizeSupportedRatios(
@@ -147,7 +148,7 @@ function resolveCustomModel(
     builtinModel: null,
     apiKey: cfg?.apiKey ?? '',
     requiresApiKey: !allowsMissingApiKey,
-    usable: catalogEntry?.usable ?? (cfg ? hasConfiguredCustomProvider(cfg) : false),
+    usable: isImageProvider && (catalogEntry?.usable ?? (cfg ? hasConfiguredCustomProvider(cfg) : false)),
     resolvedByFallback,
     extraParams,
     supportedRatios,
@@ -179,6 +180,31 @@ function resolveDreaminaModel(
   };
 }
 
+function resolveAgnesModel(
+  entryId: string,
+  ratio: string,
+  extraParams: Record<string, unknown>,
+  catalog: readonly CatalogEntry[],
+  resolvedByFallback: boolean,
+): ResolvedPanelModel {
+  const settings = useSettingsStore.getState();
+  const catalogEntry = catalog.find((entry) => entry.id === entryId);
+  return {
+    entryId,
+    modelForGateway: entryId,
+    providerId: 'agnes',
+    providerLabel: 'Agnes',
+    ratio,
+    builtinModel: null,
+    apiKey: settings.agnesApiKey,
+    requiresApiKey: true,
+    usable: hasText(settings.agnesApiKey) && (catalogEntry?.usable ?? false),
+    resolvedByFallback,
+    extraParams,
+    supportedRatios: catalogEntry?.supportedRatios ?? ['auto', '16:9', '9:16', '1:1', '4:3', '3:4'],
+  };
+}
+
 function resolvePanelModelConfig(
   config: PanelModelConfigValue,
   customProviders: readonly CustomProviderConfig[],
@@ -200,6 +226,10 @@ function resolvePanelModelConfig(
 
   if (entryId.startsWith('dreamina:')) {
     return resolveDreaminaModel(entryId, ratio, extraParams, catalog, resolvedByFallback);
+  }
+
+  if (entryId.startsWith('agnes:image:')) {
+    return resolveAgnesModel(entryId, ratio, extraParams, catalog, resolvedByFallback);
   }
 
   if (entryId.startsWith('custom:')) {
@@ -236,6 +266,7 @@ export function resolveActiveModelForPanel(
   const catalog = buildImageModelCatalog({
     customProviders,
     dreaminaStatus: settings.dreaminaStatus,
+    agnesApiKey: settings.agnesApiKey,
   });
   const requested = override ?? settings.lastModelConfigByPanel?.[panelKey] ?? null;
   const requestedResolved = requested
