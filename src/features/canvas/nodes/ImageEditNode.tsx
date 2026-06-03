@@ -10,7 +10,7 @@ import {
   useRef,
 } from 'react';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { Check, ChevronRight, Sparkles, Video, X } from 'lucide-react';
+import { Bug, Check, ChevronRight, Sparkles, Video, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -75,9 +75,14 @@ import {
   type MultiFunctionType,
 } from '@/features/canvas/ui/MultiFunctionPanel';
 import { CanvasNodeImage } from '@/features/canvas/ui/CanvasNodeImage';
-import { UiButton } from '@/components/ui';
+import { UiButton, UiModal } from '@/components/ui';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import {
+  buildGenerateImageDebugPreview,
+  type GenerateImageDebugPreview,
+} from '@/features/canvas/infrastructure/tauriAiGateway';
+import { DEFAULT_GENERATED_IMAGE_DISPLAY_NAME } from '@/features/canvas/application/generatedMediaNaming';
 
 type ImageEditNodeProps = NodeProps & {
   id: string;
@@ -207,17 +212,16 @@ function renderPromptWithHighlights(prompt: string, maxImageCount: number): Reac
   return segments;
 }
 
-function buildAiResultNodeTitle(prompt: string, fallbackTitle: string): string {
-  const normalizedPrompt = prompt.trim();
-  if (!normalizedPrompt) {
-    return fallbackTitle;
-  }
-
-  return normalizedPrompt;
-}
-
 function normalizePromptForSourceComparison(prompt: string): string {
   return prompt.replace(/\r\n/g, '\n').trim();
+}
+
+function serializeDebugJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageEditNodeProps) => {
@@ -242,6 +246,9 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   const [generateCount, setGenerateCount] = useState(1);
   const [showCountPicker, setShowCountPicker] = useState(false);
   const [customCount, setCustomCount] = useState('');
+  const [isPayloadDebugOpen, setIsPayloadDebugOpen] = useState(false);
+  const [payloadDebugPreview, setPayloadDebugPreview] = useState<GenerateImageDebugPreview | null>(null);
+  const [copiedPayloadSection, setCopiedPayloadSection] = useState<'gateway' | 'provider' | 'all' | null>(null);
   const countPickerRef = useRef<HTMLDivElement>(null);
   const promptCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCommittedPromptRef = useRef(data.prompt ?? '');
@@ -254,7 +261,6 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   const addNode = useCanvasStore((state) => state.addNode);
   const findNodePosition = useCanvasStore((state) => state.findNodePosition);
   const addEdge = useCanvasStore((state) => state.addEdge);
-  const apiKeys = useSettingsStore((state) => state.apiKeys);
   const grsaiNanoBananaProModel = useSettingsStore((state) => state.grsaiNanoBananaProModel);
   const promptPresets = useSettingsStore((state) => state.promptPresets);
 
@@ -318,7 +324,6 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     const modelId = data.model ?? DEFAULT_IMAGE_MODEL_ID;
     return getImageModel(modelId);
   }, [data.model]);
-  const providerApiKey = apiKeys[selectedModel.providerId] ?? '';
   const effectiveExtraParams = useMemo(
     () => ({
       ...(data.extraParams ?? {}),
@@ -510,6 +515,211 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     }
   }, [showCountPicker]);
 
+  const handleOpenPayloadDebug = useCallback(async () => {
+    const currentPromptDraft = promptDraftRef.current;
+    flushPromptDraft(currentPromptDraft);
+    const latestCanvasState = useCanvasStore.getState();
+    const latestNode = latestCanvasState.nodes.find((candidate) => candidate.id === id);
+    const latestData = latestNode && isImageEditNode(latestNode) ? latestNode.data : data;
+    const latestSettings = useSettingsStore.getState();
+    const latestIncomingImages = graphImageResolver.collectInputImages(
+      id,
+      latestCanvasState.nodes,
+      latestCanvasState.edges
+    );
+    let basePrompt = currentPromptDraft.replace(/@(?=图\d+)/g, '').trim();
+
+    const selectedPresetId = latestData.selectedPromptPresetId ?? null;
+    const selectedFunctionChip = selectedPresetId ? null : latestData.selectedFunctionChip ?? null;
+    if (selectedPresetId && latestData.selectedFunctionChip) {
+      updateNodeData(id, { selectedFunctionChip: null });
+    }
+
+    let sourcePrompt = '';
+    if (selectedPresetId) {
+      const selectedPreset = latestSettings.promptPresets.find((preset) => preset.id === selectedPresetId);
+      if (!selectedPreset) {
+        const errorMessage = t('node.imageEdit.promptPresetMissing');
+        setError(errorMessage);
+        void showErrorDialog(errorMessage, t('common.error'));
+        return;
+      }
+      sourcePrompt = selectedPreset.prompt.trim();
+    } else if (selectedFunctionChip) {
+      sourcePrompt = buildMultiFunctionPromptFromSettings(
+        selectedFunctionChip as MultiFunctionType,
+        latestSettings
+      ).trim();
+    }
+
+    if (sourcePrompt && basePrompt) {
+      const normalizedBasePrompt = normalizePromptForSourceComparison(basePrompt);
+      const knownSourcePrompts = [
+        sourcePrompt,
+        ...latestSettings.promptPresets.map((preset) => preset.prompt),
+        ...MULTI_FUNCTION_ITEMS.map((item) =>
+          buildMultiFunctionPromptFromSettings(item.id, latestSettings)
+        ),
+      ];
+      const basePromptIsStaleSourcePrompt = knownSourcePrompts.some((promptSource) =>
+        normalizePromptForSourceComparison(promptSource) === normalizedBasePrompt
+      );
+      if (basePromptIsStaleSourcePrompt) {
+        basePrompt = '';
+      }
+    }
+
+    if (!basePrompt && !sourcePrompt) {
+      const errorMessage = t('node.imageEdit.promptRequired');
+      setError(errorMessage);
+      void showErrorDialog(errorMessage, t('common.error'));
+      return;
+    }
+    if (!basePrompt && sourcePrompt && latestIncomingImages.length === 0) {
+      const errorMessage = t('node.imageEdit.referenceRequiredForPromptSource');
+      setError(errorMessage);
+      void showErrorDialog(errorMessage, t('common.error'));
+      return;
+    }
+
+    let prompt = sourcePrompt && basePrompt
+      ? `${sourcePrompt}\n\n${t('node.imageEdit.userSupplementLabel')}${basePrompt}`
+      : sourcePrompt || basePrompt;
+
+    const cc = latestData.cameraControl;
+    if (cc?.enabled === true) {
+      try {
+        const cameraPrompt = buildCameraPrompt({
+          cameraId: cc.camera,
+          lensId: cc.lens,
+          focalLengthMm: cc.focalLength,
+          apertureF: cc.aperture,
+        }, latestSettings);
+        if (cameraPrompt) prompt = `${prompt}, ${cameraPrompt}`;
+      } catch {
+        // keep prompt as-is for preview
+      }
+    }
+
+    const latestNodeModelConfig = latestData.modelConfig ?? nodeModelConfig ?? null;
+    const resolved = resolveActiveModelForPanel('aiImageNode', latestNodeModelConfig);
+    if ((resolved.entryId.startsWith('custom:') || resolved.entryId.startsWith('agnes:')) && resolved.requiresApiKey && !resolved.apiKey) {
+      const msg = `服务商「${resolved.providerLabel}」未填写 API Key`;
+      setError(msg);
+      void showErrorDialog(msg, t('common.error'));
+      return;
+    }
+    if (!resolved.entryId.startsWith('dreamina:') && !resolved.entryId.startsWith('custom:') && !resolved.entryId.startsWith('agnes:')) {
+      const msg = '请先在「设置 → 我的配置」里添加至少一个服务商，或在「Dreamina」里登录 CLI 后再生成。';
+      setError(msg);
+      void showErrorDialog(msg, t('common.error'));
+      return;
+    }
+
+    let resolvedRequestAspectRatio = resolved.ratio;
+    if (resolvedRequestAspectRatio === 'auto') {
+      if (latestIncomingImages.length > 0) {
+        try {
+          const sourceAspectRatio = await detectAspectRatio(latestIncomingImages[0]);
+          resolvedRequestAspectRatio = sourceAspectRatio;
+        } catch {
+          resolvedRequestAspectRatio = '1:1';
+        }
+      } else {
+        resolvedRequestAspectRatio = '1:1';
+      }
+    }
+
+    const effectiveCount = customCount ? Math.min(10, Math.max(1, parseInt(customCount, 10) || 1)) : generateCount;
+    const requestSize = '2K';
+    const effectiveExtraParamsRecord = effectiveExtraParams as Record<string, unknown>;
+    const requestResolutionLabel =
+      resolved.extraParams?.['resolutionType'] ??
+      resolved.extraParams?.['size'] ??
+      effectiveExtraParamsRecord['resolutionType'] ??
+      effectiveExtraParamsRecord['size'] ??
+      selectedResolution.value ??
+      requestSize;
+    const promptForRequest = appendGenerationParameterConstraints(prompt, {
+      enabled: latestSettings.appendParameterConstraintsToPrompt,
+      aspectRatio: resolvedRequestAspectRatio,
+      resolution: requestResolutionLabel,
+      count: effectiveCount,
+    });
+
+    const requestPayload = {
+      prompt: promptForRequest,
+      model: resolved.modelForGateway,
+      size: requestSize,
+      aspectRatio: resolvedRequestAspectRatio,
+      referenceImages: latestIncomingImages,
+      extraParams: { ...effectiveExtraParams, ...resolved.extraParams },
+    };
+
+    try {
+      const preview = await buildGenerateImageDebugPreview(requestPayload);
+      setPayloadDebugPreview(preview);
+      setIsPayloadDebugOpen(true);
+      setError(null);
+    } catch (previewError) {
+      const resolvedError = resolveErrorContent(previewError, '生成 payload 预览失败');
+      setError(resolvedError.message);
+      void showErrorDialog(
+        resolvedError.message,
+        t('common.error'),
+        resolvedError.details,
+      );
+    }
+  }, [
+    customCount,
+    data,
+    effectiveExtraParams,
+    flushPromptDraft,
+    generateCount,
+    id,
+    nodeModelConfig,
+    selectedModel.id,
+    selectedResolution.value,
+    t,
+    updateNodeData,
+  ]);
+
+  const handleCopyPayloadDebug = useCallback(async (section: 'gateway' | 'provider' | 'all') => {
+    if (!payloadDebugPreview) {
+      return;
+    }
+
+    const gatewayText = serializeDebugJson(payloadDebugPreview.gatewayRequest);
+    const providerText = payloadDebugPreview.customProviderRequest
+      ? serializeDebugJson(payloadDebugPreview.customProviderRequest)
+      : '';
+
+    const text = section === 'gateway'
+      ? gatewayText
+      : section === 'provider'
+        ? providerText
+        : [
+          '=== 网关请求 ===',
+          gatewayText,
+          payloadDebugPreview.customProviderRequest ? '\n=== 自定义服务商 HTTP 请求 ===' : '',
+          providerText,
+        ].filter(Boolean).join('\n');
+
+    if (!text.trim()) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedPayloadSection(section);
+      window.setTimeout(() => {
+        setCopiedPayloadSection((current) => (current === section ? null : current));
+      }, 1200);
+    } catch (error) {
+      console.error('Failed to copy payload debug text', error);
+    }
+  }, [payloadDebugPreview]);
+
   const handleGenerate = useCallback(async () => {
     const currentPromptDraft = promptDraftRef.current;
     flushPromptDraft(currentPromptDraft);
@@ -621,7 +831,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     const batchId = effectiveCount > 1 ? `batch-${Date.now()}` : undefined;
     const generationDurationMs = 60000;
     const generationStartedAt = Date.now();
-    const resultNodeTitle = buildAiResultNodeTitle(prompt, t('node.imageEdit.resultTitle'));
+    const resultNodeTitle = DEFAULT_GENERATED_IMAGE_DISPLAY_NAME;
     const runtimeDiagnostics = await getRuntimeDiagnostics();
     setError(null);
     setShowCountPicker(false);
@@ -669,16 +879,15 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         EXPORT_RESULT_NODE_DEFAULT_WIDTH,
         EXPORT_RESULT_NODE_LAYOUT_HEIGHT
       );
-      const nodeTitle = effectiveCount > 1 ? `${resultNodeTitle} (${i + 1}/${effectiveCount})` : resultNodeTitle;
-      const newNodeId = addNode(
-        CANVAS_NODE_TYPES.exportImage,
-        newNodePosition,
+        const newNodeId = addNode(
+          CANVAS_NODE_TYPES.exportImage,
+          newNodePosition,
         {
           isGenerating: true,
           generationStartedAt,
           generationDurationMs,
           resultKind: 'generic',
-          displayName: nodeTitle,
+            displayName: resultNodeTitle,
           batchId,
           batchIndex: i,
           batchTotal: effectiveCount,
@@ -764,7 +973,6 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     addNode,
     addEdge,
     data,
-    providerApiKey,
     findNodePosition,
     flushPromptDraft,
     effectiveExtraParams,
@@ -1058,6 +1266,20 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         titleText={resolvedTitle}
         editable
         onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
+        rightSlot={(
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              void handleOpenPayloadDebug();
+            }}
+            className="inline-flex h-5 items-center justify-center rounded border border-[rgba(255,255,255,0.14)] bg-black/25 px-1.5 text-white/70 transition-colors hover:border-[rgba(255,255,255,0.24)] hover:bg-black/40 hover:text-white"
+            title="查看当前生图 payload"
+            aria-label="查看当前生图 payload"
+          >
+            <Bug className="h-3.5 w-3.5" />
+          </button>
+        )}
       />
 
       <div ref={imageBoxRef} className="image-box relative min-h-0 flex-1 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-2">
@@ -1373,6 +1595,87 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         cameraControl={data.cameraControl}
         onApply={handleCameraControlApply}
       />
+
+      <UiModal
+        isOpen={isPayloadDebugOpen}
+        title="生图 Payload 调试"
+        onClose={() => {
+          setIsPayloadDebugOpen(false);
+          setCopiedPayloadSection(null);
+        }}
+        widthClassName="w-[900px]"
+        footer={(
+          <>
+            <UiButton
+              variant="muted"
+              size="sm"
+              onClick={() => {
+                void handleCopyPayloadDebug('all');
+              }}
+            >
+              {copiedPayloadSection === 'all' ? t('nodeToolbar.copied') : '复制全部'}
+            </UiButton>
+            <UiButton
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setIsPayloadDebugOpen(false);
+                setCopiedPayloadSection(null);
+              }}
+            >
+              关闭
+            </UiButton>
+          </>
+        )}
+      >
+        <div className="flex flex-col gap-3">
+          <div className="text-xs text-text-muted">
+            展示当前节点点击“生成”时将提交的请求预览，不会实际发请求。
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium text-text-dark">网关请求</div>
+              <UiButton
+                variant="muted"
+                size="sm"
+                onClick={() => {
+                  void handleCopyPayloadDebug('gateway');
+                }}
+              >
+                {copiedPayloadSection === 'gateway' ? t('nodeToolbar.copied') : t('common.copy')}
+              </UiButton>
+            </div>
+            <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-bg-dark/60 p-3">
+              <pre className="ui-scrollbar max-h-[260px] overflow-auto whitespace-pre-wrap break-words text-xs text-text-dark">
+                {payloadDebugPreview ? serializeDebugJson(payloadDebugPreview.gatewayRequest) : '暂无预览数据'}
+              </pre>
+            </div>
+          </div>
+
+          {payloadDebugPreview?.customProviderRequest ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-medium text-text-dark">自定义服务商 HTTP 请求</div>
+                <UiButton
+                  variant="muted"
+                  size="sm"
+                  onClick={() => {
+                    void handleCopyPayloadDebug('provider');
+                  }}
+                >
+                  {copiedPayloadSection === 'provider' ? t('nodeToolbar.copied') : t('common.copy')}
+                </UiButton>
+              </div>
+              <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-bg-dark/60 p-3">
+                <pre className="ui-scrollbar max-h-[320px] overflow-auto whitespace-pre-wrap break-words text-xs text-text-dark">
+                  {serializeDebugJson(payloadDebugPreview.customProviderRequest)}
+                </pre>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </UiModal>
     </div>
   );
 });

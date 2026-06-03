@@ -28,6 +28,9 @@ import {
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
 import { resolveErrorContent, showErrorDialog } from '@/features/canvas/application/errorDialog';
 import {
+  DEFAULT_GENERATED_VIDEO_DISPLAY_NAME,
+} from '@/features/canvas/application/generatedMediaNaming';
+import {
   CURRENT_RUNTIME_SESSION_ID,
   createReferenceImagePlaceholders,
   getRuntimeDiagnostics,
@@ -371,7 +374,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         isGenerating: true,
         generationStartedAt,
         generationDurationMs,
-        displayName: prompt,
+        displayName: DEFAULT_GENERATED_VIDEO_DISPLAY_NAME,
         aspectRatio: outputAspectRatio,
         durationSeconds: Number(latestModelConfig.duration) || null,
         sourcePrompt: prompt,

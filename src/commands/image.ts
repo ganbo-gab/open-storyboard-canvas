@@ -59,6 +59,19 @@ export interface PrepareNodeImageSourceResult {
   aspectRatio: string;
 }
 
+export interface RenameLocalMediaFilesPayload {
+  primaryPath: string;
+  previewPath?: string;
+  desiredFileName?: string;
+  mediaKind: 'image' | 'video';
+}
+
+export interface RenameLocalMediaFilesResult {
+  primaryPath: string;
+  previewPath?: string;
+  fileName: string;
+}
+
 export interface CropImageSourcePayload {
   source: string;
   aspectRatio?: string;
@@ -165,6 +178,12 @@ export async function persistImageBinary(
     bytes: Array.from(bytes),
     extension,
   });
+}
+
+export async function renameLocalMediaFiles(
+  payload: RenameLocalMediaFilesPayload
+): Promise<RenameLocalMediaFilesResult> {
+  return await invoke('rename_local_media_files', { payload });
 }
 
 export async function saveImageSourceToDownloads(

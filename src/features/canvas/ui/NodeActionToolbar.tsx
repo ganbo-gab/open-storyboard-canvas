@@ -16,6 +16,12 @@ import {
 import { MULTI_FUNCTION_ITEMS } from '@/features/canvas/ui/MultiFunctionPanel';
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
 import {
+  resolveGeneratedImageSaveFileName,
+  resolveGeneratedVideoSaveFileName,
+  resolveSuggestedImageStem,
+  resolveSuggestedVideoStem,
+} from '@/features/canvas/application/generatedMediaNaming';
+import {
   copyImageSourceToClipboard,
   saveImageSourceToDirectory,
   saveImageSourceToPath,
@@ -198,6 +204,30 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
   const canHandleImage = Boolean(imageSource);
   const canHandleVideo = Boolean(rawVideoSource && videoSource);
   const canRetryGeneration = canRetryGenerationFetch(node);
+  const suggestedImageSavePath = useMemo(() => {
+    if (isExportImageNode(node)) {
+      return resolveGeneratedImageSaveFileName(node.data);
+    }
+    return `node-${node.id}.png`;
+  }, [node]);
+  const suggestedImageStem = useMemo(() => {
+    if (isExportImageNode(node)) {
+      return resolveSuggestedImageStem(node.data);
+    }
+    return `node-${node.id}`;
+  }, [node]);
+  const suggestedVideoSavePath = useMemo(() => {
+    if (isVideoNode(node)) {
+      return resolveGeneratedVideoSaveFileName(node.data);
+    }
+    return `node-${node.id}.mp4`;
+  }, [node]);
+  const suggestedVideoStem = useMemo(() => {
+    if (isVideoNode(node)) {
+      return resolveSuggestedVideoStem(node.data);
+    }
+    return `node-${node.id}`;
+  }, [node]);
 
   const closePromptPresetMenu = useCallback(() => {
     setPromptPresetMenu(null);
@@ -397,7 +427,7 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
   const handleDownloadSaveAs = useCallback(async () => {
     if (!rawImageSource) return;
     try {
-      const selectedPath = await save({ defaultPath: `node-${node.id}.png` });
+      const selectedPath = await save({ defaultPath: suggestedImageSavePath });
       if (!selectedPath || Array.isArray(selectedPath)) return;
       await saveImageSourceToPath(rawImageSource, selectedPath);
       closeDownloadMenu();
@@ -412,7 +442,7 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
     async (targetDir: string) => {
       if (!rawImageSource) return;
       try {
-        await saveImageSourceToDirectory(rawImageSource, targetDir, `node-${node.id}`);
+        await saveImageSourceToDirectory(rawImageSource, targetDir, suggestedImageStem);
         closeDownloadMenu();
         showFeedbackToast(t('nodeToolbar.downloadSuccess'));
       } catch (error) {
@@ -420,13 +450,13 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
         showFeedbackToast(t('nodeToolbar.downloadFailed'), 'error');
       }
     },
-    [closeDownloadMenu, node.id, rawImageSource, showFeedbackToast, t]
+    [closeDownloadMenu, rawImageSource, showFeedbackToast, suggestedImageStem, t]
   );
 
   const handleDownloadVideoSaveAs = useCallback(async () => {
     if (!rawVideoSource) return;
     try {
-      const selectedPath = await save({ defaultPath: `node-${node.id}.mp4` });
+      const selectedPath = await save({ defaultPath: suggestedVideoSavePath });
       if (!selectedPath || Array.isArray(selectedPath)) return;
       await saveVideoSourceToPath(rawVideoSource, selectedPath);
       closeDownloadMenu();
@@ -441,7 +471,7 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
     async (targetDir: string) => {
       if (!rawVideoSource) return;
       try {
-        await saveVideoSourceToDirectory(rawVideoSource, targetDir, `node-${node.id}`);
+        await saveVideoSourceToDirectory(rawVideoSource, targetDir, suggestedVideoStem);
         closeDownloadMenu();
         showFeedbackToast(t('nodeToolbar.downloadSuccess'));
       } catch (error) {
@@ -449,7 +479,7 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
         showFeedbackToast(t('nodeToolbar.downloadFailed'), 'error');
       }
     },
-    [closeDownloadMenu, node.id, rawVideoSource, showFeedbackToast, t]
+    [closeDownloadMenu, rawVideoSource, showFeedbackToast, suggestedVideoStem, t]
   );
 
   const handleOpenPromptPresetMenu = useCallback((event: MouseEvent<HTMLButtonElement>) => {

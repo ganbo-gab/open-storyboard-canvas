@@ -61,6 +61,8 @@ export type ExportImageNodeResultKind =
 
 export interface ExportImageNodeData extends NodeImageData {
   resultKind?: ExportImageNodeResultKind;
+  generatedFileName?: string | null;
+  generatedNamingMode?: 'default' | 'custom';
   batchId?: string;
   batchIndex?: number;
   batchTotal?: number;
@@ -135,6 +137,8 @@ export interface VideoNodeData extends NodeDisplayData {
   videoUrl: string | null;
   localVideoUrl?: string | null;
   thumbnailUrl?: string | null;
+  generatedFileName?: string | null;
+  generatedNamingMode?: 'default' | 'custom';
   aspectRatio: string;
   durationSeconds?: number | null;
   isGenerating?: boolean;
