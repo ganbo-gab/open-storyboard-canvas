@@ -29,6 +29,7 @@ pub struct ProjectRecord {
     pub edges_json: String,
     pub viewport_json: String,
     pub history_json: String,
+    pub image_pool_json: Option<String>,
 }
 
 fn resolve_db_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -55,7 +56,8 @@ fn ensure_projects_table(conn: &Connection) -> Result<(), String> {
           nodes_json TEXT NOT NULL,
           edges_json TEXT NOT NULL,
           viewport_json TEXT NOT NULL,
-          history_json TEXT NOT NULL
+          history_json TEXT NOT NULL,
+          image_pool_json TEXT NOT NULL DEFAULT '[]'
         );
         CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at DESC);
         CREATE TABLE IF NOT EXISTS project_image_refs (
@@ -69,6 +71,7 @@ fn ensure_projects_table(conn: &Connection) -> Result<(), String> {
     .map_err(|e| format!("Failed to initialize projects table: {}", e))?;
 
     let mut has_node_count = false;
+    let mut has_image_pool_json = false;
     let mut stmt = conn
         .prepare("PRAGMA table_info(projects)")
         .map_err(|e| format!("Failed to inspect projects schema: {}", e))?;
@@ -79,9 +82,10 @@ fn ensure_projects_table(conn: &Connection) -> Result<(), String> {
     for name_result in rows {
         let column_name =
             name_result.map_err(|e| format!("Failed to read projects column name: {}", e))?;
-        if column_name == "node_count" {
-            has_node_count = true;
-            break;
+        match column_name.as_str() {
+            "node_count" => has_node_count = true,
+            "image_pool_json" => has_image_pool_json = true,
+            _ => {}
         }
     }
 
@@ -93,10 +97,35 @@ fn ensure_projects_table(conn: &Connection) -> Result<(), String> {
         .map_err(|e| format!("Failed to add node_count column: {}", e))?;
     }
 
+    if !has_image_pool_json {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN image_pool_json TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )
+        .map_err(|e| format!("Failed to add image_pool_json column: {}", e))?;
+    }
+
     Ok(())
 }
 
-fn parse_image_pool(history_json: &str) -> Vec<String> {
+fn parse_image_pool_from_json(image_pool_json: &str) -> Vec<String> {
+    let parsed: serde_json::Value = match serde_json::from_str(image_pool_json) {
+        Ok(value) => value,
+        Err(_) => return Vec::new(),
+    };
+
+    parsed
+        .as_array()
+        .map(|array| {
+            array
+                .iter()
+                .filter_map(|value| value.as_str().map(|item| item.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_image_pool_from_history(history_json: &str) -> Vec<String> {
     let parsed: serde_json::Value = match serde_json::from_str(history_json) {
         Ok(value) => value,
         Err(_) => return Vec::new(),
@@ -112,6 +141,17 @@ fn parse_image_pool(history_json: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn parse_image_pool(history_json: &str, image_pool_json: Option<&str>) -> Vec<String> {
+    let top_level_pool = image_pool_json
+        .map(parse_image_pool_from_json)
+        .unwrap_or_default();
+    if !top_level_pool.is_empty() {
+        return top_level_pool;
+    }
+
+    parse_image_pool_from_history(history_json)
 }
 
 fn resolve_image_ref(value: &str, image_pool: &[String]) -> Option<String> {
@@ -243,6 +283,7 @@ fn collect_image_paths_from_nodes(
         for key in [
             "imageUrl",
             "previewImageUrl",
+            "thumbnailUrl",
             "sourceImageUrl",
             "snapshotUrl",
             "backgroundImageUrl",
@@ -313,8 +354,12 @@ fn collect_image_paths_from_nodes(
     }
 }
 
-fn extract_project_image_paths(nodes_json: &str, history_json: &str) -> HashSet<String> {
-    let image_pool = parse_image_pool(history_json);
+fn extract_project_image_paths(
+    nodes_json: &str,
+    history_json: &str,
+    image_pool_json: Option<&str>,
+) -> HashSet<String> {
+    let image_pool = parse_image_pool(history_json, image_pool_json);
     let mut paths = HashSet::new();
 
     if let Ok(parsed_nodes) = serde_json::from_str::<serde_json::Value>(nodes_json) {
@@ -517,7 +562,8 @@ pub fn get_project_record(
                   nodes_json,
                   edges_json,
                   viewport_json,
-                  history_json
+                  history_json,
+                  image_pool_json
                 FROM projects
                 WHERE id = ?1
                 LIMIT 1
@@ -536,6 +582,7 @@ pub fn get_project_record(
                 edges_json: row.get(6)?,
                 viewport_json: row.get(7)?,
                 history_json: row.get(8)?,
+                image_pool_json: row.get(9)?,
             })
         });
 
@@ -553,7 +600,15 @@ pub fn upsert_project_record(
     db: State<ProjectDb>,
     record: ProjectRecord,
 ) -> Result<(), String> {
-    let image_paths = extract_project_image_paths(&record.nodes_json, &record.history_json);
+    let image_pool_json = record.image_pool_json.clone().unwrap_or_else(|| {
+        serde_json::to_string(&parse_image_pool_from_history(&record.history_json))
+            .unwrap_or_else(|_| "[]".to_string())
+    });
+    let image_paths = extract_project_image_paths(
+        &record.nodes_json,
+        &record.history_json,
+        Some(&image_pool_json),
+    );
     with_db(&app, &db, |conn| {
         let tx = conn
             .transaction()
@@ -570,9 +625,10 @@ pub fn upsert_project_record(
               nodes_json,
               edges_json,
               viewport_json,
-              history_json
+              history_json,
+              image_pool_json
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name,
               created_at = excluded.created_at,
@@ -581,7 +637,8 @@ pub fn upsert_project_record(
               nodes_json = excluded.nodes_json,
               edges_json = excluded.edges_json,
               viewport_json = excluded.viewport_json,
-              history_json = excluded.history_json
+              history_json = excluded.history_json,
+              image_pool_json = excluded.image_pool_json
             "#,
             params![
                 record.id,
@@ -593,6 +650,7 @@ pub fn upsert_project_record(
                 record.edges_json,
                 record.viewport_json,
                 record.history_json,
+                image_pool_json,
             ],
         )
         .map_err(|e| format!("Failed to upsert project: {}", e))?;

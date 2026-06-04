@@ -18,6 +18,8 @@ export interface ProjectRecord {
   edgesJson: string;
   viewportJson: string;
   historyJson: string;
+  imagePoolJson?: string | null;
+  imagePool?: string[] | null;
 }
 
 export async function listProjectSummaries(): Promise<ProjectSummaryRecord[]> {

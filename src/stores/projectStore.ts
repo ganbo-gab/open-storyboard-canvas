@@ -205,6 +205,7 @@ function mapNodeImageReferences(
       for (const key of [
         'imageUrl',
         'previewImageUrl',
+        'thumbnailUrl',
         'sourceImageUrl',
         'snapshotUrl',
         'backgroundImageUrl',
@@ -397,6 +398,27 @@ function extractImagePoolFromHistoryJson(historyJson: string): string[] {
   return parsed.filter((item): item is string => typeof item === 'string');
 }
 
+function parseImagePoolJson(imagePoolJson: string | null | undefined): string[] {
+  if (typeof imagePoolJson !== 'string' || imagePoolJson.length === 0) {
+    return [];
+  }
+
+  const parsed = safeParseJson<unknown>(imagePoolJson, []);
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed.filter((item): item is string => typeof item === 'string');
+}
+
+function getTopLevelImagePool(record: ProjectRecord): string[] {
+  if (Array.isArray(record.imagePool)) {
+    return record.imagePool.filter((item): item is string => typeof item === 'string');
+  }
+
+  return parseImagePoolJson(record.imagePoolJson);
+}
+
 function toProjectSummary(record: ProjectSummaryRecord): ProjectSummary {
   return {
     id: record.id,
@@ -427,6 +449,7 @@ function toProjectRecord(project: Project): ProjectRecord {
     edgesJson: JSON.stringify(encodedProject.edges),
     viewportJson: JSON.stringify(encodedProject.viewport),
     historyJson,
+    imagePoolJson: JSON.stringify(encodedProject.imagePool ?? []),
   };
 }
 
@@ -435,6 +458,7 @@ function fromProjectRecord(record: ProjectRecord): Project {
   const parsedEdges = safeParseJson<CanvasEdge[]>(record.edgesJson, []);
   const parsedViewport = safeParseJson<Viewport>(record.viewportJson, DEFAULT_VIEWPORT);
   const shouldRestoreHistory = record.historyJson.length <= MAX_HISTORY_RESTORE_JSON_CHARS;
+  const topLevelImagePool = getTopLevelImagePool(record);
   const extractedImagePool = extractImagePoolFromHistoryJson(record.historyJson);
   const parsedHistoryPayload = shouldRestoreHistory
     ? safeParseJson<{
@@ -454,6 +478,7 @@ function fromProjectRecord(record: ProjectRecord): Project {
     past: parsedHistoryPayload.past ?? [],
     future: parsedHistoryPayload.future ?? [],
   };
+  const historyImagePool = parsedHistoryPayload.imagePool ?? extractedImagePool;
 
   const persistedProject: PersistedProject = {
     id: record.id,
@@ -465,7 +490,7 @@ function fromProjectRecord(record: ProjectRecord): Project {
     edges: parsedEdges,
     viewport: parsedViewport ?? DEFAULT_VIEWPORT,
     history: parsedHistory,
-    imagePool: parsedHistoryPayload.imagePool ?? extractedImagePool,
+    imagePool: topLevelImagePool.length > 0 ? topLevelImagePool : historyImagePool,
   };
 
   const decodedProject = decodeProject(persistedProject);
