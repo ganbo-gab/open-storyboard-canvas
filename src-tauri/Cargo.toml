@@ -1,6 +1,6 @@
 [package]
 name = "open-storyboard-canvas"
-version = "0.1.17"
+version = "0.1.18"
 description = "开源的 AI 分镜与导演台画布，支持全景图、摄像机控制、提示词预设和多供应商调用。"
 authors = ["ganbo-gab"]
 edition = "2021"
