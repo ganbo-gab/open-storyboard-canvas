@@ -4,9 +4,11 @@ export const CANVAS_NODE_TYPES = {
   upload: 'uploadNode',
   imageEdit: 'imageNode',
   aiVideo: 'aiVideoNode',
+  aiText: 'aiTextNode',
   exportImage: 'exportImageNode',
   video: 'videoNode',
   textAnnotation: 'textAnnotationNode',
+  jsonCard: 'jsonCardNode',
   group: 'groupNode',
   storyboardSplit: 'storyboardNode',
   storyboardGen: 'storyboardGenNode',
@@ -89,6 +91,31 @@ export interface GroupNodeData extends NodeDisplayData {
 
 export interface TextAnnotationNodeData extends NodeDisplayData {
   content: string;
+  isGenerating?: boolean;
+  generationStartedAt?: number | null;
+  generationElapsedMs?: number | null;
+  sourceAiNodeId?: string | null;
+  sourceAgentId?: string | null;
+  [key: string]: unknown;
+}
+
+export interface JsonCardDisplayField {
+  path: string;
+  label: string;
+  value: string;
+}
+
+export interface JsonCardNodeData extends NodeDisplayData {
+  rawContent: string;
+  parsedJson: unknown | null;
+  parseError?: string | null;
+  displayFields?: JsonCardDisplayField[];
+  isStreaming?: boolean;
+  isGenerating?: boolean;
+  generationStartedAt?: number | null;
+  generationElapsedMs?: number | null;
+  sourceAiNodeId?: string | null;
+  sourceAgentId?: string | null;
   [key: string]: unknown;
 }
 
@@ -135,6 +162,20 @@ export interface AiVideoNodeData extends NodeDisplayData {
   generationStartedAt?: number | null;
   generationDurationMs?: number;
   generationJobId?: string;
+}
+
+export interface AiTextNodeData extends NodeDisplayData {
+  prompt: string;
+  providerId?: string | null;
+  model: string;
+  agentId?: string | null;
+  isToolbarCollapsed?: boolean;
+  resultNodeId?: string | null;
+  lastRunInputHash?: string | null;
+  lastPreparedPayload?: unknown;
+  lastOutputType?: 'markdown' | 'json' | null;
+  lastError?: string | null;
+  [key: string]: unknown;
 }
 
 export interface VideoNodeData extends NodeDisplayData {
@@ -493,9 +534,11 @@ export type CanvasNodeData =
   | ExportImageNodeData
   | VideoNodeData
   | TextAnnotationNodeData
+  | JsonCardNodeData
   | GroupNodeData
   | ImageEditNodeData
   | AiVideoNodeData
+  | AiTextNodeData
   | StoryboardSplitNodeData
   | StoryboardGenNodeData
   | PanoramaNodeData
@@ -561,6 +604,12 @@ export function isAiVideoNode(
   return node?.type === CANVAS_NODE_TYPES.aiVideo;
 }
 
+export function isAiTextNode(
+  node: CanvasNode | null | undefined
+): node is Node<AiTextNodeData, typeof CANVAS_NODE_TYPES.aiText> {
+  return node?.type === CANVAS_NODE_TYPES.aiText;
+}
+
 export function isExportImageNode(
   node: CanvasNode | null | undefined
 ): node is Node<ExportImageNodeData, typeof CANVAS_NODE_TYPES.exportImage> {
@@ -583,6 +632,12 @@ export function isTextAnnotationNode(
   node: CanvasNode | null | undefined
 ): node is Node<TextAnnotationNodeData, typeof CANVAS_NODE_TYPES.textAnnotation> {
   return node?.type === CANVAS_NODE_TYPES.textAnnotation;
+}
+
+export function isJsonCardNode(
+  node: CanvasNode | null | undefined
+): node is Node<JsonCardNodeData, typeof CANVAS_NODE_TYPES.jsonCard> {
+  return node?.type === CANVAS_NODE_TYPES.jsonCard;
 }
 
 export function isStoryboardSplitNode(

@@ -3,16 +3,18 @@ import {
   CANVAS_NODE_TYPES,
   DEFAULT_ASPECT_RATIO,
   type ImageSize,
+  type AiTextNodeData,
+  type AiVideoNodeData,
   type BlueprintNodeData,
   type CanvasNodeData,
   type CanvasNodeType,
-  type AiVideoNodeData,
   type ExportImageNodeData,
   type GroupNodeData,
   type ImageEditNodeData,
+  type JsonCardNodeData,
   type PanoramaNodeData,
-  type StoryboardSplitNodeData,
   type StoryboardGenNodeData,
+  type StoryboardSplitNodeData,
   type TextAnnotationNodeData,
   type UploadImageNodeData,
   type VideoNodeData,
@@ -43,6 +45,10 @@ export interface CanvasNodeDefinition<TData extends CanvasNodeData = CanvasNodeD
   menuLabelKey: string;
   menuIcon: MenuIconKey;
   visibleInMenu: boolean;
+  defaultSize?: {
+    width: number;
+    height: number;
+  };
   capabilities: CanvasNodeCapabilities;
   connectivity: CanvasNodeConnectivity;
   createDefaultData: () => TData;
@@ -55,6 +61,7 @@ const uploadNodeDefinition: CanvasNodeDefinition<UploadImageNodeData> = {
   visibleInMenu: true,
   capabilities: {
     toolbar: true,
+    selectionToolbar: 'deleteOnly',
     promptInput: false,
   },
   connectivity: {
@@ -82,6 +89,7 @@ const imageEditNodeDefinition: CanvasNodeDefinition<ImageEditNodeData> = {
   visibleInMenu: true,
   capabilities: {
     toolbar: true,
+    selectionToolbar: 'deleteOnly',
     promptInput: false,
   },
   connectivity: {
@@ -140,6 +148,39 @@ const aiVideoNodeDefinition: CanvasNodeDefinition<AiVideoNodeData> = {
   }),
 };
 
+const aiTextNodeDefinition: CanvasNodeDefinition<AiTextNodeData> = {
+  type: CANVAS_NODE_TYPES.aiText,
+  menuLabelKey: 'node.menu.aiTextGeneration',
+  menuIcon: 'sparkles',
+  visibleInMenu: true,
+  capabilities: {
+    toolbar: true,
+    selectionToolbar: 'deleteOnly',
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: true,
+    targetHandle: true,
+    connectMenu: {
+      fromSource: true,
+      fromTarget: false,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.aiText],
+    prompt: '',
+    providerId: 'openai-chat',
+    model: 'gpt-4.1-mini',
+    agentId: null,
+    isToolbarCollapsed: false,
+    resultNodeId: null,
+    lastRunInputHash: null,
+    lastPreparedPayload: null,
+    lastOutputType: null,
+    lastError: null,
+  }),
+};
+
 const exportImageNodeDefinition: CanvasNodeDefinition<ExportImageNodeData> = {
   type: CANVAS_NODE_TYPES.exportImage,
   menuLabelKey: 'node.menu.uploadImage',
@@ -147,6 +188,7 @@ const exportImageNodeDefinition: CanvasNodeDefinition<ExportImageNodeData> = {
   visibleInMenu: false,
   capabilities: {
     toolbar: true,
+    selectionToolbar: 'deleteOnly',
     promptInput: false,
   },
   connectivity: {
@@ -232,7 +274,7 @@ const groupNodeDefinition: CanvasNodeDefinition<GroupNodeData> = {
   },
   createDefaultData: () => ({
     displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.group],
-    label: '组',
+    label: '分组',
   }),
 };
 
@@ -240,22 +282,65 @@ const textAnnotationNodeDefinition: CanvasNodeDefinition<TextAnnotationNodeData>
   type: CANVAS_NODE_TYPES.textAnnotation,
   menuLabelKey: 'node.menu.textAnnotation',
   menuIcon: 'text',
-  visibleInMenu: false,
+  visibleInMenu: true,
   capabilities: {
     toolbar: true,
+    selectionToolbar: 'deleteOnly',
     promptInput: false,
   },
   connectivity: {
-    sourceHandle: false,
-    targetHandle: false,
+    sourceHandle: true,
+    targetHandle: true,
     connectMenu: {
-      fromSource: false,
+      fromSource: true,
       fromTarget: false,
     },
   },
   createDefaultData: () => ({
     displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.textAnnotation],
     content: '',
+    isGenerating: false,
+    generationStartedAt: null,
+    generationElapsedMs: null,
+    sourceAiNodeId: null,
+    sourceAgentId: null,
+  }),
+};
+
+const jsonCardNodeDefinition: CanvasNodeDefinition<JsonCardNodeData> = {
+  type: CANVAS_NODE_TYPES.jsonCard,
+  menuLabelKey: 'node.menu.jsonCard',
+  menuIcon: 'text',
+  visibleInMenu: true,
+  defaultSize: {
+    width: 760,
+    height: 420,
+  },
+  capabilities: {
+    toolbar: true,
+    selectionToolbar: 'deleteOnly',
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: true,
+    targetHandle: true,
+    connectMenu: {
+      fromSource: true,
+      fromTarget: false,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.jsonCard],
+    rawContent: '',
+    parsedJson: null,
+    parseError: null,
+    displayFields: [],
+    isStreaming: false,
+    isGenerating: false,
+    generationStartedAt: null,
+    generationElapsedMs: null,
+    sourceAiNodeId: null,
+    sourceAgentId: null,
   }),
 };
 
@@ -353,7 +438,7 @@ const panoramaNodeDefinition: CanvasNodeDefinition<PanoramaNodeData> = {
     },
   },
   createDefaultData: () => ({
-    displayName: '全景图',
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.panorama],
     imageUrl: null,
     previewImageUrl: null,
     aspectRatio: '2:1',
@@ -379,8 +464,6 @@ const blueprintNodeDefinition: CanvasNodeDefinition<BlueprintNodeData> = {
   type: CANVAS_NODE_TYPES.blueprint,
   menuLabelKey: 'node.menu.blueprint',
   menuIcon: 'layout',
-  // Same reason as panorama: Director Studio nodes are created from image
-  // nodes via their toolbar, not by picking them from the blank-canvas menu.
   visibleInMenu: false,
   capabilities: {
     toolbar: false,
@@ -396,7 +479,7 @@ const blueprintNodeDefinition: CanvasNodeDefinition<BlueprintNodeData> = {
     },
   },
   createDefaultData: () => ({
-    displayName: '导演台',
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.blueprint],
     mode: 'flat',
     backgroundImageUrl: null,
     backgroundPanoramaUrl: null,
@@ -441,9 +524,11 @@ export const canvasNodeDefinitions: Record<CanvasNodeType, CanvasNodeDefinition>
   [CANVAS_NODE_TYPES.upload]: uploadNodeDefinition,
   [CANVAS_NODE_TYPES.imageEdit]: imageEditNodeDefinition,
   [CANVAS_NODE_TYPES.aiVideo]: aiVideoNodeDefinition,
+  [CANVAS_NODE_TYPES.aiText]: aiTextNodeDefinition,
   [CANVAS_NODE_TYPES.exportImage]: exportImageNodeDefinition,
   [CANVAS_NODE_TYPES.video]: videoNodeDefinition,
   [CANVAS_NODE_TYPES.textAnnotation]: textAnnotationNodeDefinition,
+  [CANVAS_NODE_TYPES.jsonCard]: jsonCardNodeDefinition,
   [CANVAS_NODE_TYPES.group]: groupNodeDefinition,
   [CANVAS_NODE_TYPES.storyboardSplit]: storyboardSplitDefinition,
   [CANVAS_NODE_TYPES.storyboardGen]: storyboardGenNodeDefinition,

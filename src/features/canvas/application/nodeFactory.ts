@@ -20,11 +20,20 @@ export class CanvasNodeFactory implements NodeFactory {
       ...data,
     } as CanvasNodeData;
 
-    return {
+    const node: CanvasNode = {
       id: this.idGenerator.next(),
       type,
       position,
       data: nodeData,
     };
+
+    if (definition.defaultSize) {
+      node.style = {
+        width: definition.defaultSize.width,
+        height: definition.defaultSize.height,
+      };
+    }
+
+    return node;
   }
 }

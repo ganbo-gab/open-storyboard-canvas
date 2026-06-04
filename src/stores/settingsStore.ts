@@ -14,6 +14,11 @@ import {
   type PromptTemplateOverride,
   type PromptTemplateOverrideMap,
 } from '@/features/canvas/application/promptTemplates';
+import {
+  createDefaultTextAgent,
+  normalizeTextAgents,
+} from '@/features/canvas/application/aiText/helpers';
+import type { TextAgentConfig } from '@/features/canvas/application/aiText/types';
 
 export type UiRadiusPreset = 'compact' | 'default' | 'large';
 export type ThemeTonePreset = 'neutral' | 'warm' | 'cool';
@@ -100,6 +105,7 @@ interface SettingsState {
   promptDefaultLanguage: PromptLanguage;
   promptTemplateOverrides: PromptTemplateOverrideMap;
   promptPresets: PromptPreset[];
+  textAgents: TextAgentConfig[];
   multiAnglePromptTemplate: string;
   lightingPromptTemplate: string;
   /** Last-seen Dreamina login status; refreshed by the settings screen on demand. */
@@ -149,6 +155,9 @@ interface SettingsState {
   addPromptPreset: (preset: { name: string; prompt: string }) => PromptPreset | null;
   updatePromptPreset: (id: string, patch: Partial<Pick<PromptPreset, 'name' | 'prompt'>>) => void;
   deletePromptPreset: (id: string) => void;
+  addTextAgent: () => TextAgentConfig;
+  updateTextAgent: (id: string, patch: Partial<TextAgentConfig>) => void;
+  deleteTextAgent: (id: string) => void;
   setMultiAnglePromptTemplate: (template: string) => void;
   setLightingPromptTemplate: (template: string) => void;
   resetMultiAnglePromptTemplate: () => void;
@@ -501,6 +510,7 @@ export const useSettingsStore = create<SettingsState>()(
       promptDefaultLanguage: 'zh',
       promptTemplateOverrides: {},
       promptPresets: [],
+      textAgents: [],
       multiAnglePromptTemplate: DEFAULT_MULTI_ANGLE_PROMPT_TEMPLATE,
       lightingPromptTemplate: DEFAULT_LIGHTING_PROMPT_TEMPLATE,
       dreaminaStatus: null,
@@ -681,6 +691,32 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({
           promptPresets: state.promptPresets.filter((preset) => preset.id !== id),
         })),
+      addTextAgent: () => {
+        const agent = createDefaultTextAgent();
+        set((state) => ({
+          textAgents: [agent, ...state.textAgents].slice(0, 200),
+        }));
+        return agent;
+      },
+      updateTextAgent: (id, patch) =>
+        set((state) => ({
+          textAgents: state.textAgents.map((agent) => {
+            if (agent.id !== id) {
+              return agent;
+            }
+            return {
+              ...agent,
+              ...patch,
+              id: agent.id,
+              createdAt: agent.createdAt,
+              updatedAt: Date.now(),
+            };
+          }),
+        })),
+      deleteTextAgent: (id) =>
+        set((state) => ({
+          textAgents: state.textAgents.filter((agent) => agent.id !== id),
+        })),
       setMultiAnglePromptTemplate: (template) =>
         set((state) => {
           const nextTemplate = template.trim() || DEFAULT_MULTI_ANGLE_PROMPT_TEMPLATE;
@@ -791,6 +827,7 @@ export const useSettingsStore = create<SettingsState>()(
           promptDefaultLanguage?: PromptLanguage;
           promptTemplateOverrides?: PromptTemplateOverrideMap;
           promptPresets?: PromptPreset[];
+          textAgents?: TextAgentConfig[];
           multiAnglePromptTemplate?: string;
           lightingPromptTemplate?: string;
         };
@@ -832,6 +869,7 @@ export const useSettingsStore = create<SettingsState>()(
         const canvasMouseBindings = canvasMouseBindingPreset === 'custom'
           ? normalizeCanvasMouseBindings(state.canvasMouseBindings)
           : bindingsForCanvasMousePreset(canvasMouseBindingPreset);
+        const textAgents = normalizeTextAgents(state.textAgents);
         if (Object.keys(migratedApiKeys).length > 0) {
           return {
             ...persistedWithoutPricing,
@@ -868,6 +906,7 @@ export const useSettingsStore = create<SettingsState>()(
             promptDefaultLanguage,
             promptTemplateOverrides,
             promptPresets,
+            textAgents,
             multiAnglePromptTemplate:
               state.multiAnglePromptTemplate?.trim() || DEFAULT_MULTI_ANGLE_PROMPT_TEMPLATE,
             lightingPromptTemplate: migratedLightingTemplate,
@@ -909,6 +948,7 @@ export const useSettingsStore = create<SettingsState>()(
           promptDefaultLanguage,
           promptTemplateOverrides,
           promptPresets,
+          textAgents,
           multiAnglePromptTemplate:
             state.multiAnglePromptTemplate?.trim() || DEFAULT_MULTI_ANGLE_PROMPT_TEMPLATE,
           lightingPromptTemplate: migratedLightingTemplate,

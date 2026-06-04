@@ -25,6 +25,7 @@ import { AgnesSettingsSection } from '@/components/settings/AgnesSettingsSection
 import { DreaminaSection } from '@/components/settings/DreaminaSection';
 import { PromptManagementSection } from '@/components/settings/PromptManagementSection';
 import { PromptPresetsSection } from '@/components/settings/PromptPresetsSection';
+import { TextAgentsSection } from '@/components/settings/TextAgentsSection';
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -617,6 +618,20 @@ export function SettingsDialog({
               </button>
 
               <button
+                onClick={() => setActiveCategory('textAgents')}
+                className={`
+                w-full flex items-center gap-3 px-4 py-2.5 text-left
+                transition-colors
+                ${activeCategory === 'textAgents'
+                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
+                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
+                  }
+              `}
+              >
+                <span className="text-sm">AI 文本 Agent</span>
+              </button>
+
+              <button
                 onClick={() => setActiveCategory('appearance')}
                 className={`
                 w-full flex items-center gap-3 px-4 py-2.5 text-left
@@ -695,6 +710,8 @@ export function SettingsDialog({
             {activeCategory === 'promptManagement' && <PromptManagementSection />}
 
             {activeCategory === 'promptPresets' && <PromptPresetsSection />}
+
+            {activeCategory === 'textAgents' && <TextAgentsSection />}
 
             {activeCategory === 'providersAdd' && (
               <div className="flex flex-1 flex-col overflow-hidden">
