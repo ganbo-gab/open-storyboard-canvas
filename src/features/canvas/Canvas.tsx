@@ -74,6 +74,7 @@ const CANVAS_MARQUEE_MIN_DISTANCE = 4;
 const CANVAS_BATCH_TRIGGER_TYPES = new Set<CanvasNodeType>([
   CANVAS_NODE_TYPES.imageEdit,
   CANVAS_NODE_TYPES.aiVideo,
+  CANVAS_NODE_TYPES.aiText,
   CANVAS_NODE_TYPES.storyboardGen,
 ]);
 
@@ -248,7 +249,9 @@ function resolveAllowedNodeTypes(handleType: HandleType): CanvasNodeType[] {
 function canNodeTypeBeManualConnectionSource(type: CanvasNodeType): boolean {
   return type === CANVAS_NODE_TYPES.upload
     || type === CANVAS_NODE_TYPES.imageEdit
-    || type === CANVAS_NODE_TYPES.exportImage;
+    || type === CANVAS_NODE_TYPES.exportImage
+    || type === CANVAS_NODE_TYPES.textAnnotation
+    || type === CANVAS_NODE_TYPES.jsonCard;
 }
 
 function canNodeBeManualConnectionSource(nodeId: string | null | undefined, nodes: CanvasNode[]): boolean {
@@ -1516,6 +1519,9 @@ export function Canvas() {
         const data = cloneNodeData(sourceNode.data);
         if ('isGenerating' in (data as Record<string, unknown>)) {
           (data as { isGenerating?: boolean }).isGenerating = false;
+        }
+        if ('isStreaming' in (data as Record<string, unknown>)) {
+          (data as { isStreaming?: boolean }).isStreaming = false;
         }
         if ('generationStartedAt' in (data as Record<string, unknown>)) {
           (data as { generationStartedAt?: number | null }).generationStartedAt = null;

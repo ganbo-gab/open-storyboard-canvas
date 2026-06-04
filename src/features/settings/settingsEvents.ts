@@ -8,6 +8,7 @@ export type SettingsCategory =
   | 'agnes'
   | 'promptManagement'
   | 'promptPresets'
+  | 'textAgents'
   | 'appearance'
   | 'general'
   | 'about';

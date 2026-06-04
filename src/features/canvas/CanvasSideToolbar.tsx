@@ -14,7 +14,17 @@ interface SideToolbarItem {
   data?: Partial<CanvasNodeData>;
 }
 
+function TextIcon({ className }: { className?: string }) {
+  return <span className={className}>T</span>;
+}
+
 const TOOLBAR_ITEMS: SideToolbarItem[] = [
+  {
+    type: CANVAS_NODE_TYPES.aiText,
+    labelKey: 'node.menu.aiTextGeneration',
+    titleKey: 'canvasToolbar.addAiText',
+    icon: TextIcon,
+  },
   {
     type: CANVAS_NODE_TYPES.imageEdit,
     labelKey: 'node.menu.aiImageGeneration',

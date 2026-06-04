@@ -677,6 +677,10 @@ function normalizeNodes(rawNodes: CanvasNode[]): CanvasNode[] {
         }
       }
 
+      if ('isStreaming' in mergedData && mergedData.isStreaming) {
+        mergedData.isStreaming = false;
+      }
+
       return {
         ...node,
         type: node.type as CanvasNodeType,

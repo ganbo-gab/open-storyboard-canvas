@@ -138,6 +138,7 @@
   "canvasToolbar": {
     "assets": "资产",
     "assetsTitle": "查看当前项目资产",
+    "addAiText": "添加 AI 文本节点",
     "addAiImage": "添加 AI 图片节点",
     "addAiVideo": "添加 AI 视频节点",
     "addPanorama": "添加全景图节点",
@@ -747,9 +748,11 @@
       "uploadImage": "上传图片",
       "aiImageGeneration": "AI 图片",
       "aiVideoGeneration": "AI 视频",
+      "aiTextGeneration": "AI 文本",
       "storyboard": "分镜节点",
       "storyboardGen": "分镜生成",
-      "textAnnotation": "文本注释",
+      "textAnnotation": "文本节点",
+      "jsonCard": "JSON 卡片",
       "panorama": "全景图",
       "blueprint": "导演台"
     },

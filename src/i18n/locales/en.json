@@ -138,6 +138,7 @@
   "canvasToolbar": {
     "assets": "Assets",
     "assetsTitle": "View current project assets",
+    "addAiText": "Add AI text node",
     "addAiImage": "Add AI image node",
     "addAiVideo": "Add AI video node",
     "addPanorama": "Add panorama node",
@@ -747,9 +748,11 @@
       "uploadImage": "Upload Image",
       "aiImageGeneration": "AI Image",
       "aiVideoGeneration": "AI Video",
+      "aiTextGeneration": "AI Text",
       "storyboard": "Storyboard Node",
       "storyboardGen": "Storyboard Generation",
-      "textAnnotation": "Text Annotation",
+      "textAnnotation": "Text Node",
+      "jsonCard": "JSON Card",
       "panorama": "Panorama",
       "blueprint": "Director Studio"
     },
