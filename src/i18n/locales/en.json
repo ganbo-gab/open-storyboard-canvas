@@ -43,6 +43,13 @@
     "generate": "Generate",
     "emptyHintTitle": "Double-click to add a node",
     "emptyHintSubtitle": "Double-click to add a node",
+    "batchToolbar": {
+      "selectedCount": "{{count}} selected",
+      "group": "Group",
+      "ungroup": "Ungroup",
+      "trigger": "Trigger",
+      "delete": "Delete"
+    },
     "toolbar": {
       "zoomIn": "Zoom In",
       "zoomOut": "Zoom Out",
@@ -761,7 +768,8 @@
       "waitingResultDelayed": "Already waited {{minutes}} minutes with no result yet. Still waiting...",
       "selectToEdit": "Select this node and enter a prompt below to generate or edit image",
       "generationFailed": "Generation failed",
-      "fetchResultFailed": "Failed to fetch generation result. Please retry."
+      "fetchResultFailed": "Failed to fetch generation result. Please retry.",
+      "generationElapsed": "Generation elapsed time"
     },
     "imageEdit": {
       "promptRequired": "Please enter a prompt",
@@ -772,7 +780,11 @@
       "resultTitle": "Result Image",
       "promptPlaceholder": "Describe anything you want to generate or edit",
       "generateCount": "Count",
-      "customCount": "Custom"
+      "customCount": "Custom",
+      "payloadDebug": "Preview request content to be sent",
+      "payloadDebugShort": "Request Preview",
+      "payloadDebugTitle": "Request Content Preview",
+      "payloadDebugHint": "This shows the request content that will be sent to the gateway / provider, not an image preview. API keys, Authorization, query secrets, and base64 / data URLs are masked or summarized. This preview only builds the request; it does not submit generation."
     },
     "aiVideo": {
       "promptPlaceholder": "Describe the video, camera motion, action timing; type @ to reference connected images",
@@ -781,13 +793,15 @@
       "noModel": "Choose video model",
       "duration": "Duration",
       "aspectRatio": "Aspect Ratio",
+      "payloadDebug": "Preview video request content",
       "resolution": "Resolution"
     },
     "videoNode": {
       "waitingResult": "Waiting for video result",
       "waitingResultDelayed": "Already waited {{minutes}} minutes with no video result yet. Still waiting...",
       "generationFailed": "Video generation failed",
-      "empty": "No video yet"
+      "empty": "No video yet",
+      "generationElapsed": "Generation elapsed time"
     },
     "panoramaViewer": {
       "expand": "Enlarge panorama",
@@ -1193,6 +1207,8 @@
     "appendParameterConstraintsToPromptDesc": "When enabled, generation submits append the current aspect ratio, resolution, and count to the final prompt so models are less likely to ignore them.",
     "collapseNodeActionToolbarByDefault": "Collapse image node toolbars",
     "collapseNodeActionToolbarByDefaultDesc": "When enabled, AI image and image nodes only show a small hint when selected. Click it to expand the toolbar, then click again to collapse it.",
+    "showNodePayloadPreview": "Node payload preview",
+    "showNodePayloadPreviewDesc": "When enabled, AI image and AI video inputs show a request payload preview button in the upper-right corner.",
     "useLegacyPanoramaControlDirection": "Use legacy panorama drag direction",
     "useLegacyPanoramaControlDirectionDesc": "Off uses the new reversed drag direction. Turn on to restore the old panorama viewer drag and arrow-key direction.",
     "panoramaControlSensitivity": "Panorama control sensitivity",

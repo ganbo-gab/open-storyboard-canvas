@@ -1410,6 +1410,13 @@ fn canonical_local_media_path(path: &Path, media_dir: &Path, label: &str) -> Res
     Ok(canonical_path)
 }
 
+fn is_content_hash_media_path(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|value| value.to_str())
+        .map(|stem| stem.len() == 32 && stem.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .unwrap_or(false)
+}
+
 fn rename_local_file_to_stem(path: &Path, target_stem: &str) -> Result<PathBuf, String> {
     let parent = path
         .parent()
@@ -1429,14 +1436,25 @@ fn rename_local_file_to_stem(path: &Path, target_stem: &str) -> Result<PathBuf, 
     }
 
     let output_path = ensure_unique_path(candidate);
-    std::fs::rename(path, &output_path).map_err(|e| {
-        format!(
-            "Failed to rename local media file from {} to {}: {}",
-            path.display(),
-            output_path.display(),
-            e
-        )
-    })?;
+    if is_content_hash_media_path(path) {
+        std::fs::copy(path, &output_path).map_err(|e| {
+            format!(
+                "Failed to copy local media file from {} to {}: {}",
+                path.display(),
+                output_path.display(),
+                e
+            )
+        })?;
+    } else {
+        std::fs::rename(path, &output_path).map_err(|e| {
+            format!(
+                "Failed to rename local media file from {} to {}: {}",
+                path.display(),
+                output_path.display(),
+                e
+            )
+        })?;
+    }
     Ok(output_path)
 }
 

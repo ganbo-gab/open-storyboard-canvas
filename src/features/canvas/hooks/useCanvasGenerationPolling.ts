@@ -18,6 +18,12 @@ import {
 } from '@/commands/image';
 import {
   extractFileNameFromPath,
+  getLocalDateStamp,
+  resolveDefaultGeneratedImageDisplayName,
+  resolveDefaultGeneratedImageFileStem,
+  resolveDefaultGeneratedVideoDisplayName,
+  resolveDefaultGeneratedVideoFileStem,
+  resolveNextGeneratedMediaSequence,
   resolveCustomGeneratedImageName,
   resolveCustomGeneratedVideoName,
 } from '@/features/canvas/application/generatedMediaNaming';
@@ -188,6 +194,39 @@ function formatPrepareErrorDetails(error: unknown): string {
   return String(error);
 }
 
+function resolveGenerationElapsedMs(currentData: Record<string, unknown>, endedAt = Date.now()): number | null {
+  const startedAt = typeof currentData.generationStartedAt === 'number'
+    ? currentData.generationStartedAt
+    : null;
+  if (startedAt === null || !Number.isFinite(startedAt)) {
+    return null;
+  }
+  return Math.max(0, endedAt - startedAt);
+}
+
+function resolveExistingGeneratedSequence(currentData: Record<string, unknown>): number | null {
+  const value = currentData.generatedSequence;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return Math.max(1, Math.floor(value));
+}
+
+function resolveGeneratedSourcePrompt(currentData: Record<string, unknown>): string {
+  const sourcePrompt = typeof currentData.sourcePrompt === 'string' ? currentData.sourcePrompt.trim() : '';
+  if (sourcePrompt) {
+    return sourcePrompt;
+  }
+  const debugContext = currentData.generationDebugContext;
+  if (debugContext && typeof debugContext === 'object' && !Array.isArray(debugContext)) {
+    const prompt = (debugContext as { prompt?: unknown }).prompt;
+    if (typeof prompt === 'string' && prompt.trim()) {
+      return prompt.trim();
+    }
+  }
+  return typeof currentData.displayName === 'string' ? currentData.displayName.trim() : '';
+}
+
 async function prepareCompletedImageResult(
   nodeId: string,
   resultUrl: string,
@@ -271,11 +310,23 @@ async function prepareCompletedImageResult(
   const previewWithMetadata =
     prepared.previewImageUrl === prepared.imageUrl ? imageWithMetadata : prepared.previewImageUrl;
   const displayName = typeof currentData.displayName === 'string' ? currentData.displayName : null;
-  const desiredFileName = resolveCustomGeneratedImageName(displayName) ?? undefined;
+  const sequence = resolveExistingGeneratedSequence(currentData)
+    ?? resolveNextGeneratedMediaSequence('image', useCanvasStore.getState().nodes, [nodeId]);
+  const dateStamp = typeof currentData.generatedDateStamp === 'string' && currentData.generatedDateStamp.trim()
+    ? currentData.generatedDateStamp.trim()
+    : getLocalDateStamp();
+  const sourcePrompt = resolveGeneratedSourcePrompt(currentData);
+  const customName = currentData.generatedNamingMode === 'custom'
+    ? resolveCustomGeneratedImageName(displayName)
+    : null;
+  const desiredFileName = customName ?? resolveDefaultGeneratedImageFileStem(sequence, dateStamp);
+  const resolvedDisplayName = customName
+    ? (displayName?.trim() || customName)
+    : resolveDefaultGeneratedImageDisplayName(sequence, sourcePrompt);
   let finalImageUrl = imageWithMetadata;
   let finalPreviewImageUrl = previewWithMetadata;
   let generatedFileName = extractFileNameFromPath(imageWithMetadata);
-  const generatedNamingMode = desiredFileName ? 'custom' : 'default';
+  const generatedNamingMode = customName ? 'custom' : 'default';
 
   try {
     const renamed = await renameLocalMediaFiles({
@@ -298,10 +349,15 @@ async function prepareCompletedImageResult(
     imageUrl: finalImageUrl,
     previewImageUrl: finalPreviewImageUrl,
     aspectRatio: prepared.aspectRatio,
+    displayName: resolvedDisplayName,
     generatedFileName,
     generatedNamingMode,
+    generatedSequence: sequence,
+    generatedDateStamp: dateStamp,
+    sourcePrompt,
     isGenerating: false,
     generationStartedAt: null,
+    generationElapsedMs: resolveGenerationElapsedMs(currentData),
     generationJobId: null,
     generationProviderId: null,
     generationClientSessionId: null,
@@ -392,10 +448,22 @@ async function prepareCompletedVideoResult(
     ? trimmedResultUrl
     : null;
   const displayName = typeof currentData.displayName === 'string' ? currentData.displayName : null;
-  const desiredFileName = resolveCustomGeneratedVideoName(displayName) ?? undefined;
+  const sequence = resolveExistingGeneratedSequence(currentData)
+    ?? resolveNextGeneratedMediaSequence('video', useCanvasStore.getState().nodes, [nodeId]);
+  const dateStamp = typeof currentData.generatedDateStamp === 'string' && currentData.generatedDateStamp.trim()
+    ? currentData.generatedDateStamp.trim()
+    : getLocalDateStamp();
+  const sourcePrompt = resolveGeneratedSourcePrompt(currentData);
+  const customName = currentData.generatedNamingMode === 'custom'
+    ? resolveCustomGeneratedVideoName(displayName)
+    : null;
+  const desiredFileName = customName ?? resolveDefaultGeneratedVideoFileStem(sequence, dateStamp);
+  const resolvedDisplayName = customName
+    ? (displayName?.trim() || customName)
+    : resolveDefaultGeneratedVideoDisplayName(sequence, sourcePrompt);
   let finalLocalVideoUrl = localVideoUrl;
   let generatedFileName = extractFileNameFromPath(localVideoUrl);
-  const generatedNamingMode = desiredFileName ? 'custom' : 'default';
+  const generatedNamingMode = customName ? 'custom' : 'default';
 
   try {
     const renamed = await renameLocalMediaFiles({
@@ -415,10 +483,15 @@ async function prepareCompletedVideoResult(
   updateNodeData(nodeId, {
     videoUrl: lightweightResultUrl ?? finalLocalVideoUrl,
     localVideoUrl: finalLocalVideoUrl,
+    displayName: resolvedDisplayName,
     generatedFileName,
     generatedNamingMode,
+    generatedSequence: sequence,
+    generatedDateStamp: dateStamp,
+    sourcePrompt,
     isGenerating: false,
     generationStartedAt: null,
+    generationElapsedMs: resolveGenerationElapsedMs(currentData),
     generationJobId: null,
     generationProviderId: null,
     generationClientSessionId: null,
@@ -643,9 +716,12 @@ function markGenerationFailed(
     clearJobMetadata?: boolean;
   },
 ): void {
+  const currentNode = useCanvasStore.getState().nodes.find((node) => node.id === nodeId);
+  const currentData = (currentNode?.data ?? {}) as Record<string, unknown>;
   const patch: Partial<CanvasNodeData> = {
     isGenerating: false,
     generationStartedAt: null,
+    generationElapsedMs: resolveGenerationElapsedMs(currentData),
     generationStoryboardMetadata: undefined,
     generationError: errorMessage,
     generationErrorDetails: errorDetails,

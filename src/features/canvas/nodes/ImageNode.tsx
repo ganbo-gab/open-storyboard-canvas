@@ -36,6 +36,7 @@ import { renameLocalMediaFiles } from '@/commands/image';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
 import { CanvasNodeImage } from '@/features/canvas/ui/CanvasNodeImage';
+import { formatGenerationElapsedMs } from '@/features/canvas/ui/generationElapsed';
 import { useCanvasStore } from '@/stores/canvasStore';
 
 type ImageNodeProps = NodeProps & {
@@ -86,6 +87,9 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
   const resolvedTitle = useMemo(
     () => resolveNodeDisplayName(type as CanvasNodeType, data),
     [data, type]
+  );
+  const generationElapsedText = formatGenerationElapsedMs(
+    (data as { generationElapsedMs?: unknown }).generationElapsedMs
   );
 
   useEffect(() => {
@@ -155,7 +159,10 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
 
   const handleTitleChange = async (nextTitle: string) => {
     if (!isExportResultNode || !data.imageUrl) {
-      updateNodeData(id, { displayName: nextTitle });
+      updateNodeData(id, {
+        displayName: nextTitle,
+        ...(isExportResultNode ? { generatedNamingMode: 'custom' as const } : {}),
+      });
       return;
     }
 
@@ -219,19 +226,29 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
         onTitleChange={(nextTitle) => {
           void handleTitleChange(nextTitle);
         }}
-        rightSlot={
-          data.batchId &&
-          typeof data.batchIndex === 'number' &&
-          typeof data.batchTotal === 'number' &&
-          data.batchTotal > 1 ? (
-            <span
-              className="rounded-full bg-accent/80 px-2 py-[1px] text-[10px] font-medium leading-tight text-white"
-              title={`第 ${data.batchIndex + 1} 张 / 共 ${data.batchTotal} 张`}
-            >
-              {data.batchIndex + 1}/{data.batchTotal}
-            </span>
-          ) : null
-        }
+        rightSlot={(
+          <span className="flex items-center gap-1">
+            {generationElapsedText ? (
+              <span
+                className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-[1px] text-[10px] font-medium leading-tight text-white"
+                title={t('node.imageNode.generationElapsed')}
+              >
+                {generationElapsedText}
+              </span>
+            ) : null}
+            {data.batchId &&
+            typeof data.batchIndex === 'number' &&
+            typeof data.batchTotal === 'number' &&
+            data.batchTotal > 1 ? (
+              <span
+                className="rounded-full bg-accent/80 px-2 py-[1px] text-[10px] font-medium leading-tight text-white"
+                title={`第 ${data.batchIndex + 1} 张 / 共 ${data.batchTotal} 张`}
+              >
+                {data.batchIndex + 1}/{data.batchTotal}
+              </span>
+            ) : null}
+          </span>
+        )}
       />
 
       <div

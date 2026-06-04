@@ -10,7 +10,7 @@ import {
   useRef,
 } from 'react';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { Check, ChevronRight, Sparkles, Video, X } from 'lucide-react';
+import { Bug, Check, ChevronRight, Copy, Sparkles, Video, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -26,7 +26,11 @@ import {
 import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
-import { canvasAiGateway } from '@/features/canvas/application/canvasServices';
+import {
+  buildImageGenerationDebugPreview,
+  canvasAiGateway,
+  canvasEventBus,
+} from '@/features/canvas/application/canvasServices';
 import { graphImageResolver } from '@/features/canvas/application/graphImageResolver';
 import {
   parseInputImageSignature,
@@ -62,6 +66,12 @@ import {
   getImageModel,
   resolveImageModelResolution,
 } from '@/features/canvas/models';
+import {
+  getLocalDateStamp,
+  resolveDefaultGeneratedImageDisplayName,
+  resolveDefaultGeneratedImageFileStem,
+  resolveNextGeneratedMediaSequence,
+} from '@/features/canvas/application/generatedMediaNaming';
 import { useImageModelCatalog } from '@/features/canvas/application/modelCatalog';
 import { GRSAI_NANO_BANANA_PRO_MODEL_ID } from '@/features/canvas/models/image/grsai/nanoBananaPro';
 import {
@@ -79,7 +89,7 @@ import {
   type MultiFunctionType,
 } from '@/features/canvas/ui/MultiFunctionPanel';
 import { CanvasNodeImage } from '@/features/canvas/ui/CanvasNodeImage';
-import { UiButton } from '@/components/ui';
+import { UiButton, UiModal } from '@/components/ui';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 
@@ -211,13 +221,34 @@ function renderPromptWithHighlights(prompt: string, maxImageCount: number): Reac
   return segments;
 }
 
-function buildAiResultNodeTitle(prompt: string, fallbackTitle: string): string {
-  const normalizedPrompt = prompt.trim();
-  if (!normalizedPrompt) {
-    return fallbackTitle;
+function serializeDebugJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
   }
+}
 
-  return normalizedPrompt;
+interface ImageGenerationRequestAssembly {
+  promptForRequest: string;
+  requestSize: string;
+  resolvedRequestAspectRatio: string;
+  latestIncomingImages: string[];
+  effectiveCount: number;
+  batchId?: string;
+  firstGeneratedSequence: number;
+  generatedDateStamp: string;
+  generationStartedAt: number;
+  generationDurationMs: number;
+  resolved: ReturnType<typeof resolveActiveModelForPanel>;
+  gatewayPayload: {
+    prompt: string;
+    model: string;
+    size: string;
+    aspectRatio: string;
+    referenceImages: string[];
+    extraParams: Record<string, unknown>;
+  };
 }
 
 function normalizePromptForSourceComparison(prompt: string): string {
@@ -249,6 +280,8 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   const countPickerRef = useRef<HTMLDivElement>(null);
   const promptCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCommittedPromptRef = useRef(data.prompt ?? '');
+  const [payloadDebugText, setPayloadDebugText] = useState<string | null>(null);
+  const [payloadDebugCopied, setPayloadDebugCopied] = useState(false);
 
   const incomingImageSignature = useCanvasStore((state) =>
     selectInputImageSignature(id, state.nodes, state.edges)
@@ -258,9 +291,9 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   const addNode = useCanvasStore((state) => state.addNode);
   const findNodePosition = useCanvasStore((state) => state.findNodePosition);
   const addEdge = useCanvasStore((state) => state.addEdge);
-  const apiKeys = useSettingsStore((state) => state.apiKeys);
   const grsaiNanoBananaProModel = useSettingsStore((state) => state.grsaiNanoBananaProModel);
   const promptPresets = useSettingsStore((state) => state.promptPresets);
+  const showNodePayloadPreview = useSettingsStore((state) => state.showNodePayloadPreview);
 
   const incomingImages = useMemo(
     () => parseInputImageSignature(incomingImageSignature),
@@ -322,7 +355,6 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     const modelId = data.model ?? DEFAULT_IMAGE_MODEL_ID;
     return getImageModel(modelId);
   }, [data.model]);
-  const providerApiKey = apiKeys[selectedModel.providerId] ?? '';
   const effectiveExtraParams = useMemo(
     () => ({
       ...(data.extraParams ?? {}),
@@ -351,14 +383,6 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       aspectRatioOptions.find((item) => item.value === data.requestAspectRatio) ??
       aspectRatioOptions[0],
     [aspectRatioOptions, data.requestAspectRatio]
-  );
-
-  const requestResolution = selectedModel.resolveRequest({
-    referenceImageCount: incomingImages.length,
-  });
-  const supportedAspectRatioValues = useMemo(
-    () => selectedModel.aspectRatios.map((item) => item.value),
-    [selectedModel.aspectRatios]
   );
 
   const resolvedTitle = useMemo(
@@ -400,7 +424,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       promptCommitTimerRef.current = null;
       const latestPrompt = promptDraftRef.current;
       if (Object.is(lastCommittedPromptRef.current, latestPrompt)) {
-        return;
+        return null;
       }
       lastCommittedPromptRef.current = latestPrompt;
       updateNodeData(id, { prompt: latestPrompt });
@@ -482,7 +506,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   useEffect(() => {
     const handleOutside = (event: MouseEvent) => {
       if (rootRef.current?.contains(event.target as globalThis.Node)) {
-        return;
+        return null;
       }
 
       setShowImagePicker(false);
@@ -501,7 +525,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   useEffect(() => {
     const handleCountPickerOutside = (event: MouseEvent) => {
       if (countPickerRef.current?.contains(event.target as globalThis.Node)) {
-        return;
+        return null;
       }
       setShowCountPicker(false);
     };
@@ -514,15 +538,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     }
   }, [showCountPicker]);
 
-  const handleGenerate = useCallback(async () => {
-    const releaseSubmitLock = acquireGenerationSubmitLock(
-      generationSubmitLockKey(id, 'image-edit-node')
-    );
-    if (!releaseSubmitLock) {
-      return;
-    }
-
-    try {
+  const assembleImageGenerationRequest = useCallback(async (): Promise<ImageGenerationRequestAssembly | null> => {
     const currentPromptDraft = promptDraftRef.current;
     flushPromptDraft(currentPromptDraft);
     const latestCanvasState = useCanvasStore.getState();
@@ -549,7 +565,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         const errorMessage = t('node.imageEdit.promptPresetMissing');
         setError(errorMessage);
         void showErrorDialog(errorMessage, t('common.error'));
-        return;
+        return null;
       }
       sourcePrompt = selectedPreset.prompt.trim();
     } else if (selectedFunctionChip) {
@@ -580,13 +596,13 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       const errorMessage = t('node.imageEdit.promptRequired');
       setError(errorMessage);
       void showErrorDialog(errorMessage, t('common.error'));
-      return;
+      return null;
     }
     if (!basePrompt && sourcePrompt && latestIncomingImages.length === 0) {
       const errorMessage = t('node.imageEdit.referenceRequiredForPromptSource');
       setError(errorMessage);
       void showErrorDialog(errorMessage, t('common.error'));
-      return;
+      return null;
     }
 
     // Append the cinematography prompt at submit time (not into the user's
@@ -618,7 +634,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       const msg = `服务商「${resolved.providerLabel}」未填写 API Key`;
       setError(msg);
       void showErrorDialog(msg, t('common.error'));
-      return;
+      return null;
     }
     if (!resolved.entryId.startsWith('dreamina:') && !resolved.entryId.startsWith('custom:') && !resolved.entryId.startsWith('agnes:')) {
       // Fallback: no custom provider configured and no Dreamina login. Prompt
@@ -626,21 +642,20 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       const msg = '请先在「设置 → 我的配置」里添加至少一个服务商，或在「Dreamina」里登录 CLI 后再生成。';
       setError(msg);
       void showErrorDialog(msg, t('common.error'));
-      return;
+      return null;
     }
 
     const effectiveCount = customCount ? Math.min(10, Math.max(1, parseInt(customCount, 10) || 1)) : generateCount;
     const batchId = effectiveCount > 1 ? `batch-${Date.now()}` : undefined;
     const generationDurationMs = 60000;
     const generationStartedAt = Date.now();
-    const resultNodeTitle = buildAiResultNodeTitle(prompt, t('node.imageEdit.resultTitle'));
-    const runtimeDiagnostics = await getRuntimeDiagnostics();
+    const firstGeneratedSequence = resolveNextGeneratedMediaSequence(
+      'image',
+      latestCanvasState.nodes
+    );
+    const generatedDateStamp = getLocalDateStamp();
     setError(null);
     setShowCountPicker(false);
-
-    if (resolved.builtinModel && resolved.apiKey) {
-      await canvasAiGateway.setApiKey(resolved.providerId, resolved.apiKey);
-    }
 
     // Aspect ratio: honour the picker's choice directly. "auto" falls back to
     // the source image's ratio (or 1:1 if none), and for custom/Dreamina we
@@ -675,13 +690,82 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       count: effectiveCount,
     });
 
+    const extraParams = { ...effectiveExtraParams, ...resolved.extraParams };
+    return {
+      promptForRequest,
+      requestSize,
+      resolvedRequestAspectRatio,
+      latestIncomingImages,
+      effectiveCount,
+      batchId,
+      firstGeneratedSequence,
+      generatedDateStamp,
+      generationStartedAt,
+      generationDurationMs,
+      resolved,
+      gatewayPayload: {
+        prompt: promptForRequest,
+        model: resolved.modelForGateway,
+        size: requestSize,
+        aspectRatio: resolvedRequestAspectRatio,
+        referenceImages: latestIncomingImages,
+        extraParams,
+      },
+    };
+  }, [
+    data,
+    effectiveExtraParams,
+    flushPromptDraft,
+    generateCount,
+    customCount,
+    id,
+    nodeModelConfig,
+    selectedResolution.value,
+    t,
+    updateNodeData,
+  ]);
+
+  const handleGenerate = useCallback(async () => {
+    const releaseSubmitLock = acquireGenerationSubmitLock(
+      generationSubmitLockKey(id, 'image-edit-node')
+    );
+    if (!releaseSubmitLock) {
+      return;
+    }
+
+    try {
+    const assembled = await assembleImageGenerationRequest();
+    if (!assembled) {
+      return;
+    }
+    const {
+      promptForRequest,
+      requestSize,
+      resolvedRequestAspectRatio,
+      latestIncomingImages,
+      effectiveCount,
+      batchId,
+      firstGeneratedSequence,
+      generatedDateStamp,
+      generationStartedAt,
+      generationDurationMs,
+      resolved,
+      gatewayPayload,
+    } = assembled;
+    const runtimeDiagnostics = await getRuntimeDiagnostics();
+
+    if (resolved.builtinModel && resolved.apiKey) {
+      await canvasAiGateway.setApiKey(resolved.providerId, resolved.apiKey);
+    }
+
     for (let i = 0; i < effectiveCount; i++) {
+      const generatedSequence = firstGeneratedSequence + i;
       const newNodePosition = findNodePosition(
         id,
         EXPORT_RESULT_NODE_DEFAULT_WIDTH,
         EXPORT_RESULT_NODE_LAYOUT_HEIGHT
       );
-      const nodeTitle = effectiveCount > 1 ? `${resultNodeTitle} (${i + 1}/${effectiveCount})` : resultNodeTitle;
+      const nodeTitle = resolveDefaultGeneratedImageDisplayName(generatedSequence, promptForRequest);
       const newNodeId = addNode(
         CANVAS_NODE_TYPES.exportImage,
         newNodePosition,
@@ -691,6 +775,11 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
           generationDurationMs,
           resultKind: 'generic',
           displayName: nodeTitle,
+          sourcePrompt: promptForRequest,
+          generatedNamingMode: 'default',
+          generatedSequence,
+          generatedDateStamp,
+          generatedFileName: `${resolveDefaultGeneratedImageFileStem(generatedSequence, generatedDateStamp)}.png`,
           batchId,
           batchIndex: i,
           batchTotal: effectiveCount,
@@ -699,14 +788,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       addEdge(id, newNodeId);
 
       try {
-        const jobId = await canvasAiGateway.submitGenerateImageJob({
-          prompt: promptForRequest,
-          model: resolved.modelForGateway,
-          size: requestSize,
-          aspectRatio: resolvedRequestAspectRatio,
-          referenceImages: latestIncomingImages,
-          extraParams: { ...effectiveExtraParams, ...resolved.extraParams },
-        });
+        const jobId = await canvasAiGateway.submitGenerateImageJob(gatewayPayload);
         const generationDebugContext: GenerationDebugContext = {
           sourceType: 'imageEdit',
           providerId: resolved.providerId,
@@ -714,7 +796,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
           requestSize,
           requestAspectRatio: resolvedRequestAspectRatio,
           prompt: promptForRequest,
-          extraParams: { ...effectiveExtraParams, ...resolved.extraParams },
+          extraParams: gatewayPayload.extraParams,
           referenceImageCount: latestIncomingImages.length,
           referenceImagePlaceholders: createReferenceImagePlaceholders(latestIncomingImages.length),
           appVersion: runtimeDiagnostics.appVersion,
@@ -739,7 +821,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
           requestSize,
           requestAspectRatio: resolvedRequestAspectRatio,
           prompt: promptForRequest,
-          extraParams: { ...effectiveExtraParams, ...resolved.extraParams },
+          extraParams: gatewayPayload.extraParams,
           referenceImageCount: latestIncomingImages.length,
           referenceImagePlaceholders: createReferenceImagePlaceholders(latestIncomingImages.length),
           appVersion: runtimeDiagnostics.appVersion,
@@ -769,6 +851,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
           generationError: resolvedError.message,
           generationErrorDetails: resolvedError.details ?? null,
           generationDebugContext,
+          generationElapsedMs: Math.max(0, Date.now() - generationStartedAt),
         });
       }
     }
@@ -778,25 +861,59 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   }, [
     addNode,
     addEdge,
-    data,
-    providerApiKey,
+    assembleImageGenerationRequest,
     findNodePosition,
-    flushPromptDraft,
-    effectiveExtraParams,
     id,
-    nodeModelConfig,
-    requestResolution.requestModel,
-    selectedAspectRatio.value,
-    selectedModel.id,
-    selectedModel.expectedDurationMs,
-    selectedModel.providerId,
-    selectedResolution.value,
-    supportedAspectRatioValues,
     t,
     updateNodeData,
-    generateCount,
-    customCount,
   ]);
+
+  useEffect(() => {
+    return canvasEventBus.subscribe('generation-node/trigger', ({ nodeId }) => {
+      if (nodeId !== id) {
+        return;
+      }
+      void handleGenerate();
+    });
+  }, [handleGenerate, id]);
+
+  const handleOpenPayloadDebug = useCallback(async () => {
+    try {
+      const assembled = await assembleImageGenerationRequest();
+      if (!assembled) {
+        return;
+      }
+      const preview = await buildImageGenerationDebugPreview(assembled.gatewayPayload);
+      setPayloadDebugText(serializeDebugJson({
+        gatewayRequest: preview.gatewayRequest,
+        route: preview.route,
+        providerRequest: preview.providerRequest ?? null,
+      }));
+      setPayloadDebugCopied(false);
+    } catch (debugError) {
+      const resolvedError = resolveErrorContent(debugError, t('ai.error'));
+      setError(resolvedError.message);
+      void showErrorDialog(
+        resolvedError.message,
+        t('common.error'),
+        resolvedError.details,
+      );
+    }
+  }, [assembleImageGenerationRequest, t]);
+
+  const handleCopyPayloadDebug = useCallback(async () => {
+    if (!payloadDebugText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(payloadDebugText);
+      setPayloadDebugCopied(true);
+      window.setTimeout(() => setPayloadDebugCopied(false), 1600);
+    } catch (copyError) {
+      const resolvedError = resolveErrorContent(copyError, t('nodeToolbar.copyFailed'));
+      void showErrorDialog(resolvedError.message, t('common.error'), resolvedError.details);
+    }
+  }, [payloadDebugText, t]);
 
   const syncPromptHighlightScroll = () => {
     if (!promptRef.current || !promptHighlightRef.current) {
@@ -1071,6 +1188,25 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         className={NODE_HEADER_FLOATING_POSITION_CLASS}
         icon={<Sparkles className="h-4 w-4" />}
         titleText={resolvedTitle}
+        rightSlot={showNodePayloadPreview ? (
+          <button
+            type="button"
+            data-canvas-no-marquee="true"
+            className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] text-text-muted shadow-sm transition-colors hover:border-accent/50 hover:bg-[var(--canvas-node-menu-hover)] hover:text-accent"
+            title={t('node.imageEdit.payloadDebug')}
+            aria-label={t('node.imageEdit.payloadDebug')}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (payloadDebugText !== null) {
+                setPayloadDebugText(null);
+                return;
+              }
+              void handleOpenPayloadDebug();
+            }}
+          >
+            <Bug className="h-3.5 w-3.5" />
+          </button>
+        ) : undefined}
         editable
         onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
       />
@@ -1362,6 +1498,46 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       </div>
 
       {error && <div className="mt-1 shrink-0 text-xs text-red-400">{error}</div>}
+
+      <UiModal
+        isOpen={payloadDebugText !== null}
+        title={t('node.imageEdit.payloadDebugTitle')}
+        onClose={() => setPayloadDebugText(null)}
+        widthClassName="w-[min(760px,calc(100vw-32px))]"
+        containerClassName="!z-[13050]"
+        footer={(
+          <>
+            <UiButton
+              variant="muted"
+              size="sm"
+              onClick={() => setPayloadDebugText(null)}
+            >
+              {t('common.close')}
+            </UiButton>
+            <UiButton
+              variant="primary"
+              size="sm"
+              onClick={() => void handleCopyPayloadDebug()}
+            >
+              <Copy className="mr-1.5 h-3.5 w-3.5" />
+              {payloadDebugCopied ? t('nodeToolbar.copied') : t('nodeToolbar.copy')}
+            </UiButton>
+          </>
+        )}
+      >
+        <div className="space-y-2">
+          <div className="text-xs text-text-muted">
+            {t('node.imageEdit.payloadDebugHint')}
+          </div>
+          <pre
+            className="ui-scrollbar nowheel max-h-[60vh] overflow-auto rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-3 text-xs leading-5 text-text-dark"
+            onWheelCapture={(event) => event.stopPropagation()}
+            onTouchMoveCapture={(event) => event.stopPropagation()}
+          >
+            {payloadDebugText}
+          </pre>
+        </div>
+      </UiModal>
 
       <Handle
         type="target"

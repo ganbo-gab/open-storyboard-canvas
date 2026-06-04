@@ -17,6 +17,7 @@ import {
 } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { hasCustomProviderCredential } from '@/features/canvas/application/providerAvailability';
+import { isLocalFilesystemResultSource } from '@/features/canvas/application/generationRetry';
 import {
   buildProviderUrl,
   ensureProviderBaseUrlDirectory,
@@ -64,6 +65,20 @@ const RESULT_POLL_NETWORK_RETRY_ATTEMPTS = 3;
 const RESULT_POLL_MAX_CONSECUTIVE_NETWORK_FAILURES = 8;
 const RESULT_POLL_RETRY_HTTP_STATUSES = [408, 425, 429, 500, 502, 503, 504, 520, 522, 524];
 const DEFAULT_OPENAI_VIDEO_ENDPOINT_PATH = '/v1/videos';
+
+export interface CustomProviderRequestDebugPreview {
+  providerLabel: string;
+  providerId: string;
+  modelId: string;
+  modelName: string;
+  method: 'GET' | 'POST';
+  bodyMode: CustomProviderBodyMode;
+  url: string;
+  headers: Record<string, string>;
+  body?: unknown;
+  multipart?: unknown;
+  error?: string;
+}
 
 class NetworkRequestError extends Error {
   constructor(message: string) {
@@ -1085,6 +1100,193 @@ function buildQueryParamsFromRequestBody(body: unknown): Record<string, string> 
   );
 }
 
+function isSensitiveFieldName(name: string): boolean {
+  return /(authorization|api[-_ ]?key|access[-_ ]?token|secret|password|bearer|x-goog-api-key)/i.test(name);
+}
+
+function maskDebugHeaderValue(key: string, value: string): string {
+  if (isSensitiveFieldName(key)) {
+    return value ? '[masked]' : '';
+  }
+  return summarizeDebugString(value);
+}
+
+function maskDebugUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    url.searchParams.forEach((_value, key) => {
+      if (isSensitiveFieldName(key)) {
+        url.searchParams.set(key, '[masked]');
+      }
+    });
+    return url.toString();
+  } catch {
+    return rawUrl.replace(/([?&][^=&]*(?:key|token|secret|password)[^=]*=)[^&]+/gi, '$1[masked]');
+  }
+}
+
+function summarizeDebugString(value: string, maxLength = 500): string {
+  const trimmed = value.trim();
+  const commaIndex = trimmed.indexOf(',');
+  if (/^data:[^,]+;base64,/i.test(trimmed) && commaIndex >= 0) {
+    const meta = trimmed.slice(0, commaIndex);
+    const base64 = trimmed.slice(commaIndex + 1);
+    return `${meta},[base64 ${base64.length} chars]`;
+  }
+  if (isBase64LikeImage(trimmed)) {
+    return `[base64 ${trimmed.length} chars]`;
+  }
+  return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength)}...(${trimmed.length} chars)` : value;
+}
+
+function summarizeDebugValue(value: unknown, key = '', depth = 0): unknown {
+  if (value === undefined || value === null) return value;
+  if (typeof value === 'string') {
+    return isSensitiveFieldName(key) ? '[masked]' : summarizeDebugString(value);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) {
+    return depth >= 5
+      ? `[array ${value.length}]`
+      : value.map((item, index) => summarizeDebugValue(item, `${key}[${index}]`, depth + 1));
+  }
+  if (typeof value === 'object') {
+    if (depth >= 5) return '[object]';
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([entryKey, entryValue]) => [
+        entryKey,
+        summarizeDebugValue(entryValue, entryKey, depth + 1),
+      ])
+    );
+  }
+  return String(value);
+}
+
+function summarizeDebugHeaders(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).map(([key, value]) => [key, maskDebugHeaderValue(key, value)])
+  );
+}
+
+function summarizeDebugMultipart(multipart: CustomHttpMultipartBody): unknown {
+  return {
+    fields: (multipart.fields ?? []).map((field) => ({
+      name: field.name,
+      value: summarizeDebugValue(field.value, field.name),
+    })),
+    files: (multipart.files ?? []).map((file) => ({
+      name: file.name,
+      fileName: file.fileName,
+      mimeType: file.mimeType,
+      dataUrl: file.dataUrl ? summarizeDebugString(file.dataUrl) : undefined,
+      base64: file.base64 ? summarizeDebugString(file.base64) : undefined,
+    })),
+  };
+}
+
+function providerLogContext(cfg: CustomProviderConfig, model: string): Record<string, unknown> {
+  return {
+    providerId: cfg.id,
+    providerLabel: cfg.label,
+    providerKind: modernProviderKind(cfg) || cfg.apiStyle,
+    mediaType: cfg.mediaType ?? 'image',
+    model,
+  };
+}
+
+function logCustomProviderPhase(
+  level: 'info' | 'warn',
+  phase: string,
+  details: Record<string, unknown>,
+): void {
+  const log = level === 'warn' ? console.warn : console.info;
+  log('[CustomProviderGeneration]', { phase, ...details });
+}
+
+export function buildCustomProviderRequestDebugPreview(
+  request: GenerateRequest,
+): CustomProviderRequestDebugPreview {
+  const resolved = resolveProviderAndModel(request.model);
+  if (!resolved) {
+    throw new Error('未找到对应的自定义服务商配置');
+  }
+
+  const { cfg, model } = resolved;
+  const method = cfg.httpMethod ?? 'POST';
+  const bodyMode = resolveModernProviderBodyMode(cfg, request)
+    ?? resolveCustomProviderBodyMode(cfg, request.extra_params);
+
+  if (bodyMode === 'signed') {
+    return {
+      providerLabel: cfg.label,
+      providerId: cfg.id,
+      modelId: request.model,
+      modelName: model,
+      method,
+      bodyMode,
+      url: maskDebugUrl(resolveEndpointUrlForRequest(cfg, model, request)),
+      headers: {},
+      error:
+        '该配置被识别为签名鉴权/代理路线（signed_proxy_required）。预览不会伪造 AK/SK、时间戳或 Action 签名，请改为后端代理后的普通接口。',
+    };
+  }
+
+  const body = bodyMode === 'json' || bodyMode === 'form-urlencoded'
+    ? buildRequestBody(cfg, model, request)
+    : undefined;
+  const multipart = bodyMode === 'multipart' ? buildMultipartBody(cfg, model, request) : undefined;
+  const url = resolveEndpointUrlForRequest(
+    cfg,
+    model,
+    request,
+    method === 'GET' && body ? buildQueryParamsFromRequestBody(body) : undefined,
+  );
+  const headers = buildRequestHeaders(cfg, bodyMode, method);
+
+  return {
+    providerLabel: cfg.label,
+    providerId: cfg.id,
+    modelId: request.model,
+    modelName: model,
+    method,
+    bodyMode,
+    url: maskDebugUrl(url),
+    headers: summarizeDebugHeaders(headers),
+    body: method === 'POST' && body ? summarizeDebugValue(body) : undefined,
+    multipart: method === 'POST' && multipart ? summarizeDebugMultipart(multipart) : undefined,
+  };
+}
+
+export function buildCustomVideoProviderRequestDebugPreview(
+  request: GenerateRequest,
+): CustomProviderRequestDebugPreview {
+  const resolved = resolveProviderAndModel(request.model);
+  if (!resolved) {
+    throw new Error('未找到对应的视频服务商配置');
+  }
+
+  const { cfg, model } = resolved;
+  const method = cfg.httpMethod ?? 'POST';
+  const bodyMode = resolveVideoRequestBodyMode(cfg);
+  const url = resolveVideoSubmitUrl(cfg, model, request);
+  const headers = buildRequestHeaders(cfg, bodyMode, method);
+  const body = bodyMode === 'json' ? buildVideoJsonBody(cfg, model, request) : undefined;
+  const multipart = bodyMode === 'multipart' ? buildVideoMultipartBody(cfg, model, request) : undefined;
+
+  return {
+    providerLabel: cfg.label,
+    providerId: cfg.id,
+    modelId: request.model,
+    modelName: model,
+    method,
+    bodyMode,
+    url: maskDebugUrl(url),
+    headers: summarizeDebugHeaders(headers),
+    body: method === 'POST' && body ? summarizeDebugValue(body) : undefined,
+    multipart: method === 'POST' && multipart ? summarizeDebugMultipart(multipart) : undefined,
+  };
+}
+
 function parseResponseText(text: string): unknown {
   try { return JSON.parse(text); } catch { return text; }
 }
@@ -1562,10 +1764,29 @@ async function runCustomProviderJob(
   model: string,
   request: GenerateRequest,
 ): Promise<void> {
+  const jobStartedAt = Date.now();
   try {
+    logCustomProviderPhase('info', 'submit:start', {
+      jobId,
+      ...providerLogContext(cfg, model),
+      referenceImageCount: request.reference_images?.length ?? 0,
+    });
     const parsed = await sendGenerationRequest(cfg, model, request);
+    logCustomProviderPhase('info', 'submit:success', {
+      jobId,
+      ...providerLogContext(cfg, model),
+      elapsedMs: Date.now() - jobStartedAt,
+      responseShape: summarizeResponseShape(parsed),
+    });
+    const parseStartedAt = Date.now();
     const imageUrl = await resolveGeneratedImageUrl(cfg, parsed, POLL_TIMEOUT_MS);
     if (!imageUrl) {
+      logCustomProviderPhase('warn', 'parse:no-image', {
+        jobId,
+        ...providerLogContext(cfg, model),
+        elapsedMs: Date.now() - parseStartedAt,
+        responseShape: summarizeResponseShape(parsed),
+      });
       cache.set(jobId, {
         job_id: jobId,
         status: 'failed',
@@ -1574,10 +1795,30 @@ async function runCustomProviderJob(
       });
       return;
     }
+    logCustomProviderPhase('info', 'parse:image-found', {
+      jobId,
+      ...providerLogContext(cfg, model),
+      elapsedMs: Date.now() - parseStartedAt,
+      sourceKind: resolveSourceKind(imageUrl),
+    });
     let preparedImageSource: string;
     try {
+      const materializeStartedAt = Date.now();
       preparedImageSource = await materializeGeneratedImageSource(cfg, imageUrl);
+      logCustomProviderPhase('info', 'materialize:success', {
+        jobId,
+        ...providerLogContext(cfg, model),
+        elapsedMs: Date.now() - materializeStartedAt,
+        sourceKind: resolveSourceKind(imageUrl),
+        localPathBasename: basenameForLog(preparedImageSource),
+      });
     } catch (materializeError) {
+      logCustomProviderPhase('warn', 'materialize:failed', {
+        jobId,
+        ...providerLogContext(cfg, model),
+        sourceKind: resolveSourceKind(imageUrl),
+        error: formatUnknownError(materializeError),
+      });
       cache.set(jobId, {
         job_id: jobId,
         status: 'failed',
@@ -1588,6 +1829,12 @@ async function runCustomProviderJob(
     }
     cache.set(jobId, { job_id: jobId, status: 'succeeded', result: preparedImageSource, error: null });
   } catch (err) {
+    logCustomProviderPhase('warn', 'submit:failed', {
+      jobId,
+      ...providerLogContext(cfg, model),
+      elapsedMs: Date.now() - jobStartedAt,
+      error: formatUnknownError(err),
+    });
     cache.set(jobId, {
       job_id: jobId,
       status: 'failed',
@@ -1595,6 +1842,37 @@ async function runCustomProviderJob(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+function summarizeResponseShape(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object') {
+    return { type: typeof payload };
+  }
+  if (Array.isArray(payload)) {
+    return { type: 'array', length: payload.length };
+  }
+  const record = payload as Record<string, unknown>;
+  return {
+    type: 'object',
+    keys: Object.keys(record).slice(0, 12),
+    hasData: Object.prototype.hasOwnProperty.call(record, 'data'),
+    hasResult: Object.prototype.hasOwnProperty.call(record, 'result'),
+    hasUrl: Object.keys(record).some((key) => /(url|image|output|result)/i.test(key)),
+  };
+}
+
+function resolveSourceKind(source: string): string {
+  const trimmed = source.trim();
+  if (/^data:/i.test(trimmed)) return 'data-url';
+  if (/^https?:\/\//i.test(trimmed)) return 'remote-url';
+  if (isLocalFilesystemResultSource(trimmed)) return 'local-path';
+  if (/^[A-Za-z0-9+/=]+$/.test(trimmed) && trimmed.length > 300) return 'base64';
+  return 'text';
+}
+
+function basenameForLog(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  return normalized.split('/').pop() ?? '';
 }
 
 function isRemoteHttpImageSource(source: string): boolean {
@@ -1610,7 +1888,9 @@ function asLightweightRetryResultSource(source: string): string | null {
   const trimmed = source.trim();
   if (!trimmed) return null;
   const normalizedPrefix = trimmed.slice(0, 16).toLowerCase();
-  return normalizedPrefix.startsWith('data:') || normalizedPrefix.startsWith('blob:')
+  return normalizedPrefix.startsWith('data:')
+    || normalizedPrefix.startsWith('blob:')
+    || isLocalFilesystemResultSource(trimmed)
     ? null
     : trimmed;
 }
@@ -1905,6 +2185,34 @@ function normalizeAgnesFrameCount(seconds: number, frameRate: number): number {
   return Math.max(1, Math.floor((constrainedFrames - 1) / 8) * 8 + 1);
 }
 
+function normalizeAgnesVideoImageBase64(source: string): string {
+  const trimmed = source.trim();
+  if (!trimmed) {
+    throw new Error('Agnes 视频参考图为空，无法组装 image 字段。');
+  }
+
+  let payload = trimmed;
+  const commaIndex = trimmed.indexOf(',');
+  if (/^data:[^,]+;base64,/i.test(trimmed) && commaIndex >= 0) {
+    payload = trimmed.slice(commaIndex + 1);
+  } else if (/^(file|https?):/i.test(trimmed) || /^\/|^[A-Za-z]:[\\/]/.test(trimmed)) {
+    throw new Error('Agnes 视频 image 字段必须是干净 base64；当前收到本地路径或 URL，请确认画布参考图已先转换为 data URL。');
+  }
+
+  let compact = payload.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  const remainder = compact.length % 4;
+  if (remainder === 1) {
+    throw new Error('Agnes 视频参考图 base64 长度无法补齐，请重新连接或上传参考图后再生成。');
+  }
+  if (remainder > 0) {
+    compact = compact.padEnd(compact.length + (4 - remainder), '=');
+  }
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) {
+    throw new Error('Agnes 视频参考图不是有效 base64，请重新连接或上传参考图后再生成。');
+  }
+  return compact;
+}
+
 function buildAgnesVideoJsonBody(
   cfg: CustomProviderConfig,
   modelName: string,
@@ -1917,7 +2225,13 @@ function buildAgnesVideoJsonBody(
   const normalizedFrameRate = Number.isFinite(frameRate) && frameRate > 0 ? frameRate : 24;
   const seconds = resolveVideoSeconds(request, defaultRequestParams) ?? 4;
   const pixelSize = resolveAgnesVideoPixelSize(request, userExtra);
-  const referenceImage = request.reference_images?.[0];
+  // Agnes' video API expects the `image` compatibility field to be bare base64.
+  // Our canvas/gateway references commonly arrive as data URLs; normalize them
+  // here so we never forward a local path, data URL header, whitespace, or
+  // unpadded base64 to the upstream Agnes endpoint.
+  const referenceImage = request.reference_images?.[0]
+    ? normalizeAgnesVideoImageBase64(request.reference_images[0])
+    : undefined;
   delete userExtra.seconds;
   delete userExtra.duration;
   delete userExtra.size;
@@ -2050,6 +2364,9 @@ function buildVideoMultipartBody(
 }
 
 function resolveVideoRequestBodyMode(cfg: CustomProviderConfig): 'json' | 'multipart' {
+  if (modernProviderKind(cfg) === 'agnes-video') {
+    return 'json';
+  }
   const rawMode = cfg.extraParams?.videoRequestBodyMode ?? cfg.extraParams?.requestBodyMode;
   return rawMode === 'json' ? 'json' : 'multipart';
 }
@@ -2356,6 +2673,14 @@ async function sendGenerationRequest(
     method === 'GET' && body ? buildQueryParamsFromRequestBody(body) : undefined,
   );
   const headers = buildRequestHeaders(cfg, bodyMode, method);
+  logCustomProviderPhase('info', 'submit:request-built', {
+    ...providerLogContext(cfg, model),
+    method,
+    bodyMode,
+    url: maskDebugUrl(url),
+    referenceImageCount: request.reference_images?.length ?? 0,
+    timeoutMs: timeoutMs ?? GENERATION_REQUEST_TIMEOUT_MS,
+  });
   const { parsed } = await requestJson(url, {
     method,
     headers,

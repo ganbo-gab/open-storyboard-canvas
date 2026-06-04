@@ -22,6 +22,12 @@ import { canvasAiGateway } from '@/features/canvas/application/canvasServices';
 import { CURRENT_RUNTIME_SESSION_ID } from '@/features/canvas/application/generationErrorReport';
 import { appendGenerationParameterConstraints } from '@/features/canvas/application/generationPromptConstraints';
 import {
+  getLocalDateStamp,
+  resolveDefaultGeneratedImageDisplayName,
+  resolveDefaultGeneratedImageFileStem,
+  resolveNextGeneratedMediaSequence,
+} from '@/features/canvas/application/generatedMediaNaming';
+import {
   acquireGenerationSubmitLock,
   generationSubmitLockKey,
 } from '@/features/canvas/application/generationSubmitLock';
@@ -147,6 +153,22 @@ export const SelectedNodeOverlay = memo(() => {
   const isActionToolbarExpanded =
     !shouldCollapseActionToolbar || expandedActionToolbarNodeId === selectedNode?.id;
 
+  const buildDefaultGeneratedImageMetadata = useCallback((sourcePrompt: string) => {
+    const generatedSequence = resolveNextGeneratedMediaSequence(
+      'image',
+      useCanvasStore.getState().nodes
+    );
+    const generatedDateStamp = getLocalDateStamp();
+    return {
+      displayName: resolveDefaultGeneratedImageDisplayName(generatedSequence, sourcePrompt),
+      sourcePrompt,
+      generatedNamingMode: 'default' as const,
+      generatedSequence,
+      generatedDateStamp,
+      generatedFileName: `${resolveDefaultGeneratedImageFileStem(generatedSequence, generatedDateStamp)}.png`,
+    };
+  }, []);
+
   useEffect(() => {
     setExpandedActionToolbarNodeId(null);
   }, [collapseNodeActionToolbarByDefault, selectedNode?.id]);
@@ -270,7 +292,7 @@ export const SelectedNodeOverlay = memo(() => {
       : resolved.ratio;
 
     const generationStartedAt = Date.now();
-    const resultTitle = prompt.trim().slice(0, 40) || '生成结果';
+    const promptSource = prompt.trim();
     const newNodePosition = findNodePosition(
       selectedNode.id,
       EXPORT_RESULT_NODE_DEFAULT_WIDTH,
@@ -281,7 +303,7 @@ export const SelectedNodeOverlay = memo(() => {
       generationStartedAt,
       generationDurationMs,
       resultKind: 'generic',
-      displayName: resultTitle,
+      ...buildDefaultGeneratedImageMetadata(promptSource),
       aspectRatio: selectedNodeImageData.aspectRatio,
     });
     addEdge(selectedNode.id, newNodeId);
@@ -312,6 +334,7 @@ export const SelectedNodeOverlay = memo(() => {
       updateNodeData(newNodeId, {
         isGenerating: false,
         generationStartedAt: null,
+        generationElapsedMs: Math.max(0, Date.now() - generationStartedAt),
         generationJobId: null,
         generationProviderId: null,
         generationClientSessionId: null,
@@ -322,7 +345,7 @@ export const SelectedNodeOverlay = memo(() => {
     } finally {
       releaseSubmitLock();
     }
-  }, [appendParameterConstraintsToPrompt, selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState, t]);
+  }, [appendParameterConstraintsToPrompt, buildDefaultGeneratedImageMetadata, selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState, t]);
 
   const handleSubmitPromptPreset = useCallback(async (presetId: string, modelConfig: ModelConfigValue) => {
     if (!selectedNode) {
@@ -406,7 +429,7 @@ export const SelectedNodeOverlay = memo(() => {
       generationStartedAt,
       generationDurationMs,
       resultKind: 'generic',
-      displayName: preset.name,
+      ...buildDefaultGeneratedImageMetadata(preset.prompt),
       aspectRatio: ratioForGateway,
     });
     addEdge(selectedNode.id, newNodeId);
@@ -442,6 +465,7 @@ export const SelectedNodeOverlay = memo(() => {
       updateNodeData(newNodeId, {
         isGenerating: false,
         generationStartedAt: null,
+        generationElapsedMs: Math.max(0, Date.now() - generationStartedAt),
         generationJobId: null,
         generationProviderId: null,
         generationClientSessionId: null,
@@ -609,6 +633,7 @@ export const SelectedNodeOverlay = memo(() => {
       updateNodeData(newNodeId, {
         isGenerating: false,
         generationStartedAt: null,
+        generationElapsedMs: Math.max(0, Date.now() - generationStartedAt),
         generationJobId: null,
         generationProviderId: null,
         generationClientSessionId: null,
@@ -619,7 +644,7 @@ export const SelectedNodeOverlay = memo(() => {
     } finally {
       releaseSubmitLock();
     }
-  }, [appendParameterConstraintsToPrompt, selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState]);
+  }, [appendParameterConstraintsToPrompt, buildDefaultGeneratedImageMetadata, selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState]);
 
   /**
    * Blueprint submission. Spatial layout + identity references are packaged into
@@ -672,16 +697,13 @@ export const SelectedNodeOverlay = memo(() => {
       : '2K';
     const generationDurationMs = resolved.builtinModel?.expectedDurationMs ?? 60000;
     const generationStartedAt = Date.now();
-    const resultTitle = t('directorStudio.overlay.resultTitle', {
-      name: prompt.trim().slice(0, 20) || t('directorStudio.overlay.untitled'),
-    });
     const newNodePosition = findNodePosition(selectedNode.id, EXPORT_RESULT_NODE_DEFAULT_WIDTH, EXPORT_RESULT_NODE_LAYOUT_HEIGHT);
     const newNodeId = addNode(CANVAS_NODE_TYPES.exportImage, newNodePosition, {
       isGenerating: true,
       generationStartedAt,
       generationDurationMs,
       resultKind: 'generic',
-      displayName: resultTitle,
+      ...buildDefaultGeneratedImageMetadata(prompt),
       aspectRatio: selectedNodeImageData.aspectRatio,
     });
     addEdge(selectedNode.id, newNodeId);
@@ -731,6 +753,7 @@ export const SelectedNodeOverlay = memo(() => {
       updateNodeData(newNodeId, {
         isGenerating: false,
         generationStartedAt: null,
+        generationElapsedMs: Math.max(0, Date.now() - generationStartedAt),
         generationJobId: null,
         generationProviderId: null,
         generationClientSessionId: null,
@@ -744,7 +767,7 @@ export const SelectedNodeOverlay = memo(() => {
     } finally {
       releaseSubmitLock();
     }
-  }, [appendParameterConstraintsToPrompt, selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState, t]);
+  }, [appendParameterConstraintsToPrompt, buildDefaultGeneratedImageMetadata, selectedNode, selectedNodeImageData, findNodePosition, addNode, addEdge, updateNodeData, panelState, t]);
 
 
   if (!selectedNode) {

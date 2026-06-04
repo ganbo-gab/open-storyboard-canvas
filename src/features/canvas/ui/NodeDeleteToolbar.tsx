@@ -1,11 +1,11 @@
 import { memo } from 'react';
 import { NodeToolbar as ReactFlowNodeToolbar } from '@xyflow/react';
-import { RotateCcw, Trash2 } from 'lucide-react';
+import { RotateCcw, Trash2, Ungroup } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { UiChipButton, UiPanel } from '@/components/ui';
 import { useCanvasStore } from '@/stores/canvasStore';
-import type { CanvasNode } from '@/features/canvas/domain/canvasNodes';
+import { CANVAS_NODE_TYPES, type CanvasNode } from '@/features/canvas/domain/canvasNodes';
 import {
   buildRetryGenerationFetchPatch,
   canRetryGenerationFetch,
@@ -25,8 +25,10 @@ interface NodeDeleteToolbarProps {
 export const NodeDeleteToolbar = memo(({ nodeId, node }: NodeDeleteToolbarProps) => {
   const { t } = useTranslation();
   const deleteNode = useCanvasStore((state) => state.deleteNode);
+  const ungroupNode = useCanvasStore((state) => state.ungroupNode);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const canRetryGeneration = canRetryGenerationFetch(node);
+  const canUngroup = node?.type === CANVAS_NODE_TYPES.group;
 
   return (
     <ReactFlowNodeToolbar
@@ -49,6 +51,19 @@ export const NodeDeleteToolbar = memo(({ nodeId, node }: NodeDeleteToolbarProps)
           >
             <RotateCcw className="h-3.5 w-3.5" />
             {t('nodeToolbar.retryFetch')}
+          </UiChipButton>
+        )}
+        {canUngroup && (
+          <UiChipButton
+            className="h-8 rounded-full border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2.5 text-xs text-text-dark shadow-sm hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]"
+            onClick={(event) => {
+              event.stopPropagation();
+              ungroupNode(nodeId);
+            }}
+            title={t('nodeToolbar.ungroup')}
+          >
+            <Ungroup className="h-3.5 w-3.5" />
+            {t('nodeToolbar.ungroup')}
           </UiChipButton>
         )}
         <UiChipButton

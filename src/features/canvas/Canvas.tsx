@@ -23,6 +23,7 @@ import {
   type OnConnectStartParams,
   type Viewport,
 } from '@xyflow/react';
+import { Boxes, Group, Play, Trash2, Ungroup } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import '@xyflow/react/dist/style.css';
 
@@ -69,6 +70,12 @@ import { AssetPanel, type CanvasAssetItem } from './ui/AssetPanel';
 import { MissingApiKeyHint } from '@/features/settings/MissingApiKeyHint';
 
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
+const CANVAS_MARQUEE_MIN_DISTANCE = 4;
+const CANVAS_BATCH_TRIGGER_TYPES = new Set<CanvasNodeType>([
+  CANVAS_NODE_TYPES.imageEdit,
+  CANVAS_NODE_TYPES.aiVideo,
+  CANVAS_NODE_TYPES.storyboardGen,
+]);
 
 interface PendingConnectStart {
   nodeId: string;
@@ -88,6 +95,22 @@ interface PreviewConnectionVisual {
   top: number;
   width: number;
   height: number;
+}
+
+interface CanvasMarqueeRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface CanvasMarqueeGesture {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  currentClientX: number;
+  currentClientY: number;
+  moved: boolean;
 }
 
 interface DuplicateOptions {
@@ -120,6 +143,66 @@ function createAssetPanelAnchorRect(x: number, y: number): DOMRect {
     height: 0,
     toJSON: () => ({}),
   } as DOMRect;
+}
+
+function normalizeClientRect(
+  startClientX: number,
+  startClientY: number,
+  currentClientX: number,
+  currentClientY: number,
+  containerRect: DOMRect
+): CanvasMarqueeRect {
+  const minClientX = Math.min(startClientX, currentClientX);
+  const minClientY = Math.min(startClientY, currentClientY);
+  const maxClientX = Math.max(startClientX, currentClientX);
+  const maxClientY = Math.max(startClientY, currentClientY);
+  return {
+    left: minClientX - containerRect.left,
+    top: minClientY - containerRect.top,
+    width: maxClientX - minClientX,
+    height: maxClientY - minClientY,
+  };
+}
+
+function rectsOverlap(
+  a: { left: number; top: number; right: number; bottom: number },
+  b: { left: number; top: number; right: number; bottom: number }
+): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function escapeNodeDataId(nodeId: string): string {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(nodeId);
+  }
+  return nodeId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function shouldIgnoreCanvasMarqueeTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return true;
+  }
+
+  if ((target as HTMLElement).isContentEditable || target.closest('[contenteditable]')) {
+    return true;
+  }
+
+  return Boolean(target.closest([
+    'button',
+    'input',
+    'textarea',
+    'select',
+    'video',
+    'dialog',
+    '[role="dialog"]',
+    '[data-canvas-no-marquee="true"]',
+    '.react-flow__handle',
+    '.react-flow__edgeupdater',
+    '.react-flow__resize-control',
+    '.react-flow__edge',
+    '.react-flow__minimap',
+    '.canvas-minimap',
+  ].join(',')));
 }
 
 function getNodeSize(node: CanvasNode): { width: number; height: number } {
@@ -215,6 +298,8 @@ function getNodeAssetSourceLabel(node: CanvasNode): string {
       return '故事板帧';
     case CANVAS_NODE_TYPES.storyboardGen:
       return '故事板生成图';
+    case CANVAS_NODE_TYPES.video:
+      return '视频';
     default:
       return '图片资产';
   }
@@ -247,6 +332,7 @@ function extractCanvasAssets(nodes: CanvasNode[]): CanvasAssetItem[] {
       assets.push({
         id: `${node.id}:image`,
         nodeId: node.id,
+        kind: 'image',
         rawImageUrl: imageUrl,
         rawPreviewImageUrl: previewImageUrl,
         aspectRatio: typeof data.aspectRatio === 'string' ? data.aspectRatio : undefined,
@@ -255,6 +341,33 @@ function extractCanvasAssets(nodes: CanvasNode[]): CanvasAssetItem[] {
         order: baseOrder,
         ...resolved,
       });
+    }
+
+    if (node.type === CANVAS_NODE_TYPES.video) {
+      const videoUrl = typeof data.localVideoUrl === 'string' && data.localVideoUrl.trim()
+        ? data.localVideoUrl
+        : typeof data.videoUrl === 'string'
+          ? data.videoUrl
+          : '';
+      if (videoUrl) {
+        const thumbnailUrl =
+          typeof data.thumbnailUrl === 'string' && data.thumbnailUrl.trim()
+            ? data.thumbnailUrl
+            : null;
+        assets.push({
+          id: `${node.id}:video`,
+          nodeId: node.id,
+          kind: 'video',
+          rawVideoUrl: videoUrl,
+          rawThumbnailUrl: thumbnailUrl,
+          videoUrl: resolveImageDisplayUrl(videoUrl),
+          thumbnailUrl: thumbnailUrl ? resolveImageDisplayUrl(thumbnailUrl) : null,
+          aspectRatio: typeof data.aspectRatio === 'string' ? data.aspectRatio : undefined,
+          title: getNodeDisplayTitle(node, sourceLabel),
+          sourceLabel,
+          order: baseOrder,
+        });
+      }
     }
 
     if (Array.isArray(data.frames)) {
@@ -277,6 +390,7 @@ function extractCanvasAssets(nodes: CanvasNode[]): CanvasAssetItem[] {
         assets.push({
           id: `${node.id}:frame:${String(frameRecord.id ?? frameIndex)}`,
           nodeId: node.id,
+          kind: 'image',
           rawImageUrl: frameImageUrl,
           rawPreviewImageUrl: framePreviewImageUrl,
           aspectRatio: typeof frameRecord.aspectRatio === 'string' ? frameRecord.aspectRatio : undefined,
@@ -318,6 +432,8 @@ export function Canvas() {
   const lastCanvasPointerRef = useRef<{ x: number; y: number } | null>(null);
   const suppressNextPaneClickRef = useRef(false);
   const suppressNextEdgeClickRef = useRef(false);
+  const nodesRef = useRef<CanvasNode[]>([]);
+  const marqueeGestureRef = useRef<CanvasMarqueeGesture | null>(null);
 
   const [showNodeMenu, setShowNodeMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
@@ -334,6 +450,9 @@ export function Canvas() {
   );
   const [previewConnectionVisual, setPreviewConnectionVisual] =
     useState<PreviewConnectionVisual | null>(null);
+  const [marqueeRect, setMarqueeRect] = useState<CanvasMarqueeRect | null>(null);
+  const [batchToolbarPosition, setBatchToolbarPosition] =
+    useState<{ left: number; top: number } | null>(null);
 
   const pasteIterationRef = useRef(0);
   const altDragCopyRef = useRef<{
@@ -367,6 +486,7 @@ export function Canvas() {
   const deleteNode = useCanvasStore((state) => state.deleteNode);
   const deleteNodes = useCanvasStore((state) => state.deleteNodes);
   const groupNodes = useCanvasStore((state) => state.groupNodes);
+  const ungroupNode = useCanvasStore((state) => state.ungroupNode);
   const undo = useCanvasStore((state) => state.undo);
   const redo = useCanvasStore((state) => state.redo);
   const openToolDialog = useCanvasStore((state) => state.openToolDialog);
@@ -376,6 +496,7 @@ export function Canvas() {
   const imageViewer = useCanvasStore((state) => state.imageViewer);
   const closeImageViewer = useCanvasStore((state) => state.closeImageViewer);
   const navigateImageViewer = useCanvasStore((state) => state.navigateImageViewer);
+  const currentViewport = useCanvasStore((state) => state.currentViewport);
   const apiKeys = useSettingsStore((state) => state.apiKeys);
   const dreaminaStatus = useSettingsStore((state) => state.dreaminaStatus);
   const customProviders = useCustomProvidersStore((state) => state.providers);
@@ -397,7 +518,7 @@ export function Canvas() {
     if (assetPanelMode !== 'select' || !assetConnectTargetNodeId) {
       return canvasAssets;
     }
-    return canvasAssets.filter((asset) => asset.nodeId !== assetConnectTargetNodeId);
+    return canvasAssets.filter((asset) => asset.kind === 'image' && asset.nodeId !== assetConnectTargetNodeId);
   }, [assetConnectTargetNodeId, assetPanelMode, canvasAssets]);
 
   const getCurrentProject = useProjectStore((state) => state.getCurrentProject);
@@ -439,6 +560,10 @@ export function Canvas() {
   // surfacing for unreachable result URLs, and an unmount-safe active
   // set — see hook docblock for why each guard exists.
   useCanvasGenerationPolling(nodes, apiKeys);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
 
   useEffect(() => {
     const element = wrapperRef.current;
@@ -583,7 +708,7 @@ export function Canvas() {
   const handleActivateAsset = useCallback(
     (asset: CanvasAssetItem) => {
       if (assetPanelMode === 'select') {
-        if (!assetConnectTargetNodeId || asset.nodeId === assetConnectTargetNodeId) {
+        if (asset.kind !== 'image' || !assetConnectTargetNodeId || asset.nodeId === assetConnectTargetNodeId) {
           return;
         }
         const sourceNode = nodes.find((node) => node.id === asset.nodeId);
@@ -659,9 +784,15 @@ export function Canvas() {
 
   const handleRenameAsset = useCallback(
     (asset: CanvasAssetItem, title: string) => {
-      updateNodeData(asset.nodeId, { displayName: title });
+      const node = nodes.find((item) => item.id === asset.nodeId);
+      updateNodeData(asset.nodeId, {
+        displayName: title,
+        ...(node?.type === CANVAS_NODE_TYPES.exportImage || node?.type === CANVAS_NODE_TYPES.video
+          ? { generatedNamingMode: 'custom' as const }
+          : {}),
+      });
     },
-    [updateNodeData]
+    [nodes, updateNodeData]
   );
 
   const closeAssetPanel = useCallback(() => {
@@ -828,6 +959,42 @@ export function Canvas() {
     () => nodes.filter((node) => Boolean(node.selected)).map((node) => node.id),
     [nodes]
   );
+  const selectedNodes = useMemo(
+    () => nodes.filter((node) => selectedNodeIds.includes(node.id)),
+    [nodes, selectedNodeIds]
+  );
+  const selectedGroupNodeIds = useMemo(
+    () => selectedNodes
+      .filter((node) => node.type === CANVAS_NODE_TYPES.group)
+      .map((node) => node.id),
+    [selectedNodes]
+  );
+  const isSingleSelectedGroup = selectedNodeIds.length === 1 && selectedGroupNodeIds.length === 1;
+  const selectedGroupChildNodes = useMemo(
+    () => {
+      if (selectedGroupNodeIds.length === 0) {
+        return [];
+      }
+      const groupIds = new Set(selectedGroupNodeIds);
+      return nodes.filter((node) => node.parentId && groupIds.has(node.parentId));
+    },
+    [nodes, selectedGroupNodeIds]
+  );
+  const selectedBatchTriggerNodeIds = useMemo(
+    () => {
+      const ids = new Set<string>();
+      [...selectedNodes, ...selectedGroupChildNodes].forEach((node) => {
+        if (CANVAS_BATCH_TRIGGER_TYPES.has(node.type)) {
+          ids.add(node.id);
+        }
+      });
+      return Array.from(ids);
+    },
+    [selectedGroupChildNodes, selectedNodes]
+  );
+  const batchToolbarSelectedCount = isSingleSelectedGroup
+    ? Math.max(1, selectedGroupChildNodes.length)
+    : selectedNodeIds.length;
   const selectedUploadNodeId = useMemo(() => {
     if (selectedNodeIds.length !== 1) {
       return null;
@@ -837,7 +1004,189 @@ export function Canvas() {
       return null;
     }
     return selectedNode.id;
-  }, [nodes, selectedNodeIds]);
+  }, [currentViewport, nodes, selectedNodeIds]);
+
+  useEffect(() => {
+    if (selectedNodeIds.length <= 1 && !isSingleSelectedGroup) {
+      setBatchToolbarPosition(null);
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const containerRect = wrapperRef.current?.getBoundingClientRect();
+      if (!containerRect) {
+        setBatchToolbarPosition(null);
+        return;
+      }
+
+      let minLeft = Number.POSITIVE_INFINITY;
+      let minTop = Number.POSITIVE_INFINITY;
+      let maxRight = Number.NEGATIVE_INFINITY;
+      let hasRect = false;
+
+      for (const nodeId of selectedNodeIds) {
+        const nodeElement = wrapperRef.current?.querySelector<HTMLElement>(
+          `.react-flow__node[data-id="${escapeNodeDataId(nodeId)}"]`
+        );
+        if (!nodeElement) {
+          continue;
+        }
+        const rect = nodeElement.getBoundingClientRect();
+        minLeft = Math.min(minLeft, rect.left);
+        minTop = Math.min(minTop, rect.top);
+        maxRight = Math.max(maxRight, rect.right);
+        hasRect = true;
+      }
+
+      if (!hasRect) {
+        setBatchToolbarPosition(null);
+        return;
+      }
+
+      setBatchToolbarPosition({
+        left: Math.max(12, Math.min(containerRect.width - 12, (minLeft + maxRight) / 2 - containerRect.left)),
+        top: Math.max(12, minTop - containerRect.top - 42),
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [isSingleSelectedGroup, nodes, selectedNodeIds]);
+
+  const selectNodesInMarquee = useCallback((gesture: CanvasMarqueeGesture) => {
+    const selectionClientRect = {
+      left: Math.min(gesture.startClientX, gesture.currentClientX),
+      top: Math.min(gesture.startClientY, gesture.currentClientY),
+      right: Math.max(gesture.startClientX, gesture.currentClientX),
+      bottom: Math.max(gesture.startClientY, gesture.currentClientY),
+    };
+    const nextSelectedIds = nodesRef.current
+      .filter((node) => {
+        const nodeElement = wrapperRef.current?.querySelector<HTMLElement>(
+          `.react-flow__node[data-id="${escapeNodeDataId(node.id)}"]`
+        );
+        if (!nodeElement) {
+          return false;
+        }
+        const nodeRect = nodeElement.getBoundingClientRect();
+        return rectsOverlap(selectionClientRect, {
+          left: nodeRect.left,
+          top: nodeRect.top,
+          right: nodeRect.right,
+          bottom: nodeRect.bottom,
+        });
+      })
+      .map((node) => node.id);
+
+    const nextSelectedSet = new Set(nextSelectedIds);
+    const selectionChanges: NodeChange<CanvasNode>[] = nodesRef.current.map((node) => ({
+      id: node.id,
+      type: 'select',
+      selected: nextSelectedSet.has(node.id),
+    }));
+    applyNodesChange(selectionChanges);
+    setSelectedNode(nextSelectedIds.length === 1 ? nextSelectedIds[0] : null);
+  }, [applyNodesChange, setSelectedNode]);
+
+  useEffect(() => {
+    const wrapperElement = wrapperRef.current;
+    if (!wrapperElement) {
+      return;
+    }
+
+    const clearMarqueeGesture = () => {
+      marqueeGestureRef.current = null;
+      setMarqueeRect(null);
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 2 || shouldIgnoreCanvasMarqueeTarget(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      marqueeGestureRef.current = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        currentClientX: event.clientX,
+        currentClientY: event.clientY,
+        moved: false,
+      };
+      setShowNodeMenu(false);
+      setMenuAllowedTypes(undefined);
+      setPendingConnectStart(null);
+      setPreviewConnectionVisual(null);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const gesture = marqueeGestureRef.current;
+      if (!gesture || event.pointerId !== gesture.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      gesture.currentClientX = event.clientX;
+      gesture.currentClientY = event.clientY;
+
+      const dragDistance = Math.hypot(
+        gesture.currentClientX - gesture.startClientX,
+        gesture.currentClientY - gesture.startClientY
+      );
+      if (!gesture.moved && dragDistance < CANVAS_MARQUEE_MIN_DISTANCE) {
+        return;
+      }
+
+      gesture.moved = true;
+      const containerRect = wrapperElement.getBoundingClientRect();
+      setMarqueeRect(normalizeClientRect(
+        gesture.startClientX,
+        gesture.startClientY,
+        gesture.currentClientX,
+        gesture.currentClientY,
+        containerRect
+      ));
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      const gesture = marqueeGestureRef.current;
+      if (!gesture || event.pointerId !== gesture.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (gesture.moved) {
+        selectNodesInMarquee(gesture);
+      }
+      clearMarqueeGesture();
+    };
+
+    const handlePointerCancel = (event: PointerEvent) => {
+      const gesture = marqueeGestureRef.current;
+      if (!gesture || event.pointerId !== gesture.pointerId) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      clearMarqueeGesture();
+    };
+
+    wrapperElement.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('pointermove', handlePointerMove, true);
+    window.addEventListener('pointerup', handlePointerUp, true);
+    window.addEventListener('pointercancel', handlePointerCancel, true);
+
+    return () => {
+      wrapperElement.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('pointermove', handlePointerMove, true);
+      window.removeEventListener('pointerup', handlePointerUp, true);
+      window.removeEventListener('pointercancel', handlePointerCancel, true);
+    };
+  }, [selectNodesInMarquee]);
 
   const createUploadImageNodeAtClientPosition = useCallback(
     async (file: File, clientPosition: { x: number; y: number }) => {
@@ -956,6 +1305,42 @@ export function Canvas() {
       y: event.clientY,
     };
   }, []);
+
+  const handleCanvasContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (shouldIgnoreCanvasMarqueeTarget(event.target)) {
+      return;
+    }
+    event.preventDefault();
+  }, []);
+
+  const handleBatchGroup = useCallback(() => {
+    const groupedNodeId = groupNodes(selectedNodeIds);
+    if (!groupedNodeId) {
+      return;
+    }
+    scheduleCanvasPersist(0);
+  }, [groupNodes, scheduleCanvasPersist, selectedNodeIds]);
+
+  const handleBatchUngroup = useCallback(() => {
+    let changed = false;
+    for (const groupNodeId of selectedGroupNodeIds) {
+      changed = ungroupNode(groupNodeId) || changed;
+    }
+    if (changed) {
+      scheduleCanvasPersist(0);
+    }
+  }, [scheduleCanvasPersist, selectedGroupNodeIds, ungroupNode]);
+
+  const handleBatchTrigger = useCallback(() => {
+    selectedBatchTriggerNodeIds.forEach((nodeId) => {
+      canvasEventBus.publish('generation-node/trigger', { nodeId });
+    });
+  }, [selectedBatchTriggerNodeIds]);
+
+  const handleBatchDelete = useCallback(() => {
+    deleteNodes(selectedNodeIds);
+    scheduleCanvasPersist(0);
+  }, [deleteNodes, scheduleCanvasPersist, selectedNodeIds]);
 
   useEffect(() => {
     if (selectedNodeIds.length === 1) {
@@ -1607,7 +1992,12 @@ export function Canvas() {
   );
 
   return (
-    <div ref={wrapperRef} className="relative h-full w-full" onPointerMove={handleCanvasPointerMove}>
+    <div
+      ref={wrapperRef}
+      className="relative h-full w-full"
+      onPointerMove={handleCanvasPointerMove}
+      onContextMenu={handleCanvasContextMenu}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -1660,6 +2050,76 @@ export function Canvas() {
 
         <SelectedNodeOverlay />
       </ReactFlow>
+
+      {marqueeRect && (
+        <div
+          className="pointer-events-none absolute z-[12000] rounded border border-accent/80 bg-accent/15 shadow-[0_0_0_1px_rgba(255,255,255,0.16)_inset]"
+          style={{
+            left: marqueeRect.left,
+            top: marqueeRect.top,
+            width: marqueeRect.width,
+            height: marqueeRect.height,
+          }}
+        />
+      )}
+
+      {batchToolbarPosition && (selectedNodeIds.length > 1 || isSingleSelectedGroup) && (
+        <div
+          data-canvas-no-marquee="true"
+          className="absolute z-[12020] flex -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] px-2 py-1.5 text-xs text-text-dark shadow-2xl"
+          style={{
+            left: batchToolbarPosition.left,
+            top: batchToolbarPosition.top,
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onWheelCapture={(event) => event.stopPropagation()}
+        >
+          <span className="mr-1 flex items-center gap-1 whitespace-nowrap px-1 text-text-muted">
+            <Boxes className="h-3.5 w-3.5" />
+            {t('canvas.batchToolbar.selectedCount', { count: batchToolbarSelectedCount })}
+          </span>
+          <button
+            type="button"
+            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-[var(--canvas-node-menu-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={selectedNodeIds.length < 2}
+            onClick={handleBatchGroup}
+            title={t('canvas.batchToolbar.group')}
+          >
+            <Group className="h-3.5 w-3.5" />
+            {t('canvas.batchToolbar.group')}
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-[var(--canvas-node-menu-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={selectedGroupNodeIds.length === 0}
+            onClick={handleBatchUngroup}
+            title={t('canvas.batchToolbar.ungroup')}
+          >
+            <Ungroup className="h-3.5 w-3.5" />
+            {t('canvas.batchToolbar.ungroup')}
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-[var(--canvas-node-menu-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={selectedBatchTriggerNodeIds.length === 0}
+            onClick={handleBatchTrigger}
+            title={t('canvas.batchToolbar.trigger')}
+          >
+            <Play className="h-3.5 w-3.5" />
+            {t('canvas.batchToolbar.trigger')}
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-red-300 transition-colors hover:bg-red-500/15 hover:text-red-200"
+            onClick={handleBatchDelete}
+            title={t('canvas.batchToolbar.delete')}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t('canvas.batchToolbar.delete')}
+          </button>
+        </div>
+      )}
 
       <CanvasSideToolbar onOpenAssets={handleOpenAssetPanel} />
       <CanvasLeftRail />

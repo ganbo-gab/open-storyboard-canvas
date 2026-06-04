@@ -17,6 +17,7 @@ import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
 import { renameLocalMediaFiles } from '@/commands/image';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
+import { formatGenerationElapsedMs } from '@/features/canvas/ui/generationElapsed';
 import { useCanvasStore } from '@/stores/canvasStore';
 
 type VideoNodeProps = NodeProps & {
@@ -62,6 +63,7 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
     () => resolveNodeDisplayName(type as CanvasNodeType, data),
     [data, type]
   );
+  const generationElapsedText = formatGenerationElapsedMs(data.generationElapsedMs);
 
   useEffect(() => {
     updateNodeInternals(id);
@@ -87,7 +89,10 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
 
   const handleTitleChange = async (nextTitle: string) => {
     if (!data.localVideoUrl) {
-      updateNodeData(id, { displayName: nextTitle });
+      updateNodeData(id, {
+        displayName: nextTitle,
+        generatedNamingMode: 'custom',
+      });
       return;
     }
 
@@ -146,11 +151,23 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
         onTitleChange={(nextTitle) => {
           void handleTitleChange(nextTitle);
         }}
-        rightSlot={data.durationSeconds ? (
-          <span className="rounded-full bg-accent/80 px-2 py-[1px] text-[10px] font-medium leading-tight text-white">
-            {data.durationSeconds}s
+        rightSlot={(
+          <span className="flex items-center gap-1">
+            {generationElapsedText ? (
+              <span
+                className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-[1px] text-[10px] font-medium leading-tight text-white"
+                title={t('node.videoNode.generationElapsed')}
+              >
+                {generationElapsedText}
+              </span>
+            ) : null}
+            {data.durationSeconds ? (
+              <span className="rounded-full bg-accent/80 px-2 py-[1px] text-[10px] font-medium leading-tight text-white">
+                {data.durationSeconds}s
+              </span>
+            ) : null}
           </span>
-        ) : null}
+        )}
       />
 
       <div

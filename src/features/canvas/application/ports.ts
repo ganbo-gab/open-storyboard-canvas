@@ -108,6 +108,9 @@ export interface CanvasEventMap {
     nodeId: string;
     file: File;
   };
+  'generation-node/trigger': {
+    nodeId: string;
+  };
 }
 
 export interface CanvasEventBus {

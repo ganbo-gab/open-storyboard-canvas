@@ -43,6 +43,13 @@
     "generate": "生成",
     "emptyHintTitle": "双击鼠标添加节点",
     "emptyHintSubtitle": "Double-click to add a node",
+    "batchToolbar": {
+      "selectedCount": "已选 {{count}} 个",
+      "group": "打组",
+      "ungroup": "解组",
+      "trigger": "批量触发",
+      "delete": "删除"
+    },
     "toolbar": {
       "zoomIn": "放大",
       "zoomOut": "缩小",
@@ -761,7 +768,8 @@
       "waitingResultDelayed": "已经等待 {{minutes}} 分钟了，还没有结果。继续等待中...",
       "selectToEdit": "选中后在下方输入提示词生成或编辑图片",
       "generationFailed": "生成失败",
-      "fetchResultFailed": "获取生成结果失败,请重试"
+      "fetchResultFailed": "获取生成结果失败,请重试",
+      "generationElapsed": "生成耗时"
     },
     "imageEdit": {
       "promptRequired": "请输入提示词",
@@ -772,7 +780,11 @@
       "resultTitle": "结果图片",
       "promptPlaceholder": "描述任何你想要生成或编辑的内容",
       "generateCount": "数量",
-      "customCount": "自定义"
+      "customCount": "自定义",
+      "payloadDebug": "预览将发送的请求内容",
+      "payloadDebugShort": "请求预览",
+      "payloadDebugTitle": "请求内容预览",
+      "payloadDebugHint": "这里展示将发送给网关 / 供应商的请求内容，不是图片预览。API Key、Authorization、query secret 与 base64 / data URL 已脱敏或摘要；此预览只构建请求，不会提交生成。"
     },
     "aiVideo": {
       "promptPlaceholder": "描述视频内容、镜头运动、动作节奏；输入 @ 可引用已连接图片",
@@ -781,13 +793,15 @@
       "noModel": "选择视频模型",
       "duration": "时长",
       "aspectRatio": "宽高比",
+      "payloadDebug": "预览将发送的视频请求内容",
       "resolution": "分辨率"
     },
     "videoNode": {
       "waitingResult": "等待视频生成结果",
       "waitingResultDelayed": "已经等待 {{minutes}} 分钟了，还没有视频结果。继续等待中...",
       "generationFailed": "视频生成失败",
-      "empty": "暂无视频"
+      "empty": "暂无视频",
+      "generationElapsed": "生成耗时"
     },
     "panoramaViewer": {
       "expand": "放大全景图",
@@ -1193,6 +1207,8 @@
     "appendParameterConstraintsToPromptDesc": "启用后，提交生成前会把当前比例、分辨率和张数写入最终提示词，减少模型忽略画幅或清晰度设置的情况。",
     "collapseNodeActionToolbarByDefault": "图片节点功能条折叠显示",
     "collapseNodeActionToolbarByDefaultDesc": "启用后，AI 图片和图片节点被选中时只显示一个小提示，点击后展开上方功能框，再点收起。",
+    "showNodePayloadPreview": "节点 payload 预览",
+    "showNodePayloadPreviewDesc": "启用后，AI 图片和 AI 视频输入框右上角显示请求内容预览按钮，便于检查提交给网关 / 服务商的 payload。",
     "useLegacyPanoramaControlDirection": "全景拖拽使用旧方向",
     "useLegacyPanoramaControlDirectionDesc": "关闭时使用新的反向拖拽方向；开启后恢复旧版全景查看器的拖拽和方向键方向。",
     "panoramaControlSensitivity": "全景操作灵敏度",

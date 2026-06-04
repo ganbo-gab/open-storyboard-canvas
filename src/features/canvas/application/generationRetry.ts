@@ -9,13 +9,31 @@ function nonEmptyString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+export function isLocalFilesystemResultSource(value: unknown): boolean {
+  const source = nonEmptyString(value);
+  if (!source) {
+    return false;
+  }
+
+  return (
+    source.startsWith('/')
+    || /^file:\/\//i.test(source)
+    || /^[a-zA-Z]:[\\/]/.test(source)
+    || source.startsWith('\\\\')
+  );
+}
+
 export function isLightweightGenerationRetryResultUrl(value: unknown): boolean {
   const url = nonEmptyString(value);
   if (!url) {
     return false;
   }
   const normalizedPrefix = url.slice(0, 16).toLowerCase();
-  return !normalizedPrefix.startsWith('data:') && !normalizedPrefix.startsWith('blob:');
+  return (
+    !normalizedPrefix.startsWith('data:')
+    && !normalizedPrefix.startsWith('blob:')
+    && !isLocalFilesystemResultSource(url)
+  );
 }
 
 function isRetryableResultNodeType(node: CanvasNode): boolean {

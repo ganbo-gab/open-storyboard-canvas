@@ -26,7 +26,7 @@ import {
 import { EXPORT_RESULT_DISPLAY_NAME, resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { canvasAiGateway } from '@/features/canvas/application/canvasServices';
+import { canvasAiGateway, canvasEventBus } from '@/features/canvas/application/canvasServices';
 import {
   parseInputImageSignature,
   selectInputImageSignature,
@@ -1200,6 +1200,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
       updateNodeData(newNodeId, {
         isGenerating: false,
         generationStartedAt: null,
+        generationElapsedMs: Math.max(0, Date.now() - generationStartedAt),
         generationJobId: null,
         generationProviderId: null,
         generationClientSessionId: null,
@@ -1229,6 +1230,15 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
     ignoreAtTagWhenCopyingAndGenerating,
     appendParameterConstraintsToPrompt,
   ]);
+
+  useEffect(() => {
+    return canvasEventBus.subscribe('generation-node/trigger', ({ nodeId }) => {
+      if (nodeId !== id) {
+        return;
+      }
+      void handleGenerate(false);
+    });
+  }, [handleGenerate, id]);
 
   const handleRowChange = useCallback(
     (delta: number) => {

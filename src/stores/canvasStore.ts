@@ -288,7 +288,14 @@ function isLightweightRetryResultUrl(value: unknown): boolean {
     return false;
   }
   const normalizedPrefix = url.slice(0, 16).toLowerCase();
-  return !normalizedPrefix.startsWith('data:') && !normalizedPrefix.startsWith('blob:');
+  return (
+    !normalizedPrefix.startsWith('data:')
+    && !normalizedPrefix.startsWith('blob:')
+    && !url.startsWith('/')
+    && !/^file:\/\//i.test(url)
+    && !/^[a-zA-Z]:[\\/]/.test(url)
+    && !url.startsWith('\\\\')
+  );
 }
 
 function normalizeStringArray(value: unknown): string[] {

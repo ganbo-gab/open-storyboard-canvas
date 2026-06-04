@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { AlertTriangle, Check, ChevronDown, Settings2, Sparkles, Video } from 'lucide-react';
+import { AlertTriangle, Bug, Check, ChevronDown, Copy, Settings2, Sparkles, Video } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -34,13 +34,27 @@ import {
   type GenerationDebugContext,
 } from '@/features/canvas/application/generationErrorReport';
 import {
+  acquireGenerationSubmitLock,
+  generationSubmitLockKey,
+} from '@/features/canvas/application/generationSubmitLock';
+import {
   buildVideoModelCatalog,
   resolveVideoModelConfig,
   useVideoModelCatalog,
   type VideoCatalogEntry,
   type VideoModelConfigValue,
 } from '@/features/canvas/application/videoModelCatalog';
-import { canvasVideoGateway } from '@/features/canvas/application/canvasServices';
+import {
+  buildVideoGenerationDebugPreview,
+  canvasEventBus,
+  canvasVideoGateway,
+} from '@/features/canvas/application/canvasServices';
+import {
+  getLocalDateStamp,
+  resolveDefaultGeneratedVideoDisplayName,
+  resolveDefaultGeneratedVideoFileStem,
+  resolveNextGeneratedMediaSequence,
+} from '@/features/canvas/application/generatedMediaNaming';
 import { CanvasNodeImage } from '@/features/canvas/ui/CanvasNodeImage';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
@@ -49,7 +63,7 @@ import {
   NODE_CONTROL_ICON_CLASS,
   NODE_CONTROL_PRIMARY_BUTTON_CLASS,
 } from '@/features/canvas/ui/nodeControlStyles';
-import { UiButton } from '@/components/ui';
+import { UiButton, UiModal } from '@/components/ui';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useCustomProvidersStore } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -126,6 +140,31 @@ function aspectRatioFromPixelResolution(resolution: string): string | null {
   return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`;
 }
 
+function serializeDebugJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+interface VideoGenerationRequestAssembly {
+  prompt: string;
+  latestModelConfig: VideoModelConfigValue;
+  latestEntry: VideoCatalogEntry;
+  latestIncomingImages: string[];
+  outputAspectRatio: string;
+  gatewayPayload: {
+    prompt: string;
+    model: string;
+    size: string;
+    aspectRatio?: string;
+    seconds?: number;
+    referenceImages: string[];
+    extraParams?: Record<string, unknown>;
+  };
+}
+
 export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoNodeProps) => {
   const { t } = useTranslation();
   const updateNodeInternals = useUpdateNodeInternals();
@@ -141,6 +180,8 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
   const [modelOpen, setModelOpen] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
+  const [payloadDebugText, setPayloadDebugText] = useState<string | null>(null);
+  const [payloadDebugCopied, setPayloadDebugCopied] = useState(false);
 
   const incomingImageSignature = useCanvasStore((state) =>
     selectInputImageSignature(id, state.nodes, state.edges)
@@ -168,6 +209,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
   const addEdge = useCanvasStore((state) => state.addEdge);
   const findNodePosition = useCanvasStore((state) => state.findNodePosition);
   const catalog = useVideoModelCatalog();
+  const showNodePayloadPreview = useSettingsStore((state) => state.showNodePayloadPreview);
   const resolvedModelConfig = useMemo(
     () => resolveVideoModelConfig(catalog, data.modelConfig),
     [catalog, data.modelConfig]
@@ -314,7 +356,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     return () => document.removeEventListener('mousedown', handleOutside, true);
   }, [closeOpenPopovers, modelOpen, paramsOpen, providerOpen, referencePickerOpen]);
 
-  const handleGenerate = useCallback(async () => {
+  const assembleVideoGenerationRequest = useCallback((): VideoGenerationRequestAssembly | null => {
     const latestPromptDraft = promptDraftRef.current;
     flushPromptDraft(latestPromptDraft);
     const latestCanvasState = useCanvasStore.getState();
@@ -338,73 +380,32 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
       const message = t('node.aiVideo.promptRequired');
       setError(message);
       void showErrorDialog(message, t('common.error'));
-      return;
+      return null;
     }
     if (!latestModelConfig || !latestEntry) {
       const message = t('node.aiVideo.noVideoProvider');
       setError(message);
       void showErrorDialog(message, t('common.error'));
-      return;
+      return null;
     }
     if (!latestEntry.usable) {
       const message = latestEntry.notReadyReason ?? t('node.aiVideo.noVideoProvider');
       setError(message);
       void showErrorDialog(message, t('common.error'));
-      return;
+      return null;
     }
-
-    const generationStartedAt = Date.now();
-    const generationDurationMs = VIDEO_GENERATION_PROGRESS_DURATION_MS;
     const outputAspectRatio =
       aspectRatioFromPixelResolution(latestModelConfig.resolution)
       ?? latestModelConfig.aspectRatio
       ?? '16:9';
-    const newNodePosition = findNodePosition(
-      id,
-      EXPORT_RESULT_NODE_DEFAULT_WIDTH,
-      EXPORT_RESULT_NODE_LAYOUT_HEIGHT
-    );
-    const resultNodeId = addNode(
-      CANVAS_NODE_TYPES.video,
-      newNodePosition,
-      {
-        isGenerating: true,
-        generationStartedAt,
-        generationDurationMs,
-        displayName: prompt,
-        aspectRatio: outputAspectRatio,
-        durationSeconds: Number(latestModelConfig.duration) || null,
-        sourcePrompt: prompt,
-        sourceReferenceCount: latestIncomingImages.length,
-      }
-    );
-    addEdge(id, resultNodeId);
-    setError(null);
 
-    const runtimeDiagnostics = await getRuntimeDiagnostics();
-    const generationDebugContext: GenerationDebugContext = {
-      sourceType: 'aiVideo',
-      providerId: latestEntry.providerId,
-      requestModel: latestEntry.modelId,
-      requestSize: latestModelConfig.resolution,
+    return {
       prompt,
-      extraParams: {
-        duration: latestModelConfig.duration,
-        resolution: latestModelConfig.resolution,
-        aspectRatio: latestModelConfig.aspectRatio,
-        ...(latestModelConfig.extraParams ?? {}),
-      },
-      referenceImageCount: latestIncomingImages.length,
-      referenceImagePlaceholders: createReferenceImagePlaceholders(latestIncomingImages.length),
-      appVersion: runtimeDiagnostics.appVersion,
-      osName: runtimeDiagnostics.osName,
-      osVersion: runtimeDiagnostics.osVersion,
-      osBuild: runtimeDiagnostics.osBuild,
-      userAgent: runtimeDiagnostics.userAgent,
-    };
-
-    try {
-      const jobId = await canvasVideoGateway.submitGenerateVideoJob({
+      latestModelConfig,
+      latestEntry,
+      latestIncomingImages,
+      outputAspectRatio,
+      gatewayPayload: {
         prompt,
         model: latestModelConfig.entryId,
         size: latestModelConfig.resolution,
@@ -412,6 +413,90 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         seconds: Number(latestModelConfig.duration) || undefined,
         referenceImages: latestIncomingImages,
         extraParams: latestModelConfig.extraParams,
+      },
+    };
+  }, [data, flushPromptDraft, id, resolvedModelConfig, t]);
+
+  const handleGenerate = useCallback(async () => {
+    const releaseSubmitLock = acquireGenerationSubmitLock(
+      generationSubmitLockKey(id, 'ai-video-node')
+    );
+    if (!releaseSubmitLock) {
+      return;
+    }
+    let resultNodeId: string | null = null;
+    let generationStartedAt = Date.now();
+    let generationDebugContext: GenerationDebugContext | null = null;
+    try {
+      const assembled = assembleVideoGenerationRequest();
+      if (!assembled) {
+        return;
+      }
+      const {
+        prompt,
+        latestModelConfig,
+        latestEntry,
+        latestIncomingImages,
+        outputAspectRatio,
+        gatewayPayload,
+      } = assembled;
+      generationStartedAt = Date.now();
+      const generationDurationMs = VIDEO_GENERATION_PROGRESS_DURATION_MS;
+      const generatedSequence = resolveNextGeneratedMediaSequence(
+        'video',
+        useCanvasStore.getState().nodes
+      );
+      const generatedDateStamp = getLocalDateStamp();
+      const newNodePosition = findNodePosition(
+        id,
+        EXPORT_RESULT_NODE_DEFAULT_WIDTH,
+        EXPORT_RESULT_NODE_LAYOUT_HEIGHT
+      );
+      resultNodeId = addNode(
+        CANVAS_NODE_TYPES.video,
+        newNodePosition,
+        {
+          isGenerating: true,
+          generationStartedAt,
+          generationDurationMs,
+          displayName: resolveDefaultGeneratedVideoDisplayName(generatedSequence, prompt),
+          generatedNamingMode: 'default',
+          generatedSequence,
+          generatedDateStamp,
+          generatedFileName: `${resolveDefaultGeneratedVideoFileStem(generatedSequence, generatedDateStamp)}.mp4`,
+          aspectRatio: outputAspectRatio,
+          durationSeconds: Number(latestModelConfig.duration) || null,
+          sourcePrompt: prompt,
+          sourceReferenceCount: latestIncomingImages.length,
+        }
+      );
+      addEdge(id, resultNodeId);
+      setError(null);
+
+      const runtimeDiagnostics = await getRuntimeDiagnostics();
+      generationDebugContext = {
+        sourceType: 'aiVideo',
+        providerId: latestEntry.providerId,
+        requestModel: latestEntry.modelId,
+        requestSize: latestModelConfig.resolution,
+        prompt,
+        extraParams: {
+          duration: latestModelConfig.duration,
+          resolution: latestModelConfig.resolution,
+          aspectRatio: latestModelConfig.aspectRatio,
+          ...(latestModelConfig.extraParams ?? {}),
+        },
+        referenceImageCount: latestIncomingImages.length,
+        referenceImagePlaceholders: createReferenceImagePlaceholders(latestIncomingImages.length),
+        appVersion: runtimeDiagnostics.appVersion,
+        osName: runtimeDiagnostics.osName,
+        osVersion: runtimeDiagnostics.osVersion,
+        osBuild: runtimeDiagnostics.osBuild,
+        userAgent: runtimeDiagnostics.userAgent,
+      };
+
+      const jobId = await canvasVideoGateway.submitGenerateVideoJob({
+        ...gatewayPayload,
       });
       updateNodeData(resultNodeId, {
         generationJobId: jobId,
@@ -427,26 +512,77 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         t('common.error'),
         resolvedError.details
       );
-      updateNodeData(resultNodeId, {
-        isGenerating: false,
-        generationStartedAt: null,
-        generationJobId: null,
-        generationError: resolvedError.message,
-        generationErrorDetails: resolvedError.details ?? null,
-        generationDebugContext,
-      });
+      if (resultNodeId) {
+        updateNodeData(resultNodeId, {
+          isGenerating: false,
+          generationStartedAt: null,
+          generationElapsedMs: Math.max(0, Date.now() - generationStartedAt),
+          generationJobId: null,
+          generationError: resolvedError.message,
+          generationErrorDetails: resolvedError.details ?? null,
+          generationDebugContext,
+        });
+      }
+    } finally {
+      releaseSubmitLock();
     }
   }, [
     addEdge,
     addNode,
+    assembleVideoGenerationRequest,
     data,
     findNodePosition,
-    flushPromptDraft,
     id,
-    resolvedModelConfig,
     t,
     updateNodeData,
   ]);
+
+  const handleOpenPayloadDebug = useCallback(async () => {
+    try {
+      const assembled = assembleVideoGenerationRequest();
+      if (!assembled) {
+        return;
+      }
+      const preview = await buildVideoGenerationDebugPreview(assembled.gatewayPayload);
+      setPayloadDebugText(serializeDebugJson({
+        gatewayRequest: preview.gatewayRequest,
+        route: preview.route,
+        providerRequest: preview.providerRequest ?? null,
+      }));
+      setPayloadDebugCopied(false);
+    } catch (debugError) {
+      const resolvedError = resolveErrorContent(debugError, t('ai.error'));
+      setError(resolvedError.message);
+      void showErrorDialog(
+        resolvedError.message,
+        t('common.error'),
+        resolvedError.details,
+      );
+    }
+  }, [assembleVideoGenerationRequest, t]);
+
+  const handleCopyPayloadDebug = useCallback(async () => {
+    if (!payloadDebugText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(payloadDebugText);
+      setPayloadDebugCopied(true);
+      window.setTimeout(() => setPayloadDebugCopied(false), 1600);
+    } catch (copyError) {
+      const resolvedError = resolveErrorContent(copyError, t('nodeToolbar.copyFailed'));
+      void showErrorDialog(resolvedError.message, t('common.error'), resolvedError.details);
+    }
+  }, [payloadDebugText, t]);
+
+  useEffect(() => {
+    return canvasEventBus.subscribe('generation-node/trigger', ({ nodeId }) => {
+      if (nodeId !== id) {
+        return;
+      }
+      void handleGenerate();
+    });
+  }, [handleGenerate, id]);
 
   const handlePromptKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === '@' && incomingImages.length > 0) {
@@ -519,6 +655,25 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         className={NODE_HEADER_FLOATING_POSITION_CLASS}
         icon={<Video className="h-4 w-4" />}
         titleText={resolvedTitle}
+        rightSlot={showNodePayloadPreview ? (
+          <button
+            type="button"
+            data-canvas-no-marquee="true"
+            className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] text-text-muted shadow-sm transition-colors hover:border-accent/50 hover:bg-[var(--canvas-node-menu-hover)] hover:text-accent"
+            title={t('node.aiVideo.payloadDebug')}
+            aria-label={t('node.aiVideo.payloadDebug')}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (payloadDebugText !== null) {
+                setPayloadDebugText(null);
+                return;
+              }
+              void handleOpenPayloadDebug();
+            }}
+          >
+            <Bug className="h-3.5 w-3.5" />
+          </button>
+        ) : undefined}
         editable
         onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
       />
@@ -843,6 +998,46 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         maxWidth={AI_VIDEO_NODE_MAX_WIDTH}
         maxHeight={AI_VIDEO_NODE_MAX_HEIGHT}
       />
+
+      <UiModal
+        isOpen={payloadDebugText !== null}
+        title={t('node.imageEdit.payloadDebugTitle')}
+        onClose={() => setPayloadDebugText(null)}
+        widthClassName="w-[min(760px,calc(100vw-32px))]"
+        containerClassName="!z-[13050]"
+        footer={(
+          <>
+            <UiButton
+              variant="muted"
+              size="sm"
+              onClick={() => setPayloadDebugText(null)}
+            >
+              {t('common.close')}
+            </UiButton>
+            <UiButton
+              variant="primary"
+              size="sm"
+              onClick={() => void handleCopyPayloadDebug()}
+            >
+              <Copy className="mr-1.5 h-3.5 w-3.5" />
+              {payloadDebugCopied ? t('nodeToolbar.copied') : t('nodeToolbar.copy')}
+            </UiButton>
+          </>
+        )}
+      >
+        <div className="space-y-2">
+          <div className="text-xs text-text-muted">
+            {t('node.imageEdit.payloadDebugHint')}
+          </div>
+          <pre
+            className="ui-scrollbar nowheel max-h-[60vh] overflow-auto rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-3 text-xs leading-5 text-text-dark"
+            onWheelCapture={(event) => event.stopPropagation()}
+            onTouchMoveCapture={(event) => event.stopPropagation()}
+          >
+            {payloadDebugText}
+          </pre>
+        </div>
+      </UiModal>
     </div>
   );
 });

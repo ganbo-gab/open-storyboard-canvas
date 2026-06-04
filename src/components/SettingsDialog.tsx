@@ -113,6 +113,7 @@ export function SettingsDialog({
     ignoreAtTagWhenCopyingAndGenerating,
     appendParameterConstraintsToPrompt,
     collapseNodeActionToolbarByDefault,
+    showNodePayloadPreview,
     enableStoryboardGenGridPreviewShortcut,
     showStoryboardGenAdvancedRatioControls,
     useLegacyPanoramaControlDirection,
@@ -133,6 +134,7 @@ export function SettingsDialog({
     setIgnoreAtTagWhenCopyingAndGenerating,
     setAppendParameterConstraintsToPrompt,
     setCollapseNodeActionToolbarByDefault,
+    setShowNodePayloadPreview,
     setEnableStoryboardGenGridPreviewShortcut,
     setShowStoryboardGenAdvancedRatioControls,
     setUseLegacyPanoramaControlDirection,
@@ -181,6 +183,8 @@ export function SettingsDialog({
     useState(appendParameterConstraintsToPrompt);
   const [localCollapseNodeActionToolbarByDefault, setLocalCollapseNodeActionToolbarByDefault] =
     useState(collapseNodeActionToolbarByDefault);
+  const [localShowNodePayloadPreview, setLocalShowNodePayloadPreview] =
+    useState(showNodePayloadPreview);
   const [localEnableStoryboardGenGridPreviewShortcut, setLocalEnableStoryboardGenGridPreviewShortcut] =
     useState(enableStoryboardGenGridPreviewShortcut);
   const [localShowStoryboardGenAdvancedRatioControls, setLocalShowStoryboardGenAdvancedRatioControls] =
@@ -235,6 +239,7 @@ export function SettingsDialog({
     setLocalIgnoreAtTagWhenCopyingAndGenerating(ignoreAtTagWhenCopyingAndGenerating);
     setLocalAppendParameterConstraintsToPrompt(appendParameterConstraintsToPrompt);
     setLocalCollapseNodeActionToolbarByDefault(collapseNodeActionToolbarByDefault);
+    setLocalShowNodePayloadPreview(showNodePayloadPreview);
     setLocalEnableStoryboardGenGridPreviewShortcut(enableStoryboardGenGridPreviewShortcut);
     setLocalShowStoryboardGenAdvancedRatioControls(showStoryboardGenAdvancedRatioControls);
     setLocalUseLegacyPanoramaControlDirection(useLegacyPanoramaControlDirection);
@@ -273,6 +278,7 @@ export function SettingsDialog({
     setIgnoreAtTagWhenCopyingAndGenerating(localIgnoreAtTagWhenCopyingAndGenerating);
     setAppendParameterConstraintsToPrompt(localAppendParameterConstraintsToPrompt);
     setCollapseNodeActionToolbarByDefault(localCollapseNodeActionToolbarByDefault);
+    setShowNodePayloadPreview(localShowNodePayloadPreview);
     setEnableStoryboardGenGridPreviewShortcut(localEnableStoryboardGenGridPreviewShortcut);
     setShowStoryboardGenAdvancedRatioControls(localShowStoryboardGenAdvancedRatioControls);
     setUseLegacyPanoramaControlDirection(localUseLegacyPanoramaControlDirection);
@@ -296,6 +302,7 @@ export function SettingsDialog({
     localIgnoreAtTagWhenCopyingAndGenerating,
     localAppendParameterConstraintsToPrompt,
     localCollapseNodeActionToolbarByDefault,
+    localShowNodePayloadPreview,
     localEnableStoryboardGenGridPreviewShortcut,
     localShowStoryboardGenAdvancedRatioControls,
     localUseLegacyPanoramaControlDirection,
@@ -317,6 +324,7 @@ export function SettingsDialog({
     setIgnoreAtTagWhenCopyingAndGenerating,
     setAppendParameterConstraintsToPrompt,
     setCollapseNodeActionToolbarByDefault,
+    setShowNodePayloadPreview,
     setEnableStoryboardGenGridPreviewShortcut,
     setShowStoryboardGenAdvancedRatioControls,
     setUseLegacyPanoramaControlDirection,
@@ -796,6 +804,13 @@ export function SettingsDialog({
                     onCheckedChange={setLocalCollapseNodeActionToolbarByDefault}
                     title={t('settings.collapseNodeActionToolbarByDefault')}
                     description={t('settings.collapseNodeActionToolbarByDefaultDesc')}
+                  />
+
+                  <SettingsCheckboxCard
+                    checked={localShowNodePayloadPreview}
+                    onCheckedChange={setLocalShowNodePayloadPreview}
+                    title={t('settings.showNodePayloadPreview')}
+                    description={t('settings.showNodePayloadPreviewDesc')}
                   />
 
                   <SettingsCheckboxCard
