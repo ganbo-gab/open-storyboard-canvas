@@ -291,6 +291,15 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
     return picked ? resolveImageDisplayUrl(picked) : null;
   }, [data.imageUrl, data.previewImageUrl, transientPreviewUrl, zoom]);
 
+  const imageFallbackSources = useMemo(() => {
+    const sources = [data.imageUrl, data.previewImageUrl]
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      .map((item) => resolveImageDisplayUrl(item));
+    return transientPreviewUrl
+      ? [transientPreviewUrl, ...Array.from(new Set(sources))]
+      : Array.from(new Set(sources));
+  }, [data.imageUrl, data.previewImageUrl, transientPreviewUrl]);
+
   useEffect(() => {
     updateNodeInternals(id);
   }, [id, resolvedHeight, resolvedWidth, updateNodeInternals]);
@@ -320,6 +329,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
         <div className="relative block h-full w-full overflow-hidden rounded-[var(--node-radius)] bg-[var(--canvas-node-media-bg)]">
           <CanvasNodeImage
             src={imageSource ?? ''}
+            fallbackSrcs={imageFallbackSources}
             viewerSourceUrl={data.imageUrl ? resolveImageDisplayUrl(data.imageUrl) : null}
             alt={t('node.upload.uploadedAlt')}
             className="h-full w-full object-contain"

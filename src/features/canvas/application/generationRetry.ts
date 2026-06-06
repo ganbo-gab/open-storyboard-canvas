@@ -59,9 +59,11 @@ export function canRetryGenerationFetch(node: CanvasNode | null | undefined): bo
 
   const data = node.data as Record<string, unknown>;
   const hasError = nonEmptyString(data.generationError).length > 0;
+  const retryResultUrl = isLightweightGenerationRetryResultUrl(data.generationRetryResultUrl);
+  const hasJobId = nonEmptyString(data.generationJobId).length > 0;
   const hasRetrySource = Boolean(
-    nonEmptyString(data.generationJobId)
-    || isLightweightGenerationRetryResultUrl(data.generationRetryResultUrl)
+    retryResultUrl
+    || hasJobId
   );
 
   return data.isGenerating !== true && hasError && !hasResultMedia(node) && hasRetrySource;
@@ -75,7 +77,7 @@ export function buildRetryGenerationFetchPatch(node: CanvasNode): Partial<Canvas
       ? 15 * 60 * 1000
       : 60 * 1000;
 
-  return {
+  const patch: Partial<CanvasNodeData> = {
     isGenerating: true,
     generationStartedAt: Date.now(),
     generationDurationMs: Math.max(1000, Math.round(currentDuration)),
@@ -83,4 +85,8 @@ export function buildRetryGenerationFetchPatch(node: CanvasNode): Partial<Canvas
     generationError: null,
     generationErrorDetails: null,
   };
+  if (node.type === CANVAS_NODE_TYPES.video) {
+    (patch as { generationRetryRequestedAt?: number }).generationRetryRequestedAt = Date.now();
+  }
+  return patch;
 }

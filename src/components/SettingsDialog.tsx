@@ -142,6 +142,7 @@ export function SettingsDialog({
     appendParameterConstraintsToPrompt,
     collapseNodeActionToolbarByDefault,
     showNodePayloadPreview,
+    enableAiTextStreaming,
     enableStoryboardGenGridPreviewShortcut,
     showStoryboardGenAdvancedRatioControls,
     useLegacyPanoramaControlDirection,
@@ -167,6 +168,7 @@ export function SettingsDialog({
     setAppendParameterConstraintsToPrompt,
     setCollapseNodeActionToolbarByDefault,
     setShowNodePayloadPreview,
+    setEnableAiTextStreaming,
     setEnableStoryboardGenGridPreviewShortcut,
     setShowStoryboardGenAdvancedRatioControls,
     setUseLegacyPanoramaControlDirection,
@@ -221,6 +223,8 @@ export function SettingsDialog({
     useState(collapseNodeActionToolbarByDefault);
   const [localShowNodePayloadPreview, setLocalShowNodePayloadPreview] =
     useState(showNodePayloadPreview);
+  const [localEnableAiTextStreaming, setLocalEnableAiTextStreaming] =
+    useState(enableAiTextStreaming);
   const [localEnableStoryboardGenGridPreviewShortcut, setLocalEnableStoryboardGenGridPreviewShortcut] =
     useState(enableStoryboardGenGridPreviewShortcut);
   const [localShowStoryboardGenAdvancedRatioControls, setLocalShowStoryboardGenAdvancedRatioControls] =
@@ -284,6 +288,7 @@ export function SettingsDialog({
     setLocalAppendParameterConstraintsToPrompt(appendParameterConstraintsToPrompt);
     setLocalCollapseNodeActionToolbarByDefault(collapseNodeActionToolbarByDefault);
     setLocalShowNodePayloadPreview(showNodePayloadPreview);
+    setLocalEnableAiTextStreaming(enableAiTextStreaming);
     setLocalEnableStoryboardGenGridPreviewShortcut(enableStoryboardGenGridPreviewShortcut);
     setLocalShowStoryboardGenAdvancedRatioControls(showStoryboardGenAdvancedRatioControls);
     setLocalUseLegacyPanoramaControlDirection(useLegacyPanoramaControlDirection);
@@ -327,6 +332,7 @@ export function SettingsDialog({
     setAppendParameterConstraintsToPrompt(localAppendParameterConstraintsToPrompt);
     setCollapseNodeActionToolbarByDefault(localCollapseNodeActionToolbarByDefault);
     setShowNodePayloadPreview(localShowNodePayloadPreview);
+    setEnableAiTextStreaming(localEnableAiTextStreaming);
     setEnableStoryboardGenGridPreviewShortcut(localEnableStoryboardGenGridPreviewShortcut);
     setShowStoryboardGenAdvancedRatioControls(localShowStoryboardGenAdvancedRatioControls);
     setUseLegacyPanoramaControlDirection(localUseLegacyPanoramaControlDirection);
@@ -358,6 +364,7 @@ export function SettingsDialog({
     localAppendParameterConstraintsToPrompt,
     localCollapseNodeActionToolbarByDefault,
     localShowNodePayloadPreview,
+    localEnableAiTextStreaming,
     localEnableStoryboardGenGridPreviewShortcut,
     localShowStoryboardGenAdvancedRatioControls,
     localUseLegacyPanoramaControlDirection,
@@ -384,6 +391,7 @@ export function SettingsDialog({
     setAppendParameterConstraintsToPrompt,
     setCollapseNodeActionToolbarByDefault,
     setShowNodePayloadPreview,
+    setEnableAiTextStreaming,
     setEnableStoryboardGenGridPreviewShortcut,
     setShowStoryboardGenAdvancedRatioControls,
     setUseLegacyPanoramaControlDirection,
@@ -1063,6 +1071,13 @@ export function SettingsDialog({
                     onCheckedChange={setLocalShowNodePayloadPreview}
                     title={t('settings.showNodePayloadPreview')}
                     description={t('settings.showNodePayloadPreviewDesc')}
+                  />
+
+                  <SettingsCheckboxCard
+                    checked={localEnableAiTextStreaming}
+                    onCheckedChange={setLocalEnableAiTextStreaming}
+                    title={t('settings.enableAiTextStreaming')}
+                    description={t('settings.enableAiTextStreamingDesc')}
                   />
 
                   <SettingsCheckboxCard

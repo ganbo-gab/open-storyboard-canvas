@@ -19,27 +19,313 @@ use tauri::{AppHandle, Manager};
 use tokio::time::sleep;
 use tracing::info;
 
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeTIFF};
+
 const STORYBOARD_METADATA_PNG_TEXT_KEY: &str = "StoryboardCopilotMetadata";
 const FAST_PREVIEW_BYPASS_MAX_BYTES: usize = 2_000_000;
 const FAST_PREVIEW_BYPASS_MAX_DIMENSION: u32 = 2048;
 const REMOTE_IMAGE_DOWNLOAD_TIMEOUT_MS: u64 = 45_000;
 const REMOTE_IMAGE_DOWNLOAD_ATTEMPTS: usize = 3;
 const GENERATED_MEDIA_COUNTERS_FILE_NAME: &str = "generated-media-counters.json";
-static REMOTE_IMAGE_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static REMOTE_IMAGE_CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+static REMOTE_IMAGE_NO_PROXY_CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
 
-fn remote_image_client() -> &'static reqwest::Client {
-    REMOTE_IMAGE_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(Duration::from_millis(REMOTE_IMAGE_DOWNLOAD_TIMEOUT_MS))
-            .pool_idle_timeout(Duration::from_secs(90))
-            .tcp_keepalive(Duration::from_secs(60))
-            .no_gzip()
-            .no_brotli()
-            .no_zstd()
-            .no_deflate()
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
+fn build_remote_media_client(no_proxy: bool) -> Result<reqwest::Client, reqwest::Error> {
+    let builder = reqwest::Client::builder()
+        .timeout(Duration::from_millis(REMOTE_IMAGE_DOWNLOAD_TIMEOUT_MS))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .tcp_keepalive(Duration::from_secs(60))
+        .no_gzip()
+        .no_brotli()
+        .no_zstd()
+        .no_deflate();
+    let builder = if no_proxy {
+        builder.no_proxy()
+    } else {
+        builder
+    };
+    builder.build()
+}
+
+fn remote_image_client() -> Result<&'static reqwest::Client, String> {
+    REMOTE_IMAGE_CLIENT
+        .get_or_init(|| {
+            build_remote_media_client(false)
+                .map_err(|error| format!("Failed to build default media client: {}", error))
+        })
+        .as_ref()
+        .map_err(|error| error.clone())
+}
+
+fn remote_image_no_proxy_client() -> Result<&'static reqwest::Client, String> {
+    REMOTE_IMAGE_NO_PROXY_CLIENT
+        .get_or_init(|| {
+            build_remote_media_client(true)
+                .map_err(|error| format!("Failed to build no-proxy media client: {}", error))
+        })
+        .as_ref()
+        .map_err(|error| error.clone())
+}
+
+#[derive(Debug)]
+struct RemoteMediaDownload {
+    bytes: Vec<u8>,
+    content_type: String,
+}
+
+#[derive(Debug)]
+enum RemoteMediaAttemptFailure {
+    Status {
+        message: String,
+        is_client_error: bool,
+    },
+    Network {
+        message: String,
+    },
+}
+
+fn describe_remote_media_url(url: &str) -> String {
+    if let Ok(parsed) = reqwest::Url::parse(url) {
+        let host = parsed.host_str().unwrap_or("unknown-host");
+        let basename = parsed
+            .path_segments()
+            .and_then(|segments| segments.filter(|segment| !segment.is_empty()).last())
+            .unwrap_or("remote-media");
+        return format!("{}/{}", host, basename);
+    }
+    "remote-media".to_string()
+}
+
+fn describe_reqwest_network_error(error: &reqwest::Error) -> String {
+    let mut kinds: Vec<&str> = Vec::new();
+    if error.is_connect() {
+        kinds.push("connect/tls");
+    }
+    if error.is_timeout() {
+        kinds.push("timeout");
+    }
+    if error.is_body() {
+        kinds.push("body");
+    }
+    if error.is_decode() {
+        kinds.push("decode");
+    }
+    if kinds.is_empty() {
+        kinds.push("send");
+    }
+    format!("{} [{}]", error, kinds.join(","))
+}
+
+async fn try_remote_media_request(
+    client: &reqwest::Client,
+    route_label: &str,
+    url: &str,
+    accept_header: &str,
+    headers: Option<&HashMap<String, String>>,
+    media_kind: &str,
+    attempt: usize,
+) -> Result<RemoteMediaDownload, RemoteMediaAttemptFailure> {
+    let url_label = describe_remote_media_url(url);
+    let mut request = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, accept_header)
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .header(reqwest::header::USER_AGENT, "Open-Storyboard-Canvas/1.0");
+    if let Some(headers) = headers {
+        for (key, value) in headers {
+            let trimmed_key = key.trim();
+            if trimmed_key.is_empty() || !should_forward_remote_image_header(trimmed_key) {
+                continue;
+            }
+            request = request.header(trimmed_key, value.as_str());
+        }
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|error| RemoteMediaAttemptFailure::Network {
+            message: format!(
+                "{} route attempt {} failed to send remote {} request for {}: {}",
+                route_label,
+                attempt,
+                media_kind,
+                url_label,
+                describe_reqwest_network_error(&error)
+            ),
+        })?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(RemoteMediaAttemptFailure::Status {
+            message: format!(
+                "{} route attempt {} returned HTTP {} for remote {} {}",
+                route_label, attempt, status, media_kind, url_label
+            ),
+            is_client_error: status.is_client_error(),
+        });
+    }
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+    let content_encoding = response
+        .headers()
+        .get(reqwest::header::CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("none")
+        .to_string();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| RemoteMediaAttemptFailure::Network {
+            message: format!(
+                "{} route attempt {} failed to read remote {} body for {} (content-type={}, content-encoding={}): {}",
+                route_label,
+                attempt,
+                media_kind,
+                url_label,
+                content_type,
+                content_encoding,
+                describe_reqwest_network_error(&error)
+            ),
+        })?
+        .to_vec();
+
+    Ok(RemoteMediaDownload {
+        bytes,
+        content_type,
     })
+}
+
+async fn download_remote_media_bytes(
+    url: &str,
+    headers: Option<&HashMap<String, String>>,
+    accept_header: &str,
+    media_kind: &str,
+) -> Result<RemoteMediaDownload, String> {
+    let url_label = describe_remote_media_url(url);
+    let mut default_error = String::new();
+    let mut should_try_no_proxy = false;
+
+    let default_client = remote_image_client().map_err(|error| {
+        format!(
+            "Remote {} download failed for {}: {}; no-proxy route not attempted because default client was unavailable",
+            media_kind, url_label, error
+        )
+    })?;
+
+    for attempt in 1..=REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
+        match try_remote_media_request(
+            default_client,
+            "default",
+            url,
+            accept_header,
+            headers,
+            media_kind,
+            attempt,
+        )
+        .await
+        {
+            Ok(download) => return Ok(download),
+            Err(RemoteMediaAttemptFailure::Status {
+                message,
+                is_client_error,
+            }) => {
+                if is_client_error {
+                    return Err(format!(
+                        "Remote {} download failed for {}: {}; no-proxy route not attempted for HTTP client status",
+                        media_kind, url_label, message
+                    ));
+                }
+                should_try_no_proxy = true;
+                default_error = message;
+            }
+            Err(RemoteMediaAttemptFailure::Network { message }) => {
+                should_try_no_proxy = true;
+                default_error = message;
+            }
+        }
+
+        if attempt < REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
+            sleep(Duration::from_millis(350 * attempt as u64)).await;
+        }
+    }
+
+    if !should_try_no_proxy {
+        return Err(format!(
+            "Remote {} download failed for {}: {}; no-proxy route not attempted because default route returned HTTP status errors",
+            media_kind,
+            url_label,
+            if default_error.is_empty() {
+                "default route failed".to_string()
+            } else {
+                default_error
+            }
+        ));
+    }
+
+    let mut no_proxy_error = String::new();
+    let no_proxy_client = remote_image_no_proxy_client().map_err(|error| {
+        format!(
+            "Remote {} download failed for {}: default route {}; no-proxy route unavailable: {}",
+            media_kind,
+            url_label,
+            if default_error.is_empty() {
+                "failed".to_string()
+            } else {
+                default_error.clone()
+            },
+            error
+        )
+    })?;
+
+    for attempt in 1..=REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
+        match try_remote_media_request(
+            no_proxy_client,
+            "no-proxy",
+            url,
+            accept_header,
+            headers,
+            media_kind,
+            attempt,
+        )
+        .await
+        {
+            Ok(download) => return Ok(download),
+            Err(RemoteMediaAttemptFailure::Status { message, .. }) => {
+                no_proxy_error = message;
+                break;
+            }
+            Err(RemoteMediaAttemptFailure::Network { message }) => {
+                no_proxy_error = message;
+            }
+        }
+
+        if attempt < REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
+            sleep(Duration::from_millis(350 * attempt as u64)).await;
+        }
+    }
+
+    Err(format!(
+        "Remote {} download failed for {}: default route {}; no-proxy route {}",
+        media_kind,
+        url_label,
+        if default_error.is_empty() {
+            "failed".to_string()
+        } else {
+            default_error
+        },
+        if no_proxy_error.is_empty() {
+            "failed".to_string()
+        } else {
+            no_proxy_error
+        }
+    ))
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1405,7 +1691,11 @@ fn normalize_video_extension(raw_ext: &str) -> String {
     }
 }
 
-fn canonical_local_media_path(path: &Path, media_dir: &Path, label: &str) -> Result<PathBuf, String> {
+fn canonical_local_media_path(
+    path: &Path,
+    media_dir: &Path,
+    label: &str,
+) -> Result<PathBuf, String> {
     let canonical_path = std::fs::canonicalize(path)
         .map_err(|e| format!("Failed to resolve {} path {}: {}", label, path.display(), e))?;
     let canonical_media_dir = std::fs::canonicalize(media_dir).map_err(|e| {
@@ -1576,6 +1866,64 @@ fn encode_dynamic_image_as_png(image: &DynamicImage) -> Result<Vec<u8>, String> 
     Ok(buffer.into_inner())
 }
 
+fn system_clipboard_image_from_png_bytes(bytes: Vec<u8>) -> SystemClipboardImage {
+    SystemClipboardImage {
+        bytes,
+        mime_type: "image/png".to_string(),
+        file_name: "pasted-image.png".to_string(),
+    }
+}
+
+fn arboard_image_to_system_clipboard_image(
+    image_data: ImageData<'_>,
+) -> Result<SystemClipboardImage, String> {
+    let width = image_data.width as u32;
+    let height = image_data.height as u32;
+    let pixels = image_data.bytes.into_owned();
+    let rgba_image = RgbaImage::from_raw(width, height, pixels)
+        .ok_or_else(|| "Failed to decode clipboard image pixels".to_string())?;
+    let bytes = encode_dynamic_image_as_png(&DynamicImage::ImageRgba8(rgba_image))?;
+    Ok(system_clipboard_image_from_png_bytes(bytes))
+}
+
+fn decode_clipboard_encoded_image_as_png(
+    bytes: &[u8],
+    format: ImageFormat,
+) -> Result<Vec<u8>, String> {
+    if bytes.is_empty() {
+        return Err("Clipboard image payload is empty".to_string());
+    }
+    let image = image::load_from_memory_with_format(bytes, format)
+        .map_err(|e| format!("Failed to decode clipboard image payload: {}", e))?;
+    encode_dynamic_image_as_png(&image)
+}
+
+#[cfg(target_os = "macos")]
+fn read_macos_pasteboard_encoded_image() -> Option<SystemClipboardImage> {
+    let pasteboard = NSPasteboard::generalPasteboard();
+
+    if let Some(data) = pasteboard.dataForType(unsafe { NSPasteboardTypePNG }) {
+        let bytes = data.to_vec();
+        if decode_clipboard_encoded_image_as_png(&bytes, ImageFormat::Png).is_ok() {
+            return Some(system_clipboard_image_from_png_bytes(bytes));
+        }
+    }
+
+    if let Some(data) = pasteboard.dataForType(unsafe { NSPasteboardTypeTIFF }) {
+        let bytes = data.to_vec();
+        if let Ok(png_bytes) = decode_clipboard_encoded_image_as_png(&bytes, ImageFormat::Tiff) {
+            return Some(system_clipboard_image_from_png_bytes(png_bytes));
+        }
+    }
+
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_macos_pasteboard_encoded_image() -> Option<SystemClipboardImage> {
+    None
+}
+
 fn compact_text_preview(value: &str, max_chars: usize) -> String {
     let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.chars().count() <= max_chars {
@@ -1648,6 +1996,15 @@ fn decode_file_url_path(value: &str) -> String {
         decoded[1..].to_string()
     } else {
         decoded
+    }
+}
+
+fn normalize_user_selected_path(value: &str) -> String {
+    let trimmed = value.trim().trim_matches('"').trim_matches('\'').trim();
+    if trimmed.to_ascii_lowercase().starts_with("file://") {
+        decode_file_url_path(trimmed)
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -1736,82 +2093,31 @@ async fn resolve_video_source_bytes_with_headers(
     }
 
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-        let client = remote_image_client();
-        let mut last_error = String::new();
-        for attempt in 1..=REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
-            let mut request = client
-                .get(trimmed)
-                .header(
-                    reqwest::header::ACCEPT,
-                    "video/mp4,video/webm,video/quicktime,video/*,*/*;q=0.8",
-                )
-                .header(reqwest::header::ACCEPT_ENCODING, "identity")
-                .header(reqwest::header::USER_AGENT, "Open-Storyboard-Canvas/1.0");
-            if let Some(headers) = headers {
-                for (key, value) in headers {
-                    let trimmed_key = key.trim();
-                    if trimmed_key.is_empty() || !should_forward_remote_image_header(trimmed_key) {
-                        continue;
-                    }
-                    request = request.header(trimmed_key, value.as_str());
-                }
-            }
+        let download = download_remote_media_bytes(
+            trimmed,
+            headers,
+            "video/mp4,video/webm,video/quicktime,video/*,*/*;q=0.8",
+            "video",
+        )
+        .await?;
+        let content_type = download.content_type;
+        let mime_ext = extension_from_video_mime(&content_type);
+        let bytes = download.bytes;
 
-            match request.send().await {
-                Ok(response) => {
-                    if !response.status().is_success() {
-                        let status = response.status();
-                        let status_message =
-                            format!("Remote video request failed with status {}", status);
-                        if status.is_client_error() {
-                            return Err(status_message);
-                        }
-                        last_error = status_message;
-                    } else {
-                        let content_type = response
-                            .headers()
-                            .get(reqwest::header::CONTENT_TYPE)
-                            .and_then(|value| value.to_str().ok())
-                            .unwrap_or("unknown")
-                            .to_string();
-                        let mime_ext = extension_from_video_mime(&content_type);
-                        let bytes = response
-                            .bytes()
-                            .await
-                            .map_err(|e| format!("Failed to read remote video body: {}", e))?
-                            .to_vec();
-
-                        if content_type_is_textual_non_image(&content_type)
-                            || bytes_text_preview(&bytes, 120)
-                                .map(|preview| {
-                                    looks_like_json_text(&preview) || looks_like_html_text(&preview)
-                                })
-                                .unwrap_or(false)
-                        {
-                            return Err(describe_non_video_remote_body(&content_type, &bytes));
-                        }
-
-                        let ext = mime_ext
-                            .or_else(|| extension_from_path_like(trimmed))
-                            .map(|value| normalize_video_extension(&value))
-                            .unwrap_or_else(|| "mp4".to_string());
-
-                        return Ok((bytes, ext));
-                    }
-                }
-                Err(error) => {
-                    last_error = format!("Failed to download remote video: {}", error);
-                }
-            }
-
-            if attempt < REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
-                sleep(Duration::from_millis(350 * attempt as u64)).await;
-            }
+        if content_type_is_textual_non_image(&content_type)
+            || bytes_text_preview(&bytes, 120)
+                .map(|preview| looks_like_json_text(&preview) || looks_like_html_text(&preview))
+                .unwrap_or(false)
+        {
+            return Err(describe_non_video_remote_body(&content_type, &bytes));
         }
-        if !last_error.is_empty() {
-            return Err(last_error);
-        }
-        return Err("Remote video download failed".to_string());
+
+        let ext = mime_ext
+            .or_else(|| extension_from_path_like(trimmed))
+            .map(|value| normalize_video_extension(&value))
+            .unwrap_or_else(|| "mp4".to_string());
+
+        return Ok((bytes, ext));
     }
 
     if trimmed.starts_with("file://") {
@@ -2097,117 +2403,42 @@ async fn resolve_source_bytes_with_headers(
         }
 
         if current_source.starts_with("http://") || current_source.starts_with("https://") {
-            let client = remote_image_client();
-            let mut last_error = String::new();
-            for attempt in 1..=REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
-                let mut request = client
-                    .get(&current_source)
-                    .header(
-                        reqwest::header::ACCEPT,
-                        "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
-                    )
-                    .header(reqwest::header::ACCEPT_ENCODING, "identity")
-                    .header(reqwest::header::USER_AGENT, "Open-Storyboard-Canvas/1.0");
-                if let Some(headers) = headers {
-                    for (key, value) in headers {
-                        let trimmed_key = key.trim();
-                        if trimmed_key.is_empty()
-                            || !should_forward_remote_image_header(trimmed_key)
-                        {
-                            continue;
-                        }
-                        request = request.header(trimmed_key, value.as_str());
-                    }
-                }
-                match request.send().await {
-                    Ok(response) => {
-                        if !response.status().is_success() {
-                            let status = response.status();
-                            let status_message =
-                                format!("Remote image request failed with status {}", status);
-                            if status.is_client_error() {
-                                return Err(status_message);
-                            }
-                            last_error = status_message;
-                        } else {
-                            let mime_ext = response
-                                .headers()
-                                .get(reqwest::header::CONTENT_TYPE)
-                                .and_then(|value| value.to_str().ok())
-                                .map(extension_from_mime);
-                            let content_type = response
-                                .headers()
-                                .get(reqwest::header::CONTENT_TYPE)
-                                .and_then(|value| value.to_str().ok())
-                                .unwrap_or("unknown")
-                                .to_string();
-                            let content_encoding = response
-                                .headers()
-                                .get(reqwest::header::CONTENT_ENCODING)
-                                .and_then(|value| value.to_str().ok())
-                                .unwrap_or("none")
-                                .to_string();
+            let download = download_remote_media_bytes(
+                &current_source,
+                headers,
+                "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
+                "image",
+            )
+            .await?;
+            let content_type = download.content_type;
+            let mime_ext = if content_type == "unknown" {
+                None
+            } else {
+                Some(extension_from_mime(&content_type))
+            };
+            let bytes = download.bytes;
 
-                            let bytes = match response.bytes().await {
-                                Ok(bytes) => bytes.to_vec(),
-                                Err(error) => {
-                                    last_error = format!(
-                                        "Failed to read remote image body (attempt {}/{}, content-type={}, content-encoding={}): {}",
-                                        attempt,
-                                        REMOTE_IMAGE_DOWNLOAD_ATTEMPTS,
-                                        content_type,
-                                        content_encoding,
-                                        error
-                                    );
-                                    if attempt < REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
-                                        sleep(Duration::from_millis(350 * attempt as u64)).await;
-                                        continue;
-                                    }
-                                    return Err(last_error);
-                                }
-                            };
-
-                            if unwrap_count < 3 {
-                                if let Some(unwrapped_source) =
-                                    extract_wrapped_image_source_from_bytes(&bytes)
-                                {
-                                    unwrap_count += 1;
-                                    current_source = unwrapped_source;
-                                    continue 'resolve_source;
-                                }
-                            }
-
-                            if content_type_is_textual_non_image(&content_type)
-                                || bytes_text_preview(&bytes, 120)
-                                    .map(|preview| {
-                                        looks_like_json_text(&preview)
-                                            || looks_like_html_text(&preview)
-                                    })
-                                    .unwrap_or(false)
-                            {
-                                return Err(describe_non_image_remote_body(&content_type, &bytes));
-                            }
-
-                            let ext = mime_ext
-                                .or_else(|| extension_from_path_like(&current_source))
-                                .unwrap_or_else(|| "png".to_string());
-
-                            return Ok((bytes, ext));
-                        }
-                    }
-                    Err(error) => {
-                        last_error = format!("Failed to download remote image: {}", error);
-                    }
-                }
-
-                if attempt < REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
-                    sleep(Duration::from_millis(350 * attempt as u64)).await;
+            if unwrap_count < 3 {
+                if let Some(unwrapped_source) = extract_wrapped_image_source_from_bytes(&bytes) {
+                    unwrap_count += 1;
+                    current_source = unwrapped_source;
+                    continue 'resolve_source;
                 }
             }
-            if !last_error.is_empty() {
-                return Err(last_error);
+
+            if content_type_is_textual_non_image(&content_type)
+                || bytes_text_preview(&bytes, 120)
+                    .map(|preview| looks_like_json_text(&preview) || looks_like_html_text(&preview))
+                    .unwrap_or(false)
+            {
+                return Err(describe_non_image_remote_body(&content_type, &bytes));
             }
-            return Err("Remote image download failed".to_string());
+
+            let ext = mime_ext
+                .or_else(|| extension_from_path_like(&current_source))
+                .unwrap_or_else(|| "png".to_string());
+
+            return Ok((bytes, ext));
         }
 
         break;
@@ -2362,7 +2593,33 @@ fn sanitize_file_stem(raw: &str) -> String {
     }
 
     let compact = sanitized.trim().trim_matches('.').to_string();
-    if compact.is_empty() {
+    let compact_lower = compact.to_ascii_lowercase();
+    let is_windows_reserved = matches!(
+        compact_lower.as_str(),
+        "con"
+            | "prn"
+            | "aux"
+            | "nul"
+            | "com1"
+            | "com2"
+            | "com3"
+            | "com4"
+            | "com5"
+            | "com6"
+            | "com7"
+            | "com8"
+            | "com9"
+            | "lpt1"
+            | "lpt2"
+            | "lpt3"
+            | "lpt4"
+            | "lpt5"
+            | "lpt6"
+            | "lpt7"
+            | "lpt8"
+            | "lpt9"
+    );
+    if compact.is_empty() || is_windows_reserved {
         fallback.to_string()
     } else {
         compact
@@ -2422,11 +2679,8 @@ pub async fn rename_local_media_files(
         LocalMediaKind::Image => resolve_images_dir(&app)?,
         LocalMediaKind::Video => resolve_videos_dir(&app)?,
     };
-    let primary_path = canonical_local_media_path(
-        &PathBuf::from(primary_raw),
-        &media_dir,
-        "Primary media",
-    )?;
+    let primary_path =
+        canonical_local_media_path(&PathBuf::from(primary_raw), &media_dir, "Primary media")?;
 
     let default_stem = next_generated_media_file_stem(&app, media_kind)?;
     let requested_stem = payload
@@ -2539,7 +2793,7 @@ pub async fn save_image_source_to_path(
     }
 
     let (bytes, extension) = resolve_source_bytes(trimmed_source).await?;
-    let raw_path = PathBuf::from(trimmed_target);
+    let raw_path = PathBuf::from(normalize_user_selected_path(trimmed_target));
     let output_path = ensure_output_path_with_extension(&raw_path, &extension);
 
     if let Some(parent) = output_path.parent() {
@@ -2570,7 +2824,7 @@ pub async fn save_image_source_to_directory(
     }
 
     let (bytes, extension) = resolve_source_bytes(trimmed_source).await?;
-    let dir_path = PathBuf::from(trimmed_dir);
+    let dir_path = PathBuf::from(normalize_user_selected_path(trimmed_dir));
     std::fs::create_dir_all(&dir_path)
         .map_err(|e| format!("Failed to create target dir: {}", e))?;
 
@@ -2612,7 +2866,7 @@ pub async fn save_video_source_to_path(
     }
 
     let (bytes, extension) = resolve_video_source_bytes_with_headers(trimmed_source, None).await?;
-    let raw_path = PathBuf::from(trimmed_target);
+    let raw_path = PathBuf::from(normalize_user_selected_path(trimmed_target));
     let output_path = ensure_output_path_with_extension(&raw_path, &extension);
 
     if let Some(parent) = output_path.parent() {
@@ -2643,7 +2897,7 @@ pub async fn save_video_source_to_directory(
     }
 
     let (bytes, extension) = resolve_video_source_bytes_with_headers(trimmed_source, None).await?;
-    let dir_path = PathBuf::from(trimmed_dir);
+    let dir_path = PathBuf::from(normalize_user_selected_path(trimmed_dir));
     std::fs::create_dir_all(&dir_path)
         .map_err(|e| format!("Failed to create target dir: {}", e))?;
 
@@ -2746,23 +3000,6 @@ pub async fn read_system_clipboard() -> Result<SystemClipboardContent, String> {
     let mut clipboard =
         Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
 
-    let image = match clipboard.get_image() {
-        Ok(image_data) => {
-            let width = image_data.width as u32;
-            let height = image_data.height as u32;
-            let pixels = image_data.bytes.into_owned();
-            let rgba_image = RgbaImage::from_raw(width, height, pixels)
-                .ok_or_else(|| "Failed to decode clipboard image pixels".to_string())?;
-            let bytes = encode_dynamic_image_as_png(&DynamicImage::ImageRgba8(rgba_image))?;
-            Some(SystemClipboardImage {
-                bytes,
-                mime_type: "image/png".to_string(),
-                file_name: "pasted-image.png".to_string(),
-            })
-        }
-        Err(_) => None,
-    };
-
     let text = match clipboard.get_text() {
         Ok(value) => {
             let trimmed = value.trim();
@@ -2775,25 +3012,31 @@ pub async fn read_system_clipboard() -> Result<SystemClipboardContent, String> {
         Err(_) => None,
     };
 
+    let image = match clipboard.get_image() {
+        Ok(image_data) => Some(arboard_image_to_system_clipboard_image(image_data)?),
+        Err(_) => read_macos_pasteboard_encoded_image(),
+    };
+
     Ok(SystemClipboardContent { image, text })
 }
 
 #[tauri::command]
 pub async fn load_image(file_path: String) -> Result<String, String> {
-    info!("Loading image from: {}", file_path);
+    let normalized_path = normalize_user_selected_path(&file_path);
+    info!("Loading image from: {}", normalized_path);
 
     let image_data =
-        std::fs::read(&file_path).map_err(|e| format!("Failed to read file: {}", e))?;
+        std::fs::read(&normalized_path).map_err(|e| format!("Failed to read file: {}", e))?;
 
     let base64_data = STANDARD.encode(&image_data);
 
-    let mime = if file_path.ends_with(".png") {
+    let mime = if normalized_path.ends_with(".png") {
         "image/png"
-    } else if file_path.ends_with(".jpg") || file_path.ends_with(".jpeg") {
+    } else if normalized_path.ends_with(".jpg") || normalized_path.ends_with(".jpeg") {
         "image/jpeg"
-    } else if file_path.ends_with(".gif") {
+    } else if normalized_path.ends_with(".gif") {
         "image/gif"
-    } else if file_path.ends_with(".webp") {
+    } else if normalized_path.ends_with(".webp") {
         "image/webp"
     } else {
         "image/png"

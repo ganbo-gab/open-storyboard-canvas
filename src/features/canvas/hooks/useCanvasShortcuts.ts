@@ -60,9 +60,14 @@ export interface UseCanvasShortcutsArgs {
   deleteNodes: (nodeIds: string[]) => void;
   copyNodesToClipboard: (sourceNodeIds: string[]) => void;
   pasteFromShortcut: () => boolean | Promise<boolean>;
-  hasFreshInternalClipboard: () => boolean;
   markSystemClipboardFresh: () => void;
   pasteImageAtCanvasPosition?: (file: File) => void | Promise<void>;
+  pasteImageFromClipboardEvent?: (file: File) => void | Promise<void>;
+  pasteTextFromClipboardEvent?: (text: string) => void | Promise<void>;
+  shouldHandleClipboardEventPaste?: (payload: {
+    imageFile: File | null;
+    text: string;
+  }) => boolean | Promise<boolean>;
 }
 
 /**
@@ -73,17 +78,8 @@ export interface UseCanvasShortcutsArgs {
  * here keeps the call site clean and makes the shortcut policy
  * self-contained.
  *
- * Coordination subtleties baked in (and why the refs exist):
- *   • `pasteImageHandledRef` lets the `paste` listener consume an
- *     image-bearing clipboard event before the `keydown` Cmd-V handler
- *     fires its node-duplication path. Without the flag we'd both
- *     drop the image into the upload node AND duplicate any cached
- *     nodes from a prior copy.
- *   • A fresh internal canvas copy wins over the system clipboard. We
- *     prevent the native paste event in that case so stale system images
- *     cannot race with node duplication.
- *   • Copy/paste node state lives in Canvas.tsx so keyboard shortcuts
- *     and context menus share one internal clipboard.
+ * Clipboard source arbitration lives in Canvas.tsx so keyboard shortcuts
+ * and context menus share one internal/system paste policy.
  */
 export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
   const {
@@ -99,46 +95,65 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
     deleteNodes,
     copyNodesToClipboard,
     pasteFromShortcut,
-    hasFreshInternalClipboard,
     markSystemClipboardFresh,
     pasteImageAtCanvasPosition,
+    pasteImageFromClipboardEvent,
+    pasteTextFromClipboardEvent,
+    shouldHandleClipboardEventPaste,
   } = args;
-
-  const pasteImageHandledRef = useRef(false);
+  const pasteEventHandledAtRef = useRef(0);
 
   // Forward image-bearing clipboard events to the selected upload node or,
   // when no upload node is selected, to the canvas-level paste handler.
-  // Sets a same-tick flag so the keydown handler's Cmd-V branch knows to
-  // skip the node-duplication path.
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
-      pasteImageHandledRef.current = false;
       if (isTypingTarget(event.target)) {
         return;
       }
 
-      if (hasFreshInternalClipboard()) {
-        event.preventDefault();
-        return;
-      }
-
       const imageFile = resolveClipboardImageFile(event);
-      if (!imageFile) {
+      const text = event.clipboardData?.getData('text/plain')?.trim() ?? '';
+      if (!imageFile && !text) {
         return;
       }
 
       event.preventDefault();
-      pasteImageHandledRef.current = true;
-      markSystemClipboardFresh();
-      if (selectedUploadNodeId) {
-        canvasEventBus.publish('upload-node/paste-image', {
-          nodeId: selectedUploadNodeId,
-          file: imageFile,
-        });
-        return;
-      }
+      pasteEventHandledAtRef.current = Date.now();
 
-      void pasteImageAtCanvasPosition?.(imageFile);
+      void (async () => {
+        let shouldHandle = true;
+        try {
+          shouldHandle = shouldHandleClipboardEventPaste
+            ? await shouldHandleClipboardEventPaste({ imageFile, text })
+            : true;
+        } catch (error) {
+          console.warn('Failed to classify clipboard paste event', error);
+        }
+
+        if (!shouldHandle) {
+          void pasteFromShortcut();
+          return;
+        }
+
+        markSystemClipboardFresh();
+
+        if (imageFile) {
+          if (selectedUploadNodeId) {
+            canvasEventBus.publish('upload-node/paste-image', {
+              nodeId: selectedUploadNodeId,
+              file: imageFile,
+            });
+            return;
+          }
+
+          void (pasteImageFromClipboardEvent ?? pasteImageAtCanvasPosition)?.(imageFile);
+          return;
+        }
+
+        if (text && pasteTextFromClipboardEvent) {
+          void pasteTextFromClipboardEvent(text);
+        }
+      })();
     };
 
     document.addEventListener('paste', handlePaste);
@@ -146,10 +161,13 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
       document.removeEventListener('paste', handlePaste);
     };
   }, [
-    hasFreshInternalClipboard,
     markSystemClipboardFresh,
     pasteImageAtCanvasPosition,
+    pasteImageFromClipboardEvent,
+    pasteFromShortcut,
+    pasteTextFromClipboardEvent,
     selectedUploadNodeId,
+    shouldHandleClipboardEventPaste,
   ]);
 
   // Use a ref to keep the keydown handler's closure pointed at the
@@ -181,7 +199,6 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
     scheduleCanvasPersist,
     copyNodesToClipboard,
     pasteFromShortcut,
-    hasFreshInternalClipboard,
     markSystemClipboardFresh,
   });
   useEffect(() => {
@@ -194,7 +211,6 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
       scheduleCanvasPersist,
       copyNodesToClipboard,
       pasteFromShortcut,
-      hasFreshInternalClipboard,
       markSystemClipboardFresh,
     };
   }, [
@@ -206,7 +222,6 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
     scheduleCanvasPersist,
     copyNodesToClipboard,
     pasteFromShortcut,
-    hasFreshInternalClipboard,
     markSystemClipboardFresh,
   ]);
 
@@ -225,7 +240,6 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
       scheduleCanvasPersist: doPersist,
       copyNodesToClipboard: doCopy,
       pasteFromShortcut: doPasteFromShortcut,
-      hasFreshInternalClipboard: doHasFreshInternalClipboard,
     } = actionsRef.current;
 
     const commandPressed = event.ctrlKey || event.metaKey;
@@ -246,13 +260,13 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
     }
 
     if (isPaste) {
-      if (!doHasFreshInternalClipboard()) {
-        pasteImageHandledRef.current = false;
-        return;
-      }
-      event.preventDefault();
-      pasteImageHandledRef.current = false;
-      void doPasteFromShortcut();
+      const pasteStartedAt = Date.now();
+      window.setTimeout(() => {
+        if (pasteEventHandledAtRef.current >= pasteStartedAt) {
+          return;
+        }
+        void doPasteFromShortcut();
+      }, 40);
       return;
     }
 

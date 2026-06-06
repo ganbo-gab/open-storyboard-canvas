@@ -1,7 +1,7 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -169,16 +169,85 @@ fn resolve_image_ref(value: &str, image_pool: &[String]) -> Option<String> {
     Some(value.to_string())
 }
 
+fn value_looks_like_image_reference_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    lower.ends_with("imageurl")
+        || lower.ends_with("image")
+        || lower.ends_with("thumbnailurl")
+        || lower.ends_with("snapshoturl")
+        || lower.ends_with("coverurl")
+        || lower.ends_with("url")
+            && (lower.contains("image")
+                || lower.contains("thumbnail")
+                || lower.contains("snapshot")
+                || lower.contains("cover")
+                || lower.contains("panorama"))
+}
+
+fn insert_image_ref_value(
+    value: &serde_json::Value,
+    image_pool: &[String],
+    paths: &mut HashSet<String>,
+) {
+    if let Some(raw_value) = value.as_str() {
+        if let Some(path) = resolve_image_ref(raw_value, image_pool) {
+            paths.insert(path);
+        }
+    }
+}
+
 fn insert_image_ref_from_object(
     object: &serde_json::Map<String, serde_json::Value>,
     key: &str,
     image_pool: &[String],
     paths: &mut HashSet<String>,
 ) {
-    if let Some(raw_value) = object.get(key).and_then(|value| value.as_str()) {
-        if let Some(path) = resolve_image_ref(raw_value, image_pool) {
-            paths.insert(path);
+    if let Some(value) = object.get(key) {
+        insert_image_ref_value(value, image_pool, paths);
+    }
+}
+
+fn collect_string_image_refs_under(
+    value: &serde_json::Value,
+    image_pool: &[String],
+    paths: &mut HashSet<String>,
+) {
+    match value {
+        serde_json::Value::String(_) => insert_image_ref_value(value, image_pool, paths),
+        serde_json::Value::Array(array) => {
+            for child in array {
+                collect_string_image_refs_under(child, image_pool, paths);
+            }
         }
+        serde_json::Value::Object(object) => {
+            for child in object.values() {
+                collect_string_image_refs_under(child, image_pool, paths);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_nested_image_reference_paths(
+    value: &serde_json::Value,
+    image_pool: &[String],
+    paths: &mut HashSet<String>,
+) {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, child) in object {
+                if value_looks_like_image_reference_key(key) {
+                    collect_string_image_refs_under(child, image_pool, paths);
+                }
+                collect_nested_image_reference_paths(child, image_pool, paths);
+            }
+        }
+        serde_json::Value::Array(array) => {
+            for child in array {
+                collect_nested_image_reference_paths(child, image_pool, paths);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -228,11 +297,7 @@ fn collect_image_paths_from_array(
     };
 
     for value in values {
-        if let Some(raw_value) = value.as_str() {
-            if let Some(path) = resolve_image_ref(raw_value, image_pool) {
-                paths.insert(path);
-            }
-        }
+        insert_image_ref_value(value, image_pool, paths);
     }
 }
 
@@ -280,6 +345,10 @@ fn collect_image_paths_from_nodes(
             None => continue,
         };
 
+        if let Some(data_value) = node.get("data") {
+            collect_nested_image_reference_paths(data_value, image_pool, paths);
+        }
+
         for key in [
             "imageUrl",
             "previewImageUrl",
@@ -303,11 +372,7 @@ fn collect_image_paths_from_nodes(
                     None => continue,
                 };
                 for key in ["imageUrl", "previewImageUrl"] {
-                    if let Some(raw_value) = frame_obj.get(key).and_then(|value| value.as_str()) {
-                        if let Some(path) = resolve_image_ref(raw_value, image_pool) {
-                            paths.insert(path);
-                        }
-                    }
+                    insert_image_ref_from_object(frame_obj, key, image_pool, paths);
                 }
             }
         }
@@ -401,6 +466,145 @@ fn resolve_images_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(images_dir)
 }
 
+fn decode_path_like(value: &str) -> String {
+    let trimmed = value.trim();
+    let raw = trimmed.strip_prefix("file://").unwrap_or(trimmed);
+    let decoded = urlencoding::decode(raw)
+        .map(|result| result.into_owned())
+        .unwrap_or_else(|_| raw.to_string());
+
+    if cfg!(target_os = "windows")
+        && decoded.starts_with('/')
+        && decoded.len() > 2
+        && decoded.as_bytes().get(2) == Some(&b':')
+    {
+        decoded[1..].to_string()
+    } else {
+        decoded
+    }
+}
+
+fn normalize_path_for_compare(value: &str) -> Option<String> {
+    let decoded = decode_path_like(value);
+    let normalized = decoded.replace('\\', "/");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("data:")
+        || trimmed.starts_with("blob:")
+        || trimmed.starts_with("asset:")
+        || trimmed.starts_with("tauri:")
+    {
+        return None;
+    }
+
+    Some(if cfg!(target_os = "windows") {
+        trimmed.to_ascii_lowercase()
+    } else {
+        trimmed.to_string()
+    })
+}
+
+fn file_name_for_compare(path: &Path) -> Option<String> {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| {
+            if cfg!(target_os = "windows") {
+                value.to_ascii_lowercase()
+            } else {
+                value.to_string()
+            }
+        })
+}
+
+struct ReferencedImageIndex {
+    paths: HashSet<String>,
+    file_names: HashSet<String>,
+}
+
+impl ReferencedImageIndex {
+    fn from_raw_paths(raw_paths: HashSet<String>) -> Self {
+        let mut paths = HashSet::new();
+        let mut file_names = HashSet::new();
+
+        for raw_path in raw_paths {
+            if let Some(normalized) = normalize_path_for_compare(&raw_path) {
+                paths.insert(normalized.clone());
+                if let Some(file_name) = Path::new(&normalized)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                {
+                    file_names.insert(if cfg!(target_os = "windows") {
+                        file_name.to_ascii_lowercase()
+                    } else {
+                        file_name.to_string()
+                    });
+                }
+            }
+
+            let decoded = decode_path_like(&raw_path);
+            let path = PathBuf::from(decoded);
+            if let Ok(canonical) = std::fs::canonicalize(&path) {
+                if let Some(normalized) = normalize_path_for_compare(&canonical.to_string_lossy()) {
+                    paths.insert(normalized);
+                }
+                if let Some(file_name) = file_name_for_compare(&canonical) {
+                    file_names.insert(file_name);
+                }
+            }
+        }
+
+        Self { paths, file_names }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.paths.is_empty() && self.file_names.is_empty()
+    }
+
+    fn contains_file(&self, path: &Path) -> bool {
+        if let Some(path_string) = path.to_str() {
+            if let Some(normalized) = normalize_path_for_compare(path_string) {
+                if self.paths.contains(&normalized) {
+                    return true;
+                }
+            }
+        }
+
+        if let Ok(canonical) = std::fs::canonicalize(path) {
+            if let Some(normalized) = normalize_path_for_compare(&canonical.to_string_lossy()) {
+                if self.paths.contains(&normalized) {
+                    return true;
+                }
+            }
+        }
+
+        file_name_for_compare(path)
+            .map(|file_name| self.file_names.contains(&file_name))
+            .unwrap_or(false)
+    }
+}
+
+fn is_content_hash_image_path(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|value| value.to_str())
+        .map(|stem| stem.len() == 32 && stem.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .unwrap_or(false)
+}
+
+fn file_is_older_than(path: &Path, min_age: Duration) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    let Ok(modified_at) = metadata.modified() else {
+        return false;
+    };
+    SystemTime::now()
+        .duration_since(modified_at)
+        .map(|age| age >= min_age)
+        .unwrap_or(false)
+}
+
 fn prune_unreferenced_images(app: &AppHandle, conn: &Connection) -> Result<(), String> {
     let mut stmt = conn
         .prepare("SELECT DISTINCT path FROM project_image_refs")
@@ -415,6 +619,10 @@ fn prune_unreferenced_images(app: &AppHandle, conn: &Connection) -> Result<(), S
         let path = path_result.map_err(|e| format!("Failed to decode image ref row: {}", e))?;
         referenced.insert(path);
     }
+    let referenced = ReferencedImageIndex::from_raw_paths(referenced);
+    if referenced.is_empty() {
+        return Ok(());
+    }
 
     let images_dir = resolve_images_dir(app)?;
     let entries =
@@ -427,8 +635,10 @@ fn prune_unreferenced_images(app: &AppHandle, conn: &Connection) -> Result<(), S
             continue;
         }
 
-        let path_string = path.to_string_lossy().to_string();
-        if !referenced.contains(&path_string) {
+        if !referenced.contains_file(&path)
+            && is_content_hash_image_path(&path)
+            && file_is_older_than(&path, Duration::from_secs(24 * 60 * 60))
+        {
             std::fs::remove_file(&path)
                 .map_err(|e| format!("Failed to delete unreferenced image: {}", e))?;
         }

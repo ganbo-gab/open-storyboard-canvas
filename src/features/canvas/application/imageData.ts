@@ -286,6 +286,14 @@ export async function imageUrlToDataUrl(imageUrl: string): Promise<string> {
     return imageUrl;
   }
 
+  if (imageUrl.toLowerCase().startsWith('file://') && isTauri()) {
+    try {
+      return await loadImage(imageUrl);
+    } catch (error) {
+      throw createImagePipelineError('无法读取本地图片数据', `source=${imageUrl}`, error);
+    }
+  }
+
   if (isLikelyLocalImagePath(imageUrl)) {
     if (isTauri()) {
       try {

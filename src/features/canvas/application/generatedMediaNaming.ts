@@ -19,6 +19,8 @@ const LEGACY_VIDEO_DEFAULT_NAMES = new Set([
   '结果视频',
 ]);
 
+const WINDOWS_RESERVED_FILE_STEMS = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+
 function sanitizeFileStem(raw: string | null | undefined, fallback: string): string {
   const trimmed = typeof raw === 'string' ? raw.trim() : '';
   if (!trimmed) return fallback;
@@ -28,7 +30,10 @@ function sanitizeFileStem(raw: string | null | undefined, fallback: string): str
     .replace(/\.+$/g, '')
     .trim();
 
-  return sanitized || fallback;
+  if (!sanitized || WINDOWS_RESERVED_FILE_STEMS.test(sanitized)) {
+    return fallback;
+  }
+  return sanitized;
 }
 
 function sanitizeDisplayStem(raw: string | null | undefined, fallback: string): string {
@@ -40,7 +45,10 @@ function sanitizeDisplayStem(raw: string | null | undefined, fallback: string): 
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
     .replace(/\.+$/g, '')
     .trim();
-  return sanitized || fallback;
+  if (!sanitized || WINDOWS_RESERVED_FILE_STEMS.test(sanitized)) {
+    return fallback;
+  }
+  return sanitized;
 }
 
 function normalizeGeneratedSequence(value: unknown): number | null {

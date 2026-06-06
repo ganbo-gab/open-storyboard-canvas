@@ -1,4 +1,4 @@
-export type AiTextInputSourceType = 'markdown' | 'json' | 'image';
+export type AiTextInputSourceType = 'markdown' | 'json' | 'image' | 'video';
 
 export interface TextAgentInputConfig {
   id: string;
@@ -37,7 +37,7 @@ export interface JsonCardDisplayField {
 
 export interface AiTextInputTextPart {
   kind: 'text';
-  sourceType: 'markdown' | 'json';
+  sourceType: 'markdown' | 'json' | 'video';
   sourceNodeId: string;
   label: string;
   content: string;

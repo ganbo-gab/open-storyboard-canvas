@@ -7,6 +7,10 @@ import {
   type CanvasNode,
 } from '@/features/canvas/domain/canvasNodes';
 import { graphImageResolver } from '@/features/canvas/application/graphImageResolver';
+import {
+  collectInputReferences,
+  type GraphReferenceItem,
+} from '@/features/canvas/application/graphReferenceResolver';
 
 export interface CanvasImageAssetSummary {
   id: string;
@@ -118,6 +122,60 @@ export function parseInputImageSignature(signature: string): string[] {
     return Array.isArray(parsed)
       ? parsed.filter((item): item is string => typeof item === 'string' && item.length > 0)
       : [];
+  } catch {
+    return [];
+  }
+}
+
+export function selectInputReferenceSignature(
+  nodeId: string,
+  nodes: CanvasNode[],
+  edges: CanvasEdge[],
+): string {
+  return safeStringify(collectInputReferences(nodeId, nodes, edges));
+}
+
+export function parseInputReferenceSignature(signature: string): GraphReferenceItem[] {
+  try {
+    const parsed = JSON.parse(signature) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((item): GraphReferenceItem | null => {
+        if (!item || typeof item !== 'object') {
+          return null;
+        }
+        const record = item as Partial<GraphReferenceItem>;
+        if (record.kind !== 'image' && record.kind !== 'video' && record.kind !== 'text') {
+          return null;
+        }
+        if (typeof record.sourceNodeId !== 'string' || typeof record.label !== 'string' || typeof record.token !== 'string') {
+          return null;
+        }
+        if (record.kind === 'image' && typeof record.imageUrl !== 'string') {
+          return null;
+        }
+        if (record.kind === 'video' && typeof record.videoUrl !== 'string') {
+          return null;
+        }
+        if (record.kind === 'text' && typeof record.content !== 'string') {
+          return null;
+        }
+        return {
+          kind: record.kind,
+          sourceNodeId: record.sourceNodeId,
+          label: record.label,
+          token: record.token,
+          title: typeof record.title === 'string' ? record.title : record.label,
+          content: typeof record.content === 'string' ? record.content : undefined,
+          imageUrl: typeof record.imageUrl === 'string' ? record.imageUrl : undefined,
+          previewImageUrl: typeof record.previewImageUrl === 'string' ? record.previewImageUrl : null,
+          videoUrl: typeof record.videoUrl === 'string' ? record.videoUrl : undefined,
+          thumbnailUrl: typeof record.thumbnailUrl === 'string' ? record.thumbnailUrl : null,
+        };
+      })
+      .filter((item): item is GraphReferenceItem => Boolean(item));
   } catch {
     return [];
   }

@@ -11,6 +11,7 @@ import { submitDreaminaJob, getDreaminaJob } from './dreaminaGateway';
 import {
   submitCustomProviderJob,
   getCustomProviderJob,
+  retryCustomProviderJob,
   submitCustomVideoJob,
   buildCustomProviderRequestDebugPreview,
   buildCustomVideoProviderRequestDebugPreview,
@@ -237,5 +238,11 @@ export const tauriAiGateway: AiGateway = {
   getGenerateVideoJob: async (jobId: string) => {
     if (isCustomJob(jobId)) return getCustomProviderJob(jobId);
     return { job_id: jobId, status: 'not_found', result: null, error: 'video job id not found' };
+  },
+  retryGenerateVideoJob: async (jobId: string) => {
+    if (isCustomJob(jobId)) {
+      return retryCustomProviderJob(jobId);
+    }
+    return false;
   },
 };

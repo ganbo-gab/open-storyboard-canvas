@@ -55,7 +55,8 @@ import {
   prepareNodeImageFromFile,
   resolveImageDisplayUrl,
 } from '@/features/canvas/application/imageData';
-import { readSystemClipboard } from '@/commands/image';
+import { clearBrowserTextSelection } from '@/features/canvas/application/textSelection';
+import { copyImageSourceToClipboard, readSystemClipboard } from '@/commands/image';
 import {
   dataTransferHasFile,
   dataTransferHasImageFile,
@@ -401,6 +402,7 @@ interface ClipboardContentReadResult {
   imageFile: File | null;
   text: string;
   fingerprint: string | null;
+  readFailed?: boolean;
 }
 
 type ClipboardPasteSource =
@@ -412,6 +414,21 @@ interface SystemClipboardPasteOptions {
   targetNode: CanvasNode | null;
   flowPosition?: { x: number; y: number };
   pasteIntoSelectedUpload?: boolean;
+}
+
+interface BrowserClipboardImageReadResult {
+  file: File | null;
+  readFailed: boolean;
+}
+
+interface BrowserClipboardTextReadResult {
+  text: string;
+  readFailed: boolean;
+}
+
+interface ReadClipboardContentOptions {
+  preferBrowserApi?: boolean;
+  avoidBrowserApiWhenTauriAvailable?: boolean;
 }
 
 function hashBytes(bytes: ArrayLike<number>): string {
@@ -452,12 +469,12 @@ function fingerprintClipboardContent(content: {
   return null;
 }
 
-async function readBrowserClipboardImageFile(): Promise<File | null> {
+async function readBrowserClipboardImageFile(): Promise<BrowserClipboardImageReadResult> {
   const clipboard = navigator.clipboard as Clipboard & {
     read?: () => Promise<ClipboardItem[]>;
   };
   if (typeof clipboard?.read !== 'function') {
-    return null;
+    return { file: null, readFailed: false };
   }
 
   try {
@@ -469,31 +486,57 @@ async function readBrowserClipboardImageFile(): Promise<File | null> {
       }
       const blob = await item.getType(imageType);
       const subtype = imageType.split('/')[1]?.split('+')[0] || 'png';
-      return new File([blob], `pasted-image.${subtype}`, {
-        type: blob.type || imageType,
-        lastModified: Date.now(),
-      });
+      return {
+        file: new File([blob], `pasted-image.${subtype}`, {
+          type: blob.type || imageType,
+          lastModified: Date.now(),
+        }),
+        readFailed: false,
+      };
     }
   } catch (error) {
     console.warn('Failed to read image from clipboard', error);
+    return { file: null, readFailed: true };
   }
 
-  return null;
+  return { file: null, readFailed: false };
 }
 
-async function readBrowserClipboardText(): Promise<string> {
+async function readBrowserClipboardText(): Promise<BrowserClipboardTextReadResult> {
   if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') {
-    return '';
+    return { text: '', readFailed: false };
   }
   try {
-    return await navigator.clipboard.readText();
+    return { text: await navigator.clipboard.readText(), readFailed: false };
   } catch (error) {
     console.warn('Failed to read text from clipboard', error);
-    return '';
+    return { text: '', readFailed: true };
   }
 }
 
-async function readClipboardContent(): Promise<ClipboardContentReadResult> {
+function emptyClipboardContent(readFailed = false): ClipboardContentReadResult {
+  return {
+    imageFile: null,
+    text: '',
+    fingerprint: null,
+    readFailed,
+  };
+}
+
+async function readBrowserClipboardContent(): Promise<ClipboardContentReadResult> {
+  const imageRead = await readBrowserClipboardImageFile();
+  const textRead = await readBrowserClipboardText();
+  return {
+    imageFile: imageRead.file,
+    text: textRead.text,
+    fingerprint: imageRead.file
+      ? await fingerprintImageFile(imageRead.file)
+      : fingerprintClipboardContent({ text: textRead.text }),
+    readFailed: imageRead.readFailed || textRead.readFailed,
+  };
+}
+
+async function readTauriClipboardContent(): Promise<ClipboardContentReadResult | null> {
   try {
     const systemClipboard = await readSystemClipboard();
     if (systemClipboard) {
@@ -511,15 +554,129 @@ async function readClipboardContent(): Promise<ClipboardContentReadResult> {
     }
   } catch (error) {
     console.warn('Failed to read system clipboard via Tauri', error);
+    return emptyClipboardContent(true);
   }
 
-  const imageFile = await readBrowserClipboardImageFile();
-  const text = await readBrowserClipboardText();
-  return {
-    imageFile,
-    text,
-    fingerprint: imageFile ? await fingerprintImageFile(imageFile) : fingerprintClipboardContent({ text }),
-  };
+  return null;
+}
+
+async function readClipboardContent(
+  options: ReadClipboardContentOptions = {}
+): Promise<ClipboardContentReadResult> {
+  if (options.avoidBrowserApiWhenTauriAvailable) {
+    const tauriClipboard = await readTauriClipboardContent();
+    if (tauriClipboard) {
+      return tauriClipboard;
+    }
+
+    return await readBrowserClipboardContent();
+  }
+
+  if (options.preferBrowserApi) {
+    const browserClipboard = await readBrowserClipboardContent();
+    if (hasClipboardPayload(browserClipboard)) {
+      return browserClipboard;
+    }
+
+    const tauriClipboard = await readTauriClipboardContent();
+    if (tauriClipboard && hasClipboardPayload(tauriClipboard)) {
+      return {
+        ...tauriClipboard,
+        readFailed: tauriClipboard.readFailed || browserClipboard.readFailed,
+      };
+    }
+
+    return tauriClipboard
+      ? {
+          ...tauriClipboard,
+          readFailed: tauriClipboard.readFailed || browserClipboard.readFailed,
+        }
+      : browserClipboard;
+  }
+
+  const tauriClipboard = await readTauriClipboardContent();
+  if (tauriClipboard && hasClipboardPayload(tauriClipboard)) {
+    return tauriClipboard;
+  }
+
+  const browserClipboard = await readBrowserClipboardContent();
+  if (hasClipboardPayload(browserClipboard)) {
+    return browserClipboard;
+  }
+
+  return tauriClipboard
+    ? {
+        ...tauriClipboard,
+        readFailed: tauriClipboard.readFailed || browserClipboard.readFailed,
+      }
+    : browserClipboard;
+}
+
+function hasClipboardPayload(content: ClipboardContentReadResult): boolean {
+  return Boolean(content.imageFile || content.text.trim() || content.fingerprint);
+}
+
+function resolveNodeImageClipboardSource(node: CanvasNode): string {
+  if (
+    node.type !== CANVAS_NODE_TYPES.upload
+    && node.type !== CANVAS_NODE_TYPES.imageEdit
+    && node.type !== CANVAS_NODE_TYPES.exportImage
+  ) {
+    return '';
+  }
+  const data = node.data as { imageUrl?: unknown; previewImageUrl?: unknown };
+  return (
+    (typeof data.imageUrl === 'string' && data.imageUrl.trim())
+    || (typeof data.previewImageUrl === 'string' && data.previewImageUrl.trim())
+    || ''
+  );
+}
+
+function resolveNodeTextClipboardContent(node: CanvasNode, nodes: CanvasNode[]): string {
+  if (node.type === CANVAS_NODE_TYPES.textAnnotation || node.type === CANVAS_NODE_TYPES.jsonCard || node.type === CANVAS_NODE_TYPES.aiText) {
+    return getGeneratedTextForConnection(node, nodes);
+  }
+  if (node.type === CANVAS_NODE_TYPES.aiVideo || node.type === CANVAS_NODE_TYPES.imageEdit) {
+    const prompt = (node.data as { prompt?: unknown }).prompt;
+    return typeof prompt === 'string' ? prompt.trim() : '';
+  }
+  if (node.type === CANVAS_NODE_TYPES.video) {
+    const data = node.data as { localVideoUrl?: unknown; videoUrl?: unknown };
+    return (
+      (typeof data.localVideoUrl === 'string' && data.localVideoUrl.trim())
+      || (typeof data.videoUrl === 'string' && data.videoUrl.trim())
+      || ''
+    );
+  }
+  return '';
+}
+
+async function syncSingleCanvasNodeToSystemClipboard(
+  snapshot: CanvasClipboardSnapshot | null,
+  allNodes: CanvasNode[]
+): Promise<string | null> {
+  if (!snapshot || snapshot.nodes.length !== 1) {
+    return (await readClipboardContent()).fingerprint;
+  }
+
+  const [node] = snapshot.nodes;
+  const imageSource = resolveNodeImageClipboardSource(node);
+  try {
+    if (imageSource) {
+      await copyImageSourceToClipboard(imageSource);
+      return (await readClipboardContent()).fingerprint;
+    }
+
+    const text = resolveNodeTextClipboardContent(node, allNodes);
+    if (text && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return (await readClipboardContent()).fingerprint;
+    }
+  } catch (error) {
+    console.warn('Failed to sync canvas copy into system clipboard', error);
+  }
+
+  return (await readClipboardContent()).fingerprint;
 }
 
 function hasRectCollision(
@@ -557,8 +714,62 @@ function canNodeTypeBeManualConnectionSource(type: CanvasNodeType): boolean {
   return type === CANVAS_NODE_TYPES.upload
     || type === CANVAS_NODE_TYPES.imageEdit
     || type === CANVAS_NODE_TYPES.exportImage
+    || type === CANVAS_NODE_TYPES.video
+    || type === CANVAS_NODE_TYPES.aiText
     || type === CANVAS_NODE_TYPES.textAnnotation
     || type === CANVAS_NODE_TYPES.jsonCard;
+}
+
+function getGeneratedTextForConnection(sourceNode: CanvasNode, nodes: CanvasNode[]): string {
+  if (sourceNode.type === CANVAS_NODE_TYPES.textAnnotation) {
+    const content = (sourceNode.data as { content?: unknown }).content;
+    return typeof content === 'string' ? content.trim() : '';
+  }
+
+  if (sourceNode.type === CANVAS_NODE_TYPES.jsonCard) {
+    const data = sourceNode.data as { parsedJson?: unknown; rawContent?: unknown };
+    if (data.parsedJson !== null && data.parsedJson !== undefined) {
+      try {
+        return JSON.stringify(data.parsedJson, null, 2);
+      } catch {
+        return String(data.parsedJson);
+      }
+    }
+    return typeof data.rawContent === 'string' ? data.rawContent.trim() : '';
+  }
+
+  if (sourceNode.type === CANVAS_NODE_TYPES.aiText) {
+    const resultNodeId = (sourceNode.data as { resultNodeId?: unknown }).resultNodeId;
+    const resultNode = typeof resultNodeId === 'string'
+      ? nodes.find((node) => node.id === resultNodeId)
+      : null;
+    const resultContent = resultNode?.type === CANVAS_NODE_TYPES.textAnnotation
+      ? (resultNode.data as { content?: unknown }).content
+      : null;
+    if (typeof resultContent === 'string' && resultContent.trim()) {
+      return resultContent.trim();
+    }
+    const fallbackResult = nodes.find((node) => (
+      node.type === CANVAS_NODE_TYPES.textAnnotation
+      && (node.data as { sourceAiNodeId?: unknown }).sourceAiNodeId === sourceNode.id
+    ));
+    const fallbackContent = fallbackResult
+      ? (fallbackResult.data as { content?: unknown }).content
+      : null;
+    return typeof fallbackContent === 'string' ? fallbackContent.trim() : '';
+  }
+
+  return '';
+}
+
+function isLikelyVideoSourceText(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || /\s/.test(trimmed)) {
+    return false;
+  }
+  return /\.(mp4|webm|mov|m4v|avi|mkv|mpeg|mpg)(?:[?#].*)?$/i.test(trimmed)
+    || /^https?:\/\/.+\/.+\.(mp4|webm|mov|m4v|avi|mkv|mpeg|mpg)(?:[?#].*)?$/i.test(trimmed)
+    || /^file:\/\/.+\.(mp4|webm|mov|m4v|avi|mkv|mpeg|mpg)(?:[?#].*)?$/i.test(trimmed);
 }
 
 function canNodeBeManualConnectionSource(nodeId: string | null | undefined, nodes: CanvasNode[]): boolean {
@@ -771,6 +982,8 @@ export function Canvas() {
   const clipboardFreshnessRef = useRef<ClipboardFreshnessSource>(null);
   const systemClipboardFingerprintAtInternalCopyRef = useRef<string | null | undefined>(null);
   const systemClipboardFingerprintCaptureRef = useRef<Promise<string | null> | null>(null);
+  const lastConnectSelectionClearAtRef = useRef(0);
+  const pendingConnectWasActiveRef = useRef(false);
   const altDragCopyRef = useRef<{
     sourceNodeIds: string[];
     startPositions: Map<string, { x: number; y: number }>;
@@ -915,6 +1128,10 @@ export function Canvas() {
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<CanvasNode>[]) => {
+      if (pendingConnectStart && changes.every((change) => change.type === 'select')) {
+        return;
+      }
+
       applyNodesChange(changes);
 
       const hasDragMove = changes.some(
@@ -955,7 +1172,7 @@ export function Canvas() {
 
       scheduleCanvasPersist();
     },
-    [applyNodesChange, scheduleCanvasPersist]
+    [applyNodesChange, pendingConnectStart, scheduleCanvasPersist]
   );
 
   const handleEdgesChange = useCallback(
@@ -991,9 +1208,21 @@ export function Canvas() {
         return;
       }
       connectNodes(connection);
+      const sourceNode = nodes.find((node) => node.id === connection.source);
+      const targetNode = nodes.find((node) => node.id === connection.target);
+      if (sourceNode && targetNode?.type === CANVAS_NODE_TYPES.textAnnotation) {
+        const sourceText = getGeneratedTextForConnection(sourceNode, nodes);
+        if (sourceText) {
+          const currentContent = (targetNode.data as { content?: unknown }).content;
+          const normalizedCurrent = typeof currentContent === 'string' ? currentContent.trim() : '';
+          updateNodeData(targetNode.id, {
+            content: normalizedCurrent ? `${normalizedCurrent}\n${sourceText}` : sourceText,
+          } as Partial<CanvasNodeData>);
+        }
+      }
       scheduleCanvasPersist(0);
     },
-    [connectNodes, nodes, scheduleCanvasPersist]
+    [connectNodes, nodes, scheduleCanvasPersist, updateNodeData]
   );
 
   const handleMoveEnd = useCallback(
@@ -1655,6 +1884,22 @@ export function Canvas() {
     [createUploadImageNodeAtClientPosition]
   );
 
+  const resolveShortcutPasteFlowPosition = useCallback(() => {
+    const containerRect = wrapperRef.current?.getBoundingClientRect();
+    const clientPosition = lastCanvasPointerRef.current ?? (
+      containerRect
+        ? {
+            x: containerRect.left + containerRect.width / 2,
+            y: containerRect.top + containerRect.height / 2,
+          }
+        : {
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 2,
+          }
+    );
+    return reactFlowInstance.screenToFlowPosition(clientPosition);
+  }, [reactFlowInstance]);
+
   useEffect(() => {
     const handleWindowFileDragOver = (event: DragEvent) => {
       if (!dataTransferHasFile(event.dataTransfer)) {
@@ -1722,7 +1967,17 @@ export function Canvas() {
       x: event.clientX,
       y: event.clientY,
     };
-  }, []);
+    if (!pendingConnectStart) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastConnectSelectionClearAtRef.current < 50) {
+      return;
+    }
+    lastConnectSelectionClearAtRef.current = now;
+    clearBrowserTextSelection();
+  }, [pendingConnectStart]);
 
   const handleCanvasPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (shouldIgnoreCanvasMarqueeTarget(event.target)) {
@@ -1730,6 +1985,22 @@ export function Canvas() {
     }
     wrapperRef.current?.focus({ preventScroll: true });
   }, []);
+
+  useEffect(() => {
+    if (pendingConnectStart) {
+      pendingConnectWasActiveRef.current = true;
+      return;
+    }
+
+    if (!pendingConnectWasActiveRef.current) {
+      return;
+    }
+
+    pendingConnectWasActiveRef.current = false;
+    lastConnectSelectionClearAtRef.current = 0;
+    clearBrowserTextSelection();
+    window.requestAnimationFrame(() => clearBrowserTextSelection());
+  }, [pendingConnectStart]);
 
   const handleCanvasContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (shouldIgnoreCanvasMarqueeTarget(event.target)) {
@@ -1892,6 +2163,15 @@ export function Canvas() {
             sourceHandle: 'source',
             targetHandle: 'target',
           });
+          if (type === CANVAS_NODE_TYPES.textAnnotation) {
+            const sourceNode = useCanvasStore.getState().nodes.find((node) => node.id === pendingConnectStart.nodeId);
+            if (sourceNode) {
+              const sourceText = getGeneratedTextForConnection(sourceNode, useCanvasStore.getState().nodes);
+              if (sourceText) {
+                updateNodeData(newNodeId, { content: sourceText } as Partial<CanvasNodeData>);
+              }
+            }
+          }
         } else {
           connectNodes({
             source: newNodeId,
@@ -1916,6 +2196,7 @@ export function Canvas() {
       pendingConnectStart,
       scheduleCanvasPersist,
       setPreviewConnectionVisual,
+      updateNodeData,
     ]
   );
 
@@ -1952,8 +2233,7 @@ export function Canvas() {
         clipboardFreshnessRef.current = 'internal';
         pasteIterationRef.current = 0;
         systemClipboardFingerprintAtInternalCopyRef.current = undefined;
-        const capture = readClipboardContent()
-          .then((content) => content.fingerprint)
+        const capture = syncSingleCanvasNodeToSystemClipboard(snapshot, nodes)
           .catch((error) => {
             console.warn('Failed to capture clipboard freshness baseline', error);
             return null;
@@ -1970,13 +2250,8 @@ export function Canvas() {
         });
       }
     },
-    [createClipboardSnapshot]
+    [createClipboardSnapshot, nodes]
   );
-
-  const hasFreshInternalClipboard = useCallback(() => (
-    clipboardFreshnessRef.current === 'internal'
-    && Boolean(copiedSnapshotRef.current?.nodes.length)
-  ), []);
 
   const markSystemClipboardFresh = useCallback(() => {
     clipboardFreshnessRef.current = 'system';
@@ -2004,17 +2279,28 @@ export function Canvas() {
         && baselineFingerprint !== undefined
         && clipboardContent.fingerprint !== baselineFingerprint
       ) {
+        markSystemClipboardFresh();
+        return { source: 'system', content: clipboardContent };
+      }
+      if (clipboardContent.fingerprint && baselineFingerprint === undefined) {
+        markSystemClipboardFresh();
         return { source: 'system', content: clipboardContent };
       }
       return { source: 'internal' };
     }
 
+    if (clipboardContent.imageFile) {
+      markSystemClipboardFresh();
+      return { source: 'system', content: clipboardContent };
+    }
+
     if (clipboardContent.fingerprint) {
+      markSystemClipboardFresh();
       return { source: 'system', content: clipboardContent };
     }
 
     return { source: 'none' };
-  }, []);
+  }, [markSystemClipboardFresh]);
 
   const duplicateSnapshot = useCallback(
     (snapshot: CanvasClipboardSnapshot, options: DuplicateOptions = {}) => {
@@ -2276,6 +2562,35 @@ export function Canvas() {
     [addEdge, createUploadImageNodeAtFlowPosition, scheduleCanvasPersist]
   );
 
+  const pasteVideoSourceAsNodeReference = useCallback(
+    (videoSource: string, targetNode: CanvasNode) => {
+      const trimmedSource = videoSource.trim();
+      if (!isLikelyVideoSourceText(trimmedSource)) {
+        return false;
+      }
+      const videoNodeId = addNode(
+        CANVAS_NODE_TYPES.video,
+        {
+          x: targetNode.position.x - 300,
+          y: targetNode.position.y,
+        },
+        {
+          videoUrl: trimmedSource,
+          localVideoUrl: trimmedSource.startsWith('http://') || trimmedSource.startsWith('https://')
+            ? null
+            : trimmedSource,
+          thumbnailUrl: null,
+          isGenerating: false,
+          sourcePrompt: '',
+        }
+      );
+      addEdge(videoNodeId, targetNode.id);
+      scheduleCanvasPersist(0);
+      return true;
+    },
+    [addEdge, addNode, scheduleCanvasPersist]
+  );
+
   const pasteTextIntoPromptNode = useCallback(
     (targetNode: CanvasNode, text: string) => {
       const trimmedText = text.trim();
@@ -2293,6 +2608,45 @@ export function Canvas() {
     [scheduleCanvasPersist, updateNodeData]
   );
 
+  const pasteTextIntoTextNode = useCallback(
+    (targetNode: CanvasNode, text: string) => {
+      if (targetNode.type !== CANVAS_NODE_TYPES.textAnnotation) {
+        return false;
+      }
+      const trimmedText = text.trim();
+      if (!trimmedText) {
+        return false;
+      }
+      const currentContent = (targetNode.data as { content?: unknown }).content;
+      const normalizedCurrent = typeof currentContent === 'string' ? currentContent.trim() : '';
+      updateNodeData(targetNode.id, {
+        content: normalizedCurrent ? `${normalizedCurrent}\n${trimmedText}` : trimmedText,
+      } as Partial<CanvasNodeData>);
+      scheduleCanvasPersist(0);
+      return true;
+    },
+    [scheduleCanvasPersist, updateNodeData]
+  );
+
+  const pasteTextAsTextNode = useCallback(
+    (text: string, flowPosition?: { x: number; y: number }) => {
+      const trimmedText = text.trim();
+      if (!trimmedText) {
+        return false;
+      }
+      addNode(
+        CANVAS_NODE_TYPES.textAnnotation,
+        flowPosition ?? resolveShortcutPasteFlowPosition(),
+        {
+          content: trimmedText,
+        }
+      );
+      scheduleCanvasPersist(0);
+      return true;
+    },
+    [addNode, resolveShortcutPasteFlowPosition, scheduleCanvasPersist]
+  );
+
   const pasteSystemClipboardContent = useCallback(
     async (
       clipboardContent: ClipboardContentReadResult,
@@ -2300,7 +2654,9 @@ export function Canvas() {
     ) => {
       const targetNode = options.targetNode;
       const isPromptPasteTarget = targetNode?.type === CANVAS_NODE_TYPES.imageEdit
-        || targetNode?.type === CANVAS_NODE_TYPES.aiVideo;
+        || targetNode?.type === CANVAS_NODE_TYPES.aiVideo
+        || targetNode?.type === CANVAS_NODE_TYPES.aiText;
+      const isTextPasteTarget = targetNode?.type === CANVAS_NODE_TYPES.textAnnotation;
       const imageFile = clipboardContent.imageFile;
 
       if (imageFile && options.pasteIntoSelectedUpload && targetNode?.type === CANVAS_NODE_TYPES.upload) {
@@ -2321,10 +2677,20 @@ export function Canvas() {
           }
         }
 
+        if (pasteVideoSourceAsNodeReference(clipboardContent.text, targetNode)) {
+          markSystemClipboardFresh();
+          return true;
+        }
+
         if (pasteTextIntoPromptNode(targetNode, clipboardContent.text)) {
           markSystemClipboardFresh();
           return true;
         }
+      }
+
+      if (isTextPasteTarget && targetNode && pasteTextIntoTextNode(targetNode, clipboardContent.text)) {
+        markSystemClipboardFresh();
+        return true;
       }
 
       if (imageFile) {
@@ -2342,6 +2708,11 @@ export function Canvas() {
         return true;
       }
 
+      if (pasteTextAsTextNode(clipboardContent.text, options.flowPosition)) {
+        markSystemClipboardFresh();
+        return true;
+      }
+
       return false;
     },
     [
@@ -2349,14 +2720,17 @@ export function Canvas() {
       markSystemClipboardFresh,
       pasteImageAsNodeReference,
       pasteImageAtCanvasPosition,
+      pasteTextAsTextNode,
       pasteTextIntoPromptNode,
+      pasteTextIntoTextNode,
+      pasteVideoSourceAsNodeReference,
     ]
   );
 
   const handleShortcutPaste = useCallback(async () => {
     const pasteSource = await resolveClipboardPasteSource();
     if (pasteSource.source === 'internal') {
-      return Boolean(pasteCopiedNodes());
+      return Boolean(pasteCopiedNodes(resolveShortcutPasteFlowPosition()));
     }
     if (pasteSource.source !== 'system') {
       return false;
@@ -2367,6 +2741,7 @@ export function Canvas() {
       : null;
     return await pasteSystemClipboardContent(pasteSource.content, {
       targetNode: selectedTargetNode,
+      flowPosition: resolveShortcutPasteFlowPosition(),
       pasteIntoSelectedUpload: Boolean(
         selectedUploadNodeId && selectedTargetNode?.id === selectedUploadNodeId
       ),
@@ -2375,9 +2750,75 @@ export function Canvas() {
     pasteCopiedNodes,
     pasteSystemClipboardContent,
     resolveClipboardPasteSource,
+    resolveShortcutPasteFlowPosition,
     selectedNodeId,
     selectedUploadNodeId,
   ]);
+
+  const pasteImageFromClipboardEvent = useCallback(async (file: File) => {
+    const selectedTargetNode = selectedNodeId
+      ? useCanvasStore.getState().nodes.find((node) => node.id === selectedNodeId) ?? null
+      : null;
+    await pasteSystemClipboardContent(
+      {
+        imageFile: file,
+        text: '',
+        fingerprint: `event-image:${file.name}:${file.size}:${file.type}:${file.lastModified}`,
+      },
+      {
+        targetNode: selectedTargetNode,
+        pasteIntoSelectedUpload: Boolean(
+          selectedUploadNodeId && selectedTargetNode?.id === selectedUploadNodeId
+        ),
+      }
+    );
+  }, [pasteSystemClipboardContent, selectedNodeId, selectedUploadNodeId]);
+
+  const pasteTextFromClipboardEvent = useCallback(async (text: string) => {
+    const selectedTargetNode = selectedNodeId
+      ? useCanvasStore.getState().nodes.find((node) => node.id === selectedNodeId) ?? null
+      : null;
+    await pasteSystemClipboardContent(
+      {
+        imageFile: null,
+        text,
+        fingerprint: `event-text:${text.trim().length}:${hashText(text.trim())}`,
+      },
+      {
+        targetNode: selectedTargetNode,
+        flowPosition: resolveShortcutPasteFlowPosition(),
+      }
+    );
+  }, [pasteSystemClipboardContent, resolveShortcutPasteFlowPosition, selectedNodeId]);
+
+  const shouldHandleClipboardEventPaste = useCallback(async (payload: {
+    imageFile: File | null;
+    text: string;
+  }) => {
+    const internalSnapshotIsFresh = clipboardFreshnessRef.current === 'internal'
+      && Boolean(copiedSnapshotRef.current?.nodes.length);
+    if (!internalSnapshotIsFresh) {
+      return true;
+    }
+
+    let settledInternalBaseline = systemClipboardFingerprintAtInternalCopyRef.current;
+    const baselineCapture = systemClipboardFingerprintCaptureRef.current;
+    if (settledInternalBaseline === undefined && baselineCapture) {
+      settledInternalBaseline = await baselineCapture;
+      if (systemClipboardFingerprintCaptureRef.current === baselineCapture) {
+        systemClipboardFingerprintAtInternalCopyRef.current = settledInternalBaseline;
+      }
+    }
+
+    if (settledInternalBaseline === undefined) {
+      return false;
+    }
+
+    const eventFingerprint = payload.imageFile
+      ? await fingerprintImageFile(payload.imageFile)
+      : fingerprintClipboardContent({ text: payload.text });
+    return Boolean(eventFingerprint && eventFingerprint !== settledInternalBaseline);
+  }, []);
 
   // Keyboard shortcuts (undo/redo/copy/paste/group/delete) + paste-image
   // bridge to upload nodes — see hook for the coordination details
@@ -2395,9 +2836,11 @@ export function Canvas() {
     deleteNodes,
     copyNodesToClipboard,
     pasteFromShortcut: handleShortcutPaste,
-    hasFreshInternalClipboard,
     markSystemClipboardFresh,
     pasteImageAtCanvasPosition,
+    pasteImageFromClipboardEvent,
+    pasteTextFromClipboardEvent,
+    shouldHandleClipboardEventPaste,
   });
 
   const handleContextMenuPaste = useCallback(async () => {
@@ -2411,7 +2854,8 @@ export function Canvas() {
       ? useCanvasStore.getState().nodes.find((node) => node.id === menuState.nodeId) ?? null
       : null;
     const isPromptPasteTarget = targetNode?.type === CANVAS_NODE_TYPES.imageEdit
-      || targetNode?.type === CANVAS_NODE_TYPES.aiVideo;
+      || targetNode?.type === CANVAS_NODE_TYPES.aiVideo
+      || targetNode?.type === CANVAS_NODE_TYPES.aiText;
     const pasteFlowPosition = targetNode && (
       targetNode.type === CANVAS_NODE_TYPES.upload
       || targetNode.type === CANVAS_NODE_TYPES.exportImage
@@ -2428,16 +2872,37 @@ export function Canvas() {
         })()
       : menuState.flowPosition;
 
-    const pasteSource = await resolveClipboardPasteSource();
-    if (pasteSource.source === 'internal') {
-      pasteCopiedNodes(pasteFlowPosition);
-      return;
+    const clipboardContent = await readClipboardContent({ avoidBrowserApiWhenTauriAvailable: true });
+    const internalSnapshotIsFresh = clipboardFreshnessRef.current === 'internal'
+      && Boolean(copiedSnapshotRef.current?.nodes.length);
+    let settledInternalBaseline = systemClipboardFingerprintAtInternalCopyRef.current;
+    const baselineCapture = systemClipboardFingerprintCaptureRef.current;
+    if (internalSnapshotIsFresh && settledInternalBaseline === undefined && baselineCapture) {
+      settledInternalBaseline = await baselineCapture;
+      if (systemClipboardFingerprintCaptureRef.current === baselineCapture) {
+        systemClipboardFingerprintAtInternalCopyRef.current = settledInternalBaseline;
+      }
     }
-    if (pasteSource.source === 'system') {
-      await pasteSystemClipboardContent(pasteSource.content, {
+    const clipboardHasPayload = hasClipboardPayload(clipboardContent);
+    const clipboardReadCanConfirmEmpty = !clipboardContent.readFailed;
+    const clipboardMatchesSettledInternalBaseline = internalSnapshotIsFresh
+      && settledInternalBaseline !== undefined
+      && clipboardContent.fingerprint === settledInternalBaseline;
+    const clipboardCanConfirmSettledInternalBaseline = clipboardMatchesSettledInternalBaseline
+      && (clipboardHasPayload || clipboardReadCanConfirmEmpty);
+    if (clipboardHasPayload && !clipboardCanConfirmSettledInternalBaseline) {
+      await pasteSystemClipboardContent(clipboardContent, {
         targetNode,
         flowPosition: pasteFlowPosition,
       });
+      return;
+    }
+    if (clipboardContent.readFailed && !clipboardCanConfirmSettledInternalBaseline) {
+      return;
+    }
+
+    if (internalSnapshotIsFresh) {
+      pasteCopiedNodes(pasteFlowPosition);
       return;
     }
 
@@ -2448,7 +2913,6 @@ export function Canvas() {
     nodeContextMenu,
     pasteCopiedNodes,
     pasteSystemClipboardContent,
-    resolveClipboardPasteSource,
   ]);
 
   const handleNodeContextMenuDelete = useCallback(() => {
@@ -2520,6 +2984,8 @@ export function Canvas() {
 
   const handleConnectStart = useCallback(
     (event: MouseEvent | TouchEvent, params: OnConnectStartParams) => {
+      lastConnectSelectionClearAtRef.current = Date.now();
+      clearBrowserTextSelection();
       setShowNodeMenu(false);
       setNodeContextMenu(null);
       setMenuAllowedTypes(undefined);
@@ -2778,6 +3244,9 @@ export function Canvas() {
 
   const handleConnectEnd = useCallback(
     (event: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
+      lastConnectSelectionClearAtRef.current = 0;
+      clearBrowserTextSelection();
+      window.requestAnimationFrame(() => clearBrowserTextSelection());
       if (connectionState.isValid || !pendingConnectStart) {
         setPendingConnectStart(null);
         setPreviewConnectionVisual(null);
@@ -2822,6 +3291,16 @@ export function Canvas() {
             sourceHandle: 'source',
             targetHandle: 'target',
           });
+          if (targetNode.type === CANVAS_NODE_TYPES.textAnnotation) {
+            const sourceText = getGeneratedTextForConnection(sourceNode, nodes);
+            if (sourceText) {
+              const currentContent = (targetNode.data as { content?: unknown }).content;
+              const normalizedCurrent = typeof currentContent === 'string' ? currentContent.trim() : '';
+              updateNodeData(targetNode.id, {
+                content: normalizedCurrent ? `${normalizedCurrent}\n${sourceText}` : sourceText,
+              } as Partial<CanvasNodeData>);
+            }
+          }
           scheduleCanvasPersist(0);
           setPendingConnectStart(null);
           setPreviewConnectionVisual(null);
@@ -2894,7 +3373,7 @@ export function Canvas() {
       suppressNextPaneClickRef.current = true;
       setShowNodeMenu(true);
     },
-    [connectNodes, nodes, pendingConnectStart, reactFlowInstance, scheduleCanvasPersist]
+    [connectNodes, nodes, pendingConnectStart, reactFlowInstance, scheduleCanvasPersist, updateNodeData]
   );
 
   const emptyHint = useMemo(

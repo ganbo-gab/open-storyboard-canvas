@@ -80,8 +80,8 @@ export function buildChatModelCatalog(
         modelId,
         modelLabel: label,
         supportsMultimodal: true,
-        contextWindow: null,
-        maxOutputTokens: null,
+        contextWindow: 256000,
+        maxOutputTokens: 65500,
         description: label,
         usable: true,
       });

@@ -31,11 +31,16 @@ import {
   canvasAiGateway,
   canvasEventBus,
 } from '@/features/canvas/application/canvasServices';
-import { graphImageResolver } from '@/features/canvas/application/graphImageResolver';
 import {
   parseInputImageSignature,
+  parseInputReferenceSignature,
   selectInputImageSignature,
+  selectInputReferenceSignature,
 } from '@/features/canvas/application/canvasGraphSelectors';
+import {
+  buildReferenceContextPrompt,
+  collectInputReferences,
+} from '@/features/canvas/application/graphReferenceResolver';
 import { resolveErrorContent, showErrorDialog } from '@/features/canvas/application/errorDialog';
 import {
   detectAspectRatio,
@@ -286,6 +291,9 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   const incomingImageSignature = useCanvasStore((state) =>
     selectInputImageSignature(id, state.nodes, state.edges)
   );
+  const incomingReferenceSignature = useCanvasStore((state) =>
+    selectInputReferenceSignature(id, state.nodes, state.edges)
+  );
   const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const addNode = useCanvasStore((state) => state.addNode);
@@ -298,6 +306,10 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   const incomingImages = useMemo(
     () => parseInputImageSignature(incomingImageSignature),
     [incomingImageSignature]
+  );
+  const incomingReferences = useMemo(
+    () => parseInputReferenceSignature(incomingReferenceSignature),
+    [incomingReferenceSignature]
   );
 
   const incomingImageItems = useMemo(
@@ -312,6 +324,17 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   const incomingImageViewerList = useMemo(
     () => incomingImageItems.map((item) => resolveImageDisplayUrl(item.imageUrl)),
     [incomingImageItems]
+  );
+  const incomingReferenceItems = useMemo(
+    () => incomingReferences.map((reference) => ({
+      ...reference,
+      displayUrl: reference.kind === 'image' && reference.imageUrl
+        ? resolveImageDisplayUrl(reference.imageUrl)
+        : reference.kind === 'video' && reference.thumbnailUrl
+          ? resolveImageDisplayUrl(reference.thumbnailUrl)
+          : null,
+    })),
+    [incomingReferences]
   );
   const functionPickerItems = useMemo(() => [
     ...MULTI_FUNCTION_ITEMS.map((item) => ({
@@ -493,15 +516,15 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   }, [data.modelConfig, id, nodeModelConfig, updateNodeData]);
 
   useEffect(() => {
-    if (incomingImages.length === 0) {
+    if (incomingReferenceItems.length === 0) {
       setShowImagePicker(false);
       setPickerCursor(null);
       setPickerActiveIndex(0);
       return;
     }
 
-    setPickerActiveIndex((previous) => Math.min(previous, incomingImages.length - 1));
-  }, [incomingImages.length]);
+    setPickerActiveIndex((previous) => Math.min(previous, incomingReferenceItems.length - 1));
+  }, [incomingReferenceItems.length]);
 
   useEffect(() => {
     const handleOutside = (event: MouseEvent) => {
@@ -545,12 +568,12 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     const latestNode = latestCanvasState.nodes.find((candidate) => candidate.id === id);
     const latestData = latestNode && isImageEditNode(latestNode) ? latestNode.data : data;
     const latestSettings = useSettingsStore.getState();
-    const latestIncomingImages = graphImageResolver.collectInputImages(
-      id,
-      latestCanvasState.nodes,
-      latestCanvasState.edges
-    );
-    let basePrompt = currentPromptDraft.replace(/@(?=图\d+)/g, '').trim();
+    const latestReferences = collectInputReferences(id, latestCanvasState.nodes, latestCanvasState.edges);
+    const referenceContextPrompt = buildReferenceContextPrompt(latestReferences);
+    const latestIncomingImages = latestReferences
+      .filter((reference) => reference.kind === 'image' && reference.imageUrl)
+      .map((reference) => reference.imageUrl as string);
+    let basePrompt = currentPromptDraft.replace(/@(?=(?:图|视频|文本)\d+)/g, '').trim();
 
     const selectedPresetId = latestData.selectedPromptPresetId ?? null;
     const selectedFunctionChip = selectedPresetId ? null : latestData.selectedFunctionChip ?? null;
@@ -683,7 +706,10 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       effectiveExtraParamsRecord['size'] ??
       selectedResolution.value ??
       requestSize;
-    const promptForRequest = appendGenerationParameterConstraints(prompt, {
+    const promptWithReferenceContext = referenceContextPrompt
+      ? `${referenceContextPrompt}\n\n${prompt}`
+      : prompt;
+    const promptForRequest = appendGenerationParameterConstraints(promptWithReferenceContext, {
       enabled: latestSettings.appendParameterConstraintsToPrompt,
       aspectRatio: resolvedRequestAspectRatio,
       resolution: requestResolutionLabel,
@@ -924,8 +950,11 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     promptHighlightRef.current.scrollLeft = promptRef.current.scrollLeft;
   };
 
-  const insertImageReference = useCallback((imageIndex: number) => {
-    const marker = `@图${imageIndex + 1}`;
+  const insertGraphReference = useCallback((referenceIndex: number) => {
+    const marker = incomingReferenceItems[referenceIndex]?.token;
+    if (!marker) {
+      return;
+    }
     const currentPrompt = promptDraftRef.current;
     const cursor = pickerCursor ?? currentPrompt.length;
     const { nextText: nextPrompt, nextCursor } = insertReferenceToken(currentPrompt, cursor, marker);
@@ -941,7 +970,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       promptRef.current?.setSelectionRange(nextCursor, nextCursor);
       syncPromptHighlightScroll();
     });
-  }, [flushPromptDraft, pickerCursor]);
+  }, [flushPromptDraft, incomingReferenceItems, pickerCursor]);
 
   const selectPromptPresetFromFunctionPicker = useCallback((presetId: string) => {
     updateNodeData(id, {
@@ -1060,7 +1089,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         selectionStart,
         selectionEnd,
         deletionDirection,
-        incomingImages.length
+        incomingReferences.length
       );
       if (deleteRange) {
         event.preventDefault();
@@ -1109,24 +1138,24 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       }
     }
 
-    if (showImagePicker && incomingImages.length > 0) {
+    if (showImagePicker && incomingReferenceItems.length > 0) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
-        setPickerActiveIndex((previous) => (previous + 1) % incomingImages.length);
+        setPickerActiveIndex((previous) => (previous + 1) % incomingReferenceItems.length);
         return;
       }
 
       if (event.key === 'ArrowUp') {
         event.preventDefault();
         setPickerActiveIndex((previous) =>
-          previous === 0 ? incomingImages.length - 1 : previous - 1
+          previous === 0 ? incomingReferenceItems.length - 1 : previous - 1
         );
         return;
       }
 
       if (event.key === 'Enter') {
         event.preventDefault();
-        insertImageReference(pickerActiveIndex);
+        insertGraphReference(pickerActiveIndex);
         return;
       }
     }
@@ -1146,7 +1175,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       return;
     }
 
-    if (event.key === '@' && incomingImages.length > 0) {
+    if (event.key === '@' && incomingReferenceItems.length > 0) {
       event.preventDefault();
       const cursor = event.currentTarget.selectionStart ?? promptDraftRef.current.length;
       setPickerAnchor(resolvePickerAnchor(rootRef.current, event.currentTarget, cursor));
@@ -1238,7 +1267,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
             style={{ scrollbarGutter: 'stable' }}
           >
             <div className={`min-h-full whitespace-pre-wrap break-words px-1 py-0.5 ${selectedFunctionLabel ? 'pt-8' : ''}`}>
-              {renderPromptWithHighlights(promptDraft, incomingImages.length)}
+              {renderPromptWithHighlights(promptDraft, incomingReferences.length)}
             </div>
           </div>
 
@@ -1262,7 +1291,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
           />
         </div>
 
-        {showImagePicker && incomingImageItems.length > 0 && (
+        {showImagePicker && incomingReferenceItems.length > 0 && (
           <div
             className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
             style={{ left: pickerAnchor.left, top: pickerAnchor.top }}
@@ -1273,13 +1302,13 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
               className="ui-scrollbar nowheel max-h-[180px] overflow-y-auto"
               onWheelCapture={(event) => event.stopPropagation()}
             >
-              {incomingImageItems.map((item, index) => (
+              {incomingReferenceItems.map((item, index) => (
                 <button
-                  key={`${item.imageUrl}-${index}`}
+                  key={`${item.kind}-${item.sourceNodeId}-${index}`}
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
-                    insertImageReference(index);
+                    insertGraphReference(index);
                   }}
                   onMouseEnter={() => setPickerActiveIndex(index)}
                   className={`flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[var(--canvas-node-field-border)] hover:bg-[var(--canvas-node-menu-hover)] ${pickerActiveIndex === index
@@ -1287,14 +1316,20 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                       : ''
                     }`}
                 >
-                  <CanvasNodeImage
-                    src={item.displayUrl}
-                    alt={item.label}
-                    viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl)}
-                    viewerImageList={incomingImageViewerList}
-                    className="h-8 w-8 rounded object-cover"
-                    draggable={false}
-                  />
+                  {item.kind === 'image' && item.displayUrl ? (
+                    <CanvasNodeImage
+                      src={item.displayUrl}
+                      alt={item.label}
+                      viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl ?? item.displayUrl)}
+                      viewerImageList={incomingImageViewerList}
+                      className="h-8 w-8 rounded object-cover"
+                      draggable={false}
+                    />
+                  ) : (
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[var(--canvas-node-button-bg)] text-[10px] font-semibold text-text-muted">
+                      {item.kind === 'video' ? 'V' : 'T'}
+                    </span>
+                  )}
                   <span>{item.label}</span>
                 </button>
               ))}

@@ -199,6 +199,7 @@ export interface VideoNodeData extends NodeDisplayData {
   generationErrorDetails?: string | null;
   generationDebugContext?: unknown;
   generationRetryResultUrl?: string | null;
+  generationRetryRequestedAt?: number | null;
   sourcePrompt?: string;
   sourceReferenceCount?: number;
   [key: string]: unknown;

@@ -61,7 +61,6 @@ const uploadNodeDefinition: CanvasNodeDefinition<UploadImageNodeData> = {
   visibleInMenu: true,
   capabilities: {
     toolbar: true,
-    selectionToolbar: 'deleteOnly',
     promptInput: false,
   },
   connectivity: {
@@ -89,7 +88,6 @@ const imageEditNodeDefinition: CanvasNodeDefinition<ImageEditNodeData> = {
   visibleInMenu: true,
   capabilities: {
     toolbar: true,
-    selectionToolbar: 'deleteOnly',
     promptInput: false,
   },
   connectivity: {
@@ -169,8 +167,8 @@ const aiTextNodeDefinition: CanvasNodeDefinition<AiTextNodeData> = {
   createDefaultData: () => ({
     displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.aiText],
     prompt: '',
-    providerId: 'openai-chat',
-    model: 'gpt-4.1-mini',
+    providerId: null,
+    model: '',
     agentId: null,
     isToolbarCollapsed: false,
     resultNodeId: null,
@@ -188,7 +186,6 @@ const exportImageNodeDefinition: CanvasNodeDefinition<ExportImageNodeData> = {
   visibleInMenu: false,
   capabilities: {
     toolbar: true,
-    selectionToolbar: 'deleteOnly',
     promptInput: false,
   },
   connectivity: {
@@ -229,10 +226,10 @@ const videoNodeDefinition: CanvasNodeDefinition<VideoNodeData> = {
     promptInput: false,
   },
   connectivity: {
-    sourceHandle: false,
+    sourceHandle: true,
     targetHandle: true,
     connectMenu: {
-      fromSource: false,
+      fromSource: true,
       fromTarget: false,
     },
   },

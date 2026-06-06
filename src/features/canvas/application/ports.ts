@@ -68,6 +68,7 @@ export interface AiGateway {
     result?: string | null;
     error?: string | null;
   }>;
+  retryGenerateVideoJob?: (jobId: string) => Promise<boolean>;
 }
 
 export interface ImageSplitGateway {

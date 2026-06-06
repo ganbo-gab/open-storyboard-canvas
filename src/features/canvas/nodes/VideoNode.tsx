@@ -63,7 +63,10 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
     () => resolveNodeDisplayName(type as CanvasNodeType, data),
     [data, type]
   );
-  const generationElapsedText = formatGenerationElapsedMs(data.generationElapsedMs);
+  const liveGenerationElapsedMs = isGenerating && generationStartedAt !== null
+    ? Math.max(0, now - generationStartedAt)
+    : data.generationElapsedMs;
+  const generationElapsedText = formatGenerationElapsedMs(liveGenerationElapsedMs);
 
   useEffect(() => {
     updateNodeInternals(id);
@@ -71,7 +74,7 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
 
   useEffect(() => {
     if (!isGenerating) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 120);
+    const timer = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(timer);
   }, [isGenerating]);
 
@@ -224,6 +227,12 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
         type="target"
         id="target"
         position={Position.Left}
+        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+      />
+      <Handle
+        type="source"
+        id="source"
+        position={Position.Right}
         className="!h-2 !w-2 !border-surface-dark !bg-accent"
       />
       <NodeResizeHandle

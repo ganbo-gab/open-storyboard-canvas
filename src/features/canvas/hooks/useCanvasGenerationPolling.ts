@@ -204,6 +204,12 @@ function resolveGenerationElapsedMs(currentData: Record<string, unknown>, endedA
   return Math.max(0, endedAt - startedAt);
 }
 
+function isRetriableVideoPollingError(errorMessage: string): boolean {
+  const normalized = errorMessage.trim();
+  return normalized === '视频任务轮询超时，未获取到结果'
+    || normalized.toLowerCase().includes('video task polling timed out');
+}
+
 function resolveExistingGeneratedSequence(currentData: Record<string, unknown>): number | null {
   const value = currentData.generatedSequence;
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
@@ -366,6 +372,7 @@ async function prepareCompletedImageResult(
     generationErrorDetails: null,
     generationDebugContext: undefined,
     generationRetryResultUrl: null,
+    generationRetryRequestedAt: null,
   });
   return true;
 }
@@ -499,6 +506,7 @@ async function prepareCompletedVideoResult(
     generationErrorDetails: null,
     generationDebugContext: undefined,
     generationRetryResultUrl: null,
+    generationRetryRequestedAt: null,
   });
   return true;
 }
@@ -513,6 +521,7 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
   const { nodeId, startedAt, apiKeys, updateNodeData, finalize, translateError } = ctx;
   let lastApiKeyResetAt = 0;
   let lastApiKeyResetProvider: string | null = null;
+  let handledRetryRequestedAt: number | null = null;
 
   try {
     while (true) {
@@ -569,6 +578,36 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
       }
       if (!jobId) {
         return;
+      }
+
+      const generationRetryRequestedAt =
+        typeof currentData.generationRetryRequestedAt === 'number'
+          && Number.isFinite(currentData.generationRetryRequestedAt)
+          ? currentData.generationRetryRequestedAt
+          : null;
+      if (
+        isVideoNode
+        && generationRetryRequestedAt !== null
+        && generationRetryRequestedAt !== handledRetryRequestedAt
+        && typeof canvasVideoGateway.retryGenerateVideoJob === 'function'
+      ) {
+        handledRetryRequestedAt = generationRetryRequestedAt;
+        const restarted = await canvasVideoGateway.retryGenerateVideoJob(jobId).catch((error) => {
+          console.warn('[GenerationJob] video retry restart failed', { nodeId, jobId, error });
+          return false;
+        });
+        if (!restarted && !retryResultUrl) {
+          const message = '缺少任务信息，无法重新获取';
+          void showErrorDialog(message, translateError('common.error'));
+          markGenerationFailed(
+            nodeId,
+            message,
+            null,
+            updateNodeData,
+            undefined,
+          );
+          return;
+        }
       }
 
       // Refresh the provider's API key — but only once per minute per
@@ -639,6 +678,7 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
           isVideoNode ? 'video generation succeeded without a result URL' : 'generation succeeded without a result URL',
           null,
           updateNodeData,
+          isVideoNode ? { preserveRetryMetadata: true } : undefined,
         );
         return;
       }
@@ -696,6 +736,8 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
         updateNodeData,
         statusRetryResultUrl
           ? { preserveRetryMetadata: true, retryResultUrl: statusRetryResultUrl, clearJobMetadata: true }
+          : isVideoNode && isRetriableVideoPollingError(errorMessage)
+            ? { preserveRetryMetadata: true }
           : undefined,
       );
       return;
@@ -746,6 +788,7 @@ function markGenerationFailed(
     patch.generationProviderId = null;
     patch.generationClientSessionId = null;
     patch.generationRetryResultUrl = null;
+    patch.generationRetryRequestedAt = null;
   }
 
   updateNodeData(nodeId, patch);

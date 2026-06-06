@@ -3261,7 +3261,7 @@ dependencies = [
 
 [[package]]
 name = "open-storyboard-canvas"
-version = "0.1.18"
+version = "0.1.20"
 dependencies = [
  "ab_glyph",
  "arboard",
@@ -3274,6 +3274,8 @@ dependencies = [
  "imageproc",
  "inventory",
  "md5",
+ "objc2-app-kit",
+ "objc2-foundation",
  "png 0.17.16",
  "reqwest 0.12.28",
  "rusqlite",

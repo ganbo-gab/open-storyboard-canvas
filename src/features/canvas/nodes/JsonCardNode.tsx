@@ -94,7 +94,7 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
       return;
     }
 
-    const timer = window.setInterval(() => setNow(Date.now()), 120);
+    const timer = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(timer);
   }, [isStreaming]);
 

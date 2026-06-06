@@ -1,15 +1,22 @@
 import {
   CANVAS_NODE_TYPES,
+  isAiTextNode,
   isExportImageNode,
   isImageEditNode,
   isTextAnnotationNode,
   isUploadNode,
+  isVideoNode,
   type CanvasEdge,
   type CanvasNode,
   type JsonCardNodeData,
   type TextAnnotationNodeData,
 } from '@/features/canvas/domain/canvasNodes';
 import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
+import {
+  collectInputReferences,
+  type GraphReferenceItem,
+} from '@/features/canvas/application/graphReferenceResolver';
+import { imageUrlToDataUrl } from '@/features/canvas/application/imageData';
 import type {
   AiTextInputImagePart,
   AiTextInputPart,
@@ -62,6 +69,8 @@ function createDefaultLabel(type: AiTextInputSourceType, index: number): string 
       return `JSON 输入 ${index}`;
     case 'image':
       return `图片输入 ${index}`;
+    case 'video':
+      return `视频输入 ${index}`;
     case 'markdown':
     default:
       return `文本输入 ${index}`;
@@ -278,7 +287,7 @@ export function normalizeTextAgentInputSource(
     return null;
   }
   const record = input as Partial<TextAgentInputConfig>;
-  const type = record.type === 'json' || record.type === 'image' || record.type === 'markdown'
+  const type = record.type === 'json' || record.type === 'image' || record.type === 'markdown' || record.type === 'video'
     ? record.type
     : 'markdown';
   return {
@@ -412,6 +421,23 @@ function createMarkdownPart(node: CanvasNode, label: string): AiTextInputTextPar
   };
 }
 
+function createTextPartFromReference(reference: GraphReferenceItem, label: string): AiTextInputTextPart | null {
+  if (reference.kind !== 'text') {
+    return null;
+  }
+  const content = reference.content?.trim() ?? '';
+  if (!content) {
+    return null;
+  }
+  return {
+    kind: 'text',
+    sourceType: 'markdown',
+    sourceNodeId: reference.sourceNodeId,
+    label,
+    content,
+  };
+}
+
 function createJsonPart(
   node: CanvasNode,
   label: string,
@@ -456,8 +482,54 @@ function createImagePart(node: CanvasNode, label: string): AiTextInputImagePart 
   };
 }
 
+function isOpenAiCompatibleImageUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value)
+    || /^file:\/\//i.test(value)
+    || /^data:image\//i.test(value);
+}
+
+async function normalizeOpenAiChatImageUrl(source: string): Promise<string | null> {
+  const trimmed = source.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (/^https?:\/\//i.test(trimmed) || /^data:image\//i.test(trimmed)) {
+    return trimmed;
+  }
+
+  try {
+    const dataUrl = await imageUrlToDataUrl(trimmed);
+    const normalized = dataUrl.trim();
+    return isOpenAiCompatibleImageUrl(normalized) ? normalized : null;
+  } catch (error) {
+    console.warn('[aiText] Failed to normalize image reference for chat payload', {
+      source: trimmed,
+      error,
+    });
+    return null;
+  }
+}
+
+function createVideoPart(node: CanvasNode, label: string, reference?: GraphReferenceItem): AiTextInputTextPart | null {
+  if (!isVideoNode(node)) {
+    return null;
+  }
+  const videoUrl = reference?.videoUrl ?? node.data.localVideoUrl ?? node.data.videoUrl ?? '';
+  if (!videoUrl) {
+    return null;
+  }
+  const title = reference?.title || resolveNodeDisplayName(node.type, node.data) || label;
+  return {
+    kind: 'text',
+    sourceType: 'video',
+    sourceNodeId: node.id,
+    label,
+    content: `视频参考「${title}」：${videoUrl}\n请将该连接视频作为动作、节奏、镜头连续性、主体状态或场景变化参考；当前文本模型请求不会上传视频二进制。`,
+  };
+}
+
 function sourceTypeForNode(node: CanvasNode): AiTextInputSourceType | null {
-  if (isTextAnnotationNode(node)) {
+  if (isTextAnnotationNode(node) || isAiTextNode(node)) {
     return 'markdown';
   }
   if (isJsonCardNode(node)) {
@@ -466,17 +538,29 @@ function sourceTypeForNode(node: CanvasNode): AiTextInputSourceType | null {
   if (isUploadNode(node) || isImageEditNode(node) || isExportImageNode(node)) {
     return 'image';
   }
+  if (isVideoNode(node)) {
+    return 'video';
+  }
   return null;
 }
 
-function buildPartFromConfig(node: CanvasNode, config: TextAgentInputConfig): AiTextInputPart | null {
+function buildPartFromConfig(
+  node: CanvasNode,
+  config: TextAgentInputConfig,
+  reference?: GraphReferenceItem
+): AiTextInputPart | null {
   switch (config.type) {
     case 'json':
       return createJsonPart(node, config.label, config.jsonPath);
     case 'image':
       return createImagePart(node, config.label);
+    case 'video':
+      return createVideoPart(node, config.label, reference);
     case 'markdown':
     default:
+      if (reference?.kind === 'text') {
+        return createTextPartFromReference(reference, config.label);
+      }
       return createMarkdownPart(node, config.label);
   }
 }
@@ -496,6 +580,9 @@ function resolveInputPartLabel(
   }
   if (config.type === 'markdown') {
     return `${agentName} 文本`;
+  }
+  if (config.type === 'video') {
+    return `${agentName} 视频`;
   }
   return `${agentName} 图片`;
 }
@@ -561,10 +648,14 @@ export function collectAiTextInputs(
   sourceAgents: TextAgentConfig[] = []
 ): AiTextInputPart[] {
   const sourceNodes = collectDirectSourceNodes(nodeId, nodes, edges);
+  const referenceByNodeId = new Map(
+    collectInputReferences(nodeId, nodes, edges).map((reference) => [reference.sourceNodeId, reference] as const)
+  );
   const pool = {
     markdown: [] as CanvasNode[],
     json: [] as CanvasNode[],
     image: [] as CanvasNode[],
+    video: [] as CanvasNode[],
   };
 
   sourceNodes.forEach((node) => {
@@ -611,7 +702,7 @@ export function collectAiTextInputs(
     if (!candidate) {
       return;
     }
-    const part = buildPartFromConfig(candidate, config);
+    const part = buildPartFromConfig(candidate, config, referenceByNodeId.get(candidate.id));
     if (!part) {
       return;
     }
@@ -619,20 +710,23 @@ export function collectAiTextInputs(
     used.add(candidate.id);
   });
 
-  (['markdown', 'json', 'image'] as const).forEach((type) => {
+  (['markdown', 'json', 'image', 'video'] as const).forEach((type) => {
     let index = 0;
     pool[type].forEach((node) => {
       if (used.has(node.id)) {
         return;
       }
       index += 1;
-      const fallbackLabel = resolveNodeDisplayName(node.type, node.data) || createDefaultLabel(type, index);
+      const fallbackLabel =
+        referenceByNodeId.get(node.id)?.label
+        || resolveNodeDisplayName(node.type, node.data)
+        || createDefaultLabel(type, index);
       const part = buildPartFromConfig(node, {
         id: createSourceConfigId(),
         type,
         label: fallbackLabel,
         enabled: true,
-      });
+      }, referenceByNodeId.get(node.id));
       if (!part) {
         return;
       }
@@ -656,22 +750,24 @@ export function buildAiTextUserPrompt(parts: AiTextInputPart[], userPrompt: stri
   return [...sections, taskSection].filter((item) => item.trim().length > 0).join('\n\n');
 }
 
-export function buildOpenAiChatPayload(args: {
+export async function buildOpenAiChatPayload(args: {
   model?: string | null;
   agentPrompt: string;
   userPrompt: string;
   parts: AiTextInputPart[];
-}): AiTextOpenAiChatPayload {
+}): Promise<AiTextOpenAiChatPayload> {
   const normalizedModel = args.model?.trim() || DEFAULT_TEXT_MODEL;
   const compiledPrompt = buildAiTextUserPrompt(args.parts, args.userPrompt);
-  const imageParts = args.parts
+  const imagePartSources = args.parts
     .filter((part): part is AiTextInputImagePart => part.kind === 'image')
-    .map((part) => ({
-      type: 'image_url' as const,
-      image_url: {
-        url: part.imageUrl,
-      },
-    }));
+    .map((part) => part.imageUrl);
+  const normalizedImageUrls = (
+    await Promise.all(imagePartSources.map((source) => normalizeOpenAiChatImageUrl(source)))
+  ).filter((url): url is string => Boolean(url));
+  const imageParts = normalizedImageUrls.map((url) => ({
+    type: 'image_url' as const,
+    image_url: { url },
+  }));
 
   return {
     model: normalizedModel,

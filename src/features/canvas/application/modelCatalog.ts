@@ -169,7 +169,7 @@ export function buildImageModelCatalog({
   }
 
   if (agnesApiKey?.trim()) {
-    const supportedRatios = ['auto', '16:9', '9:16', '1:1', '4:3', '3:4'];
+    const supportedRatios = ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9'];
     const supportedResolutions = [...AGNES_PROVIDER_DEFAULTS.imageResolutions];
     entries.push(
       {

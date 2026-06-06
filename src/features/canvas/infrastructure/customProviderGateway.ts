@@ -51,7 +51,25 @@ import {
  * to branch.
  */
 
-interface CachedJob extends GenerationJobStatus {}
+interface VideoPollRetryContext {
+  cfg: CustomProviderConfig;
+  taskId: string;
+}
+
+interface CachedJob extends GenerationJobStatus {
+  videoPollRetry?: VideoPollRetryContext;
+}
+
+class VideoPollTimeoutError extends Error {
+  constructor(
+    message: string,
+    readonly retryContext: VideoPollRetryContext,
+  ) {
+    super(message);
+    this.name = 'VideoPollTimeoutError';
+  }
+}
+
 const cache = new Map<string, CachedJob>();
 const POLL_TIMEOUT_MS = 120000;
 const VIDEO_POLL_TIMEOUT_MS = 15 * 60 * 1000;
@@ -79,6 +97,12 @@ export interface CustomProviderRequestDebugPreview {
   body?: unknown;
   multipart?: unknown;
   error?: string;
+}
+
+export interface CustomChatCompletionResult {
+  text: string;
+  status?: number;
+  raw: unknown;
 }
 
 class NetworkRequestError extends Error {
@@ -142,14 +166,16 @@ function buildAgnesProviderConfig(mediaType: 'image' | 'video' | 'chat', apiKey:
         providerKind: 'agnes-video',
         requestComposer: 'video-agnes-json',
         videoRequestBodyMode: 'json',
-        supportedDurations: ['4', '8', '12'],
+        supportedDurations: Array.from({ length: 18 }, (_, index) => String(index + 1)),
         supportedRatios: ['16:9', '9:16', '1:1'],
         supportedResolutions: [...AGNES_PROVIDER_DEFAULTS.videoResolutions],
         videoPollTimeoutMs: VIDEO_POLL_TIMEOUT_MS,
         videoTaskIdPath: 'task_id',
         videoStatusEndpointPath: AGNES_PROVIDER_DEFAULTS.videoStatusEndpointPath,
         responseVideoPath: 'video_url',
+        responseVideoUrlPath: 'remixed_from_video_id',
         videoStatusPath: 'status',
+        videoPendingValues: ['queued', 'in_progress'],
         videoSuccessValues: ['completed'],
         videoFailedValues: ['failed'],
         videoReferenceField: 'image',
@@ -179,15 +205,15 @@ function buildAgnesProviderConfig(mediaType: 'image' | 'video' | 'chat', apiKey:
       modelMetadata: {
         [AGNES_PROVIDER_DEFAULTS.models.chat20Flash]: {
           supportsMultimodal: true,
-          contextWindow: null,
-          maxOutputTokens: null,
-          description: 'Agnes 2.0 Flash text chat model',
+          contextWindow: 256000,
+          maxOutputTokens: 65500,
+          description: 'Agnes 2.0 Flash multimodal chat model; streaming/tools/thinking are documented, but this gateway currently submits non-streaming JSON.',
         },
         [AGNES_PROVIDER_DEFAULTS.models.chat15Flash]: {
           supportsMultimodal: true,
-          contextWindow: null,
-          maxOutputTokens: null,
-          description: 'Agnes 1.5 Flash text chat model',
+          contextWindow: 256000,
+          maxOutputTokens: 65500,
+          description: 'Agnes 1.5 Flash multimodal chat model',
         },
       },
       extraParams: {
@@ -216,8 +242,8 @@ function buildAgnesProviderConfig(mediaType: 'image' | 'video' | 'chat', apiKey:
     responseFormat: 'openai-images',
     extraParams: {
       providerConfigVersion: 'new-v1',
-      providerKind: 'openai-images',
-      supportedRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4'],
+      providerKind: 'agnes-images',
+      supportedRatios: ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9'],
     },
     note: 'Agnes settings key routed through the OpenAI Images-compatible gateway.',
   };
@@ -393,6 +419,131 @@ function modelLooksLikeGeminiHighResImageModel(modelName: string): boolean {
     || normalized.includes('imagen-4');
 }
 
+function sanitizeAgnesImageTopLevelParams(params: Record<string, unknown>): Record<string, unknown> {
+  const sanitized = { ...params };
+  delete sanitized.image;
+  delete sanitized.images;
+  delete sanitized.reference_images;
+  delete sanitized.response_format;
+  delete sanitized.responseFormat;
+  delete sanitized.resolutionType;
+  delete sanitized.aspect_ratio;
+  delete sanitized.aspectRatio;
+  return sanitized;
+}
+
+function resolveAgnesImageResponseFormat(
+  defaultRequestParams: Record<string, unknown>,
+  userExtra: Record<string, unknown>,
+): string | undefined {
+  const raw =
+    userExtra.response_format
+    ?? userExtra.responseFormat
+    ?? defaultRequestParams.response_format
+    ?? defaultRequestParams.responseFormat;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
+}
+
+const AGNES_IMAGE_SIZE_BY_TIER: Record<'1k' | '2k' | '4k', Record<string, string>> = {
+  '1k': {
+    '1:1': '1024x1024',
+    '16:9': '1024x576',
+    '9:16': '576x1024',
+    '4:3': '1024x768',
+    '3:4': '768x1024',
+    '3:2': '1024x682',
+    '2:3': '682x1024',
+    '21:9': '1344x576',
+  },
+  '2k': {
+    '1:1': '2048x2048',
+    '16:9': '2048x1152',
+    '9:16': '1152x2048',
+    '4:3': '2048x1536',
+    '3:4': '1536x2048',
+    '3:2': '2048x1365',
+    '2:3': '1365x2048',
+    '21:9': '2560x1080',
+  },
+  '4k': {
+    '1:1': '4096x4096',
+    '16:9': '3840x2160',
+    '9:16': '2160x3840',
+    '4:3': '4096x3072',
+    '3:4': '3072x4096',
+    '3:2': '3840x2560',
+    '2:3': '2560x3840',
+    '21:9': '5120x2160',
+  },
+};
+
+function resolveAgnesImageSize(cfg: CustomProviderConfig, request: GenerateRequest): string {
+  const selectedResolution = request.extra_params?.resolutionType ?? request.size;
+  if (isPixelSize(selectedResolution)) return selectedResolution.trim();
+  const tier = normalizeResolutionTier(selectedResolution);
+  if (tier === 'auto') {
+    return AGNES_IMAGE_SIZE_BY_TIER['1k'][normalizeRatioKey(request.aspect_ratio)]
+      ?? fallbackPixelSizeForAspectRatio(request.aspect_ratio);
+  }
+  if (tier) {
+    const byRatio = AGNES_IMAGE_SIZE_BY_TIER[tier][normalizeRatioKey(request.aspect_ratio)];
+    if (byRatio) return byRatio;
+  }
+  if (isPixelSize(request.size)) return request.size.trim();
+  const configuredSizes = (cfg.supportedResolutions ?? []).filter(isPixelSize).map((size) => size.trim());
+  return pickClosestPixelSize(configuredSizes, request.aspect_ratio)
+    ?? fallbackPixelSizeForAspectRatio(request.aspect_ratio);
+}
+
+function buildAgnesImageRequestBody(
+  cfg: CustomProviderConfig,
+  modelName: string,
+  request: GenerateRequest,
+  userExtra: Record<string, unknown>,
+): Record<string, unknown> {
+  const defaultRequestParams = resolveDefaultRequestParams(cfg);
+  const size = resolveAgnesImageSize(cfg, request);
+  const referenceImages = (request.reference_images ?? [])
+    .map((image) => image.trim())
+    .filter(Boolean);
+  const defaultExtraBody = asPlainRecord(defaultRequestParams.extra_body) ?? {};
+  const userExtraBody = asPlainRecord(userExtra.extra_body) ?? {};
+  const explicitResponseFormat = resolveAgnesImageResponseFormat(defaultRequestParams, userExtra);
+  const topLevelDefaults = sanitizeAgnesImageTopLevelParams(defaultRequestParams);
+  const topLevelUserExtra = sanitizeAgnesImageTopLevelParams(userExtra);
+  const returnBase64Raw = topLevelUserExtra.return_base64 ?? topLevelDefaults.return_base64;
+  delete topLevelDefaults.extra_body;
+  delete topLevelUserExtra.extra_body;
+  delete topLevelDefaults.return_base64;
+  delete topLevelUserExtra.return_base64;
+  const explicitTags = topLevelUserExtra.tags ?? topLevelDefaults.tags;
+
+  return compactRecord({
+    model: modelName,
+    prompt: request.prompt,
+    size,
+    n: 1,
+    ...(referenceImages.length > 0 && explicitTags === undefined ? { tags: ['img2img'] } : {}),
+    ...topLevelDefaults,
+    ...topLevelUserExtra,
+    ...(referenceImages.length > 0
+      ? {
+        extra_body: compactRecord({
+          ...defaultExtraBody,
+          ...userExtraBody,
+          image: referenceImages,
+          response_format: explicitResponseFormat ?? 'b64_json',
+        }),
+      }
+      : {
+        return_base64: typeof returnBase64Raw === 'boolean' ? returnBase64Raw : true,
+        ...(Object.keys(defaultExtraBody).length > 0 || Object.keys(userExtraBody).length > 0
+          ? { extra_body: compactRecord({ ...defaultExtraBody, ...userExtraBody }) }
+          : {}),
+      }),
+  });
+}
+
 function buildModernRequestBody(
   cfg: CustomProviderConfig,
   modelName: string,
@@ -475,6 +626,10 @@ function buildModernRequestBody(
       ...pickAllowedParams(defaultRequestParams, OPENAI_IMAGE_PARAM_KEYS),
       ...pickAllowedParams(userExtra, OPENAI_IMAGE_PARAM_KEYS),
     });
+  }
+
+  if (kind === 'agnes-images') {
+    return buildAgnesImageRequestBody(cfg, modelName, request, userExtra);
   }
 
   if (kind === 'fal') {
@@ -2118,13 +2273,17 @@ function scanFirstVideoSource(cfg: CustomProviderConfig, payload: unknown): stri
 }
 
 function extractFirstVideoSource(cfg: CustomProviderConfig, payload: unknown): string | null {
-  const hintedPath =
-    cfg.extraParams?.responseVideoPath
-    ?? cfg.extraParams?.responseVideoUrlPath
-    ?? cfg.extraParams?.videoPath
-    ?? cfg.extraParams?.videoUrlPath;
-  const hinted = extractVideoByPath(cfg, payload, hintedPath);
-  if (hinted) return hinted;
+  const hintedPaths = [
+    cfg.extraParams?.responseVideoPath,
+    cfg.extraParams?.responseVideoUrlPath,
+    cfg.extraParams?.videoPath,
+    cfg.extraParams?.videoUrlPath,
+    modernProviderKind(cfg) === 'agnes-video' ? 'remixed_from_video_id' : undefined,
+  ];
+  for (const hintedPath of hintedPaths) {
+    const hinted = extractVideoByPath(cfg, payload, hintedPath);
+    if (hinted) return hinted;
+  }
   return scanFirstVideoSource(cfg, payload);
 }
 
@@ -2257,10 +2416,30 @@ function resolveAgnesVideoPixelSize(request: GenerateRequest, userExtra: Record<
 }
 
 function normalizeAgnesFrameCount(seconds: number, frameRate: number): number {
-  const requestedFrames = Math.max(1, Math.round(seconds * frameRate));
+  if (frameRate === 24 && seconds >= 17.75) {
+    return 441;
+  }
+  const requestedFrames = Math.max(1, seconds * frameRate);
   const maxFrames = 441;
-  const constrainedFrames = Math.min(requestedFrames, maxFrames);
+  const nearest = Math.round((requestedFrames - 1) / 8) * 8 + 1;
+  const constrainedFrames = Math.min(nearest, maxFrames);
   return Math.max(1, Math.floor((constrainedFrames - 1) / 8) * 8 + 1);
+}
+
+function normalizeAgnesBase64Payload(payload: string, errorPrefix: string): string {
+  let compact = payload.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  compact = compact.replace(/=+$/g, '');
+  const remainder = compact.length % 4;
+  if (remainder === 1) {
+    throw new Error(`${errorPrefix} base64 长度无法补齐，请重新连接或上传参考图后再生成。`);
+  }
+  if (remainder > 0) {
+    compact = compact.padEnd(compact.length + (4 - remainder), '=');
+  }
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) {
+    throw new Error(`${errorPrefix} 不是有效 base64，请重新连接或上传参考图后再生成。`);
+  }
+  return compact;
 }
 
 function normalizeAgnesVideoImageBase64(source: string): string {
@@ -2269,26 +2448,28 @@ function normalizeAgnesVideoImageBase64(source: string): string {
     throw new Error('Agnes 视频参考图为空，无法组装 image 字段。');
   }
 
-  let payload = trimmed;
   const commaIndex = trimmed.indexOf(',');
   if (/^data:[^,]+;base64,/i.test(trimmed) && commaIndex >= 0) {
-    payload = trimmed.slice(commaIndex + 1);
-  } else if (/^(file|https?):/i.test(trimmed) || /^\/|^[A-Za-z]:[\\/]/.test(trimmed)) {
-    throw new Error('Agnes 视频 image 字段必须是干净 base64；当前收到本地路径或 URL，请确认画布参考图已先转换为 data URL。');
+    return normalizeAgnesBase64Payload(trimmed.slice(commaIndex + 1), 'Agnes 视频参考图');
   }
+  if (/^https?:\/\//i.test(trimmed) || /^(file):/i.test(trimmed) || /^\/|^[A-Za-z]:[\\/]/.test(trimmed)) {
+    throw new Error('Agnes 视频 image 字段必须是干净 base64；当前收到路径或 URL，请确认画布参考图已先转换为 data URL。');
+  }
+  if (/^[A-Za-z0-9+/_=-]+$/i.test(trimmed) && trimmed.length > 64) {
+    return normalizeAgnesBase64Payload(trimmed, 'Agnes 视频参考图');
+  }
+  throw new Error('Agnes 视频 image 字段仅支持 data URL 或裸 base64，请重新连接或上传参考图后再生成。');
+}
 
-  let compact = payload.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
-  const remainder = compact.length % 4;
-  if (remainder === 1) {
-    throw new Error('Agnes 视频参考图 base64 长度无法补齐，请重新连接或上传参考图后再生成。');
-  }
-  if (remainder > 0) {
-    compact = compact.padEnd(compact.length + (4 - remainder), '=');
-  }
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) {
-    throw new Error('Agnes 视频参考图不是有效 base64，请重新连接或上传参考图后再生成。');
-  }
-  return compact;
+function normalizeAgnesVideoMode(value: unknown): 'text' | 'image' | 'multi' | 'keyframes' | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (/^(text|txt2vid|t2v|text-to-video)$/.test(normalized)) return 'text';
+  if (/^(image|ti2vid|i2v|img2vid|image-to-video)$/.test(normalized)) return 'image';
+  if (/^(multi|multi-image|references?|multi_reference|multi-reference)$/.test(normalized)) return 'multi';
+  if (/^(keyframes?|keyframe)$/.test(normalized)) return 'keyframes';
+  return null;
 }
 
 function buildAgnesVideoJsonBody(
@@ -2303,13 +2484,14 @@ function buildAgnesVideoJsonBody(
   const normalizedFrameRate = Number.isFinite(frameRate) && frameRate > 0 ? frameRate : 24;
   const seconds = resolveVideoSeconds(request, defaultRequestParams) ?? 4;
   const pixelSize = resolveAgnesVideoPixelSize(request, userExtra);
-  // Agnes' video API expects the `image` compatibility field to be bare base64.
-  // Our canvas/gateway references commonly arrive as data URLs; normalize them
-  // here so we never forward a local path, data URL header, whitespace, or
-  // unpadded base64 to the upstream Agnes endpoint.
-  const referenceImage = request.reference_images?.[0]
-    ? normalizeAgnesVideoImageBase64(request.reference_images[0])
-    : undefined;
+  const referenceImages = (request.reference_images ?? [])
+    .map(normalizeAgnesVideoImageBase64)
+    .filter(Boolean);
+  const explicitMode = normalizeAgnesVideoMode(userExtra.agnesVideoMode ?? userExtra.videoMode ?? userExtra.mode);
+  const derivedMode = explicitMode
+    ?? (referenceImages.length === 0 ? 'text' : referenceImages.length === 1 ? 'image' : 'multi');
+  const defaultExtraBody = asPlainRecord(defaultRequestParams.extra_body) ?? {};
+  const userExtraBody = asPlainRecord(userExtra.extra_body) ?? {};
   delete userExtra.seconds;
   delete userExtra.duration;
   delete userExtra.size;
@@ -2320,7 +2502,27 @@ function buildAgnesVideoJsonBody(
   delete userExtra.input_reference;
   delete userExtra.inputReference;
   delete userExtra.image;
+  delete userExtra.images;
+  delete userExtra.mode;
+  delete userExtra.videoMode;
+  delete userExtra.agnesVideoMode;
   delete userExtra.frameRate;
+  delete userExtra.extra_body;
+
+  const shouldUseTopLevelImage = referenceImages.length === 1
+    && derivedMode !== 'keyframes'
+    && derivedMode !== 'text';
+  const shouldUseExtraBodyImages = referenceImages.length > 0
+    && derivedMode !== 'text'
+    && (derivedMode === 'keyframes' || derivedMode === 'multi' || referenceImages.length > 1);
+  const extraBody = compactRecord({
+    ...defaultExtraBody,
+    ...userExtraBody,
+    ...(shouldUseExtraBodyImages
+      ? { image: referenceImages }
+      : {}),
+    ...(derivedMode === 'keyframes' ? { mode: 'keyframes' } : {}),
+  });
 
   return compactRecord({
     model: modelName,
@@ -2331,13 +2533,12 @@ function buildAgnesVideoJsonBody(
     frame_rate: normalizedFrameRate,
     ...defaultRequestParams,
     ...userExtra,
-    ...(referenceImage ? {
-      image: referenceImage,
-      extra_body: {
-        ...(asPlainRecord(defaultRequestParams.extra_body) ?? {}),
-        ...(asPlainRecord(userExtra.extra_body) ?? {}),
-        image: referenceImage,
-      },
+    ...(shouldUseTopLevelImage ? {
+      image: referenceImages[0],
+      mode: 'ti2vid',
+    } : {}),
+    ...(Object.keys(extraBody).length > 0 ? {
+      extra_body: extraBody,
     } : {}),
   });
 }
@@ -2551,6 +2752,14 @@ async function resolveGeneratedVideoSource(
     ? taskIdRaw.trim()
     : (typeof taskIdRaw === 'number' && Number.isFinite(taskIdRaw) ? String(taskIdRaw) : null);
   if (!taskId) return null;
+
+  return await pollGeneratedVideoTask(cfg, taskId);
+}
+
+async function pollGeneratedVideoTask(
+  cfg: CustomProviderConfig,
+  taskId: string,
+): Promise<string> {
   const statusPath = typeof cfg.extraParams?.videoStatusPath === 'string' ? cfg.extraParams.videoStatusPath : 'status';
   const errorPath = typeof cfg.extraParams?.videoErrorPath === 'string' ? cfg.extraParams.videoErrorPath : 'error';
   const pendingValues = normalizeAsyncStatusValues(
@@ -2634,7 +2843,10 @@ async function resolveGeneratedVideoSource(
     }
   }
 
-  throw new Error('视频任务轮询超时，未获取到结果');
+  throw new VideoPollTimeoutError(
+    '视频任务轮询超时，未获取到结果',
+    { cfg, taskId },
+  );
 }
 
 async function materializeGeneratedVideoSource(
@@ -2717,6 +2929,52 @@ async function runCustomVideoJob(
     }
     cache.set(jobId, { job_id: jobId, status: 'succeeded', result: preparedVideoSource, error: null });
   } catch (err) {
+    if (err instanceof VideoPollTimeoutError) {
+      cache.set(jobId, {
+        job_id: jobId,
+        status: 'failed',
+        result: null,
+        error: err.message,
+        videoPollRetry: err.retryContext,
+      });
+      return;
+    }
+    cache.set(jobId, {
+      job_id: jobId,
+      status: 'failed',
+      result: null,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+async function retryCustomVideoPoll(jobId: string, retryContext: VideoPollRetryContext): Promise<void> {
+  try {
+    const videoSource = await pollGeneratedVideoTask(retryContext.cfg, retryContext.taskId);
+    let preparedVideoSource: string;
+    try {
+      preparedVideoSource = await materializeGeneratedVideoSource(retryContext.cfg, videoSource);
+    } catch (materializeError) {
+      cache.set(jobId, {
+        job_id: jobId,
+        status: 'failed',
+        result: asLightweightRetryResultSource(videoSource),
+        error: formatUnknownError(materializeError),
+      });
+      return;
+    }
+    cache.set(jobId, { job_id: jobId, status: 'succeeded', result: preparedVideoSource, error: null });
+  } catch (err) {
+    if (err instanceof VideoPollTimeoutError) {
+      cache.set(jobId, {
+        job_id: jobId,
+        status: 'failed',
+        result: null,
+        error: err.message,
+        videoPollRetry: err.retryContext,
+      });
+      return;
+    }
     cache.set(jobId, {
       job_id: jobId,
       status: 'failed',
@@ -3060,6 +3318,18 @@ export function getCustomProviderJob(jobId: string): GenerationJobStatus {
   return cached;
 }
 
+export function retryCustomProviderJob(jobId: string): boolean {
+  const cached = cache.get(jobId);
+  if (cached?.status === 'failed' && cached.videoPollRetry) {
+    const retryContext = cached.videoPollRetry;
+    const running: CachedJob = { job_id: jobId, status: 'running', result: null, error: null };
+    cache.set(jobId, running);
+    void retryCustomVideoPoll(jobId, retryContext);
+    return true;
+  }
+  return false;
+}
+
 /**
  * One-shot connectivity test for a draft custom provider. Meant to be wired
  * up to the 添加服务商 / 我的配置 form's 「测试连通」 button so the user can
@@ -3221,6 +3491,87 @@ function buildChatConnectivityBody(cfg: CustomProviderConfig, modelName: string)
   };
 }
 
+function extractOpenAiChatUserText(payload: unknown): string {
+  const messages = getValueByPath(payload, 'messages');
+  if (!Array.isArray(messages)) {
+    return '';
+  }
+  return messages
+    .map((message) => {
+      const content = (message as { content?: unknown } | null)?.content;
+      return textFromUnknown(content);
+    })
+    .filter((item): item is string => Boolean(item))
+    .join('\n\n')
+    .trim();
+}
+
+function resolveChatCompletionBody(
+  cfg: CustomProviderConfig,
+  modelName: string,
+  openAiPayload: unknown,
+): unknown {
+  const defaultParams = resolveDefaultRequestParams(cfg);
+  const payloadRecord = openAiPayload && typeof openAiPayload === 'object' && !Array.isArray(openAiPayload)
+    ? openAiPayload as Record<string, unknown>
+    : {};
+  const kind = chatProviderKind(cfg);
+
+  if (kind === 'openai-responses') {
+    return {
+      ...defaultParams,
+      model: modelName,
+      input: extractOpenAiChatUserText(openAiPayload),
+    };
+  }
+  if (kind === 'anthropic-messages') {
+    const messages = Array.isArray(payloadRecord.messages) ? payloadRecord.messages : [];
+    const systemMessage = messages.find((message) =>
+      (message as { role?: unknown } | null)?.role === 'system'
+    ) as { content?: unknown } | undefined;
+    const userMessages = messages.filter((message) =>
+      (message as { role?: unknown } | null)?.role !== 'system'
+    );
+    return {
+      ...defaultParams,
+      model: modelName,
+      system: textFromUnknown(systemMessage?.content) ?? undefined,
+      max_tokens: defaultParams.max_tokens ?? 2048,
+      messages: userMessages.map((message) => ({
+        role: (message as { role?: unknown }).role === 'assistant' ? 'assistant' : 'user',
+        content: textFromUnknown((message as { content?: unknown }).content) ?? '',
+      })),
+    };
+  }
+  if (kind === 'google-gemini') {
+    return {
+      ...defaultParams,
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: extractOpenAiChatUserText(openAiPayload) }],
+        },
+      ],
+    };
+  }
+
+  if (kind === 'agnes-chat') {
+    const normalizedPayload = { ...payloadRecord };
+    delete normalizedPayload.stream;
+    return {
+      ...defaultParams,
+      ...normalizedPayload,
+      model: modelName,
+    };
+  }
+
+  return {
+    ...defaultParams,
+    ...payloadRecord,
+    model: modelName,
+  };
+}
+
 function textFromUnknown(value: unknown): string | null {
   if (typeof value === 'string' && value.trim()) return value.trim();
   if (Array.isArray(value)) {
@@ -3300,6 +3651,42 @@ export async function testCustomChatProviderConnectivity(
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, errorMessage: `请求失败：${msg}` };
   }
+}
+
+export async function submitCustomChatCompletion(
+  catalogModelId: string,
+  openAiPayload: unknown,
+): Promise<CustomChatCompletionResult> {
+  const resolved = resolveProviderAndModel(catalogModelId);
+  if (!resolved) {
+    throw new Error('未找到可用的文本模型配置');
+  }
+  const { cfg, model } = resolved;
+  if (!isChatCustomProvider(cfg)) {
+    throw new Error('所选模型不是文本对话模型');
+  }
+  if (!hasCustomProviderCredential(cfg)) {
+    throw new Error('未填写 API Key，无法发起文本生成');
+  }
+  if (!cfg.baseUrl?.trim()) {
+    throw new Error('未填写 API 根地址，无法发起文本生成');
+  }
+
+  const url = resolveChatEndpointUrl(cfg, model);
+  const headers = buildChatRequestHeaders(cfg, 'POST');
+  const body = resolveChatCompletionBody(cfg, model, openAiPayload);
+  const { status, parsed } = await requestJson(url, {
+    method: 'POST',
+    headers,
+    bodyMode: 'json',
+    body,
+    timeoutMs: 180000,
+  });
+  const extractedText = extractChatText(parsed);
+  if (!extractedText) {
+    throw new Error(`响应中未找到文本内容。响应预览：${previewPayload(parsed)}`);
+  }
+  return { text: extractedText, status, raw: parsed };
 }
 
 export async function testCustomProviderConnectivity(

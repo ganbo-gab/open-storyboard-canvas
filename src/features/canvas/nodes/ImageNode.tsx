@@ -88,9 +88,10 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
     () => resolveNodeDisplayName(type as CanvasNodeType, data),
     [data, type]
   );
-  const generationElapsedText = formatGenerationElapsedMs(
-    (data as { generationElapsedMs?: unknown }).generationElapsedMs
-  );
+  const liveGenerationElapsedMs = isGenerating && generationStartedAt !== null
+    ? Math.max(0, now - generationStartedAt)
+    : (data as { generationElapsedMs?: unknown }).generationElapsedMs;
+  const generationElapsedText = formatGenerationElapsedMs(liveGenerationElapsedMs);
 
   useEffect(() => {
     updateNodeInternals(id);
@@ -103,7 +104,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
 
     const timer = window.setInterval(() => {
       setNow(Date.now());
-    }, 120);
+    }, 100);
 
     return () => {
       window.clearInterval(timer);
@@ -150,6 +151,13 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
       : data.previewImageUrl || data.imageUrl;
     return picked ? resolveImageDisplayUrl(picked) : null;
   }, [data.imageUrl, data.previewImageUrl, zoom]);
+
+  const imageFallbackSources = useMemo(() => {
+    const sources = [data.imageUrl, data.previewImageUrl]
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      .map((item) => resolveImageDisplayUrl(item));
+    return Array.from(new Set(sources));
+  }, [data.imageUrl, data.previewImageUrl]);
 
   // 获取原图 URL 用于查看器
   const originalImageUrl = useMemo(() => {
@@ -258,6 +266,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
           <>
             <CanvasNodeImage
               src={imageSource ?? ''}
+              fallbackSrcs={imageFallbackSources}
               alt={isExportResultNode ? t('node.imageNode.resultAlt') : t('node.imageNode.generatedAlt')}
               viewerSourceUrl={originalImageUrl}
               className="h-full w-full object-contain"

@@ -11,6 +11,7 @@ import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canv
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
 import { TextPreviewModal } from '@/features/canvas/ui/TextPreviewModal';
 import { formatGenerationElapsedMs } from '@/features/canvas/ui/generationElapsed';
+import { clearBrowserTextSelection } from '@/features/canvas/application/textSelection';
 import { useCanvasStore } from '@/stores/canvasStore';
 
 type TextAnnotationNodeProps = NodeProps & {
@@ -67,7 +68,7 @@ export const TextAnnotationNode = memo(({
       return;
     }
 
-    const timer = window.setInterval(() => setNow(Date.now()), 120);
+    const timer = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(timer);
   }, [isGenerating]);
 
@@ -179,9 +180,7 @@ export const TextAnnotationNode = memo(({
           />
         ) : (
           <div
-            className="nodrag nowheel h-full w-full overflow-auto px-1 py-0.5 text-sm leading-6 text-text-dark"
-            onMouseDown={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
+            className="nowheel h-full w-full overflow-auto px-1 py-0.5 text-sm leading-6 text-text-dark"
             onDoubleClick={(event) => {
               event.stopPropagation();
               setSelectedNode(id);
@@ -210,6 +209,7 @@ export const TextAnnotationNode = memo(({
           type="source"
           id="source"
           position={Position.Right}
+          onPointerDownCapture={clearBrowserTextSelection}
           className="!h-2 !w-2 !border-surface-dark !bg-accent"
         />
 

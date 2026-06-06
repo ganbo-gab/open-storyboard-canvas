@@ -8,27 +8,27 @@ const AGNES_DOCS = [
   {
     title: 'Agnes 2.0 Flash',
     url: 'https://agnes-ai.com/doc/agnes-20-flash',
-    note: '文本对话模型说明。后续 chat 调用层可读取这里保存的 Agnes Key。',
+    note: '多模态文本模型。官方支持 stream / tools / thinking；当前应用默认使用非流式 JSON 兼容模式。',
   },
   {
     title: 'Agnes 1.5 Flash',
     url: 'https://agnes-ai.com/doc/agnes-15-flash',
-    note: '文本对话模型说明。当前已作为 Agnes Chat 默认模型展示。',
+    note: '多模态文本模型。保存的 Agnes Key 会用于 AI 文本节点的非流式对话请求。',
   },
   {
     title: 'Agnes Image 2.1 Flash',
     url: 'https://agnes-ai.com/doc/agnes-image-21-flash',
-    note: '图片生成模型说明。后续图片调用层可读取这里保存的 Agnes Key。',
+    note: '图片生成模型。保存的 Agnes Key 会用于 AI 图片节点，默认优先请求 base64 结果。',
   },
   {
     title: 'Agnes Image 2.0 Flash',
     url: 'https://agnes-ai.com/doc/agnes-image-20-flash',
-    note: '图片生成兼容说明。当前先提供 key 管理和文档入口。',
+    note: '图片生成 / 多参考图模型。参考图会按官方 image 数组发送。',
   },
   {
     title: 'Agnes Video v2.0',
     url: 'https://agnes-ai.com/doc/agnes-video-v20',
-    note: '视频生成模型说明。后续视频调用层可接入该 key。',
+    note: '视频生成模型。保存的 Agnes Key 会用于 AI 视频节点，支持文生、图生、多参考和关键帧模式。',
   },
 ];
 
@@ -53,7 +53,7 @@ export const AgnesSettingsSection = memo(function AgnesSettingsSection() {
       <div>
         <h2 className="text-base font-semibold text-text-dark">Agnes</h2>
         <p className="mt-1 text-xs leading-5 text-text-muted">
-          独立管理 Agnes Key，并保留文本 / 图片 / 视频模型说明入口。当前不会自动改动现有图片供应商配置。
+          独立管理 Agnes Key。保存后会用于 Agnes AI 图片、AI 视频和 AI 文本模型；不会自动改动你在「我的配置」里保存的其他供应商。
         </p>
       </div>
 
@@ -106,7 +106,7 @@ export const AgnesSettingsSection = memo(function AgnesSettingsSection() {
       </div>
 
       <div className="rounded-lg border border-dashed border-border-dark bg-bg-dark/50 p-3 text-[11px] leading-5 text-text-muted">
-        Agnes 文档页面当前由前端渲染，静态正文不稳定；这里先保存独立 key 与文本 / 图片 / 视频模型说明入口，后续后端 / 前端调用层可通过 `settingsStore.agnesApiKey` 读取。
+        Agnes Chat 2.0 官方支持流式、工具调用和 thinking 参数；当前网关以非流式 JSON 响应为默认兼容策略，避免 SSE 响应被普通 JSON 解析器误读。
       </div>
     </div>
   );

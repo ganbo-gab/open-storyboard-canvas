@@ -8,6 +8,7 @@ export interface TextRange {
 export interface ReferenceTokenMatch extends TextRange {
   token: string;
   value: number;
+  prefix: string;
 }
 
 interface TokenRange extends TextRange {
@@ -31,16 +32,22 @@ function isAsciiDigit(char: string): boolean {
   return char >= '0' && char <= '9';
 }
 
-export function findReferenceTokens(text: string, maxImageCount?: number): ReferenceTokenMatch[] {
+export function findReferenceTokens(text: string, maxReferenceCount?: number): ReferenceTokenMatch[] {
   const tokens: ReferenceTokenMatch[] = [];
-  const maxReferenceNumber = resolveMaxReferenceNumber(maxImageCount);
+  const maxReferenceNumber = resolveMaxReferenceNumber(maxReferenceCount);
+  const prefixes = ['图', '视频', '文本'];
 
   for (let index = 0; index < text.length; index += 1) {
-    if (text[index] !== '@' || text[index + 1] !== '图') {
+    if (text[index] !== '@') {
       continue;
     }
 
-    const digitsStart = index + 2;
+    const prefix = prefixes.find((candidate) => text.startsWith(candidate, index + 1));
+    if (!prefix) {
+      continue;
+    }
+
+    const digitsStart = index + 1 + prefix.length;
     if (!isAsciiDigit(text[digitsStart] ?? '')) {
       continue;
     }
@@ -58,6 +65,7 @@ export function findReferenceTokens(text: string, maxImageCount?: number): Refer
           end: digitsEnd,
           token: text.slice(index, digitsEnd),
           value: fullValue,
+          prefix,
         });
         index = digitsEnd - 1;
       }
@@ -86,6 +94,7 @@ export function findReferenceTokens(text: string, maxImageCount?: number): Refer
         end: bestEnd,
         token: text.slice(index, bestEnd),
         value: bestValue,
+        prefix,
       });
       index = bestEnd - 1;
     }

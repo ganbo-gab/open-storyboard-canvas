@@ -23,6 +23,7 @@ import {
 } from '@/features/canvas/application/generatedMediaNaming';
 import {
   copyImageSourceToClipboard,
+  saveImageSourceToDownloads,
   saveImageSourceToDirectory,
   saveImageSourceToPath,
   saveVideoSourceToDirectory,
@@ -438,6 +439,18 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
     }
   }, [closeDownloadMenu, rawImageSource, showFeedbackToast, suggestedImageSavePath, t]);
 
+  const handleDownloadToDownloads = useCallback(async () => {
+    if (!rawImageSource) return;
+    try {
+      await saveImageSourceToDownloads(rawImageSource, suggestedImageStem);
+      closeDownloadMenu();
+      showFeedbackToast(t('nodeToolbar.downloadSuccess'));
+    } catch (error) {
+      console.error('Failed to save image to downloads', error);
+      showFeedbackToast(t('nodeToolbar.downloadFailed'), 'error');
+    }
+  }, [closeDownloadMenu, rawImageSource, showFeedbackToast, suggestedImageStem, t]);
+
   const handleDownloadToPreset = useCallback(
     async (targetDir: string) => {
       if (!rawImageSource) return;
@@ -826,7 +839,7 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
             onClick={(event) => {
               event.stopPropagation();
               if (normalizedDownloadPresetPaths.length === 0) {
-                void handleDownloadSaveAs();
+                void handleDownloadToDownloads();
                 return;
               }
               if (normalizedDownloadPresetPaths.length === 1) {

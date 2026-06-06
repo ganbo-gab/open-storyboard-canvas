@@ -3,11 +3,12 @@ export function formatGenerationElapsedMs(value: unknown): string | null {
     return null;
   }
 
-  const totalSeconds = Math.max(0, Math.round(value / 1000));
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
+  const elapsedMs = Math.max(0, Math.floor(value));
+  if (elapsedMs < 60000) {
+    return `${(Math.floor(elapsedMs / 100) / 10).toFixed(1)}s`;
   }
 
+  const totalSeconds = Math.floor(elapsedMs / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;

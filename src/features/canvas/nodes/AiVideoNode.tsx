@@ -20,11 +20,16 @@ import {
   type AiVideoNodeData,
 } from '@/features/canvas/domain/canvasNodes';
 import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
-import { graphImageResolver } from '@/features/canvas/application/graphImageResolver';
 import {
   parseInputImageSignature,
+  parseInputReferenceSignature,
   selectInputImageSignature,
+  selectInputReferenceSignature,
 } from '@/features/canvas/application/canvasGraphSelectors';
+import {
+  buildReferenceContextPrompt,
+  collectInputReferences,
+} from '@/features/canvas/application/graphReferenceResolver';
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
 import { resolveErrorContent, showErrorDialog } from '@/features/canvas/application/errorDialog';
 import {
@@ -85,7 +90,7 @@ const VIDEO_GENERATION_PROGRESS_DURATION_MS = 15 * 60 * 1000;
 
 function findReferenceTokens(prompt: string, maxImageCount: number): Array<{ token: string; start: number }> {
   const matches: Array<{ token: string; start: number }> = [];
-  const regex = /@?图(\d+)/g;
+  const regex = /@?(?:图|视频|文本)(\d+)/g;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(prompt)) !== null) {
     const imageIndex = Number(match[1]);
@@ -148,6 +153,18 @@ function serializeDebugJson(value: unknown): string {
   }
 }
 
+function defaultDurationForVideoEntry(entry: VideoCatalogEntry): string {
+  if (entry.providerId === 'agnes' && entry.supportedDurations.includes('5')) {
+    return '5';
+  }
+  return entry.supportedDurations[0] ?? '4';
+}
+
+function resolveAgnesVideoMode(extraParams: Record<string, unknown> | undefined): 'keyframes' | null {
+  const raw = extraParams?.agnesVideoMode ?? extraParams?.videoMode ?? extraParams?.mode;
+  return typeof raw === 'string' && raw.toLowerCase() === 'keyframes' ? 'keyframes' : null;
+}
+
 interface VideoGenerationRequestAssembly {
   prompt: string;
   latestModelConfig: VideoModelConfigValue;
@@ -186,21 +203,31 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
   const incomingImageSignature = useCanvasStore((state) =>
     selectInputImageSignature(id, state.nodes, state.edges)
   );
+  const incomingReferenceSignature = useCanvasStore((state) =>
+    selectInputReferenceSignature(id, state.nodes, state.edges)
+  );
   const incomingImages = useMemo(
     () => parseInputImageSignature(incomingImageSignature),
     [incomingImageSignature]
   );
-  const incomingImageItems = useMemo(
-    () => incomingImages.map((imageUrl, index) => ({
-      imageUrl,
-      displayUrl: resolveImageDisplayUrl(imageUrl),
-      label: `图${index + 1}`,
-    })),
-    [incomingImages]
+  const incomingReferences = useMemo(
+    () => parseInputReferenceSignature(incomingReferenceSignature),
+    [incomingReferenceSignature]
   );
   const incomingViewerList = useMemo(
     () => incomingImages.map((imageUrl) => resolveImageDisplayUrl(imageUrl)),
     [incomingImages]
+  );
+  const incomingReferenceItems = useMemo(
+    () => incomingReferences.map((reference) => ({
+      ...reference,
+      displayUrl: reference.kind === 'image' && reference.imageUrl
+        ? resolveImageDisplayUrl(reference.imageUrl)
+        : reference.kind === 'video' && reference.thumbnailUrl
+          ? resolveImageDisplayUrl(reference.thumbnailUrl)
+          : null,
+    })),
+    [incomingReferences]
   );
 
   const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
@@ -218,6 +245,8 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     () => resolveConfigEntry(catalog, resolvedModelConfig),
     [catalog, resolvedModelConfig]
   );
+  const isAgnesVideoModel = selectedEntry?.providerId === 'agnes';
+  const agnesVideoMode = resolveAgnesVideoMode(resolvedModelConfig?.extraParams);
   const entriesByProvider = useMemo(() => {
     const map = new Map<string, VideoCatalogEntry[]>();
     for (const entry of catalog) {
@@ -311,7 +340,10 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
   }, []);
 
   const insertReferenceToken = useCallback((index: number) => {
-    const marker = `图${index + 1}`;
+    const marker = incomingReferenceItems[index]?.token ?? '';
+    if (!marker) {
+      return;
+    }
     const textarea = promptRef.current;
     const current = promptDraftRef.current;
     const cursor = textarea?.selectionStart ?? current.length;
@@ -327,12 +359,31 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
       promptRef.current?.setSelectionRange(nextCursor, nextCursor);
       syncPromptHighlightScroll();
     });
-  }, [flushPromptDraft, syncPromptHighlightScroll]);
+  }, [flushPromptDraft, incomingReferenceItems, syncPromptHighlightScroll]);
 
   const handleConfigChange = useCallback((patch: Partial<VideoModelConfigValue>) => {
     const base = resolvedModelConfig ?? resolveVideoModelConfig(catalog, null);
     if (!base) return;
     updateNodeData(id, { modelConfig: { ...base, ...patch } });
+  }, [catalog, id, resolvedModelConfig, updateNodeData]);
+
+  const handleAgnesVideoModeChange = useCallback((mode: 'multi' | 'keyframes') => {
+    const base = resolvedModelConfig ?? resolveVideoModelConfig(catalog, null);
+    if (!base) return;
+    const nextExtraParams = { ...(base.extraParams ?? {}) };
+    if (mode === 'keyframes') {
+      nextExtraParams.agnesVideoMode = 'keyframes';
+    } else {
+      delete nextExtraParams.agnesVideoMode;
+      delete nextExtraParams.videoMode;
+      delete nextExtraParams.mode;
+    }
+    updateNodeData(id, {
+      modelConfig: {
+        ...base,
+        extraParams: nextExtraParams,
+      },
+    });
   }, [catalog, id, resolvedModelConfig, updateNodeData]);
 
   const closeOpenPopovers = useCallback(() => {
@@ -369,12 +420,18 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     );
     const latestModelConfig = resolveVideoModelConfig(latestCatalog, latestData.modelConfig ?? resolvedModelConfig);
     const latestEntry = resolveConfigEntry(latestCatalog, latestModelConfig);
-    const prompt = latestPromptDraft.replace(/@(?=图\d+)/g, '').trim();
-    const latestIncomingImages = graphImageResolver.collectInputImages(
-      id,
-      latestCanvasState.nodes,
-      latestCanvasState.edges
-    );
+    const basePrompt = latestPromptDraft.replace(/@(?=(?:图|视频|文本)\d+)/g, '').trim();
+    const latestReferences = collectInputReferences(id, latestCanvasState.nodes, latestCanvasState.edges);
+    const referenceContextPrompt = buildReferenceContextPrompt(latestReferences);
+    const prompt = referenceContextPrompt
+      ? `${referenceContextPrompt}\n\n${basePrompt}`
+      : basePrompt;
+    const latestIncomingImages = latestReferences
+      .filter((reference) => reference.kind === 'image' && reference.imageUrl)
+      .map((reference) => reference.imageUrl as string);
+    const latestIncomingVideos = latestReferences
+      .filter((reference) => reference.kind === 'video' && reference.videoUrl)
+      .map((reference) => reference.videoUrl as string);
 
     if (!prompt) {
       const message = t('node.aiVideo.promptRequired');
@@ -398,6 +455,10 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
       aspectRatioFromPixelResolution(latestModelConfig.resolution)
       ?? latestModelConfig.aspectRatio
       ?? '16:9';
+    const extraParams = { ...(latestModelConfig.extraParams ?? {}) };
+    if (latestEntry.providerId === 'agnes' && latestIncomingVideos[0]) {
+      extraParams.video_url = extraParams.video_url ?? extraParams.videoUrl ?? latestIncomingVideos[0];
+    }
 
     return {
       prompt,
@@ -412,7 +473,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         aspectRatio: latestModelConfig.aspectRatio,
         seconds: Number(latestModelConfig.duration) || undefined,
         referenceImages: latestIncomingImages,
-        extraParams: latestModelConfig.extraParams,
+        extraParams,
       },
     };
   }, [data, flushPromptDraft, id, resolvedModelConfig, t]);
@@ -585,7 +646,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
   }, [handleGenerate, id]);
 
   const handlePromptKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === '@' && incomingImages.length > 0) {
+    if (event.key === '@' && incomingReferenceItems.length > 0) {
       event.preventDefault();
       setReferencePickerOpen(true);
       setProviderOpen(false);
@@ -602,7 +663,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
       event.preventDefault();
       void handleGenerate();
     }
-  }, [handleGenerate, incomingImages.length, referencePickerOpen]);
+  }, [handleGenerate, incomingReferenceItems.length, referencePickerOpen]);
 
   const handlePickProvider = useCallback((providerLabel: string) => {
     const entry = entriesByProvider.get(providerLabel)?.find((candidate) => candidate.usable);
@@ -610,7 +671,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     updateNodeData(id, {
       modelConfig: {
         entryId: entry.id,
-        duration: entry.supportedDurations[0] ?? '4',
+        duration: defaultDurationForVideoEntry(entry),
         resolution: entry.supportedResolutions[0] ?? '1280x720',
         aspectRatio: entry.supportedAspectRatios[0] ?? '16:9',
         extraParams: resolvedModelConfig?.extraParams ?? {},
@@ -626,7 +687,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         entryId: entry.id,
         duration: resolvedModelConfig?.duration && entry.supportedDurations.includes(resolvedModelConfig.duration)
           ? resolvedModelConfig.duration
-          : entry.supportedDurations[0] ?? '4',
+          : defaultDurationForVideoEntry(entry),
         resolution: resolvedModelConfig?.resolution && entry.supportedResolutions.includes(resolvedModelConfig.resolution)
           ? resolvedModelConfig.resolution
           : entry.supportedResolutions[0] ?? '1280x720',
@@ -687,7 +748,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             style={{ scrollbarGutter: 'stable' }}
           >
             <div className="min-h-full whitespace-pre-wrap break-words px-1 py-0.5">
-              {renderPromptWithHighlights(promptDraft, incomingImages.length)}
+              {renderPromptWithHighlights(promptDraft, incomingReferences.length)}
             </div>
           </div>
           <textarea
@@ -709,15 +770,15 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
           />
         </div>
 
-        {referencePickerOpen && incomingImageItems.length > 0 && (
+        {referencePickerOpen && incomingReferenceItems.length > 0 && (
           <div
             className="nowheel absolute left-3 top-3 z-30 w-[140px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="ui-scrollbar nowheel max-h-[220px] overflow-y-auto">
-              {incomingImageItems.map((item, index) => (
+              {incomingReferenceItems.map((item, index) => (
                 <button
-                  key={`${item.imageUrl}-${index}`}
+                  key={`${item.kind}-${item.sourceNodeId}-${index}`}
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
@@ -725,14 +786,20 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                   }}
                   className="flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[var(--canvas-node-field-border)] hover:bg-[var(--canvas-node-menu-hover)]"
                 >
-                  <CanvasNodeImage
-                    src={item.displayUrl}
-                    alt={item.label}
-                    viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl)}
-                    viewerImageList={incomingViewerList}
-                    className="h-8 w-8 rounded object-cover"
-                    draggable={false}
-                  />
+                  {item.kind === 'image' && item.displayUrl ? (
+                    <CanvasNodeImage
+                      src={item.displayUrl}
+                      alt={item.label}
+                      viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl ?? item.displayUrl)}
+                      viewerImageList={incomingViewerList}
+                      className="h-8 w-8 rounded object-cover"
+                      draggable={false}
+                    />
+                  ) : (
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[var(--canvas-node-button-bg)] text-[10px] font-semibold text-text-muted">
+                      {item.kind === 'video' ? 'V' : 'T'}
+                    </span>
+                  )}
                   <span>{item.label}</span>
                 </button>
               ))}
@@ -881,26 +948,75 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
               >
                 <div>
                   <div className="mb-1 text-[10px] text-text-muted">{t('node.aiVideo.duration')}</div>
-                  <div className="flex flex-wrap gap-1">
-                    {selectedEntry.supportedDurations.map((duration) => {
-                      const active = resolvedModelConfig.duration === duration;
-                      return (
-                        <button
-                          key={duration}
-                          type="button"
-                          onClick={() => handleConfigChange({ duration })}
-                          className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
-                            active
-                              ? 'border-accent/60 bg-accent/15 text-accent'
-                              : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'
-                          }`}
-                        >
-                          {duration}s
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {isAgnesVideoModel ? (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={1}
+                          max={18}
+                          step={1}
+                          value={Math.min(18, Math.max(1, Number(resolvedModelConfig.duration) || 5))}
+                          onChange={(event) => handleConfigChange({ duration: event.target.value })}
+                          className="nodrag nowheel h-5 min-w-0 flex-1 accent-accent"
+                        />
+                        <span className="w-10 text-right text-[11px] font-medium text-text-dark">
+                          {resolvedModelConfig.duration}s
+                        </span>
+                      </div>
+                      <div className="text-[10px] leading-4 text-text-muted">
+                        {t('node.aiVideo.agnesDurationHint')}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1">
+                      {selectedEntry.supportedDurations.map((duration) => {
+                        const active = resolvedModelConfig.duration === duration;
+                        return (
+                          <button
+                            key={duration}
+                            type="button"
+                            onClick={() => handleConfigChange({ duration })}
+                            className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
+                              active
+                                ? 'border-accent/60 bg-accent/15 text-accent'
+                                : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'
+                            }`}
+                          >
+                            {duration}s
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
+                {isAgnesVideoModel && incomingImages.length > 1 && (
+                  <div>
+                    <div className="mb-1 text-[10px] text-text-muted">{t('node.aiVideo.agnesMode')}</div>
+                    <div className="grid grid-cols-2 gap-1">
+                      {([
+                        ['multi', t('node.aiVideo.agnesModeMulti')],
+                        ['keyframes', t('node.aiVideo.agnesModeKeyframes')],
+                      ] as const).map(([mode, label]) => {
+                        const active = mode === 'keyframes' ? agnesVideoMode === 'keyframes' : agnesVideoMode !== 'keyframes';
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => handleAgnesVideoModeChange(mode)}
+                            className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
+                              active
+                                ? 'border-accent/60 bg-accent/15 text-accent'
+                                : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 <div>
                   <div className="mb-1 text-[10px] text-text-muted">{t('node.aiVideo.aspectRatio')}</div>
                   <div className="flex flex-wrap gap-1">
@@ -950,7 +1066,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
           </div>
         )}
 
-        {incomingImages.length > 0 && (
+        {incomingReferenceItems.length > 0 && (
           <UiButton
             onClick={(event) => {
               event.stopPropagation();
@@ -962,7 +1078,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             variant="muted"
             className={`shrink-0 ${NODE_CONTROL_CHIP_CLASS}`}
           >
-            <span>{incomingImages.length}图</span>
+            <span>{t('node.aiVideo.referenceCount', { count: incomingReferenceItems.length })}</span>
           </UiButton>
         )}
         <UiButton

@@ -31,9 +31,11 @@ export interface VideoModelConfigValue {
 }
 
 const DEFAULT_DURATIONS = ['4', '8', '12'];
+const AGNES_DURATIONS = Array.from({ length: 18 }, (_, index) => String(index + 1));
 const DEFAULT_RESOLUTIONS = ['1280x720', '720x1280', '1024x1024'];
 const DEFAULT_ASPECT_RATIOS = ['16:9', '9:16', '1:1'];
 const AGNES_VIDEO_RESOLUTIONS = [...AGNES_PROVIDER_DEFAULTS.videoResolutions];
+const AGNES_DEFAULT_DURATION = '5';
 
 function uniqueStrings(values: unknown, fallback: string[]): string[] {
   if (!Array.isArray(values)) {
@@ -116,7 +118,7 @@ export function buildVideoModelCatalog(
         providerLabel: 'Agnes',
         modelId,
         modelLabel,
-        supportedDurations: ['4', '8', '12'],
+        supportedDurations: AGNES_DURATIONS,
         supportedResolutions: AGNES_VIDEO_RESOLUTIONS,
         supportedAspectRatios: DEFAULT_ASPECT_RATIOS,
         usable: true,
@@ -146,9 +148,12 @@ export function resolveVideoModelConfig(
   if (!entry) {
     return undefined;
   }
+  const defaultDuration = entry.providerId === 'agnes' && entry.supportedDurations.includes(AGNES_DEFAULT_DURATION)
+    ? AGNES_DEFAULT_DURATION
+    : entry.supportedDurations[0] ?? DEFAULT_DURATIONS[0];
   const duration = current?.duration && entry.supportedDurations.includes(current.duration)
     ? current.duration
-    : entry.supportedDurations[0] ?? DEFAULT_DURATIONS[0];
+    : defaultDuration;
   const resolution = current?.resolution && entry.supportedResolutions.includes(current.resolution)
     ? current.resolution
     : entry.supportedResolutions[0] ?? DEFAULT_RESOLUTIONS[0];

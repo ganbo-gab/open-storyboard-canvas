@@ -88,6 +88,7 @@ interface SettingsState {
   appendParameterConstraintsToPrompt: boolean;
   collapseNodeActionToolbarByDefault: boolean;
   showNodePayloadPreview: boolean;
+  enableAiTextStreaming: boolean;
   enableStoryboardGenGridPreviewShortcut: boolean;
   showStoryboardGenAdvancedRatioControls: boolean;
   useLegacyPanoramaControlDirection: boolean;
@@ -125,6 +126,7 @@ interface SettingsState {
   setAppendParameterConstraintsToPrompt: (enabled: boolean) => void;
   setCollapseNodeActionToolbarByDefault: (enabled: boolean) => void;
   setShowNodePayloadPreview: (enabled: boolean) => void;
+  setEnableAiTextStreaming: (enabled: boolean) => void;
   setEnableStoryboardGenGridPreviewShortcut: (enabled: boolean) => void;
   setShowStoryboardGenAdvancedRatioControls: (enabled: boolean) => void;
   setUseLegacyPanoramaControlDirection: (enabled: boolean) => void;
@@ -493,6 +495,7 @@ export const useSettingsStore = create<SettingsState>()(
       appendParameterConstraintsToPrompt: false,
       collapseNodeActionToolbarByDefault: false,
       showNodePayloadPreview: false,
+      enableAiTextStreaming: false,
       enableStoryboardGenGridPreviewShortcut: false,
       showStoryboardGenAdvancedRatioControls: false,
       useLegacyPanoramaControlDirection: false,
@@ -549,6 +552,8 @@ export const useSettingsStore = create<SettingsState>()(
         set({ collapseNodeActionToolbarByDefault: enabled }),
       setShowNodePayloadPreview: (enabled) =>
         set({ showNodePayloadPreview: enabled }),
+      setEnableAiTextStreaming: (enabled) =>
+        set({ enableAiTextStreaming: enabled }),
       setEnableStoryboardGenGridPreviewShortcut: (enabled) =>
         set({ enableStoryboardGenGridPreviewShortcut: enabled }),
       setShowStoryboardGenAdvancedRatioControls: (enabled) =>
@@ -810,6 +815,7 @@ export const useSettingsStore = create<SettingsState>()(
           appendParameterConstraintsToPrompt?: boolean;
           collapseNodeActionToolbarByDefault?: boolean;
           showNodePayloadPreview?: boolean;
+          enableAiTextStreaming?: boolean;
           grsaiNanoBananaProModel?: string;
           hideProviderGuidePopover?: boolean;
           canvasEdgeRoutingMode?: CanvasEdgeRoutingMode | string;
@@ -846,6 +852,7 @@ export const useSettingsStore = create<SettingsState>()(
         const collapseNodeActionToolbarByDefault =
           state.collapseNodeActionToolbarByDefault ?? false;
         const showNodePayloadPreview = state.showNodePayloadPreview ?? false;
+        const enableAiTextStreaming = state.enableAiTextStreaming ?? false;
         const migratedLightingTemplate = (() => {
           const trimmed = state.lightingPromptTemplate?.trim() ?? '';
           if (!trimmed) return DEFAULT_LIGHTING_PROMPT_TEMPLATE;
@@ -880,6 +887,7 @@ export const useSettingsStore = create<SettingsState>()(
             appendParameterConstraintsToPrompt,
             collapseNodeActionToolbarByDefault,
             showNodePayloadPreview,
+            enableAiTextStreaming,
             grsaiNanoBananaProModel: normalizeGrsaiNanoBananaProModel(
               state.grsaiNanoBananaProModel
             ),
@@ -922,6 +930,7 @@ export const useSettingsStore = create<SettingsState>()(
           appendParameterConstraintsToPrompt,
           collapseNodeActionToolbarByDefault,
           showNodePayloadPreview,
+          enableAiTextStreaming,
           grsaiNanoBananaProModel: normalizeGrsaiNanoBananaProModel(
             state.grsaiNanoBananaProModel
           ),
