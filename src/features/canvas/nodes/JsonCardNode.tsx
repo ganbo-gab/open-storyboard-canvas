@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Braces, Expand, LoaderCircle } from 'lucide-react';
 
@@ -35,6 +35,9 @@ const MIN_WIDTH = 360;
 const MIN_HEIGHT = 240;
 const MAX_WIDTH = 1600;
 const MAX_HEIGHT = 1100;
+const DEFAULT_STRUCTURED_COLUMN_WIDTH = 220;
+const MIN_STRUCTURED_COLUMN_WIDTH = 96;
+const MAX_STRUCTURED_COLUMN_WIDTH = 720;
 
 function safeStringify(value: unknown): string {
   try {
@@ -168,6 +171,33 @@ function resolveRowValue(row: unknown, path: string, pathPrefixTokens: string[])
   return formatDisplayValue(getValueByJsonPath(row, normalizeRowPath(path, pathPrefixTokens)));
 }
 
+function resolveStructuredColumnKey(group: StructuredTableGroup, field: ResolvedDisplayField): string {
+  return `${group.key}::${field.path}`;
+}
+
+function resolveStructuredColumnWidth(
+  widths: Record<string, number> | undefined,
+  group: StructuredTableGroup,
+  field: ResolvedDisplayField
+): number {
+  const key = resolveStructuredColumnKey(group, field);
+  const width = widths?.[key];
+  if (typeof width !== 'number' || !Number.isFinite(width)) {
+    return DEFAULT_STRUCTURED_COLUMN_WIDTH;
+  }
+  return Math.min(MAX_STRUCTURED_COLUMN_WIDTH, Math.max(MIN_STRUCTURED_COLUMN_WIDTH, Math.round(width)));
+}
+
+function resolveStructuredTableWidth(
+  widths: Record<string, number>,
+  group: StructuredTableGroup
+): number {
+  return group.fields.reduce(
+    (total, field) => total + resolveStructuredColumnWidth(widths, group, field),
+    0
+  );
+}
+
 function resolveGroupedFieldLabel(field: ResolvedDisplayField, pathPrefixTokens: string[]): string {
   const label = field.label.trim();
   const tokens = tokenizeJsonPath(field.path);
@@ -198,6 +228,7 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
   const textAgents = useSettingsStore((state) => state.textAgents);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [columnWidthPreview, setColumnWidthPreview] = useState<Record<string, number>>({});
 
   const rawResolvedJson = useMemo(() => {
     if (!data.rawContent.trim()) {
@@ -256,6 +287,23 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
   );
   const shouldShowStructuredTable = !isStreaming && tableGroups.length > 0;
   const shouldShowStructuredFields = !isStreaming && fieldBlocks.length > 0;
+  const structuredColumnWidths = useMemo(
+    () => (
+      data.structuredColumnWidths
+      && typeof data.structuredColumnWidths === 'object'
+      && !Array.isArray(data.structuredColumnWidths)
+        ? data.structuredColumnWidths
+        : {}
+    ),
+    [data.structuredColumnWidths]
+  );
+  const effectiveColumnWidths = useMemo(
+    () => ({
+      ...structuredColumnWidths,
+      ...columnWidthPreview,
+    }),
+    [columnWidthPreview, structuredColumnWidths]
+  );
   const prettyJson = useMemo(() => {
     if (effectiveParsedJson !== null && effectiveParsedJson !== undefined) {
       return safeStringify(effectiveParsedJson);
@@ -324,6 +372,49 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
       prompt: selectedText.trim(),
     });
     setSelectedNode(newNodeId);
+  };
+
+  const startColumnResize = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    group: StructuredTableGroup,
+    field: ResolvedDisplayField
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const columnKey = resolveStructuredColumnKey(group, field);
+    const startX = event.clientX;
+    const startWidth = resolveStructuredColumnWidth(effectiveColumnWidths, group, field);
+    let latestWidth = startWidth;
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      latestWidth = Math.min(
+        MAX_STRUCTURED_COLUMN_WIDTH,
+        Math.max(MIN_STRUCTURED_COLUMN_WIDTH, Math.round(startWidth + moveEvent.clientX - startX))
+      );
+      setColumnWidthPreview((previous) => ({
+        ...previous,
+        [columnKey]: latestWidth,
+      }));
+    };
+
+    const handlePointerUp = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      setColumnWidthPreview((previous) => {
+        const next = { ...previous };
+        delete next[columnKey];
+        return next;
+      });
+      updateNodeData(id, {
+        structuredColumnWidths: {
+          ...structuredColumnWidths,
+          [columnKey]: latestWidth,
+        },
+      });
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp, { once: true });
   };
 
   return (
@@ -406,18 +497,37 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
                       {group.label} · {group.rows.length}行
                     </div>
                   ) : null}
-                  <table className="w-full table-fixed border-separate border-spacing-0 text-left text-xs text-text-dark">
+                  <table
+                    className="min-w-full table-fixed border-separate border-spacing-0 text-left text-xs text-text-dark"
+                    style={{ width: resolveStructuredTableWidth(effectiveColumnWidths, group) }}
+                  >
+                    <colgroup>
+                      {group.fields.map((field) => (
+                        <col
+                          key={field.path}
+                          style={{ width: resolveStructuredColumnWidth(effectiveColumnWidths, group, field) }}
+                        />
+                      ))}
+                    </colgroup>
                     <thead className="sticky top-0 z-10 bg-[var(--canvas-node-field-bg)]">
                       <tr>
                         {group.fields.map((field) => (
                           <th
                             key={field.path}
-                            className="border-b border-[var(--canvas-node-field-border)] px-2 py-2 text-[11px] font-semibold text-text-muted"
+                            className="relative border-b border-[var(--canvas-node-field-border)] px-2 py-2 text-[11px] font-semibold text-text-muted"
                             title={field.path}
                           >
                             <span className="block truncate">
                               {resolveGroupedFieldLabel(field, group.pathPrefixTokens)}
                             </span>
+                            <button
+                              type="button"
+                              data-canvas-no-marquee="true"
+                              className="nodrag nowheel absolute bottom-1 right-0 top-1 w-2 cursor-col-resize rounded-sm border-r border-transparent transition-colors hover:border-accent/70 hover:bg-accent/10"
+                              title="拖动调整列宽"
+                              aria-label="拖动调整列宽"
+                              onPointerDown={(event) => startColumnResize(event, group, field)}
+                            />
                           </th>
                         ))}
                       </tr>

@@ -112,6 +112,7 @@ export interface JsonCardNodeData extends NodeDisplayData {
   parsedJson: unknown | null;
   parseError?: string | null;
   displayFields?: JsonCardDisplayField[];
+  structuredColumnWidths?: Record<string, number>;
   isStreaming?: boolean;
   isGenerating?: boolean;
   generationStartedAt?: number | null;
