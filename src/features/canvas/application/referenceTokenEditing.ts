@@ -35,7 +35,7 @@ function isAsciiDigit(char: string): boolean {
 export function findReferenceTokens(text: string, maxReferenceCount?: number): ReferenceTokenMatch[] {
   const tokens: ReferenceTokenMatch[] = [];
   const maxReferenceNumber = resolveMaxReferenceNumber(maxReferenceCount);
-  const prefixes = ['图', '视频', '文本'];
+  const prefixes = ['图', '视频', '音频', '文本'];
 
   for (let index = 0; index < text.length; index += 1) {
     if (text[index] !== '@') {

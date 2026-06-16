@@ -3,18 +3,30 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Braces, Expand, LoaderCircle } from 'lucide-react';
 
 import { CANVAS_NODE_TYPES, type JsonCardNodeData } from '@/features/canvas/domain/canvasNodes';
-import { getValueByJsonPath } from '@/features/canvas/application/aiText/helpers';
+import {
+  getValueByJsonPath,
+  resolveAiTextResult,
+  resolveJsonCardDisplayFields,
+  tokenizeJsonPath,
+} from '@/features/canvas/application/aiText/helpers';
 import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
 import { TextPreviewModal } from '@/features/canvas/ui/TextPreviewModal';
 import { formatGenerationElapsedMs } from '@/features/canvas/ui/generationElapsed';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 type JsonCardNodeProps = NodeProps & {
   id: string;
   data: JsonCardNodeData;
   selected?: boolean;
+};
+
+type ResolvedDisplayField = {
+  path: string;
+  label: string;
+  value: string;
 };
 
 const DEFAULT_WIDTH = 760;
@@ -42,15 +54,133 @@ function formatDisplayValue(value: unknown): string {
   if (typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
   }
+  if (Array.isArray(value)) {
+    if (value.every((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item))) {
+      return value.map((item) => item === null ? '' : String(item)).filter(Boolean).join('\n');
+    }
+  }
   return safeStringify(value);
 }
 
-function normalizeRowPath(path: string): string {
+function createAutoDisplayFields(parsedJson: unknown, limit = 8): ResolvedDisplayField[] {
+  if (!isRecord(parsedJson)) {
+    return [];
+  }
+
+  return Object.entries(parsedJson)
+    .filter(([, value]) => value !== undefined)
+    .slice(0, limit)
+    .map(([key, value]) => ({
+      path: `$.${key}`,
+      label: key,
+      value: formatDisplayValue(value),
+    }));
+}
+
+type StructuredTableSource = {
+  rows: unknown[];
+  pathPrefixTokens: string[];
+};
+
+type StructuredTableGroup = StructuredTableSource & {
+  key: string;
+  label: string;
+  fields: ResolvedDisplayField[];
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function pathFromTokens(tokens: string[]): string {
+  return tokens.length > 0 ? `$.${tokens.join('.')}` : '$';
+}
+
+function normalizeRowPath(path: string, pathPrefixTokens: string[]): string {
+  const tokens = tokenizeJsonPath(path);
+  const startsWithPrefix = pathPrefixTokens.length > 0
+    && pathPrefixTokens.every((token, index) => tokens[index] === token);
+  if (startsWithPrefix) {
+    return pathFromTokens(tokens.slice(pathPrefixTokens.length));
+  }
   return path.replace(/^\$\[0\](?=\.|\[|$)/, '$');
 }
 
-function resolveRowValue(row: unknown, path: string): string {
-  return formatDisplayValue(getValueByJsonPath(row, normalizeRowPath(path)));
+function findArrayPrefixForPath(source: unknown, path: string): StructuredTableSource | null {
+  const tokens = tokenizeJsonPath(path);
+  let current = source;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (!isRecord(current)) {
+      return null;
+    }
+    const next = current[tokens[index]];
+    if (Array.isArray(next)) {
+      return {
+        rows: next,
+        pathPrefixTokens: tokens.slice(0, index + 1),
+      };
+    }
+    current = next;
+  }
+
+  return null;
+}
+
+function resolveStructuredTableGroups(
+  parsedJson: unknown,
+  fields: ResolvedDisplayField[]
+): StructuredTableGroup[] {
+  if (Array.isArray(parsedJson)) {
+    return [{
+      key: '$',
+      label: '$',
+      fields,
+      rows: parsedJson,
+      pathPrefixTokens: [],
+    }];
+  }
+
+  const groups = new Map<string, StructuredTableGroup>();
+  fields.forEach((field) => {
+    const candidate = findArrayPrefixForPath(parsedJson, field.path);
+    if (!candidate || candidate.rows.length === 0) {
+      return;
+    }
+    const key = candidate.pathPrefixTokens.join('\u0000');
+    const existing = groups.get(key);
+    if (existing) {
+      existing.fields.push(field);
+      return;
+    }
+    groups.set(key, {
+      key,
+      label: pathFromTokens(candidate.pathPrefixTokens),
+      fields: [field],
+      ...candidate,
+    });
+  });
+
+  return Array.from(groups.values());
+}
+
+function resolveRowValue(row: unknown, path: string, pathPrefixTokens: string[]): string {
+  return formatDisplayValue(getValueByJsonPath(row, normalizeRowPath(path, pathPrefixTokens)));
+}
+
+function resolveGroupedFieldLabel(field: ResolvedDisplayField, pathPrefixTokens: string[]): string {
+  const label = field.label.trim();
+  const tokens = tokenizeJsonPath(field.path);
+  const suffixTokens = tokens
+    .slice(pathPrefixTokens.length)
+    .filter((token, index) => index > 0 || !/^\d+$/.test(token));
+  const suffix = suffixTokens.join('.');
+
+  if (!label || label === field.path || label.startsWith('$.') || label.startsWith('$[')) {
+    return suffix || label || field.path;
+  }
+
+  return label;
 }
 
 function resolveJsonCardDimension(value: number | undefined, min: number, fallback: number): number {
@@ -63,30 +193,75 @@ function resolveJsonCardDimension(value: number | undefined, min: number, fallba
 export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCardNodeProps) => {
   const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const addNode = useCanvasStore((state) => state.addNode);
+  const nodes = useCanvasStore((state) => state.nodes);
+  const textAgents = useSettingsStore((state) => state.textAgents);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
+  const rawResolvedJson = useMemo(() => {
+    if (!data.rawContent.trim()) {
+      return null;
+    }
+    const resolved = resolveAiTextResult(data.rawContent);
+    return resolved.kind === 'json' ? resolved.parsedJson ?? null : null;
+  }, [data.rawContent]);
+  const effectiveParsedJson = data.rawContent.trim()
+    ? rawResolvedJson
+    : data.parsedJson !== null && data.parsedJson !== undefined
+    ? data.parsedJson
+    : null;
   const resolvedTitle = resolveNodeDisplayName(CANVAS_NODE_TYPES.jsonCard, data);
   const resolvedWidth = resolveJsonCardDimension(width, MIN_WIDTH, DEFAULT_WIDTH);
   const resolvedHeight = resolveJsonCardDimension(height, MIN_HEIGHT, DEFAULT_HEIGHT);
-  const selectedFields = Array.isArray(data.displayFields) ? data.displayFields : [];
+  const configuredFields = Array.isArray(data.displayFields) ? data.displayFields : [];
+  const sourceAgent = useMemo(
+    () => textAgents.find((agent) => agent.id === data.sourceAgentId) ?? null,
+    [data.sourceAgentId, textAgents]
+  );
+  const liveAgentFields = useMemo(
+    () => effectiveParsedJson !== null && effectiveParsedJson !== undefined
+      ? resolveJsonCardDisplayFields(sourceAgent, effectiveParsedJson)
+      : [],
+    [effectiveParsedJson, sourceAgent]
+  );
+  const selectedFields = useMemo(
+    () => effectiveParsedJson === null || effectiveParsedJson === undefined
+      ? []
+      : liveAgentFields.length > 0
+      ? liveAgentFields
+      : configuredFields.length > 0
+      ? configuredFields
+      : createAutoDisplayFields(effectiveParsedJson),
+    [configuredFields, effectiveParsedJson, liveAgentFields]
+  );
   const isStreaming = data.isStreaming === true || data.isGenerating === true;
   const generationStartedAt = typeof data.generationStartedAt === 'number' ? data.generationStartedAt : null;
   const liveGenerationElapsedMs = isStreaming && generationStartedAt !== null
     ? Math.max(0, now - generationStartedAt)
     : data.generationElapsedMs;
   const generationElapsedText = formatGenerationElapsedMs(liveGenerationElapsedMs);
-  const tableRows = useMemo(
-    () => Array.isArray(data.parsedJson) ? data.parsedJson : [],
-    [data.parsedJson]
+  const tableGroups = useMemo(
+    () => resolveStructuredTableGroups(effectiveParsedJson, selectedFields),
+    [effectiveParsedJson, selectedFields]
   );
-  const shouldShowStructuredTable = !isStreaming && tableRows.length > 0 && selectedFields.length > 0;
+  const tableRowCount = tableGroups.reduce((total, group) => total + group.rows.length, 0);
+  const tableFieldPaths = useMemo(
+    () => new Set(tableGroups.flatMap((group) => group.fields.map((field) => field.path))),
+    [tableGroups]
+  );
+  const fieldBlocks = useMemo(
+    () => selectedFields.filter((field) => !tableFieldPaths.has(field.path)),
+    [selectedFields, tableFieldPaths]
+  );
+  const shouldShowStructuredTable = !isStreaming && tableGroups.length > 0;
+  const shouldShowStructuredFields = !isStreaming && fieldBlocks.length > 0;
   const prettyJson = useMemo(() => {
-    if (data.parsedJson !== null && data.parsedJson !== undefined) {
-      return safeStringify(data.parsedJson);
+    if (effectiveParsedJson !== null && effectiveParsedJson !== undefined) {
+      return safeStringify(effectiveParsedJson);
     }
     return data.rawContent || '';
-  }, [data.parsedJson, data.rawContent]);
+  }, [effectiveParsedJson, data.rawContent]);
   const rawJson = data.rawContent || prettyJson;
 
   useEffect(() => {
@@ -97,6 +272,59 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
     const timer = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(timer);
   }, [isStreaming]);
+
+  useEffect(() => {
+    if (isStreaming || !data.rawContent.trim()) {
+      return;
+    }
+
+    const repairedResult = resolveAiTextResult(data.rawContent);
+    if (repairedResult.kind !== 'json' || repairedResult.parsedJson === undefined) {
+      return;
+    }
+    if (!data.parseError && data.parsedJson === repairedResult.parsedJson) {
+      return;
+    }
+    if (
+      !data.parseError
+      && data.parsedJson !== null
+      && data.parsedJson !== undefined
+      && JSON.stringify(data.parsedJson) === JSON.stringify(repairedResult.parsedJson)
+    ) {
+      return;
+    }
+
+    updateNodeData(id, {
+      rawContent: repairedResult.rawContent || data.rawContent,
+      parsedJson: repairedResult.parsedJson,
+      parseError: repairedResult.parseError ?? null,
+      displayFields: resolveJsonCardDisplayFields(sourceAgent, repairedResult.parsedJson),
+    });
+  }, [
+    data.parseError,
+    data.parsedJson,
+    data.rawContent,
+    data.sourceAgentId,
+    id,
+    isStreaming,
+    sourceAgent,
+    updateNodeData,
+  ]);
+
+  const createImageNodeFromSelectedText = (selectedText: string) => {
+    const sourceNode = nodes.find((node) => node.id === id);
+    const sourcePosition = sourceNode?.position ?? { x: 0, y: 0 };
+    const sourceWidth =
+      sourceNode?.measured?.width
+      ?? (typeof sourceNode?.style?.width === 'number' ? sourceNode.style.width : resolvedWidth);
+    const newNodeId = addNode(CANVAS_NODE_TYPES.imageEdit, {
+      x: sourcePosition.x + sourceWidth + 80,
+      y: sourcePosition.y,
+    }, {
+      prompt: selectedText.trim(),
+    });
+    setSelectedNode(newNodeId);
+  };
 
   return (
     <>
@@ -130,7 +358,7 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
                     <LoaderCircle className="h-3 w-3 animate-spin text-accent" />
                     流式
                   </>
-                ) : shouldShowStructuredTable ? '结构化' : '原始'}
+                ) : shouldShowStructuredTable ? `结构化 ${tableRowCount}行` : shouldShowStructuredFields ? '结构化' : '原始'}
               </span>
               <button
                 type="button"
@@ -169,50 +397,66 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
             </div>
           ) : null}
 
-          {shouldShowStructuredTable ? (
-            <table className="w-full table-fixed border-separate border-spacing-0 text-left text-xs text-text-dark">
-              <thead className="sticky top-0 z-10 bg-[var(--canvas-node-field-bg)]">
-                <tr>
-                  {selectedFields.map((field) => (
-                    <th
-                      key={field.path}
-                      className="border-b border-[var(--canvas-node-field-border)] px-2 py-2 text-[11px] font-semibold text-text-muted"
-                    >
-                      <span className="block truncate">{field.label}</span>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {tableRows.map((row, rowIndex) => (
-                  <tr key={rowIndex} className="align-top">
-                    {selectedFields.map((field) => (
-                      <td
-                        key={`${rowIndex}-${field.path}`}
-                        className="border-b border-[var(--canvas-node-field-border)] px-2 py-2 leading-5"
-                      >
-                        <div className="max-h-36 overflow-hidden whitespace-pre-wrap break-words select-text">
-                          {resolveRowValue(row, field.path)}
-                        </div>
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : !isStreaming && selectedFields.length > 0 ? (
-            <div className="grid grid-cols-1 gap-2">
-              {selectedFields.slice(0, 4).map((field) => (
-                <div
-                  key={field.path}
-                  className="rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2 py-1.5"
-                >
-                  <div className="truncate text-[11px] text-text-muted">{field.label}</div>
-                  <div className="mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-xs text-text-dark select-text">
-                    {field.value}
-                  </div>
+          {shouldShowStructuredTable || shouldShowStructuredFields ? (
+            <div className="flex min-h-0 flex-col gap-4">
+              {tableGroups.map((group) => (
+                <div key={group.key} className="min-h-0">
+                  {tableGroups.length > 1 ? (
+                    <div className="mb-2 text-[11px] font-semibold text-text-muted">
+                      {group.label} · {group.rows.length}行
+                    </div>
+                  ) : null}
+                  <table className="w-full table-fixed border-separate border-spacing-0 text-left text-xs text-text-dark">
+                    <thead className="sticky top-0 z-10 bg-[var(--canvas-node-field-bg)]">
+                      <tr>
+                        {group.fields.map((field) => (
+                          <th
+                            key={field.path}
+                            className="border-b border-[var(--canvas-node-field-border)] px-2 py-2 text-[11px] font-semibold text-text-muted"
+                            title={field.path}
+                          >
+                            <span className="block truncate">
+                              {resolveGroupedFieldLabel(field, group.pathPrefixTokens)}
+                            </span>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.rows.map((row, rowIndex) => (
+                        <tr key={rowIndex} className="align-top">
+                          {group.fields.map((field) => (
+                            <td
+                              key={`${rowIndex}-${field.path}`}
+                              className="border-b border-[var(--canvas-node-field-border)] px-2 py-2 leading-5"
+                            >
+                              <div className="whitespace-pre-wrap break-words select-text">
+                                {resolveRowValue(row, field.path, group.pathPrefixTokens)}
+                              </div>
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               ))}
+
+              {fieldBlocks.length > 0 ? (
+                <div className="flex min-h-0 flex-col gap-3">
+                  {fieldBlocks.map((field) => (
+                    <div
+                      key={field.path}
+                      className="rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2.5 py-2"
+                    >
+                      <div className="shrink-0 truncate text-[11px] text-text-muted">{field.label}</div>
+                      <div className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-text-dark select-text">
+                        {field.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : (
             <pre className="whitespace-pre-wrap break-words select-text font-mono text-xs leading-6 text-text-dark">
@@ -241,6 +485,7 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
         mode="json"
         content={rawJson}
         onClose={() => setPreviewOpen(false)}
+        onCreateImageFromSelectedText={createImageNodeFromSelectedText}
       />
     </>
   );

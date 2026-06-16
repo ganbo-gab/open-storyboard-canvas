@@ -23,7 +23,7 @@ import {
   type OnConnectStartParams,
   type Viewport,
 } from '@xyflow/react';
-import { Boxes, ClipboardPaste, Copy, Group, Play, Trash2, Ungroup } from 'lucide-react';
+import { Boxes, ClipboardPaste, Copy, Group, ImagePlus, Play, Trash2, Ungroup } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import '@xyflow/react/dist/style.css';
 
@@ -148,6 +148,7 @@ interface NodeContextMenuState {
   nodeId: string | null;
   position: { x: number; y: number };
   flowPosition: { x: number; y: number };
+  selectedText?: string;
 }
 
 interface BlankCanvasRightClickState {
@@ -275,6 +276,38 @@ function getCanvasNodeIdFromTarget(target: EventTarget | null): string | null {
   }
   const nodeElement = target.closest<HTMLElement>('.react-flow__node[data-id]');
   return nodeElement?.dataset.id ?? null;
+}
+
+function getSelectedCanvasText(container: HTMLElement | null): string {
+  if (!container) {
+    return '';
+  }
+
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    return '';
+  }
+
+  const selectedText = selection.toString().trim();
+  if (!selectedText) {
+    return '';
+  }
+
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    const range = selection.getRangeAt(index);
+    if (container.contains(range.commonAncestorContainer)) {
+      return selectedText;
+    }
+  }
+
+  if (
+    (selection.anchorNode && container.contains(selection.anchorNode))
+    || (selection.focusNode && container.contains(selection.focusNode))
+  ) {
+    return selectedText;
+  }
+
+  return '';
 }
 
 function getNodeSize(node: CanvasNode): { width: number; height: number } {
@@ -614,6 +647,27 @@ async function readClipboardContent(
     : browserClipboard;
 }
 
+async function writeTextToClipboard(text: string): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  if (!copied) {
+    throw new Error('Failed to copy text');
+  }
+}
+
 function hasClipboardPayload(content: ClipboardContentReadResult): boolean {
   return Boolean(content.imageFile || content.text.trim() || content.fingerprint);
 }
@@ -670,8 +724,8 @@ async function syncSingleCanvasNodeToSystemClipboard(
     }
 
     const text = resolveNodeTextClipboardContent(node, allNodes);
-    if (text && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
+    if (text) {
+      await writeTextToClipboard(text);
       return (await readClipboardContent()).fingerprint;
     }
   } catch (error) {
@@ -1668,7 +1722,12 @@ export function Canvas() {
     setSelectedNode(nodeId);
   }, [applyNodesChange, setSelectedNode]);
 
-  const openNodeContextMenuAtClientPosition = useCallback((nodeId: string, clientX: number, clientY: number) => {
+  const openContextMenuAtClientPosition = useCallback((
+    nodeId: string | null,
+    clientX: number,
+    clientY: number,
+    options: { selectedText?: string; selectNode?: boolean } = {}
+  ) => {
     const containerRect = wrapperRef.current?.getBoundingClientRect();
     if (!containerRect) {
       return;
@@ -1677,7 +1736,9 @@ export function Canvas() {
       x: clientX,
       y: clientY,
     });
-    selectSingleNode(nodeId);
+    if (options.selectNode) {
+      selectSingleNode(nodeId);
+    }
     setNodeContextMenu({
       nodeId,
       position: {
@@ -1685,12 +1746,25 @@ export function Canvas() {
         y: clientY - containerRect.top,
       },
       flowPosition,
+      selectedText: options.selectedText,
     });
     setShowNodeMenu(false);
     setMenuAllowedTypes(undefined);
     setPendingConnectStart(null);
     setPreviewConnectionVisual(null);
   }, [reactFlowInstance, selectSingleNode]);
+
+  const openNodeContextMenuAtClientPosition = useCallback((
+    nodeId: string,
+    clientX: number,
+    clientY: number,
+    options: { selectedText?: string; selectNode?: boolean } = {}
+  ) => {
+    openContextMenuAtClientPosition(nodeId, clientX, clientY, {
+      ...options,
+      selectNode: options.selectNode ?? true,
+    });
+  }, [openContextMenuAtClientPosition]);
 
   const selectNodesInMarquee = useCallback((gesture: CanvasMarqueeGesture): string[] => {
     const selectionClientRect = {
@@ -2067,6 +2141,20 @@ export function Canvas() {
   }, [pendingConnectStart]);
 
   const handleCanvasContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const selectedText = getSelectedCanvasText(wrapperRef.current);
+    if (selectedText) {
+      event.stopPropagation();
+      event.preventDefault();
+      blankCanvasRightClickRef.current = null;
+      openContextMenuAtClientPosition(
+        getCanvasNodeIdFromTarget(event.target),
+        event.clientX,
+        event.clientY,
+        { selectedText }
+      );
+      return;
+    }
+
     if (shouldIgnoreCanvasMarqueeTarget(event.target)) {
       return;
     }
@@ -2194,7 +2282,7 @@ export function Canvas() {
     setPendingConnectStart(null);
     setPreviewConnectionVisual(null);
     setShowNodeMenu(true);
-  }, [reactFlowInstance]);
+  }, [openContextMenuAtClientPosition, reactFlowInstance]);
 
   const handlePaneClick = useCallback((event: ReactMouseEvent) => {
     if (suppressPaneClickUntilRef.current > 0) {
@@ -2613,6 +2701,48 @@ export function Canvas() {
     setNodeContextMenu(null);
   }, [copyNodesToClipboard, nodeContextMenu]);
 
+  const handleContextMenuCopySelectedText = useCallback(async () => {
+    const selectedText = nodeContextMenu?.selectedText?.trim();
+    if (!selectedText) {
+      return;
+    }
+    try {
+      await writeTextToClipboard(selectedText);
+      markSystemClipboardFresh();
+    } catch (error) {
+      console.warn('Failed to copy selected text', error);
+    } finally {
+      setNodeContextMenu(null);
+    }
+  }, [markSystemClipboardFresh, nodeContextMenu]);
+
+  const handleContextMenuCreateImageFromSelectedText = useCallback(() => {
+    const selectedText = nodeContextMenu?.selectedText?.trim();
+    const menuFlowPosition = nodeContextMenu?.flowPosition;
+    if (!selectedText || !menuFlowPosition) {
+      return;
+    }
+    const newNodeId = addNode(CANVAS_NODE_TYPES.imageEdit, menuFlowPosition, {
+      prompt: selectedText,
+    });
+    applyNodesChange([
+      ...nodesRef.current.map((node) => ({
+        id: node.id,
+        type: 'select' as const,
+        selected: false,
+      })),
+      {
+        id: newNodeId,
+        type: 'select' as const,
+        selected: true,
+      },
+    ]);
+    setSelectedNode(newNodeId);
+    scheduleCanvasPersist(0);
+    setNodeContextMenu(null);
+    window.requestAnimationFrame(() => clearBrowserTextSelection());
+  }, [addNode, applyNodesChange, nodeContextMenu, scheduleCanvasPersist, setSelectedNode]);
+
   const pasteImageAsNodeReference = useCallback(
     async (file: File, targetNode: CanvasNode) => {
       const uploadNodeId = await createUploadImageNodeAtFlowPosition(file, {
@@ -3025,9 +3155,19 @@ export function Canvas() {
   const handleNodeContextMenu = useCallback((event: ReactMouseEvent, node: CanvasNode) => {
     event.preventDefault();
     event.stopPropagation();
+    const selectedText = getSelectedCanvasText(wrapperRef.current);
+    if (selectedText) {
+      blankCanvasRightClickRef.current = null;
+      openNodeContextMenuAtClientPosition(node.id, event.clientX, event.clientY, {
+        selectedText,
+        selectNode: false,
+      });
+      return;
+    }
+
     const action = getCanvasMouseAction(canvasMouseBindings, 2, 'click');
     handleConfiguredNodeClickAction(event, node.id, action);
-  }, [canvasMouseBindings, handleConfiguredNodeClickAction]);
+  }, [canvasMouseBindings, handleConfiguredNodeClickAction, openNodeContextMenuAtClientPosition]);
 
   const handleCanvasAuxClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (event.button !== 1 || shouldIgnoreCanvasMarqueeTarget(event.target)) {
@@ -3672,6 +3812,35 @@ export function Canvas() {
           onPointerDown={(event) => event.stopPropagation()}
           onWheelCapture={(event) => event.stopPropagation()}
         >
+          {nodeContextMenu.selectedText && (
+            <>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void handleContextMenuCopySelectedText();
+                }}
+              >
+                <Copy className="h-4 w-4" />
+                {t('nodeToolbar.copyText')}
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  handleContextMenuCreateImageFromSelectedText();
+                }}
+              >
+                <ImagePlus className="h-4 w-4" />
+                {t('nodeToolbar.generateImage')}
+              </button>
+              <div className="my-1 h-px bg-[var(--canvas-node-border)]" />
+            </>
+          )}
           {nodeContextMenu.nodeId && (
             <button
               type="button"

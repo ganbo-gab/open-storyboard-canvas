@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { AlertTriangle, Bug, Check, ChevronDown, Copy, LoaderCircle, MoreHorizontal, Sparkles } from 'lucide-react';
+import { AlertTriangle, Bug, Check, ChevronDown, Copy, LoaderCircle, MoreHorizontal, Play, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -13,6 +13,8 @@ import {
   buildOpenAiChatPayload,
   collectAiTextInputs,
   computeAiTextInputHash,
+  resolveAiTextResult,
+  resolveJsonCardDisplayFields,
 } from '@/features/canvas/application/aiText/helpers';
 import { collectInputReferences } from '@/features/canvas/application/graphReferenceResolver';
 import { resolveErrorContent, showErrorDialog } from '@/features/canvas/application/errorDialog';
@@ -26,7 +28,10 @@ import { insertReferenceToken } from '@/features/canvas/application/referenceTok
 import { clearBrowserTextSelection } from '@/features/canvas/application/textSelection';
 import { useChatModelCatalog, type ChatCatalogEntry } from '@/features/canvas/application/chatModelCatalog';
 import { canvasEventBus } from '@/features/canvas/application/canvasServices';
-import { submitCustomChatCompletion } from '@/features/canvas/infrastructure/customProviderGateway';
+import {
+  streamCustomChatCompletion,
+  submitCustomChatCompletion,
+} from '@/features/canvas/infrastructure/customProviderGateway';
 import { CanvasNodeImage } from '@/features/canvas/ui/CanvasNodeImage';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
@@ -111,7 +116,6 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
   const findNodePosition = useCanvasStore((state) => state.findNodePosition);
   const textAgents = useSettingsStore((state) => state.textAgents);
   const showNodePayloadPreview = useSettingsStore((state) => state.showNodePayloadPreview);
-  const enableAiTextStreaming = useSettingsStore((state) => state.enableAiTextStreaming);
   const chatCatalog = useChatModelCatalog();
 
   const [providerOpen, setProviderOpen] = useState(false);
@@ -121,6 +125,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
   const [payloadDebugCopied, setPayloadDebugCopied] = useState(false);
   const [notice, setNotice] = useState('');
   const [runningAgentId, setRunningAgentId] = useState<string | null>(null);
+  const [runningAutomation, setRunningAutomation] = useState(false);
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const promptDraftRef = useRef(data.prompt ?? '');
   const promptCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -322,7 +327,8 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
   const buildPayloadPreview = useCallback(async (agentOverride?: typeof selectedAgent, modelOverride?: ChatCatalogEntry | null) => {
     const agent = agentOverride ?? selectedAgent;
     const entry = modelOverride ?? selectedModelEntry ?? availableModelOptions[0] ?? chatCatalog[0] ?? null;
-    const previewParts = collectAiTextInputs(id, nodes, edges, agent, textAgents);
+    const latestCanvas = useCanvasStore.getState();
+    const previewParts = collectAiTextInputs(id, latestCanvas.nodes, latestCanvas.edges, agent, textAgents);
     const previewInputHash = computeAiTextInputHash({
       agentId: agent?.id ?? data.agentId ?? null,
       providerId: entry?.providerId ?? selectedProvider?.id ?? data.providerId ?? null,
@@ -368,9 +374,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
     data.agentId,
     data.model,
     data.providerId,
-    edges,
     id,
-    nodes,
     availableModelOptions,
     chatCatalog,
     selectedAgent,
@@ -383,21 +387,21 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
     const agent = enabledAgents.find((item) => item.id === agentId) ?? selectedAgent ?? enabledAgents[0] ?? null;
     if (!agent) {
       setNotice(t('node.aiText.noAgent'));
-      return;
+      return false;
     }
     if (!agent.prompt.trim()) {
       setNotice(t('node.aiText.missingAgentPrompt'));
-      return;
+      return false;
     }
 
     const nextEntry = selectedModelEntry ?? availableModelOptions[0] ?? chatCatalog[0] ?? null;
     if (!nextEntry) {
       setNotice(t('node.aiText.noChatModel'));
-      return;
+      return false;
     }
     if (!nextEntry.usable) {
       setNotice(nextEntry.notReadyReason ?? t('node.aiText.modelNotReady'));
-      return;
+      return false;
     }
     const generationStartedAt = Date.now();
     let outputNodeId: string | null = null;
@@ -415,11 +419,15 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
     try {
       payloadPreview = await buildPayloadPreview(agent, nextEntry);
       const resultNodeId = addNode(
-        CANVAS_NODE_TYPES.textAnnotation,
-        findNodePosition(id, 360, 240),
+        CANVAS_NODE_TYPES.jsonCard,
+        findNodePosition(id, 420, 240),
         {
           displayName: t('node.aiText.outputTitle', { name: agent.name }),
-          content: '',
+          rawContent: '',
+          parsedJson: null,
+          parseError: null,
+          displayFields: [],
+          isStreaming: true,
           isGenerating: true,
           generationStartedAt,
           generationElapsedMs: null,
@@ -430,13 +438,58 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
       outputNodeId = resultNodeId;
       addEdge(id, resultNodeId);
       await waitForPreviewDelay();
-      if (enableAiTextStreaming) {
-        setNotice(t('node.aiText.streamingFallback'));
+      let rawOutput = '';
+      let usedStreaming = false;
+      try {
+        usedStreaming = true;
+        const streamResult = await streamCustomChatCompletion(nextEntry.id, payloadPreview.payload, {
+          onTextDelta: (_delta, fullText) => {
+            rawOutput = fullText;
+            updateNodeData(resultNodeId, {
+              rawContent: fullText,
+              isStreaming: true,
+              isGenerating: true,
+              generationStartedAt,
+              generationElapsedMs: null,
+              sourceAiNodeId: id,
+              sourceAgentId: agent.id,
+            });
+          },
+        });
+        rawOutput = streamResult.text;
+      } catch (streamError) {
+        usedStreaming = false;
+        rawOutput = '';
+        const message = streamError instanceof Error ? streamError.message : String(streamError);
+        setNotice(`${t('node.aiText.streamingFallback')} ${message}`);
+        updateNodeData(resultNodeId, {
+          rawContent: '',
+          isStreaming: false,
+          isGenerating: true,
+          generationStartedAt,
+          generationElapsedMs: null,
+        });
       }
-      const result = await submitCustomChatCompletion(nextEntry.id, payloadPreview.payload);
+
+      if (!rawOutput) {
+        const result = await submitCustomChatCompletion(nextEntry.id, payloadPreview.payload);
+        rawOutput = result.text;
+      }
+      const resolvedResult = resolveAiTextResult(rawOutput);
+      const parsedJson = resolvedResult.kind === 'json' ? resolvedResult.parsedJson ?? null : null;
+      const parseError = resolvedResult.kind === 'json'
+        ? resolvedResult.parseError ?? null
+        : resolvedResult.parseError ?? '模型返回内容不是合法 JSON';
+      const displayFields = parsedJson !== null
+        ? resolveJsonCardDisplayFields(agent, parsedJson)
+        : [];
       const generationElapsedMs = Math.max(0, Date.now() - generationStartedAt);
       updateNodeData(resultNodeId, {
-        content: result.text,
+        rawContent: resolvedResult.rawContent || rawOutput,
+        parsedJson,
+        parseError,
+        displayFields,
+        isStreaming: false,
         isGenerating: false,
         generationStartedAt: null,
         generationElapsedMs,
@@ -450,12 +503,11 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
         resultNodeId,
         lastPreparedPayload: payloadPreview,
         lastRunInputHash: payloadPreview.inputHash,
-        lastOutputType: 'markdown',
+        lastOutputType: 'json',
         lastError: null,
       });
-      setNotice(enableAiTextStreaming
-        ? t('node.aiText.generatedWithStreamingFallback')
-        : t('node.aiText.generated'));
+      setNotice(usedStreaming ? t('node.aiText.generatedStreaming') : t('node.aiText.generated'));
+      return true;
     } catch (error) {
       const resolvedError = resolveErrorContent(error, t('ai.error'));
       const message = resolvedError.message;
@@ -493,6 +545,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
       });
       void showErrorDialog(message, t('common.error'), resolvedError.details, reportText);
       setNotice(t('node.aiText.generateFailed'));
+      return false;
     } finally {
       setRunningAgentId(null);
     }
@@ -503,7 +556,6 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
     buildPayloadPreview,
     chatCatalog,
     data.model,
-    enableAiTextStreaming,
     enabledAgents,
     findNodePosition,
     id,
@@ -513,6 +565,37 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
     t,
     updateNodeData,
   ]);
+
+  const runAgentAutomation = useCallback(async () => {
+    if (runningAutomation || isGeneratingPreview) {
+      return;
+    }
+    if (enabledAgents.length === 0) {
+      setNotice(t('node.aiText.noAgent'));
+      return;
+    }
+
+    setRunningAutomation(true);
+    setAgentOverflowOpen(false);
+    try {
+      for (let index = 0; index < enabledAgents.length; index += 1) {
+        const agent = enabledAgents[index];
+        setNotice(t('node.aiText.automationRunning', {
+          current: index + 1,
+          total: enabledAgents.length,
+          name: agent.name,
+        }));
+        const success = await runAgent(agent.id);
+        if (!success) {
+          setNotice(t('node.aiText.automationStopped', { name: agent.name }));
+          return;
+        }
+      }
+      setNotice(t('node.aiText.automationComplete', { count: enabledAgents.length }));
+    } finally {
+      setRunningAutomation(false);
+    }
+  }, [enabledAgents, isGeneratingPreview, runAgent, runningAutomation, t]);
 
   useEffect(() => {
     return canvasEventBus.subscribe('generation-node/trigger', ({ nodeId }) => {
@@ -620,7 +703,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
                   <button
                     key={agent.id}
                     type="button"
-                    disabled={isGeneratingPreview && !running}
+                    disabled={runningAutomation || (isGeneratingPreview && !running)}
                     className={`inline-flex max-w-[156px] items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium text-white transition-colors ${
                       active
                         ? 'border-accent bg-accent shadow-[0_0_0_1px_rgba(59,130,246,0.34)]'
@@ -669,7 +752,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
                             <button
                               key={agent.id}
                               type="button"
-                              disabled={isGeneratingPreview && !running}
+                              disabled={runningAutomation || (isGeneratingPreview && !running)}
                               className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
                                 active
                                   ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
@@ -722,6 +805,23 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              className="nodrag nowheel inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-text-muted transition-colors hover:border-accent/50 hover:bg-[var(--canvas-node-menu-hover)] hover:text-accent disabled:cursor-not-allowed disabled:opacity-55"
+              disabled={runningAutomation || isGeneratingPreview || enabledAgents.length === 0}
+              onClick={(event) => {
+                event.stopPropagation();
+                void runAgentAutomation();
+              }}
+              title={t('node.aiText.runAutomation') as string}
+              aria-label={t('node.aiText.runAutomation') as string}
+            >
+              {runningAutomation ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4 translate-x-[1px]" />
+              )}
+            </button>
             <button
               type="button"
               className="nodrag nowheel inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-text-muted transition-colors hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)] hover:text-text-dark"
@@ -912,7 +1012,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
         <UiButton
           variant="primary"
           className={`ml-auto shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
-          disabled={isGeneratingPreview}
+          disabled={isGeneratingPreview || runningAutomation}
           onClick={(event) => {
             event.stopPropagation();
             void runAgent(selectedAgent?.id);

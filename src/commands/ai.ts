@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 export interface GenerateRequest {
   prompt: string;
@@ -244,9 +245,59 @@ export interface CustomHttpResponse {
   text: string;
 }
 
+export interface CustomHttpStreamEvent {
+  streamId: string;
+  kind: 'status' | 'chunk' | 'done' | 'error';
+  status?: number | null;
+  chunk?: string | null;
+  error?: string | null;
+}
+
 export async function customHttpRequest(request: CustomHttpRequest): Promise<CustomHttpResponse> {
   if (!isTauri()) {
     throw new Error('当前不是 Tauri 容器环境，请使用 `npm run tauri dev` 启动');
   }
   return await invoke<CustomHttpResponse>('custom_http_request', { request });
+}
+
+export async function customHttpStreamRequest(
+  request: CustomHttpRequest,
+  handlers: {
+    onStatus?: (status: number) => void;
+    onChunk?: (chunk: string, status?: number | null) => void;
+    onDone?: (status?: number | null) => void;
+    onError?: (message: string, status?: number | null) => void;
+  }
+): Promise<number> {
+  if (!isTauri()) {
+    throw new Error('当前不是 Tauri 容器环境，请使用 `npm run tauri dev` 启动');
+  }
+  const streamId = `http-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const unlisten = await listen<CustomHttpStreamEvent>('custom-http-stream', (event) => {
+    const payload = event.payload;
+    if (!payload || payload.streamId !== streamId) {
+      return;
+    }
+    if (payload.kind === 'status' && typeof payload.status === 'number') {
+      handlers.onStatus?.(payload.status);
+      return;
+    }
+    if (payload.kind === 'chunk') {
+      handlers.onChunk?.(payload.chunk ?? '', payload.status);
+      return;
+    }
+    if (payload.kind === 'done') {
+      handlers.onDone?.(payload.status);
+      return;
+    }
+    if (payload.kind === 'error') {
+      handlers.onError?.(payload.error || 'HTTP stream failed', payload.status);
+    }
+  });
+
+  try {
+    return await invoke<number>('custom_http_stream_request', { request, streamId });
+  } finally {
+    unlisten();
+  }
 }

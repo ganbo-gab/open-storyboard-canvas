@@ -1,5 +1,6 @@
 import {
   customHttpRequest,
+  customHttpStreamRequest,
   type CustomHttpMultipartBody,
   type GenerateRequest,
   type GenerationJobStatus,
@@ -103,6 +104,16 @@ export interface CustomChatCompletionResult {
   text: string;
   status?: number;
   raw: unknown;
+}
+
+export interface CustomChatCompletionStreamResult {
+  text: string;
+  status?: number;
+}
+
+export interface CustomChatCompletionStreamOptions {
+  onTextDelta?: (delta: string, fullText: string) => void;
+  onRawChunk?: (chunk: string) => void;
 }
 
 class NetworkRequestError extends Error {
@@ -3976,9 +3987,39 @@ function textFromUnknown(value: unknown): string | null {
     return textFromUnknown(record.text)
       ?? textFromUnknown(record.content)
       ?? textFromUnknown(record.output_text)
-      ?? textFromUnknown(record.message);
+      ?? textFromUnknown(record.message)
+      ?? textFromUnknown(record.answer)
+      ?? textFromUnknown(record.output)
+      ?? textFromUnknown(record.result);
   }
   return null;
+}
+
+function streamTextFromUnknown(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    const joined = value
+      .map((item) => streamTextFromUnknown(item))
+      .filter((item): item is string => item !== null)
+      .join('');
+    return joined || null;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return streamTextFromUnknown(record.text)
+      ?? streamTextFromUnknown(record.content)
+      ?? streamTextFromUnknown(record.output_text)
+      ?? streamTextFromUnknown(record.message)
+      ?? streamTextFromUnknown(record.answer)
+      ?? streamTextFromUnknown(record.output)
+      ?? streamTextFromUnknown(record.result);
+  }
+  return null;
+}
+
+function eventTypeFromUnknown(value: unknown): string | null {
+  const text = streamTextFromUnknown(value);
+  return text?.trim() || null;
 }
 
 function extractOpenAiResponsesText(payload: unknown): string | null {
@@ -4002,6 +4043,121 @@ function extractChatText(payload: unknown): string | null {
     ?? textFromUnknown(getValueByPath(payload, 'candidates[0].content.parts[0].text'))
     ?? textFromUnknown(getValueByPath(payload, 'text'))
     ?? textFromUnknown(payload);
+}
+
+function extractChatStreamTextDelta(payload: unknown): string {
+  return streamTextFromUnknown(getValueByPath(payload, 'choices[0].delta.content'))
+    ?? streamTextFromUnknown(getValueByPath(payload, 'choices[0].message.content'))
+    ?? streamTextFromUnknown(getValueByPath(payload, 'choices[0].text'))
+    ?? streamTextFromUnknown(getValueByPath(payload, 'delta'))
+    ?? streamTextFromUnknown(getValueByPath(payload, 'content_block_delta.delta.text'))
+    ?? streamTextFromUnknown(getValueByPath(payload, 'delta.text'))
+    ?? streamTextFromUnknown(getValueByPath(payload, 'output_text_delta'))
+    ?? streamTextFromUnknown(getValueByPath(payload, 'response.output_text.delta'))
+    ?? streamTextFromUnknown(getValueByPath(payload, 'message.content'))
+    ?? streamTextFromUnknown(getValueByPath(payload, 'content'))
+    ?? streamTextFromUnknown(getValueByPath(payload, 'text'))
+    ?? '';
+}
+
+function handleChatStreamDataLine(
+  line: string,
+  onDelta: (delta: string) => void,
+): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (trimmed === '[DONE]') {
+    return true;
+  }
+  const parsed = parseResponseText(trimmed);
+  if (typeof parsed === 'string') {
+    return false;
+  }
+  const eventType = eventTypeFromUnknown(getValueByPath(parsed, 'type'))
+    ?? eventTypeFromUnknown(getValueByPath(parsed, 'event'));
+  if (
+    eventType === 'response.completed'
+    || eventType === 'message_stop'
+    || eventType === 'done'
+    || eventType === 'finish'
+    || eventType === 'completed'
+  ) {
+    return true;
+  }
+  const delta = extractChatStreamTextDelta(parsed);
+  if (delta) {
+    onDelta(delta);
+  }
+  return false;
+}
+
+function consumeChatStreamChunk(
+  state: { buffer: string; isDone: boolean },
+  chunk: string,
+  onDelta: (delta: string) => void,
+) {
+  state.buffer += chunk;
+  if (!/\r?\n\r?\n/.test(state.buffer)) {
+    const lines = state.buffer.split(/\r?\n/);
+    state.buffer = lines.pop() ?? '';
+    lines
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => !line.startsWith(':') && !line.startsWith('event:') && !line.startsWith('id:'))
+      .forEach((line) => {
+        const dataLine = line.startsWith('data:') ? line.slice(5).trim() : line;
+        if (handleChatStreamDataLine(dataLine, onDelta)) {
+          state.isDone = true;
+        }
+      });
+    return;
+  }
+
+  const blocks = state.buffer.split(/\r?\n\r?\n/);
+  state.buffer = blocks.pop() ?? '';
+
+  blocks.forEach((block) => {
+    const lines = block
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => !line.startsWith(':') && !line.startsWith('event:') && !line.startsWith('id:'));
+    const dataLines = lines
+      .map((line) => line.startsWith('data:') ? line.slice(5).trim() : line);
+
+    if (dataLines.length === 0) {
+      return;
+    }
+
+    dataLines.forEach((dataLine) => {
+      if (handleChatStreamDataLine(dataLine, onDelta)) {
+        state.isDone = true;
+      }
+    });
+  });
+}
+
+function flushChatStreamBuffer(
+  state: { buffer: string; isDone: boolean },
+  onDelta: (delta: string) => void,
+) {
+  const remaining = state.buffer.trim();
+  state.buffer = '';
+  if (!remaining) {
+    return;
+  }
+  remaining
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      const dataLine = line.startsWith('data:') ? line.slice(5).trim() : line;
+      if (handleChatStreamDataLine(dataLine, onDelta)) {
+        state.isDone = true;
+      }
+    });
 }
 
 export async function testCustomChatProviderConnectivity(
@@ -4077,6 +4233,79 @@ export async function submitCustomChatCompletion(
     throw new Error(`响应中未找到文本内容。响应预览：${previewPayload(parsed)}`);
   }
   return { text: extractedText, status, raw: parsed };
+}
+
+export async function streamCustomChatCompletion(
+  catalogModelId: string,
+  openAiPayload: unknown,
+  options: CustomChatCompletionStreamOptions = {},
+): Promise<CustomChatCompletionStreamResult> {
+  const resolved = resolveProviderAndModel(catalogModelId);
+  if (!resolved) {
+    throw new Error('未找到可用的文本模型配置');
+  }
+  const { cfg, model } = resolved;
+  if (!isChatCustomProvider(cfg)) {
+    throw new Error('所选模型不是文本对话模型');
+  }
+  if (!hasCustomProviderCredential(cfg)) {
+    throw new Error('未填写 API Key，无法发起文本生成');
+  }
+  if (!cfg.baseUrl?.trim()) {
+    throw new Error('未填写 API 根地址，无法发起文本生成');
+  }
+
+  const url = resolveChatEndpointUrl(cfg, model);
+  const headers = {
+    ...buildChatRequestHeaders(cfg, 'POST'),
+    Accept: 'text/event-stream',
+  };
+  const body = resolveChatCompletionBody(cfg, model, openAiPayload);
+  const streamBody = body && typeof body === 'object' && !Array.isArray(body)
+    ? { ...(body as Record<string, unknown>), stream: true }
+    : body;
+  const state = { buffer: '', isDone: false };
+  let fullText = '';
+  let latestStatus: number | undefined;
+
+  const appendDelta = (delta: string) => {
+    if (!delta) {
+      return;
+    }
+    fullText += delta;
+    options.onTextDelta?.(delta, fullText);
+  };
+
+  const status = await customHttpStreamRequest({
+    url,
+    method: 'POST',
+    headers,
+    bodyMode: 'json',
+    body: streamBody,
+    timeoutMs: 180000,
+  }, {
+    onStatus: (statusCode) => {
+      latestStatus = statusCode;
+    },
+    onChunk: (chunk, statusCode) => {
+      latestStatus = typeof statusCode === 'number' ? statusCode : latestStatus;
+      options.onRawChunk?.(chunk);
+      consumeChatStreamChunk(state, chunk, appendDelta);
+    },
+    onDone: (statusCode) => {
+      latestStatus = typeof statusCode === 'number' ? statusCode : latestStatus;
+      flushChatStreamBuffer(state, appendDelta);
+    },
+  });
+
+  flushChatStreamBuffer(state, appendDelta);
+  if (!fullText.trim()) {
+    throw new Error('流式响应中未找到文本内容');
+  }
+  return {
+    text: fullText,
+    status: latestStatus ?? status,
+  };
 }
 
 export async function testCustomProviderConnectivity(

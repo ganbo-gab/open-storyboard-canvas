@@ -164,6 +164,8 @@ export interface AiVideoNodeData extends NodeDisplayData {
   generationStartedAt?: number | null;
   generationDurationMs?: number;
   generationJobId?: string;
+  cameraControl?: CameraControlOptions;
+  selectedPromptPresetId?: string | null;
 }
 
 export interface AiTextNodeData extends NodeDisplayData {

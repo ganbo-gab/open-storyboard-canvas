@@ -8,12 +8,12 @@ const AGNES_DOCS = [
   {
     title: 'Agnes 2.0 Flash',
     url: 'https://agnes-ai.com/doc/agnes-20-flash',
-    note: '多模态文本模型。官方支持 stream / tools / thinking；当前应用默认使用非流式 JSON 兼容模式。',
+    note: '多模态文本模型。官方支持 stream / tools / thinking；AI 文本 Agent 会优先流式输出到 JSON 卡片。',
   },
   {
     title: 'Agnes 1.5 Flash',
     url: 'https://agnes-ai.com/doc/agnes-15-flash',
-    note: '多模态文本模型。保存的 Agnes Key 会用于 AI 文本节点的非流式对话请求。',
+    note: '多模态文本模型。保存的 Agnes Key 会用于 AI 文本节点的流式对话请求。',
   },
   {
     title: 'Agnes Image 2.1 Flash',
@@ -106,7 +106,7 @@ export const AgnesSettingsSection = memo(function AgnesSettingsSection() {
       </div>
 
       <div className="rounded-lg border border-dashed border-border-dark bg-bg-dark/50 p-3 text-[11px] leading-5 text-text-muted">
-        Agnes Chat 2.0 官方支持流式、工具调用和 thinking 参数；当前网关以非流式 JSON 响应为默认兼容策略，避免 SSE 响应被普通 JSON 解析器误读。
+        Agnes Chat 2.0 官方支持流式、工具调用和 thinking 参数；当前网关会优先读取 SSE 流式响应，结束后再按 Agent 配置解析并展示 JSON 字段。
       </div>
     </div>
   );

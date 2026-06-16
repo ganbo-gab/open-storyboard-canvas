@@ -130,8 +130,10 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
   }, [caseKind, node]);
 
   const selectedPromptPresetId: string | null = useMemo(() => {
-    if (!isImageEditNode(node)) return null;
-    return node.data.selectedPromptPresetId ?? null;
+    if (isImageEditNode(node) || isAiVideoNode(node)) {
+      return node.data.selectedPromptPresetId ?? null;
+    }
+    return null;
   }, [node]);
 
   const handleToggleChip = useCallback((chipId: string) => {
@@ -581,7 +583,8 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
   const handleOpenPromptPresetMenu = useCallback((event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     const button = event.currentTarget;
-    if (caseKind !== 'B') {
+    const usesInlinePresetMenu = caseKind === 'B' || caseKind === 'AI_VIDEO_INPUT';
+    if (!usesInlinePresetMenu) {
       closePromptPresetMenu();
       button.dataset.panelAnchor = `${node.id}:promptPreset`;
       openPanel(
@@ -610,14 +613,21 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
       await showErrorDialog(t('node.imageEdit.promptPresetMissing'), t('common.error'));
       return;
     }
-    if (caseKind !== 'B' || !isImageEditNode(node)) {
+    if (caseKind === 'B' && isImageEditNode(node)) {
+      updateNodeData(node.id, {
+        selectedPromptPresetId: preset.id,
+        selectedFunctionChip: null,
+      });
       closePromptPresetMenu();
       return;
     }
-    updateNodeData(node.id, {
-      selectedPromptPresetId: preset.id,
-      selectedFunctionChip: null,
-    });
+    if (caseKind === 'AI_VIDEO_INPUT' && isAiVideoNode(node)) {
+      updateNodeData(node.id, {
+        selectedPromptPresetId: preset.id,
+      });
+      closePromptPresetMenu();
+      return;
+    }
     closePromptPresetMenu();
   }, [
     caseKind,
@@ -628,17 +638,29 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
     updateNodeData,
   ]);
 
+  const handleClearPromptPreset = useCallback(() => {
+    if (caseKind === 'B' && isImageEditNode(node)) {
+      updateNodeData(node.id, { selectedPromptPresetId: null });
+      closePromptPresetMenu();
+      return;
+    }
+    if (caseKind === 'AI_VIDEO_INPUT' && isAiVideoNode(node)) {
+      updateNodeData(node.id, { selectedPromptPresetId: null });
+      closePromptPresetMenu();
+    }
+  }, [caseKind, closePromptPresetMenu, node, updateNodeData]);
+
   const renderPromptPresetButton = (disabled = false) => (
     <UiChipButton
-      ref={caseKind === 'B' ? promptPresetAnchorRef : promptPresetPanelButtonRef}
+      ref={caseKind === 'B' || caseKind === 'AI_VIDEO_INPUT' ? promptPresetAnchorRef : promptPresetPanelButtonRef}
       type="button"
       className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${
-        caseKind === 'B' && selectedPromptPresetId
+        (caseKind === 'B' || caseKind === 'AI_VIDEO_INPUT') && selectedPromptPresetId
           ? 'border-accent bg-accent/35 text-white ring-2 ring-accent/40'
           : TOOLBAR_NEUTRAL_BUTTON_CLASS
       } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
       onClick={disabled ? undefined : handleOpenPromptPresetMenu}
-      onMouseEnter={disabled || caseKind !== 'B'
+      onMouseEnter={disabled || (caseKind !== 'B' && caseKind !== 'AI_VIDEO_INPUT')
         ? undefined
         : (event) => {
           promptPresetAnchorRef.current = event.currentTarget;
@@ -646,7 +668,7 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
         }}
       title={t('nodeToolbar.promptPreset') as string}
     >
-      {caseKind === 'B' && selectedPromptPresetId && <Check className="h-3.5 w-3.5 text-white" />}
+      {(caseKind === 'B' || caseKind === 'AI_VIDEO_INPUT') && selectedPromptPresetId && <Check className="h-3.5 w-3.5 text-white" />}
       <Sparkles className="h-3.5 w-3.5" />
       {t('nodeToolbar.promptPreset')}
       <ChevronDown className="h-3 w-3 opacity-70" />
@@ -666,6 +688,16 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
           </div>
           {promptPresets.length > 0 ? (
             <div className="max-h-[240px] space-y-1 overflow-y-auto pr-1">
+              {selectedPromptPresetId && (
+                <button
+                  type="button"
+                  className="mb-1 flex w-full items-center gap-2 rounded-lg border border-[var(--canvas-node-field-border)] px-2.5 py-2 text-left text-sm text-text-muted transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+                  onClick={handleClearPromptPreset}
+                >
+                  <X className="h-3.5 w-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">清除当前预设</span>
+                </button>
+              )}
               {promptPresets.map((preset) => {
                 const active = selectedPromptPresetId === preset.id;
                 return (
@@ -793,6 +825,8 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
         })}
 
         {caseKind === 'B' && renderPromptPresetButton()}
+
+        {caseKind === 'AI_VIDEO_INPUT' && renderPromptPresetButton()}
 
         {/* Case A / C: full tool chips. */}
         {caseKind !== 'B' && caseKind !== 'V' && caseKind !== 'AUDIO' && caseKind !== 'AI_VIDEO_INPUT' && (<>

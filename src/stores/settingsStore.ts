@@ -292,6 +292,7 @@ interface SettingsState {
   deletePromptPreset: (id: string) => void;
   addTextAgent: () => TextAgentConfig;
   updateTextAgent: (id: string, patch: Partial<TextAgentConfig>) => void;
+  moveTextAgent: (id: string, direction: -1 | 1) => void;
   deleteTextAgent: (id: string) => void;
   setImageHostSettings: (settings: ImageHostSettings) => void;
   setAudioGenerationSettings: (settings: AudioGenerationSettings) => void;
@@ -949,7 +950,7 @@ export const useSettingsStore = create<SettingsState>()(
       appendParameterConstraintsToPrompt: false,
       collapseNodeActionToolbarByDefault: false,
       showNodePayloadPreview: false,
-      enableAiTextStreaming: false,
+      enableAiTextStreaming: true,
       enableStoryboardGenGridPreviewShortcut: false,
       showStoryboardGenAdvancedRatioControls: false,
       useLegacyPanoramaControlDirection: false,
@@ -1174,6 +1175,26 @@ export const useSettingsStore = create<SettingsState>()(
             };
           }),
         })),
+      moveTextAgent: (id, direction) =>
+        set((state) => {
+          const fromIndex = state.textAgents.findIndex((agent) => agent.id === id);
+          const toIndex = fromIndex + direction;
+          if (
+            fromIndex < 0
+            || toIndex < 0
+            || toIndex >= state.textAgents.length
+            || fromIndex === toIndex
+          ) {
+            return {};
+          }
+          const textAgents = [...state.textAgents];
+          const [agent] = textAgents.splice(fromIndex, 1);
+          textAgents.splice(toIndex, 0, {
+            ...agent,
+            updatedAt: Date.now(),
+          });
+          return { textAgents };
+        }),
       deleteTextAgent: (id) =>
         set((state) => ({
           textAgents: state.textAgents.filter((agent) => agent.id !== id),
@@ -1314,7 +1335,7 @@ export const useSettingsStore = create<SettingsState>()(
         const collapseNodeActionToolbarByDefault =
           state.collapseNodeActionToolbarByDefault ?? false;
         const showNodePayloadPreview = state.showNodePayloadPreview ?? false;
-        const enableAiTextStreaming = state.enableAiTextStreaming ?? false;
+        const enableAiTextStreaming = state.enableAiTextStreaming ?? true;
         const migratedLightingTemplate = (() => {
           const trimmed = state.lightingPromptTemplate?.trim() ?? '';
           if (!trimmed) return DEFAULT_LIGHTING_PROMPT_TEMPLATE;

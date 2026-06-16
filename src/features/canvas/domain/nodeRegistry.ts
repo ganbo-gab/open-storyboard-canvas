@@ -126,7 +126,7 @@ const aiVideoNodeDefinition: CanvasNodeDefinition<AiVideoNodeData> = {
   visibleInMenu: true,
   capabilities: {
     toolbar: true,
-    selectionToolbar: 'deleteOnly',
+    selectionToolbar: 'full',
     promptInput: false,
   },
   connectivity: {
@@ -145,6 +145,7 @@ const aiVideoNodeDefinition: CanvasNodeDefinition<AiVideoNodeData> = {
     isGenerating: false,
     generationStartedAt: null,
     generationDurationMs: 15 * 60 * 1000,
+    selectedPromptPresetId: null,
   }),
 };
 

@@ -172,6 +172,7 @@ pub fn run() {
             commands::dreamina_stage_reference_image,
             commands::dreamina_network_diagnose,
             commands::custom_http_request,
+            commands::custom_http_stream_request,
             image::split_image,
             image::split_image_source,
             image::prepare_node_image_source,

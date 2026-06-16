@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 
-import { parseAgentJsonExample } from '@/features/canvas/application/aiText/helpers';
+import {
+  parseAgentJsonExample,
+  resolveJsonCardDisplayFields,
+} from '@/features/canvas/application/aiText/helpers';
 import type {
   AiTextInputSourceType,
   TextAgentConfig,
   TextAgentInputConfig,
 } from '@/features/canvas/application/aiText/types';
+import { CANVAS_NODE_TYPES } from '@/features/canvas/domain/canvasNodes';
 import { UiButton, UiCheckbox, UiInput, UiSelect, UiTextArea } from '@/components/ui';
+import { useCanvasStore } from '@/stores/canvasStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 type DraftAgent = TextAgentConfig;
@@ -58,11 +63,48 @@ function normalizeDraft(agent: DraftAgent): DraftAgent {
   };
 }
 
+function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
+  if (
+    fromIndex < 0
+    || fromIndex >= items.length
+    || toIndex < 0
+    || toIndex >= items.length
+    || fromIndex === toIndex
+  ) {
+    return items;
+  }
+  const next = [...items];
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
+  return next;
+}
+
+function moveJsonField(
+  fields: DraftAgent['jsonFields'],
+  fieldId: string,
+  direction: -1 | 1
+): DraftAgent['jsonFields'] {
+  const enabledFields = fields.filter((field) => field.enabled);
+  const enabledIndex = enabledFields.findIndex((field) => field.id === fieldId);
+  const targetField = enabledFields[enabledIndex + direction];
+  if (enabledIndex < 0 || !targetField) {
+    return fields;
+  }
+  return moveArrayItem(
+    fields,
+    fields.findIndex((field) => field.id === fieldId),
+    fields.findIndex((field) => field.id === targetField.id)
+  );
+}
+
 export function TextAgentsSection() {
   const textAgents = useSettingsStore((state) => state.textAgents);
   const addTextAgent = useSettingsStore((state) => state.addTextAgent);
   const updateTextAgent = useSettingsStore((state) => state.updateTextAgent);
+  const moveTextAgent = useSettingsStore((state) => state.moveTextAgent);
   const deleteTextAgent = useSettingsStore((state) => state.deleteTextAgent);
+  const canvasNodes = useCanvasStore((state) => state.nodes);
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
 
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(textAgents[0]?.id ?? null);
   const [draft, setDraft] = useState<DraftAgent | null>(textAgents[0] ? cloneAgent(textAgents[0]) : null);
@@ -107,8 +149,21 @@ export function TextAgentsSection() {
       setError('Agent prompt 为必填项');
       return;
     }
+    const normalized = normalizeDraft(draft);
     setError('');
-    updateTextAgent(draft.id, normalizeDraft(draft));
+    updateTextAgent(draft.id, normalized);
+    canvasNodes
+      .filter((node) =>
+        node.type === CANVAS_NODE_TYPES.jsonCard
+        && node.data.sourceAgentId === normalized.id
+        && node.data.parsedJson !== null
+        && node.data.parsedJson !== undefined
+      )
+      .forEach((node) => {
+        updateNodeData(node.id, {
+          displayFields: resolveJsonCardDisplayFields(normalized, node.data.parsedJson),
+        });
+      });
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1200);
   };
@@ -149,35 +204,71 @@ export function TextAgentsSection() {
         </div>
 
         <div className="ui-scrollbar flex-1 overflow-y-auto p-3">
-          {textAgents.length > 0 ? textAgents.map((agent) => (
-            <button
+          {textAgents.length > 0 ? textAgents.map((agent, agentIndex) => (
+            <div
               key={agent.id}
-              type="button"
-              className={`mb-2 w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+              className={`mb-2 rounded-lg border transition-colors ${
                 selectedAgentId === agent.id
                   ? 'border-accent/60 bg-accent/10'
                   : 'border-border-dark bg-surface-dark hover:border-[rgba(255,255,255,0.2)]'
               }`}
-              onClick={() => {
-                setSelectedAgentId(agent.id);
-                setDraft(cloneAgent(agent));
-                setError('');
-              }}
             >
-              <div className="flex items-center gap-2">
-                <div className="min-w-0 flex-1 truncate text-sm font-medium text-text-dark">{agent.name}</div>
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
-                  agent.enabled
-                    ? 'bg-emerald-500/15 text-emerald-300'
-                    : 'bg-white/8 text-text-muted'
-                }`}>
-                  {agent.enabled ? '启用' : '停用'}
+              <div className="flex items-start gap-2 px-3 py-2">
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() => {
+                    setSelectedAgentId(agent.id);
+                    setDraft(cloneAgent(agent));
+                    setError('');
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1 truncate text-sm font-medium text-text-dark">{agent.name}</div>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
+                      agent.enabled
+                        ? 'bg-emerald-500/15 text-emerald-300'
+                        : 'bg-white/8 text-text-muted'
+                    }`}>
+                      {agent.enabled ? '启用' : '停用'}
+                    </span>
+                  </div>
+                  <div className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-[11px] text-text-muted">
+                    {agent.prompt || '未填写 Agent prompt'}
+                  </div>
+                </button>
+                <span className="mt-0.5 flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="上移 Agent"
+                    title="上移 Agent"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-border-dark bg-bg-dark/70 text-text-muted transition-colors hover:border-accent/45 hover:text-text-dark disabled:pointer-events-none disabled:opacity-35"
+                    disabled={agentIndex === 0}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      moveTextAgent(agent.id, -1);
+                    }}
+                  >
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="下移 Agent"
+                    title="下移 Agent"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-border-dark bg-bg-dark/70 text-text-muted transition-colors hover:border-accent/45 hover:text-text-dark disabled:pointer-events-none disabled:opacity-35"
+                    disabled={agentIndex === textAgents.length - 1}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      moveTextAgent(agent.id, 1);
+                    }}
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </button>
                 </span>
               </div>
-              <div className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-[11px] text-text-muted">
-                {agent.prompt || '未填写 Agent prompt'}
-              </div>
-            </button>
+            </div>
           )) : (
             <div className="rounded-lg border border-dashed border-border-dark bg-surface-dark/60 p-4 text-sm text-text-muted">
               还没有 Agent，先建一个。
@@ -397,6 +488,53 @@ export function TextAgentsSection() {
 
                   <div className="mt-4">
                     <div className="mb-2 text-xs font-medium text-text-muted">JSON 卡片展示项</div>
+                    {draft.jsonFields.filter((field) => field.enabled).length > 0 ? (
+                      <div className="mb-4 rounded-lg border border-border-dark bg-surface-dark/70 p-3">
+                        <div className="mb-2 text-[11px] font-medium text-text-muted">展示顺序</div>
+                        <div className="flex flex-col gap-2">
+                          {draft.jsonFields
+                            .filter((field) => field.enabled)
+                            .map((field, displayIndex, enabledFields) => (
+                              <div
+                                key={field.id}
+                                className="flex items-center gap-2 rounded-md border border-border-dark bg-bg-dark px-2 py-2"
+                              >
+                                <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded bg-white/8 px-1 text-[10px] text-text-muted">
+                                  {displayIndex + 1}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate text-xs font-medium text-text-dark">{field.label}</div>
+                                  <div className="truncate text-[10px] text-text-muted">{field.path}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border-dark text-text-muted transition-colors hover:bg-surface-dark hover:text-text-dark disabled:opacity-35"
+                                  title="上移"
+                                  disabled={displayIndex === 0}
+                                  onClick={() => setDraft((previous) => previous ? ({
+                                    ...previous,
+                                    jsonFields: moveJsonField(previous.jsonFields, field.id, -1),
+                                  }) : previous)}
+                                >
+                                  <ArrowUp className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border-dark text-text-muted transition-colors hover:bg-surface-dark hover:text-text-dark disabled:opacity-35"
+                                  title="下移"
+                                  disabled={displayIndex === enabledFields.length - 1}
+                                  onClick={() => setDraft((previous) => previous ? ({
+                                    ...previous,
+                                    jsonFields: moveJsonField(previous.jsonFields, field.id, 1),
+                                  }) : previous)}
+                                >
+                                  <ArrowDown className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    ) : null}
                     {jsonExampleState.options.length > 0 ? (
                       <div className="grid gap-2 md:grid-cols-2">
                         {jsonExampleState.options.map((option) => {

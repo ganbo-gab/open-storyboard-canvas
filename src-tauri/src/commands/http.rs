@@ -8,6 +8,7 @@ use reqwest::header::CONTENT_TYPE;
 use reqwest::multipart::{Form, Part};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +51,16 @@ pub struct MultipartFileDto {
 pub struct HttpResponseDto {
     pub status: u16,
     pub text: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpStreamEventDto {
+    pub stream_id: String,
+    pub kind: String,
+    pub status: Option<u16>,
+    pub chunk: Option<String>,
+    pub error: Option<String>,
 }
 
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -215,14 +226,15 @@ fn build_form_urlencoded_body(body: Value) -> Result<String, String> {
     Ok(parts.join("&"))
 }
 
-#[tauri::command]
-pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponseDto, String> {
+fn build_http_request(
+    client: &reqwest::Client,
+    request: HttpRequestDto,
+) -> Result<reqwest::RequestBuilder, String> {
     let method = request.method.trim().to_uppercase();
     let body_mode = normalize_body_mode(request.body_mode.as_deref());
     if body_mode != "json" && body_mode != "multipart" && body_mode != "form-urlencoded" {
         return Err(format!("Unsupported HTTP bodyMode: {body_mode}"));
     }
-    let client = shared_http_client();
 
     let mut builder = match method.as_str() {
         "GET" => client.get(&request.url),
@@ -265,7 +277,17 @@ pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponse
         }
     }
 
-    let response = builder
+    Ok(builder)
+}
+
+fn emit_stream_event(app: &AppHandle, event: HttpStreamEventDto) {
+    let _ = app.emit("custom-http-stream", event);
+}
+
+#[tauri::command]
+pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponseDto, String> {
+    let client = shared_http_client();
+    let response = build_http_request(client, request)?
         .send()
         .await
         .map_err(|err| format!("HTTP request failed: {err}"))?;
@@ -276,4 +298,93 @@ pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponse
         .map_err(|err| format!("HTTP response read failed: {err}"))?;
 
     Ok(HttpResponseDto { status, text })
+}
+
+#[tauri::command]
+pub async fn custom_http_stream_request(
+    app: AppHandle,
+    request: HttpRequestDto,
+    stream_id: String,
+) -> Result<u16, String> {
+    let normalized_stream_id = stream_id.trim().to_string();
+    if normalized_stream_id.is_empty() {
+        return Err("streamId is required".to_string());
+    }
+
+    let client = shared_http_client();
+    let mut response = build_http_request(client, request)?
+        .send()
+        .await
+        .map_err(|err| {
+            let message = format!("HTTP request failed: {err}");
+            emit_stream_event(&app, HttpStreamEventDto {
+                stream_id: normalized_stream_id.clone(),
+                kind: "error".to_string(),
+                status: None,
+                chunk: None,
+                error: Some(message.clone()),
+            });
+            message
+        })?;
+    let status = response.status().as_u16();
+
+    emit_stream_event(&app, HttpStreamEventDto {
+        stream_id: normalized_stream_id.clone(),
+        kind: "status".to_string(),
+        status: Some(status),
+        chunk: None,
+        error: None,
+    });
+
+    let mut error_text = String::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|err| {
+            let message = format!("HTTP response stream read failed: {err}");
+            emit_stream_event(&app, HttpStreamEventDto {
+                stream_id: normalized_stream_id.clone(),
+                kind: "error".to_string(),
+                status: Some(status),
+                chunk: None,
+                error: Some(message.clone()),
+            });
+            message
+        })?
+    {
+        let text = String::from_utf8_lossy(&chunk).to_string();
+        if status < 200 || status >= 300 {
+            error_text.push_str(&text);
+        }
+        emit_stream_event(&app, HttpStreamEventDto {
+            stream_id: normalized_stream_id.clone(),
+            kind: "chunk".to_string(),
+            status: Some(status),
+            chunk: Some(text),
+            error: None,
+        });
+    }
+
+    if status < 200 || status >= 300 {
+        let preview: String = error_text.chars().take(1000).collect();
+        let message = format!("HTTP {status}: {preview}");
+        emit_stream_event(&app, HttpStreamEventDto {
+            stream_id: normalized_stream_id.clone(),
+            kind: "error".to_string(),
+            status: Some(status),
+            chunk: None,
+            error: Some(message.clone()),
+        });
+        return Err(message);
+    }
+
+    emit_stream_event(&app, HttpStreamEventDto {
+        stream_id: normalized_stream_id,
+        kind: "done".to_string(),
+        status: Some(status),
+        chunk: None,
+        error: None,
+    });
+
+    Ok(status)
 }

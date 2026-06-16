@@ -9,10 +9,11 @@ import {
   type ReactNode,
 } from 'react';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { AlertTriangle, Bug, Check, ChevronDown, Copy, Settings2, Sparkles, Video } from 'lucide-react';
+import { AlertTriangle, Bug, Camera, Check, ChevronDown, ChevronRight, Copy, Sparkles, Video, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
+  type CameraControlOptions,
   CANVAS_NODE_TYPES,
   EXPORT_RESULT_NODE_DEFAULT_WIDTH,
   EXPORT_RESULT_NODE_LAYOUT_HEIGHT,
@@ -43,6 +44,12 @@ import {
   generationSubmitLockKey,
 } from '@/features/canvas/application/generationSubmitLock';
 import {
+  findReferenceTokens,
+  insertReferenceToken as insertReferenceTokenText,
+  removeTextRange,
+  resolveReferenceAwareDeleteRange,
+} from '@/features/canvas/application/referenceTokenEditing';
+import {
   buildVideoModelCatalog,
   resolveVideoModelConfig,
   useVideoModelCatalog,
@@ -66,6 +73,8 @@ import {
   resolveNextGeneratedMediaSequence,
 } from '@/features/canvas/application/generatedMediaNaming';
 import { CanvasNodeImage } from '@/features/canvas/ui/CanvasNodeImage';
+import { CameraControlPanel } from '@/features/canvas/ui/CameraControlPanel';
+import { buildCameraPrompt } from '@/features/canvas/application/cameraPromptLibrary';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
 import {
@@ -84,7 +93,7 @@ type AiVideoNodeProps = NodeProps & {
   selected?: boolean;
 };
 
-const AI_VIDEO_NODE_MIN_WIDTH = 520;
+const AI_VIDEO_NODE_MIN_WIDTH = 560;
 const AI_VIDEO_NODE_MIN_HEIGHT = 260;
 const AI_VIDEO_NODE_DEFAULT_WIDTH = 680;
 const AI_VIDEO_NODE_DEFAULT_HEIGHT = 360;
@@ -92,19 +101,16 @@ const AI_VIDEO_NODE_MAX_WIDTH = 1400;
 const AI_VIDEO_NODE_MAX_HEIGHT = 1000;
 const PROMPT_COMMIT_DELAY_MS = 650;
 const VIDEO_GENERATION_PROGRESS_DURATION_MS = 15 * 60 * 1000;
-
-function findReferenceTokens(prompt: string, maxImageCount: number): Array<{ token: string; start: number }> {
-  const matches: Array<{ token: string; start: number }> = [];
-  const regex = /@?(?:图|视频|音频|文本)(\d+)/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(prompt)) !== null) {
-    const imageIndex = Number(match[1]);
-    if (imageIndex >= 1 && imageIndex <= maxImageCount) {
-      matches.push({ token: match[0], start: match.index });
-    }
-  }
-  return matches;
-}
+const PICKER_FALLBACK_ANCHOR = { left: 8, top: 8 };
+const PICKER_Y_OFFSET_PX = 20;
+const REFERENCE_PICKER_WIDTH_PX = 150;
+const FUNCTION_PICKER_WIDTH_PX = 280;
+const PROMPT_PRESET_GROUP_ID = '__prompt_presets__';
+const INLINE_REFERENCE_SEPARATOR = '，';
+const AI_VIDEO_SELECTOR_CHIP_CLASS =
+  'border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-text-dark shadow-sm hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]';
+const AI_VIDEO_COMPACT_ICON_CHIP_CLASS =
+  '!w-6 !px-0 border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-text-dark shadow-sm hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]';
 
 function renderPromptWithHighlights(prompt: string, maxImageCount: number): ReactNode {
   if (!prompt) return ' ';
@@ -117,7 +123,7 @@ function renderPromptWithHighlights(prompt: string, maxImageCount: number): Reac
     segments.push(
       <span
         key={`ref-${token.start}`}
-        className="relative z-0 text-white [text-shadow:0.24px_0_currentColor,-0.24px_0_currentColor] before:absolute before:-inset-x-[4px] before:-inset-y-[1px] before:-z-10 before:rounded-[7px] before:bg-accent/55 before:content-['']"
+        className="inline rounded-[5px] bg-accent/45 font-medium text-white [box-decoration-break:clone] [-webkit-box-decoration-break:clone] [text-shadow:0.24px_0_currentColor,-0.24px_0_currentColor]"
       >
         {token.token}
       </span>
@@ -128,6 +134,65 @@ function renderPromptWithHighlights(prompt: string, maxImageCount: number): Reac
     segments.push(<span key={`plain-${lastIndex}`}>{prompt.slice(lastIndex)}</span>);
   }
   return segments;
+}
+
+function getTextareaCaretOffset(
+  textarea: HTMLTextAreaElement,
+  caretIndex: number
+): { left: number; top: number } {
+  const mirror = document.createElement('div');
+  const computed = window.getComputedStyle(textarea);
+  const mirrorStyle = mirror.style;
+
+  mirrorStyle.position = 'absolute';
+  mirrorStyle.visibility = 'hidden';
+  mirrorStyle.pointerEvents = 'none';
+  mirrorStyle.whiteSpace = 'pre-wrap';
+  mirrorStyle.overflowWrap = 'break-word';
+  mirrorStyle.wordBreak = 'break-word';
+  mirrorStyle.boxSizing = computed.boxSizing;
+  mirrorStyle.width = `${textarea.clientWidth}px`;
+  mirrorStyle.font = computed.font;
+  mirrorStyle.lineHeight = computed.lineHeight;
+  mirrorStyle.letterSpacing = computed.letterSpacing;
+  mirrorStyle.padding = computed.padding;
+  mirrorStyle.border = computed.border;
+  mirrorStyle.textTransform = computed.textTransform;
+  mirrorStyle.textIndent = computed.textIndent;
+
+  mirror.textContent = textarea.value.slice(0, caretIndex);
+  const marker = document.createElement('span');
+  marker.textContent = textarea.value.slice(caretIndex, caretIndex + 1) || ' ';
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+
+  const left = marker.offsetLeft - textarea.scrollLeft;
+  const top = marker.offsetTop - textarea.scrollTop;
+  document.body.removeChild(mirror);
+
+  return {
+    left: Math.max(0, left),
+    top: Math.max(0, top),
+  };
+}
+
+function resolvePickerAnchor(
+  container: HTMLDivElement | null,
+  textarea: HTMLTextAreaElement,
+  caretIndex: number
+): { left: number; top: number } {
+  if (!container) {
+    return PICKER_FALLBACK_ANCHOR;
+  }
+
+  const containerRect = container.getBoundingClientRect();
+  const textareaRect = textarea.getBoundingClientRect();
+  const caretOffset = getTextareaCaretOffset(textarea, caretIndex);
+
+  return {
+    left: Math.max(0, textareaRect.left - containerRect.left + caretOffset.left),
+    top: Math.max(0, textareaRect.top - containerRect.top + caretOffset.top + PICKER_Y_OFFSET_PX),
+  };
 }
 
 function resolveConfigEntry(
@@ -191,6 +256,55 @@ function describeVideoInputSchema(schema: VideoInputSchema): string {
   return parts.length > 0 ? parts.join(' / ') : '无引用';
 }
 
+function describeCompactVideoInputSchema(schema: VideoInputSchema): string {
+  const parts: string[] = [];
+  if (schema.images.enabled) {
+    const imagePart = `图${Math.max(0, schema.images.max)}`;
+    parts.push(schema.images.requireImageHost ? `${imagePart}URL` : imagePart);
+  }
+  if (schema.video.enabled) {
+    parts.push(`视频${Math.max(0, schema.video.max)}`);
+  }
+  if (schema.audio.enabled) {
+    parts.push(`音频${Math.max(0, schema.audio.max)}`);
+  }
+  return parts.length > 0 ? parts.join('/') : '无';
+}
+
+function describeReferenceForPrompt(reference: { kind: string; token: string; title: string }): string {
+  const title = reference.title.trim() || reference.token;
+  if (reference.kind === 'image') {
+    return `${reference.token}是${title}`;
+  }
+  if (reference.kind === 'audio') {
+    return `${reference.token}是${title}的声音`;
+  }
+  if (reference.kind === 'video') {
+    return `${reference.token}是参考视频`;
+  }
+  return `${reference.token}是${title}`;
+}
+
+function appendMissingReferenceDescriptions(
+  prompt: string,
+  references: Array<{ kind: string; token: string; title: string }>
+): string {
+  const additions = references
+    .map(describeReferenceForPrompt)
+    .filter((line) => line && !prompt.includes(line));
+  if (additions.length === 0) {
+    return prompt;
+  }
+  const trimmedPrompt = prompt.trimEnd();
+  const inlineAdditions = additions.join(INLINE_REFERENCE_SEPARATOR);
+  const suffix = inlineAdditions.endsWith(INLINE_REFERENCE_SEPARATOR) ? '' : INLINE_REFERENCE_SEPARATOR;
+  if (!trimmedPrompt) {
+    return `${inlineAdditions}${suffix}`;
+  }
+  const connector = /[，,、。；;：:\s]$/.test(trimmedPrompt) ? '' : INLINE_REFERENCE_SEPARATOR;
+  return `${trimmedPrompt}${connector}${inlineAdditions}${suffix}`;
+}
+
 interface VideoGenerationRequestAssembly {
   prompt: string;
   latestModelConfig: VideoModelConfigValue;
@@ -227,6 +341,13 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
   const [modelOpen, setModelOpen] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
+  const [referencePickerAnchor, setReferencePickerAnchor] = useState(PICKER_FALLBACK_ANCHOR);
+  const [referencePickerCursor, setReferencePickerCursor] = useState<number | null>(null);
+  const [referencePickerActiveIndex, setReferencePickerActiveIndex] = useState(0);
+  const [showFunctionPicker, setShowFunctionPicker] = useState(false);
+  const [functionPickerAnchor, setFunctionPickerAnchor] = useState(PICKER_FALLBACK_ANCHOR);
+  const [functionPickerActiveIndex, setFunctionPickerActiveIndex] = useState(0);
+  const [showCameraControl, setShowCameraControl] = useState(false);
   const [payloadDebugText, setPayloadDebugText] = useState<string | null>(null);
   const [payloadDebugCopied, setPayloadDebugCopied] = useState(false);
 
@@ -266,6 +387,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
   const findNodePosition = useCanvasStore((state) => state.findNodePosition);
   const catalog = useVideoModelCatalog();
   const showNodePayloadPreview = useSettingsStore((state) => state.showNodePayloadPreview);
+  const promptPresets = useSettingsStore((state) => state.promptPresets);
   const resolvedModelConfig = useMemo(
     () => resolveVideoModelConfig(catalog, data.modelConfig),
     [catalog, data.modelConfig]
@@ -295,6 +417,23 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     }),
     [currentInputSchema.audio.enabled, currentInputSchema.images.enabled, currentInputSchema.video.enabled, incomingReferenceItems]
   );
+  const functionPickerItems = useMemo(() => (
+    promptPresets.length > 0
+      ? [{
+        kind: 'presetGroup' as const,
+        id: PROMPT_PRESET_GROUP_ID,
+        label: t('nodeToolbar.promptPreset') as string,
+        description: t('nodeToolbar.promptPresetMenuTitle') as string,
+        icon: Sparkles,
+      }]
+      : []
+  ), [promptPresets.length, t]);
+  const selectedPresetLabel = useMemo(() => {
+    if (!data.selectedPromptPresetId) {
+      return null;
+    }
+    return promptPresets.find((preset) => preset.id === data.selectedPromptPresetId)?.name ?? null;
+  }, [data.selectedPromptPresetId, promptPresets]);
   const isAgnesVideoModel = selectedEntry?.providerId === 'agnes';
   const agnesVideoMode = resolveAgnesVideoMode(resolvedModelConfig?.extraParams);
   const entriesByProvider = useMemo(() => {
@@ -389,6 +528,20 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     promptHighlightRef.current.scrollLeft = promptRef.current.scrollLeft;
   }, []);
 
+  useEffect(() => {
+    if (incomingReferences.length === 0) {
+      return;
+    }
+    const nextPrompt = appendMissingReferenceDescriptions(promptDraftRef.current, incomingReferences);
+    if (nextPrompt === promptDraftRef.current) {
+      return;
+    }
+    promptDraftRef.current = nextPrompt;
+    setPromptDraft(nextPrompt);
+    flushPromptDraft(nextPrompt);
+    requestAnimationFrame(syncPromptHighlightScroll);
+  }, [flushPromptDraft, incomingReferenceSignature, incomingReferences, syncPromptHighlightScroll]);
+
   const insertReferenceToken = useCallback((index: number) => {
     const marker = schemaReferencePickerItems[index]?.token ?? '';
     if (!marker) {
@@ -396,20 +549,46 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     }
     const textarea = promptRef.current;
     const current = promptDraftRef.current;
-    const cursor = textarea?.selectionStart ?? current.length;
-    const prefix = cursor > 0 && !/\s/.test(current[cursor - 1]) ? ' ' : '';
-    const suffix = current[cursor] && !/\s/.test(current[cursor]) ? ' ' : '';
-    const nextPrompt = `${current.slice(0, cursor)}${prefix}${marker}${suffix}${current.slice(cursor)}`;
-    const nextCursor = cursor + prefix.length + marker.length + suffix.length;
+    const cursor = referencePickerCursor ?? textarea?.selectionStart ?? current.length;
+    const { nextText: nextPrompt, nextCursor } = insertReferenceTokenText(current, cursor, marker);
     setPromptDraft(nextPrompt);
     flushPromptDraft(nextPrompt);
     setReferencePickerOpen(false);
+    setReferencePickerCursor(null);
+    setReferencePickerActiveIndex(0);
     requestAnimationFrame(() => {
       promptRef.current?.focus();
       promptRef.current?.setSelectionRange(nextCursor, nextCursor);
       syncPromptHighlightScroll();
     });
-  }, [flushPromptDraft, schemaReferencePickerItems, syncPromptHighlightScroll]);
+  }, [flushPromptDraft, referencePickerCursor, schemaReferencePickerItems, syncPromptHighlightScroll]);
+
+  const selectPromptPresetFromPicker = useCallback((presetId: string) => {
+    updateNodeData(id, { selectedPromptPresetId: presetId });
+    setShowFunctionPicker(false);
+    setFunctionPickerActiveIndex(0);
+    requestAnimationFrame(() => {
+      promptRef.current?.focus();
+      syncPromptHighlightScroll();
+    });
+  }, [id, syncPromptHighlightScroll, updateNodeData]);
+
+  const selectFunctionPickerItem = useCallback((index: number) => {
+    const item = functionPickerItems[index];
+    if (!item) return;
+    const firstPreset = promptPresets[0];
+    if (firstPreset) {
+      selectPromptPresetFromPicker(firstPreset.id);
+    }
+  }, [functionPickerItems, promptPresets, selectPromptPresetFromPicker]);
+
+  const clearSelectedPromptPreset = useCallback(() => {
+    updateNodeData(id, { selectedPromptPresetId: null });
+  }, [id, updateNodeData]);
+
+  const handleCameraControlApply = useCallback((cameraControl: CameraControlOptions) => {
+    updateNodeData(id, { cameraControl });
+  }, [id, updateNodeData]);
 
   const handleConfigChange = useCallback((patch: Partial<VideoModelConfigValue>) => {
     const base = resolvedModelConfig ?? resolveVideoModelConfig(catalog, null);
@@ -441,10 +620,12 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     setModelOpen(false);
     setParamsOpen(false);
     setReferencePickerOpen(false);
+    setReferencePickerCursor(null);
+    setShowFunctionPicker(false);
   }, []);
 
   useEffect(() => {
-    if (!providerOpen && !modelOpen && !paramsOpen && !referencePickerOpen) {
+    if (!providerOpen && !modelOpen && !paramsOpen && !referencePickerOpen && !showFunctionPicker) {
       return;
     }
     const handleOutside = (event: MouseEvent) => {
@@ -455,7 +636,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     };
     document.addEventListener('mousedown', handleOutside, true);
     return () => document.removeEventListener('mousedown', handleOutside, true);
-  }, [closeOpenPopovers, modelOpen, paramsOpen, providerOpen, referencePickerOpen]);
+  }, [closeOpenPopovers, modelOpen, paramsOpen, providerOpen, referencePickerOpen, showFunctionPicker]);
 
   const assembleVideoGenerationRequest = useCallback((): VideoGenerationRequestAssembly | null => {
     const latestPromptDraft = promptDraftRef.current;
@@ -471,11 +652,41 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     const latestModelConfig = resolveVideoModelConfig(latestCatalog, latestData.modelConfig ?? resolvedModelConfig);
     const latestEntry = resolveConfigEntry(latestCatalog, latestModelConfig);
     const basePrompt = latestPromptDraft.replace(/@(?=(?:图|视频|音频|文本)\d+)/g, '').trim();
+    let sourcePrompt = '';
+    if (latestData.selectedPromptPresetId) {
+      const selectedPreset = latestSettings.promptPresets.find((preset) => preset.id === latestData.selectedPromptPresetId);
+      if (!selectedPreset) {
+        const message = t('node.imageEdit.promptPresetMissing');
+        setError(message);
+        void showErrorDialog(message, t('common.error'));
+        return null;
+      }
+      sourcePrompt = selectedPreset.prompt.trim();
+    }
+    let composedPrompt = sourcePrompt && basePrompt
+      ? `${sourcePrompt}\n\n${t('node.imageEdit.userSupplementLabel')}${basePrompt}`
+      : sourcePrompt || basePrompt;
+    const cc = latestData.cameraControl;
+    if (cc?.enabled === true) {
+      try {
+        const cameraPrompt = buildCameraPrompt({
+          cameraId: cc.camera,
+          lensId: cc.lens,
+          focalLengthMm: cc.focalLength,
+          apertureF: cc.aperture,
+        }, latestSettings);
+        if (cameraPrompt) {
+          composedPrompt = composedPrompt ? `${composedPrompt}, ${cameraPrompt}` : cameraPrompt;
+        }
+      } catch {
+        // Keep the user's prompt if camera prompt assembly fails.
+      }
+    }
     const latestReferences = collectInputReferences(id, latestCanvasState.nodes, latestCanvasState.edges);
     const referenceContextPrompt = buildReferenceContextPrompt(latestReferences);
     const prompt = referenceContextPrompt
-      ? `${referenceContextPrompt}\n\n${basePrompt}`
-      : basePrompt;
+      ? `${referenceContextPrompt}\n\n${composedPrompt}`
+      : composedPrompt;
     if (!prompt) {
       const message = t('node.aiVideo.promptRequired');
       setError(message);
@@ -732,24 +943,144 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
   }, [handleGenerate, id]);
 
   const handlePromptKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Backspace' || event.key === 'Delete') {
+      const currentPrompt = promptDraftRef.current;
+      const selectionStart = event.currentTarget.selectionStart ?? currentPrompt.length;
+      const selectionEnd = event.currentTarget.selectionEnd ?? selectionStart;
+      const deleteRange = resolveReferenceAwareDeleteRange(
+        currentPrompt,
+        selectionStart,
+        selectionEnd,
+        event.key === 'Backspace' ? 'backward' : 'forward',
+        incomingReferences.length
+      );
+      if (deleteRange) {
+        event.preventDefault();
+        const { nextText, nextCursor } = removeTextRange(currentPrompt, deleteRange);
+        setPromptDraft(nextText);
+        flushPromptDraft(nextText);
+        requestAnimationFrame(() => {
+          promptRef.current?.focus();
+          promptRef.current?.setSelectionRange(nextCursor, nextCursor);
+          syncPromptHighlightScroll();
+        });
+        return;
+      }
+      if (
+        event.key === 'Backspace'
+        && !currentPrompt.trim()
+        && selectedPresetLabel
+        && selectionStart === 0
+        && selectionEnd === 0
+      ) {
+        event.preventDefault();
+        clearSelectedPromptPreset();
+        return;
+      }
+    }
+
+    if (showFunctionPicker && functionPickerItems.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setFunctionPickerActiveIndex((previous) => (previous + 1) % functionPickerItems.length);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setFunctionPickerActiveIndex((previous) =>
+          previous === 0 ? functionPickerItems.length - 1 : previous - 1
+        );
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        selectFunctionPickerItem(functionPickerActiveIndex);
+        return;
+      }
+    }
+
+    if (referencePickerOpen && schemaReferencePickerItems.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setReferencePickerActiveIndex((previous) => (previous + 1) % schemaReferencePickerItems.length);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setReferencePickerActiveIndex((previous) =>
+          previous === 0 ? schemaReferencePickerItems.length - 1 : previous - 1
+        );
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        insertReferenceToken(referencePickerActiveIndex);
+        return;
+      }
+    }
+
+    if (event.key === '/' && functionPickerItems.length > 0) {
+      event.preventDefault();
+      const cursor = event.currentTarget.selectionStart ?? promptDraftRef.current.length;
+      const anchor = resolvePickerAnchor(rootRef.current, event.currentTarget, cursor);
+      setFunctionPickerAnchor({
+        left: Math.max(8, Math.min(anchor.left, resolvedWidth - FUNCTION_PICKER_WIDTH_PX - 8)),
+        top: anchor.top,
+      });
+      setShowFunctionPicker(true);
+      setFunctionPickerActiveIndex(0);
+      setReferencePickerOpen(false);
+      setReferencePickerCursor(null);
+      return;
+    }
+
     if (event.key === '@' && schemaReferencePickerItems.length > 0) {
       event.preventDefault();
+      const cursor = event.currentTarget.selectionStart ?? promptDraftRef.current.length;
+      const anchor = resolvePickerAnchor(rootRef.current, event.currentTarget, cursor);
+      setReferencePickerAnchor({
+        left: Math.max(8, Math.min(anchor.left, resolvedWidth - REFERENCE_PICKER_WIDTH_PX - 8)),
+        top: Math.max(8, anchor.top),
+      });
+      setReferencePickerCursor(cursor);
       setReferencePickerOpen(true);
+      setReferencePickerActiveIndex(0);
       setProviderOpen(false);
       setModelOpen(false);
       setParamsOpen(false);
+      setShowFunctionPicker(false);
       return;
     }
-    if (event.key === 'Escape' && referencePickerOpen) {
+    if (event.key === 'Escape' && (referencePickerOpen || showFunctionPicker)) {
       event.preventDefault();
       setReferencePickerOpen(false);
+      setReferencePickerCursor(null);
+      setReferencePickerActiveIndex(0);
+      setShowFunctionPicker(false);
+      setFunctionPickerActiveIndex(0);
       return;
     }
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       event.preventDefault();
       void handleGenerate();
     }
-  }, [handleGenerate, schemaReferencePickerItems.length, referencePickerOpen]);
+  }, [
+    clearSelectedPromptPreset,
+    flushPromptDraft,
+    functionPickerActiveIndex,
+    functionPickerItems.length,
+    handleGenerate,
+    incomingReferences.length,
+    insertReferenceToken,
+    referencePickerActiveIndex,
+    referencePickerOpen,
+    resolvedWidth,
+    schemaReferencePickerItems.length,
+    selectFunctionPickerItem,
+    selectedPresetLabel,
+    showFunctionPicker,
+    syncPromptHighlightScroll,
+  ]);
 
   const handlePickProvider = useCallback((providerLabel: string) => {
     const entry = entriesByProvider.get(providerLabel)?.find((candidate) => candidate.usable);
@@ -827,13 +1158,31 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
 
       <div className="image-box relative min-h-0 flex-1 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-2">
         <div className="relative h-full min-h-0">
+          {selectedPresetLabel && (
+            <div className="absolute left-1 top-1 z-20 flex max-w-[calc(100%-8px)] items-center gap-1 rounded-md border border-accent/35 bg-accent/18 px-2 py-1 text-xs text-accent shadow-sm">
+              <Sparkles className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{selectedPresetLabel}</span>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  clearSelectedPromptPreset();
+                  promptRef.current?.focus();
+                }}
+                className="ml-0.5 rounded p-0.5 text-accent/80 hover:bg-accent/20 hover:text-accent"
+                title={t('nodeToolbar.promptPreset') as string}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
           <div
             ref={promptHighlightRef}
             aria-hidden="true"
             className="ui-scrollbar pointer-events-none absolute inset-0 overflow-y-auto overflow-x-hidden text-sm leading-6 text-text-dark"
             style={{ scrollbarGutter: 'stable' }}
           >
-            <div className="min-h-full whitespace-pre-wrap break-words px-1 py-0.5">
+            <div className={`min-h-full whitespace-pre-wrap break-words px-1 py-0.5 ${selectedPresetLabel ? 'pt-8' : ''}`}>
               {renderPromptWithHighlights(promptDraft, incomingReferences.length)}
             </div>
           </div>
@@ -851,17 +1200,19 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             onScroll={syncPromptHighlightScroll}
             onMouseDown={(event) => event.stopPropagation()}
             placeholder={t('node.aiVideo.promptPlaceholder')}
-            className="ui-scrollbar nodrag nowheel relative z-10 h-full w-full resize-none overflow-y-auto overflow-x-hidden border-none bg-transparent px-1 py-0.5 text-sm leading-6 text-transparent caret-text-dark outline-none placeholder:text-text-muted/80 focus:border-transparent whitespace-pre-wrap break-words"
+            className={`ui-scrollbar nodrag nowheel relative z-10 h-full w-full resize-none overflow-y-auto overflow-x-hidden border-none bg-transparent px-1 py-0.5 text-sm leading-6 text-transparent caret-text-dark outline-none placeholder:text-text-muted/80 focus:border-transparent whitespace-pre-wrap break-words ${selectedPresetLabel ? 'pt-8' : ''}`}
             style={{ scrollbarGutter: 'stable' }}
           />
         </div>
 
         {referencePickerOpen && schemaReferencePickerItems.length > 0 && (
           <div
-            className="nowheel absolute left-3 top-3 z-30 w-[140px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
+            className="nowheel absolute z-30 w-[150px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
+            style={{ left: referencePickerAnchor.left, top: referencePickerAnchor.top }}
             onMouseDown={(event) => event.stopPropagation()}
+            onWheelCapture={(event) => event.stopPropagation()}
           >
-            <div className="ui-scrollbar nowheel max-h-[220px] overflow-y-auto">
+            <div className="ui-scrollbar nowheel max-h-[220px] overflow-y-auto" onWheelCapture={(event) => event.stopPropagation()}>
               {schemaReferencePickerItems.map((item, index) => (
                 <button
                   key={`${item.kind}-${item.sourceNodeId}-${index}`}
@@ -870,7 +1221,12 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                     event.stopPropagation();
                     insertReferenceToken(index);
                   }}
-                  className="flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[var(--canvas-node-field-border)] hover:bg-[var(--canvas-node-menu-hover)]"
+                  onMouseEnter={() => setReferencePickerActiveIndex(index)}
+                  className={`flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[var(--canvas-node-field-border)] hover:bg-[var(--canvas-node-menu-hover)] ${
+                    referencePickerActiveIndex === index
+                      ? 'border-accent/35 bg-[var(--canvas-node-menu-active)]'
+                      : ''
+                  }`}
                 >
                   {item.kind === 'image' && item.displayUrl ? (
                     <CanvasNodeImage
@@ -892,66 +1248,156 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             </div>
           </div>
         )}
+
+        {showFunctionPicker && functionPickerItems.length > 0 && (
+          <div
+            className="nowheel absolute z-40 w-[280px] overflow-visible rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-2xl"
+            style={{ left: functionPickerAnchor.left, top: functionPickerAnchor.top }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onWheelCapture={(event) => event.stopPropagation()}
+          >
+            <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+              输入 / 选择提示词预设
+            </div>
+            <div className="ui-scrollbar nowheel max-h-[260px] overflow-y-auto pr-1">
+              {functionPickerItems.map((item, index) => {
+                const Icon = item.icon;
+                const active = functionPickerActiveIndex === index;
+                const selected = Boolean(data.selectedPromptPresetId);
+                return (
+                  <button
+                    key={`${item.kind}-${item.id}`}
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      selectFunctionPickerItem(index);
+                    }}
+                    onMouseEnter={() => setFunctionPickerActiveIndex(index)}
+                    className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors ${
+                      active
+                        ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
+                        : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                    }`}
+                    title={item.description}
+                  >
+                    <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{item.label}</span>
+                      <span className="mt-0.5 block truncate text-[11px] text-text-muted">
+                        我的提示词预设
+                      </span>
+                    </span>
+                    {selected && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />}
+                    {item.kind === 'presetGroup' && <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" />}
+                  </button>
+                );
+              })}
+            </div>
+            {functionPickerItems[functionPickerActiveIndex]?.kind === 'presetGroup' && (
+              <div
+                className="nowheel absolute left-[calc(100%+8px)] w-[240px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-2xl"
+                style={{ top: `${Math.min(44 + functionPickerActiveIndex * 58, 150)}px` }}
+                onMouseDown={(event) => event.stopPropagation()}
+                onWheelCapture={(event) => event.stopPropagation()}
+              >
+                <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+                  我的提示词预设
+                </div>
+                <div className="ui-scrollbar nowheel max-h-[220px] overflow-y-auto pr-1">
+                {promptPresets.map((preset) => {
+                  const presetSelected = data.selectedPromptPresetId === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors ${
+                        presetSelected
+                          ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
+                          : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                      }`}
+                      title={preset.prompt}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        selectPromptPresetFromPicker(preset.id);
+                      }}
+                    >
+                      <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{preset.name}</span>
+                        <span className="mt-0.5 block truncate text-[11px] text-text-muted">我的提示词预设</span>
+                      </span>
+                      {presetSelected && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />}
+                    </button>
+                  );
+                })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="mt-2 flex min-w-0 shrink-0 flex-nowrap items-center gap-1">
-        <div className="relative min-w-0 max-w-[120px] shrink">
-          <UiButton
-            onClick={(event) => {
-              event.stopPropagation();
-              setProviderOpen((open) => !open);
-              setModelOpen(false);
-              setParamsOpen(false);
-              setReferencePickerOpen(false);
-            }}
-            variant="muted"
-            className={`w-full ${NODE_CONTROL_CHIP_CLASS}`}
-            title={selectedEntry?.providerLabel ?? t('node.aiVideo.noModel')}
-          >
-            <Video className={NODE_CONTROL_ICON_CLASS} />
-            <span className="min-w-0 truncate">{selectedEntry?.providerLabel ?? t('node.aiVideo.noModel')}</span>
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
-          </UiButton>
-          {providerOpen && (
-            <div
-              className="nowheel absolute bottom-full left-0 z-50 mb-1 min-w-[170px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-xl"
-              onMouseDown={(event) => event.stopPropagation()}
+      <div className="mt-2 flex min-w-0 shrink-0 items-center gap-1 overflow-visible">
+        <div className="flex min-w-0 flex-1 items-center gap-0.5">
+          <div className="relative min-w-0 max-w-[92px] shrink">
+            <UiButton
+              onClick={(event) => {
+                event.stopPropagation();
+                setProviderOpen((open) => !open);
+                setModelOpen(false);
+                setParamsOpen(false);
+                setReferencePickerOpen(false);
+                setReferencePickerCursor(null);
+                setShowFunctionPicker(false);
+              }}
+              variant="muted"
+              className={`w-full justify-start ${NODE_CONTROL_CHIP_CLASS} ${AI_VIDEO_SELECTOR_CHIP_CLASS}`}
+              title={selectedEntry?.providerLabel ?? t('node.aiVideo.noModel')}
             >
-              {catalog.length === 0 ? (
-                <div className="flex items-start gap-2 p-2 text-xs leading-5 text-text-muted">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
-                  <span>{t('node.aiVideo.noVideoProvider')}</span>
-                </div>
-              ) : (
-                <div className="ui-scrollbar max-h-[220px] overflow-y-auto pr-1">
-                  {Array.from(entriesByProvider.keys()).map((providerLabel) => {
-                    const active = selectedEntry?.providerLabel === providerLabel;
-                    return (
-                      <button
-                        key={providerLabel}
-                        type="button"
-                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
-                          active
-                            ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
-                            : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
-                        }`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handlePickProvider(providerLabel);
-                        }}
-                      >
-                        {active && <Check className="h-3.5 w-3.5 shrink-0 text-accent" />}
-                        <span className="min-w-0 truncate">{providerLabel}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+              <Video className={NODE_CONTROL_ICON_CLASS} />
+              <span className="min-w-0 truncate">{selectedEntry?.providerLabel ?? t('node.aiVideo.noModel')}</span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
+            </UiButton>
+            {providerOpen && (
+              <div
+                className="nowheel absolute bottom-full left-0 z-50 mb-1 min-w-[170px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-xl"
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                {catalog.length === 0 ? (
+                  <div className="flex items-start gap-2 p-2 text-xs leading-5 text-text-muted">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+                    <span>{t('node.aiVideo.noVideoProvider')}</span>
+                  </div>
+                ) : (
+                  <div className="ui-scrollbar max-h-[220px] overflow-y-auto pr-1">
+                    {Array.from(entriesByProvider.keys()).map((providerLabel) => {
+                      const active = selectedEntry?.providerLabel === providerLabel;
+                      return (
+                        <button
+                          key={providerLabel}
+                          type="button"
+                          className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
+                            active
+                              ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
+                              : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                          }`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handlePickProvider(providerLabel);
+                          }}
+                        >
+                          {active && <Check className="h-3.5 w-3.5 shrink-0 text-accent" />}
+                          <span className="min-w-0 truncate">{providerLabel}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
-        <div className="relative min-w-0 max-w-[140px] shrink">
+        <div className="relative min-w-0 max-w-[124px] shrink">
           <UiButton
             onClick={(event) => {
               event.stopPropagation();
@@ -959,9 +1405,11 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
               setProviderOpen(false);
               setParamsOpen(false);
               setReferencePickerOpen(false);
+              setReferencePickerCursor(null);
+              setShowFunctionPicker(false);
             }}
             variant="muted"
-            className={`w-full ${NODE_CONTROL_CHIP_CLASS}`}
+            className={`w-full justify-start ${NODE_CONTROL_CHIP_CLASS} ${AI_VIDEO_SELECTOR_CHIP_CLASS}`}
             title={selectedEntry?.modelLabel ?? t('node.aiVideo.noModel')}
           >
             <span className="min-w-0 truncate">{selectedEntry?.modelLabel ?? t('node.aiVideo.noModel')}</span>
@@ -1008,7 +1456,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         </div>
 
         {resolvedModelConfig && selectedEntry && (
-          <div className="relative shrink-0">
+          <div className="relative min-w-0 max-w-[96px] shrink">
             <UiButton
               onClick={(event) => {
                 event.stopPropagation();
@@ -1016,14 +1464,15 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                 setProviderOpen(false);
                 setModelOpen(false);
                 setReferencePickerOpen(false);
+                setReferencePickerCursor(null);
+                setShowFunctionPicker(false);
               }}
               variant="muted"
-              className={`shrink-0 ${NODE_CONTROL_CHIP_CLASS}`}
+              className={`w-full justify-start ${NODE_CONTROL_CHIP_CLASS}`}
               title={`${t('node.aiVideo.duration')} / ${t('node.aiVideo.resolution')} / ${t('node.aiVideo.aspectRatio')}`}
             >
-              <Settings2 className={NODE_CONTROL_ICON_CLASS} />
               <span className="min-w-0 truncate">
-                {resolvedModelConfig.duration}s · {resolvedModelConfig.resolution} · {resolvedModelConfig.aspectRatio}
+                {resolvedModelConfig.duration}s·{resolvedModelConfig.resolution}·{resolvedModelConfig.aspectRatio}
               </span>
               <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
             </UiButton>
@@ -1155,21 +1604,40 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         {selectedEntry && (
           <UiButton
             variant="muted"
-            className={`shrink-0 ${NODE_CONTROL_CHIP_CLASS}`}
+            className={`min-w-[92px] max-w-[132px] shrink-0 justify-start ${NODE_CONTROL_CHIP_CLASS}`}
             title={describeVideoInputSchema(currentInputSchema)}
           >
-            <span>{describeVideoInputSchema(currentInputSchema)}</span>
+            <span className="min-w-0 truncate">{describeCompactVideoInputSchema(currentInputSchema)}</span>
           </UiButton>
         )}
+        </div>
+
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          <UiButton
+            onClick={(event) => {
+              event.stopPropagation();
+              setShowCameraControl(true);
+            }}
+            variant={data.cameraControl?.enabled === true ? 'primary' : 'muted'}
+            className={`shrink-0 ${NODE_CONTROL_CHIP_CLASS} ${data.cameraControl?.enabled === true ? '' : AI_VIDEO_COMPACT_ICON_CHIP_CLASS}`}
+            title={t('cameraControl.title') as string}
+            aria-label={t('cameraControl.title') as string}
+          >
+            <Camera className={NODE_CONTROL_ICON_CLASS} />
+          </UiButton>
 
         {schemaReferencePickerItems.length > 0 && (
           <UiButton
             onClick={(event) => {
               event.stopPropagation();
               setReferencePickerOpen((open) => !open);
+              setReferencePickerAnchor({ left: 12, top: 12 });
+              setReferencePickerCursor(promptDraftRef.current.length);
+              setReferencePickerActiveIndex(0);
               setProviderOpen(false);
               setModelOpen(false);
               setParamsOpen(false);
+              setShowFunctionPicker(false);
             }}
             variant="muted"
             className={`shrink-0 ${NODE_CONTROL_CHIP_CLASS}`}
@@ -1177,17 +1645,18 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             <span>{t('node.aiVideo.referenceCount', { count: schemaReferencePickerItems.length })}</span>
           </UiButton>
         )}
-        <UiButton
-          onClick={(event) => {
-            event.stopPropagation();
-            void handleGenerate();
-          }}
-          variant="primary"
-          className={`shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
-        >
-          <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
-          {t('canvas.generate')}
-        </UiButton>
+          <UiButton
+            onClick={(event) => {
+              event.stopPropagation();
+              void handleGenerate();
+            }}
+            variant="primary"
+            className={`shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
+          >
+            <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
+            {t('canvas.generate')}
+          </UiButton>
+        </div>
       </div>
 
       {error && <div className="mt-1 shrink-0 text-xs text-red-400">{error}</div>}
@@ -1250,6 +1719,13 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
           </pre>
         </div>
       </UiModal>
+
+      <CameraControlPanel
+        isOpen={showCameraControl}
+        onClose={() => setShowCameraControl(false)}
+        cameraControl={data.cameraControl}
+        onApply={handleCameraControlApply}
+      />
     </div>
   );
 });

@@ -85,7 +85,7 @@ function createJsonFieldId(): string {
   return `agent-json-field-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function tokenizeJsonPath(path: string): string[] {
+export function tokenizeJsonPath(path: string): string[] {
   const trimmed = path.trim();
   if (!trimmed) {
     return [];
@@ -112,29 +112,387 @@ export function getValueByJsonPath(source: unknown, path?: string): unknown {
     return source;
   }
   const tokens = tokenizeJsonPath(path);
-  let current: unknown = source;
-  for (const token of tokens) {
-    if (Array.isArray(current)) {
-      const index = Number(token);
-      if (!Number.isInteger(index) || index < 0 || index >= current.length) {
+  return getValueByJsonPathTokens(source, tokens, 0);
+}
+
+function getValueByJsonPathTokens(source: unknown, tokens: string[], tokenIndex: number): unknown {
+  if (tokenIndex >= tokens.length) {
+    return source;
+  }
+
+  const token = tokens[tokenIndex];
+  if (Array.isArray(source)) {
+    const index = Number(token);
+    if (Number.isInteger(index)) {
+      if (index < 0 || index >= source.length) {
         return undefined;
       }
-      current = current[index];
-      continue;
+      return getValueByJsonPathTokens(source[index], tokens, tokenIndex + 1);
     }
-    if (!current || typeof current !== 'object') {
-      return undefined;
-    }
-    current = (current as Record<string, unknown>)[token];
+
+    const values = source
+      .map((item) => getValueByJsonPathTokens(item, tokens, tokenIndex))
+      .filter((value) => value !== undefined);
+    return values.length > 0 ? values : undefined;
   }
-  return current;
+
+  if (!source || typeof source !== 'object') {
+    return undefined;
+  }
+
+  return getValueByJsonPathTokens(
+    (source as Record<string, unknown>)[token],
+    tokens,
+    tokenIndex + 1
+  );
 }
 
 function formatJsonPathValue(value: unknown): string {
   if (typeof value === 'string') {
     return value;
   }
+  if (Array.isArray(value)) {
+    if (value.every((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item))) {
+      return value
+        .map((item) => item === null ? '' : String(item))
+        .filter((item) => item.length > 0)
+        .join('\n');
+    }
+  }
   return safeStringify(value, 2);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function decodeJsonStringFragment(content: string): string {
+  try {
+    return JSON.parse(`"${escapeJsonStringControlChars(content)}"`) as string;
+  } catch {
+    return content
+      .replace(/\\u([0-9a-fA-F]{4})/g, (_match, code: string) =>
+        String.fromCharCode(parseInt(code, 16))
+      )
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\')
+      .replace(/\\\//g, '/');
+  }
+}
+
+function findStringValueEnd(raw: string, valueStart: number): number {
+  let escaped = false;
+  for (let index = valueStart + 1; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (char !== '"') {
+      continue;
+    }
+
+    const rest = raw.slice(index + 1);
+    if (/^\s*(?:,|\}|$)/.test(rest)) {
+      return index;
+    }
+  }
+
+  const objectEnd = raw.lastIndexOf('}');
+  const lastQuote = raw.lastIndexOf('"', objectEnd >= 0 ? objectEnd : raw.length - 1);
+  return lastQuote > valueStart ? lastQuote : -1;
+}
+
+function extractTopLevelStringFieldFromRawJson(raw: string, path: string): string | undefined {
+  const tokens = tokenizeJsonPath(path);
+  if (tokens.length !== 1 || /^\d+$/.test(tokens[0])) {
+    return undefined;
+  }
+
+  const key = tokens[0];
+  const pattern = new RegExp(`"${escapeRegExp(key)}"\\s*:`, 'm');
+  const match = pattern.exec(raw);
+  if (!match) {
+    return undefined;
+  }
+
+  let valueStart = match.index + match[0].length;
+  while (valueStart < raw.length && /\s/.test(raw[valueStart])) {
+    valueStart += 1;
+  }
+  if (raw[valueStart] !== '"') {
+    return undefined;
+  }
+
+  const valueEnd = findStringValueEnd(raw, valueStart);
+  if (valueEnd <= valueStart) {
+    return undefined;
+  }
+
+  return decodeJsonStringFragment(raw.slice(valueStart + 1, valueEnd));
+}
+
+export function resolveJsonCardDisplayFieldsFromRaw(
+  agent: TextAgentConfig | null | undefined,
+  raw: string
+): JsonCardDisplayField[] {
+  if (!agent?.jsonFields?.length || !raw.trim()) {
+    return [];
+  }
+
+  return agent.jsonFields
+    .filter((field) => field.enabled)
+    .map((field) => {
+      const value = extractTopLevelStringFieldFromRawJson(raw, field.path);
+      if (value === undefined) {
+        return null;
+      }
+      return {
+        path: field.path,
+        label: field.label,
+        value,
+      };
+    })
+    .filter((field): field is JsonCardDisplayField => Boolean(field));
+}
+
+function tryParseJson(raw: string): { parsed: unknown; content: string } | null {
+  const originalContent = raw.trim();
+  if (!originalContent) {
+    return null;
+  }
+  try {
+    return {
+      parsed: JSON.parse(originalContent) as unknown,
+      content: originalContent,
+    };
+  } catch {
+    // Keep going into repair passes. Chinese punctuation such as “...” is
+    // valid inside JSON strings, so normalization must not run before this.
+  }
+
+  const repairedOriginalContent = escapeJsonStringControlChars(originalContent);
+  if (repairedOriginalContent !== originalContent) {
+    try {
+      return {
+        parsed: JSON.parse(repairedOriginalContent) as unknown,
+        content: repairedOriginalContent,
+      };
+    } catch {
+      // Try punctuation normalization below.
+    }
+  }
+
+  const content = normalizeJsonLikePunctuation(originalContent);
+  if (content !== originalContent) {
+    try {
+      return {
+        parsed: JSON.parse(content) as unknown,
+        content,
+      };
+    } catch {
+      // Try escaping control characters below.
+    }
+  }
+
+  const repairedContent = escapeJsonStringControlChars(content);
+  if (repairedContent === content) {
+    return null;
+  }
+  try {
+    return {
+      parsed: JSON.parse(repairedContent) as unknown,
+      content: repairedContent,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeJsonLikePunctuation(raw: string): string {
+  const punctuationMap: Record<string, string> = {
+    '\u201c': '"',
+    '\u201d': '"',
+    '\uff02': '"',
+    '\uff0c': ',',
+    '\uff1a': ':',
+    '\uff3b': '[',
+    '\uff3d': ']',
+    '\uff5b': '{',
+    '\uff5d': '}',
+  };
+  return raw.replace(/[\u201c\u201d\uff02\uff0c\uff1a\uff3b\uff3d\uff5b\uff5d]/g, (char) =>
+    punctuationMap[char] ?? char
+  );
+}
+
+function escapeJsonStringControlChars(raw: string): string {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  let changed = false;
+
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+
+    if (!inString) {
+      result += char;
+      if (char === '"') {
+        inString = true;
+      }
+      continue;
+    }
+
+    if (escaped) {
+      result += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      result += char;
+      escaped = true;
+      continue;
+    }
+
+    if (char === '"') {
+      result += char;
+      inString = false;
+      continue;
+    }
+
+    if (char === '\r' || char === '\n') {
+      result += '\\n';
+      changed = true;
+      if (char === '\r' && raw[index + 1] === '\n') {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (char === '\t') {
+      result += '\\t';
+      changed = true;
+      continue;
+    }
+
+    result += char;
+  }
+
+  return changed ? result : raw;
+}
+
+function tryParseJsonFragment(raw: string): { parsed: unknown; content: string } | null {
+  const originalJson = tryParseJsonFragmentCandidate(raw);
+  const normalized = normalizeJsonLikePunctuation(raw);
+  if (normalized === raw) {
+    return originalJson;
+  }
+
+  const normalizedJson = tryParseJsonFragmentCandidate(normalized);
+  if (
+    normalizedJson
+    && (!originalJson || (Array.isArray(normalizedJson.parsed) && !Array.isArray(originalJson.parsed)))
+  ) {
+    return normalizedJson;
+  }
+
+  return originalJson;
+}
+
+function tryParseJsonFragmentCandidate(raw: string): { parsed: unknown; content: string } | null {
+  const trimmed = raw.trimStart();
+  const firstObjectIndex = raw.indexOf('{');
+  const firstArrayIndex = raw.indexOf('[');
+
+  if (trimmed.startsWith('{')) {
+    return tryParseJsonFragmentWithRoot(raw, '{');
+  }
+
+  if (
+    firstObjectIndex >= 0
+    && (firstArrayIndex < 0 || firstObjectIndex < firstArrayIndex)
+  ) {
+    const objectJson = tryParseJsonFragmentWithRoot(raw, '{');
+    if (objectJson || firstObjectIndex === 0) {
+      return objectJson;
+    }
+  }
+
+  const arrayJson = tryParseJsonFragmentWithRoot(raw, '[');
+  return arrayJson ?? tryParseJsonFragmentWithRoot(raw, '{');
+}
+
+function tryParseJsonFragmentWithRoot(
+  raw: string,
+  rootChar: '[' | '{'
+): { parsed: unknown; content: string } | null {
+  const escapedRoot = rootChar === '[' ? '\\[' : '{';
+  const starts = [...raw.matchAll(new RegExp(escapedRoot, 'g'))]
+    .map((match) => match.index ?? -1)
+    .filter((index) => index >= 0);
+
+  for (const start of starts) {
+    const stack: string[] = [];
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < raw.length; index += 1) {
+      const char = raw[index];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (char === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+      if (char === '{') {
+        stack.push('}');
+        continue;
+      }
+      if (char === '[') {
+        stack.push(']');
+        continue;
+      }
+      if (char !== '}' && char !== ']') {
+        continue;
+      }
+      if (stack.length === 0 || stack[stack.length - 1] !== char) {
+        break;
+      }
+      stack.pop();
+      if (stack.length === 0) {
+        const candidate = raw.slice(start, index + 1);
+        const parsed = tryParseJson(candidate);
+        if (parsed) {
+          return parsed;
+        }
+        break;
+      }
+    }
+  }
+
+  return null;
 }
 
 function appendFlattenedPaths(
@@ -837,35 +1195,45 @@ export function resolveAiTextResult(raw: string): AiTextResolvedResult {
     };
   }
 
-  try {
+  const directJson = tryParseJson(normalized);
+  if (directJson) {
     return {
       kind: 'json',
       rawContent: normalized,
-      parsedJson: JSON.parse(normalized) as unknown,
+      parsedJson: directJson.parsed,
       parseError: null,
     };
-  } catch {
-    // Ignore and continue to fenced parsing.
   }
 
   const fencedMatch = normalized.match(JSON_FENCE_PATTERN);
   if (fencedMatch?.[1]) {
     const fencedContent = fencedMatch[1].trim();
-    try {
+    const fencedJson = tryParseJson(fencedContent);
+    if (fencedJson) {
       return {
         kind: 'json',
         rawContent: normalized,
-        parsedJson: JSON.parse(fencedContent) as unknown,
+        parsedJson: fencedJson.parsed,
         parseError: null,
       };
-    } catch (error) {
+    } else {
       return {
         kind: 'markdown',
         rawContent: normalized,
         markdownContent: normalized,
-        parseError: error instanceof Error ? error.message : 'JSON 解析失败',
+        parseError: 'JSON 解析失败',
       };
     }
+  }
+
+  const fragmentJson = tryParseJsonFragment(normalized);
+  if (fragmentJson) {
+    return {
+      kind: 'json',
+      rawContent: normalized,
+      parsedJson: fragmentJson.parsed,
+      parseError: null,
+    };
   }
 
   return {
@@ -887,7 +1255,9 @@ export function resolveJsonCardDisplayFields(
     .filter((field) => field.enabled)
     .map((field) => {
       const value = Array.isArray(parsedJson)
-        ? getValueByJsonPath(parsedJson[0], field.path)
+        ? parsedJson
+          .map((item) => getValueByJsonPath(item, field.path))
+          .find((item) => item !== undefined)
         : getValueByJsonPath(parsedJson, field.path);
       if (value === undefined) {
         return null;
