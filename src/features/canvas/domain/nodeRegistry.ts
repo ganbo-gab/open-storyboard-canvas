@@ -254,9 +254,13 @@ const exportImageNodeDefinition: CanvasNodeDefinition<ExportImageNodeData> = {
 
 const videoNodeDefinition: CanvasNodeDefinition<VideoNodeData> = {
   type: CANVAS_NODE_TYPES.video,
-  menuLabelKey: 'node.menu.aiVideoGeneration',
+  menuLabelKey: 'node.menu.uploadVideo',
   menuIcon: 'video',
-  visibleInMenu: false,
+  visibleInMenu: true,
+  defaultSize: {
+    width: 384,
+    height: 288,
+  },
   capabilities: {
     toolbar: true,
     selectionToolbar: 'full',
@@ -275,6 +279,7 @@ const videoNodeDefinition: CanvasNodeDefinition<VideoNodeData> = {
     videoUrl: null,
     localVideoUrl: null,
     thumbnailUrl: null,
+    sourceFileName: null,
     aspectRatio: '16:9',
     durationSeconds: null,
     isGenerating: false,

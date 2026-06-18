@@ -206,6 +206,7 @@ export interface VideoNodeData extends NodeDisplayData {
   videoUrl: string | null;
   localVideoUrl?: string | null;
   thumbnailUrl?: string | null;
+  sourceFileName?: string | null;
   generatedFileName?: string | null;
   generatedNamingMode?: 'default' | 'custom';
   generatedSequence?: number | null;

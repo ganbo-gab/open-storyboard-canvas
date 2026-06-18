@@ -760,6 +760,7 @@
   "node": {
     "menu": {
       "uploadImage": "上传图片",
+      "uploadVideo": "上传视频",
       "aiImageGeneration": "AI 图片",
       "aiVideoGeneration": "AI 视频",
       "aiTextGeneration": "AI 文本",
@@ -876,7 +877,10 @@
       "waitingResult": "等待视频生成结果",
       "waitingResultDelayed": "已经等待 {{minutes}} 分钟了，还没有视频结果。继续等待中...",
       "generationFailed": "视频生成失败",
-      "empty": "暂无视频",
+      "uploadFailed": "视频上传失败",
+      "empty": "点击或拖拽上传视频",
+      "uploading": "正在读取视频...",
+      "replace": "替换视频",
       "generationElapsed": "生成耗时"
     },
     "panoramaViewer": {

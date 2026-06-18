@@ -197,7 +197,8 @@ export function resolveGeneratedVideoSaveFileName(
   const generatedFileName = data.generatedFileName?.trim() || null;
   const isCustom = data.generatedNamingMode === 'custom';
   const customName = isCustom ? resolveCustomGeneratedVideoName(data.displayName) : null;
-  const sourceFileName = extractFileNameFromPath(data.localVideoUrl || data.videoUrl);
+  const sourceFileName = extractFileNameFromPath(data.sourceFileName)
+    ?? extractFileNameFromPath(data.localVideoUrl || data.videoUrl);
   const extension = extractFileExtension(generatedFileName ?? sourceFileName, fallbackExtension);
   if (customName) {
     return `${sanitizeFileStem(customName, DEFAULT_GENERATED_VIDEO_DISPLAY_NAME)}.${extension}`;
@@ -206,6 +207,9 @@ export function resolveGeneratedVideoSaveFileName(
   const sequence = normalizeGeneratedSequence(data.generatedSequence);
   if (sequence) {
     return `${resolveDefaultGeneratedVideoFileStem(sequence, data.generatedDateStamp?.trim() || getLocalDateStamp())}.${extension}`;
+  }
+  if (sourceFileName) {
+    return `${sanitizeFileStem(stripFileExtension(sourceFileName), DEFAULT_GENERATED_VIDEO_DISPLAY_NAME)}.${extension}`;
   }
   return `${DEFAULT_GENERATED_VIDEO_DISPLAY_NAME}.${extension}`;
 }

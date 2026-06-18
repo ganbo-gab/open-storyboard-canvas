@@ -1,4 +1,8 @@
-import { customHttpRequest } from '@/commands/ai';
+import {
+  customHttpRequest,
+  type CustomHttpRequest,
+  type CustomHttpResponse,
+} from '@/commands/ai';
 import { loadAudioSourceDataUrl } from '@/commands/image';
 import type {
   AudioModelConfig,
@@ -87,6 +91,8 @@ const VOXCPM_GENERATE_PARAMETER_NAMES = [
   'user_id',
 ];
 const VOXCPM_DEFAULT_USER_ID = 'fp-2fejme4mpcko';
+const VOXCPM_RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504, 520, 522, 524]);
+const VOXCPM_RETRY_DELAYS_MS = [1200, 2800, 5000];
 
 function joinApiPath(baseUrl: string, path: string): string {
   return `${baseUrl.trim().replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
@@ -98,6 +104,52 @@ function parseJsonResponse(text: string, fallbackMessage: string): unknown {
   } catch {
     throw new Error(fallbackMessage);
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function formatVoxCpmHttpFailure(action: string, status: number, attempts: number): string {
+  const retryText = attempts > 1 ? `，已自动重试 ${attempts - 1} 次` : '';
+  if (status === 503) {
+    return `VoxCPM ${action}失败（HTTP 503）。官方生成接口当前繁忙或临时不可用${retryText}，请稍后再试。`;
+  }
+  if (status === 429) {
+    return `VoxCPM ${action}失败（HTTP 429）。请求过快或服务限流${retryText}，请稍后再试。`;
+  }
+  return `VoxCPM ${action}失败（HTTP ${status}）${retryText}`;
+}
+
+async function customVoxCpmHttpRequest(
+  request: CustomHttpRequest,
+  action: string
+): Promise<CustomHttpResponse> {
+  let response: CustomHttpResponse | null = null;
+
+  for (let attempt = 0; attempt <= VOXCPM_RETRY_DELAYS_MS.length; attempt += 1) {
+    response = await customHttpRequest(request);
+    if (!VOXCPM_RETRYABLE_HTTP_STATUSES.has(response.status)) {
+      return response;
+    }
+
+    const delayMs = VOXCPM_RETRY_DELAYS_MS[attempt];
+    if (typeof delayMs !== 'number') {
+      break;
+    }
+    console.warn('[VoxCPM] retryable HTTP status', {
+      action,
+      status: response.status,
+      attempt: attempt + 1,
+      nextDelayMs: delayMs,
+    });
+    await sleep(delayMs);
+  }
+
+  if (response) {
+    throw new Error(formatVoxCpmHttpFailure(action, response.status, VOXCPM_RETRY_DELAYS_MS.length + 1));
+  }
+  throw new Error(`VoxCPM ${action}失败`);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -774,7 +826,7 @@ async function uploadGradioAudioReference(baseUrl: string, audioSource: string, 
 
   const uploadSource = await resolveAudioSourceDataUrl(trimmed);
 
-  const response = await customHttpRequest({
+  const response = await customVoxCpmHttpRequest({
     url: joinApiPath(baseUrl, '/gradio_api/upload'),
     method: 'POST',
     bodyMode: 'multipart',
@@ -789,7 +841,7 @@ async function uploadGradioAudioReference(baseUrl: string, audioSource: string, 
       ],
     },
     timeoutMs,
-  });
+  }, '参考音频上传');
 
   if (response.status < 200 || response.status >= 300) {
     throw new Error(`VoxCPM 参考音频上传失败（HTTP ${response.status}）`);
@@ -984,7 +1036,7 @@ export async function generateVoxCpmAudio(
     uploadedReference || request.referenceAudioUrl || ''
   );
 
-  const submitResponse = await customHttpRequest({
+  const submitResponse = await customVoxCpmHttpRequest({
     url: payload.submitUrl,
     method: 'POST',
     headers: {
@@ -993,21 +1045,21 @@ export async function generateVoxCpmAudio(
     bodyMode: 'json',
     body: payload.body,
     timeoutMs: payload.timeoutMs,
-  });
+  }, '提交');
 
   if (submitResponse.status < 200 || submitResponse.status >= 300) {
     throw new Error(`VoxCPM 提交失败（HTTP ${submitResponse.status}）`);
   }
 
   const eventId = parseGradioEventId(submitResponse.text);
-  const resultResponse = await customHttpRequest({
+  const resultResponse = await customVoxCpmHttpRequest({
     url: joinApiPath(payload.baseUrl, `${payload.endpointPath}/${eventId}`),
     method: 'GET',
     headers: {
       Accept: 'text/event-stream',
     },
     timeoutMs: payload.timeoutMs,
-  });
+  }, '结果读取');
 
   if (resultResponse.status < 200 || resultResponse.status >= 300) {
     throw new Error(`VoxCPM 结果读取失败（HTTP ${resultResponse.status}）`);
@@ -1043,7 +1095,7 @@ export async function transcribeVoxCpmReferenceAudio(
     throw new Error('VoxCPM ASR 需要先连接一个参考音频');
   }
 
-  const submitResponse = await customHttpRequest({
+  const submitResponse = await customVoxCpmHttpRequest({
     url: joinApiPath(baseUrl, endpointPath),
     method: 'POST',
     headers: {
@@ -1054,21 +1106,21 @@ export async function transcribeVoxCpmReferenceAudio(
       data: [request.usePromptText !== false, refWav],
     },
     timeoutMs,
-  });
+  }, 'ASR 提交');
 
   if (submitResponse.status < 200 || submitResponse.status >= 300) {
     throw new Error(`VoxCPM ASR 提交失败（HTTP ${submitResponse.status}）`);
   }
 
   const eventId = parseGradioEventId(submitResponse.text);
-  const resultResponse = await customHttpRequest({
+  const resultResponse = await customVoxCpmHttpRequest({
     url: joinApiPath(baseUrl, `${endpointPath}/${eventId}`),
     method: 'GET',
     headers: {
       Accept: 'text/event-stream',
     },
     timeoutMs,
-  });
+  }, 'ASR 结果读取');
 
   if (resultResponse.status < 200 || resultResponse.status >= 300) {
     throw new Error(`VoxCPM ASR 结果读取失败（HTTP ${resultResponse.status}）`);

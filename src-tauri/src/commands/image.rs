@@ -1686,7 +1686,7 @@ fn resolve_videos_dir(app: &AppHandle) -> Result<PathBuf, String> {
 fn normalize_video_extension(raw_ext: &str) -> String {
     let ext = raw_ext.trim().trim_start_matches('.').to_ascii_lowercase();
     match ext.as_str() {
-        "mp4" | "webm" | "mov" | "m4v" | "avi" | "mkv" | "mpeg" | "mpg" => ext,
+        "mp4" | "webm" | "mov" | "m4v" | "avi" | "mkv" | "mpeg" | "mpg" | "3gp" | "3gpp" => ext,
         _ => "mp4".to_string(),
     }
 }
@@ -1885,6 +1885,8 @@ fn extension_from_video_mime(mime: &str) -> Option<String> {
         "video/x-msvideo" => Some("avi".to_string()),
         "video/x-matroska" => Some("mkv".to_string()),
         "video/mpeg" => Some("mpg".to_string()),
+        "video/3gpp" => Some("3gp".to_string()),
+        "video/3gpp2" => Some("3gpp".to_string()),
         "application/octet-stream" => None,
         _ => None,
     }

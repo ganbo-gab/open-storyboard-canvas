@@ -12,7 +12,7 @@ export const DEFAULT_NODE_DISPLAY_NAME: Record<CanvasNodeType, string> = {
   [CANVAS_NODE_TYPES.aiText]: 'AI 文本',
   [CANVAS_NODE_TYPES.aiAudio]: 'AI 音频',
   [CANVAS_NODE_TYPES.exportImage]: '生成图像',
-  [CANVAS_NODE_TYPES.video]: '生成视频',
+  [CANVAS_NODE_TYPES.video]: '视频',
   [CANVAS_NODE_TYPES.audio]: '音频',
   [CANVAS_NODE_TYPES.textAnnotation]: '文本节点',
   [CANVAS_NODE_TYPES.jsonCard]: 'JSON 卡片',

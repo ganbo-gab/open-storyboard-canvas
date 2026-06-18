@@ -1,5 +1,7 @@
 const COMMON_IMAGE_FILE_EXTENSION_PATTERN =
   /\.(?:png|jpe?g|webp|gif|bmp|avif|heic|heif|tiff?|svg)$/i;
+const COMMON_VIDEO_FILE_EXTENSION_PATTERN =
+  /\.(?:mp4|webm|mov|m4v|avi|mkv|mpe?g|3gp|3gpp)$/i;
 
 export function isImageFile(file: File | null | undefined): file is File {
   if (!file) {
@@ -9,6 +11,16 @@ export function isImageFile(file: File | null | undefined): file is File {
     return true;
   }
   return COMMON_IMAGE_FILE_EXTENSION_PATTERN.test(file.name);
+}
+
+export function isVideoFile(file: File | null | undefined): file is File {
+  if (!file) {
+    return false;
+  }
+  if (file.type.startsWith('video/')) {
+    return true;
+  }
+  return COMMON_VIDEO_FILE_EXTENSION_PATTERN.test(file.name);
 }
 
 export function dataTransferHasFile(dataTransfer: DataTransfer | null | undefined): boolean {
@@ -49,6 +61,26 @@ export function dataTransferHasImageFile(dataTransfer: DataTransfer | null | und
   return Array.from(dataTransfer.files || []).some(isImageFile);
 }
 
+export function dataTransferHasVideoFile(dataTransfer: DataTransfer | null | undefined): boolean {
+  if (!dataTransfer) {
+    return false;
+  }
+
+  if (Array.from(dataTransfer.items || []).some((item) => (
+    item.kind === 'file'
+    && (
+      item.type.startsWith('video/')
+      || item.type === ''
+      || item.type === 'application/octet-stream'
+      || COMMON_VIDEO_FILE_EXTENSION_PATTERN.test(item.getAsFile()?.name ?? '')
+    )
+  ))) {
+    return true;
+  }
+
+  return Array.from(dataTransfer.files || []).some(isVideoFile);
+}
+
 export function resolveDroppedImageFile(dataTransfer: DataTransfer | null | undefined): File | null {
   if (!dataTransfer) {
     return null;
@@ -65,4 +97,22 @@ export function resolveDroppedImageFile(dataTransfer: DataTransfer | null | unde
   }
 
   return Array.from(dataTransfer.files || []).find(isImageFile) ?? null;
+}
+
+export function resolveDroppedVideoFile(dataTransfer: DataTransfer | null | undefined): File | null {
+  if (!dataTransfer) {
+    return null;
+  }
+
+  for (const item of Array.from(dataTransfer.items || [])) {
+    if (item.kind !== 'file') {
+      continue;
+    }
+    const file = item.getAsFile();
+    if (isVideoFile(file)) {
+      return file;
+    }
+  }
+
+  return Array.from(dataTransfer.files || []).find(isVideoFile) ?? null;
 }

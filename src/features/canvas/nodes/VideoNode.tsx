@@ -1,9 +1,19 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+} from 'react';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { AlertTriangle, Film, Loader2 } from 'lucide-react';
+import { AlertTriangle, Film, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
+  CANVAS_NODE_TYPES,
   type CanvasNodeType,
   type VideoNodeData,
 } from '@/features/canvas/domain/canvasNodes';
@@ -13,12 +23,18 @@ import {
   resolveCustomGeneratedVideoName,
 } from '@/features/canvas/application/generatedMediaNaming';
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
-import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
+import {
+  isNodeUsingDefaultDisplayName,
+  resolveNodeDisplayName,
+} from '@/features/canvas/domain/nodeDisplay';
+import { isVideoFile, resolveDroppedVideoFile } from '@/features/canvas/application/imageDragDrop';
+import { prepareVideoNodeDataFromFile } from '@/features/canvas/application/videoUpload';
 import { renameLocalMediaFiles } from '@/commands/image';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
 import { formatGenerationElapsedMs } from '@/features/canvas/ui/generationElapsed';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 type VideoNodeProps = NodeProps & {
   id: string;
@@ -44,9 +60,13 @@ function resolveNodeDimension(value: number | undefined, fallback: number): numb
 export const VideoNode = memo(({ id, data, selected, type, width, height }: VideoNodeProps) => {
   const { t } = useTranslation();
   const updateNodeInternals = useUpdateNodeInternals();
+  const inputRef = useRef<HTMLInputElement>(null);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
+  const useUploadFilenameAsNodeTitle = useSettingsStore((state) => state.useUploadFilenameAsNodeTitle);
   const [now, setNow] = useState(() => Date.now());
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
 
   const isGenerating = data.isGenerating === true;
   const videoSource = useMemo(() => {
@@ -54,15 +74,27 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
     return source ? resolveImageDisplayUrl(source) : null;
   }, [data.localVideoUrl, data.videoUrl]);
   const generationError = typeof data.generationError === 'string' ? data.generationError.trim() : '';
-  const hasGenerationError = !isGenerating && !videoSource && generationError.length > 0;
+  const errorText = uploadError.trim() || generationError;
+  const hasVideoError = !isGenerating && !isUploading && !videoSource && errorText.length > 0;
+  const errorTitleKey = uploadError.trim()
+    ? 'node.videoNode.uploadFailed'
+    : 'node.videoNode.generationFailed';
   const generationStartedAt = typeof data.generationStartedAt === 'number' ? data.generationStartedAt : null;
   const generationDurationMs = typeof data.generationDurationMs === 'number' ? data.generationDurationMs : DEFAULT_VIDEO_GENERATION_DURATION_MS;
   const resolvedWidth = resolveNodeDimension(width, VIDEO_NODE_DEFAULT_WIDTH);
   const resolvedHeight = resolveNodeDimension(height, VIDEO_NODE_DEFAULT_HEIGHT);
-  const resolvedTitle = useMemo(
-    () => resolveNodeDisplayName(type as CanvasNodeType, data),
-    [data, type]
-  );
+  const resolvedTitle = useMemo(() => {
+    const sourceFileName = typeof data.sourceFileName === 'string' ? data.sourceFileName.trim() : '';
+    if (
+      useUploadFilenameAsNodeTitle
+      && sourceFileName
+      && isNodeUsingDefaultDisplayName(CANVAS_NODE_TYPES.video, data)
+    ) {
+      return sourceFileName;
+    }
+
+    return resolveNodeDisplayName(type as CanvasNodeType, data);
+  }, [data, type, useUploadFilenameAsNodeTitle]);
   const liveGenerationElapsedMs = isGenerating && generationStartedAt !== null
     ? Math.max(0, now - generationStartedAt)
     : data.generationElapsedMs;
@@ -130,11 +162,80 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
     }
   };
 
+  useEffect(() => {
+    if (videoSource && uploadError) {
+      setUploadError('');
+    }
+  }, [uploadError, videoSource]);
+
+  const processFile = useCallback(
+    async (file: File) => {
+      if (!isVideoFile(file)) {
+        return;
+      }
+
+      setIsUploading(true);
+      setUploadError('');
+      try {
+        const prepared = await prepareVideoNodeDataFromFile(file);
+        const nextData: Partial<VideoNodeData> = {
+          ...prepared,
+        };
+        if (useUploadFilenameAsNodeTitle) {
+          nextData.displayName = file.name;
+        }
+        updateNodeData(id, nextData);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setUploadError(message || t('node.videoNode.uploadFailed'));
+        console.error('[VideoNode] failed to import local video', { id, fileName: file.name, error });
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [id, t, updateNodeData, useUploadFilenameAsNodeTitle]
+  );
+
+  const handleFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0] ?? null;
+      if (isVideoFile(file)) {
+        await processFile(file);
+      }
+      event.target.value = '';
+    },
+    [processFile]
+  );
+
+  const handleDrop = useCallback(
+    async (event: DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const file = resolveDroppedVideoFile(event.dataTransfer);
+      if (file) {
+        await processFile(file);
+      }
+    },
+    [processFile]
+  );
+
+  const handleDragOver = useCallback((event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  const handleNodeClick = useCallback(() => {
+    setSelectedNode(id);
+    if (!videoSource && !isGenerating && !isUploading) {
+      inputRef.current?.click();
+    }
+  }, [id, isGenerating, isUploading, setSelectedNode, videoSource]);
+
   return (
     <div
       className={`
         group relative overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-0 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
-        ${hasGenerationError
+        ${hasVideoError
           ? (selected
             ? 'border-red-400 shadow-[0_0_0_1px_rgba(248,113,113,0.42)]'
             : 'border-red-500/70 bg-[rgba(127,29,29,0.12)] hover:border-red-400/80')
@@ -143,7 +244,9 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
           : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
       `}
       style={{ width: resolvedWidth, height: resolvedHeight }}
-      onClick={() => setSelectedNode(id)}
+      onClick={handleNodeClick}
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
     >
       <NodeHeader
         className={NODE_HEADER_FLOATING_POSITION_CLASS}
@@ -174,36 +277,52 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
       />
 
       <div
-        className={`relative h-full w-full overflow-hidden rounded-[var(--node-radius)] ${hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'}`}
+        className={`relative h-full w-full overflow-hidden rounded-[var(--node-radius)] ${hasVideoError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'}`}
       >
         {videoSource ? (
-          <video
-            src={videoSource}
-            poster={data.thumbnailUrl ? resolveImageDisplayUrl(data.thumbnailUrl) : undefined}
-            className="h-full w-full bg-black object-contain"
-            controls
-            playsInline
-            preload="metadata"
-          />
-        ) : hasGenerationError ? (
+          <>
+            <video
+              src={videoSource}
+              poster={data.thumbnailUrl ? resolveImageDisplayUrl(data.thumbnailUrl) : undefined}
+              className="h-full w-full bg-black object-contain"
+              controls
+              playsInline
+              preload="metadata"
+            />
+            <button
+              type="button"
+              className="nodrag nowheel absolute left-2 top-2 flex h-7 items-center gap-1 rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2 text-xs text-text-dark shadow-sm backdrop-blur-sm transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+              title={t('node.videoNode.replace') as string}
+              onClick={(event) => {
+                event.stopPropagation();
+                inputRef.current?.click();
+              }}
+            >
+              <RefreshCw className="h-3 w-3" />
+              {t('node.videoNode.replace')}
+            </button>
+          </>
+        ) : hasVideoError ? (
           <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-red-300">
             <AlertTriangle className="h-7 w-7 opacity-90" />
             <span className="text-center text-[12px] font-medium leading-5 text-red-200">
-              {t('node.videoNode.generationFailed')}
+              {t(errorTitleKey)}
             </span>
             <span className="max-h-[96px] overflow-y-auto break-words text-center text-[11px] leading-5 text-red-200/90">
-              {generationError}
+              {errorText}
             </span>
           </div>
         ) : (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-text-muted/85">
-            {isGenerating ? (
+          <div className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-2 text-text-muted/85">
+            {isGenerating || isUploading ? (
               <Loader2 className="h-7 w-7 animate-spin opacity-70" />
             ) : (
-              <Film className="h-7 w-7 opacity-60" />
+              <Upload className="h-7 w-7 opacity-60" />
             )}
             <span className="px-4 text-center text-[12px] leading-6">
-              {isGenerating
+              {isUploading
+                ? t('node.videoNode.uploading')
+                : isGenerating
                 ? waitedMinutes >= 2
                   ? t('node.videoNode.waitingResultDelayed', { minutes: waitedMinutes })
                   : t('node.videoNode.waitingResult')
@@ -222,6 +341,14 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
           </div>
         )}
       </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="video/*,.mp4,.webm,.mov,.m4v,.avi,.mkv,.mpeg,.mpg,.3gp,.3gpp"
+        className="hidden"
+        onChange={handleFileChange}
+      />
 
       <Handle
         type="target"

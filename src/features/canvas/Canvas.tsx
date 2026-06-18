@@ -50,6 +50,7 @@ import {
   type CanvasNodeData,
   type CanvasNodeType,
   DEFAULT_NODE_WIDTH,
+  type VideoNodeData,
 } from '@/features/canvas/domain/canvasNodes';
 import {
   prepareNodeImageFromFile,
@@ -60,8 +61,11 @@ import { copyImageSourceToClipboard, readSystemClipboard } from '@/commands/imag
 import {
   dataTransferHasFile,
   dataTransferHasImageFile,
+  dataTransferHasVideoFile,
   resolveDroppedImageFile,
+  resolveDroppedVideoFile,
 } from '@/features/canvas/application/imageDragDrop';
+import { prepareVideoNodeDataFromFile } from '@/features/canvas/application/videoUpload';
 import {
   getConnectMenuNodeTypes,
   nodeHasSourceHandle,
@@ -1089,6 +1093,7 @@ export function Canvas() {
   const canvasMouseBindings = useSettingsStore((state) => state.canvasMouseBindings);
   const enableCanvasWasdPan = useSettingsStore((state) => state.enableCanvasWasdPan);
   const canvasWasdPanSensitivity = useSettingsStore((state) => state.canvasWasdPanSensitivity);
+  const useUploadFilenameAsNodeTitle = useSettingsStore((state) => state.useUploadFilenameAsNodeTitle);
   const customProviders = useCustomProvidersStore((state) => state.providers);
   const providerIds = useMemo(() => listModelProviders().map((provider) => provider.id), []);
   const hasConfiguredProvider = useMemo(
@@ -2003,6 +2008,42 @@ export function Canvas() {
     [createUploadImageNodeAtFlowPosition, reactFlowInstance]
   );
 
+  const createVideoNodeFromFileAtFlowPosition = useCallback(
+    async (file: File, flowPosition: { x: number; y: number }) => {
+      try {
+        const prepared = await prepareVideoNodeDataFromFile(file);
+        const nodeData: Partial<VideoNodeData> = {
+          ...prepared,
+        };
+        if (useUploadFilenameAsNodeTitle) {
+          nodeData.displayName = file.name;
+        }
+        const newNodeId = addNode(
+          CANVAS_NODE_TYPES.video,
+          flowPosition,
+          nodeData
+        );
+        setSelectedNode(newNodeId);
+        scheduleCanvasPersist(0);
+        return newNodeId;
+      } catch (error) {
+        console.error('Failed to import video onto canvas', error);
+        return null;
+      }
+    },
+    [addNode, scheduleCanvasPersist, setSelectedNode, useUploadFilenameAsNodeTitle]
+  );
+
+  const createVideoNodeFromFileAtClientPosition = useCallback(
+    async (file: File, clientPosition: { x: number; y: number }) => {
+      await createVideoNodeFromFileAtFlowPosition(
+        file,
+        reactFlowInstance.screenToFlowPosition(clientPosition)
+      );
+    },
+    [createVideoNodeFromFileAtFlowPosition, reactFlowInstance]
+  );
+
   const pasteImageAtCanvasPosition = useCallback(
     async (file: File) => {
       const containerRect = wrapperRef.current?.getBoundingClientRect();
@@ -2046,7 +2087,10 @@ export function Canvas() {
 
       event.preventDefault();
       if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = dataTransferHasImageFile(event.dataTransfer)
+        event.dataTransfer.dropEffect = (
+          dataTransferHasImageFile(event.dataTransfer)
+          || dataTransferHasVideoFile(event.dataTransfer)
+        )
           ? 'copy'
           : 'none';
       }
@@ -2075,7 +2119,10 @@ export function Canvas() {
     }
 
     event.preventDefault();
-    event.dataTransfer.dropEffect = dataTransferHasImageFile(event.dataTransfer)
+    event.dataTransfer.dropEffect = (
+      dataTransferHasImageFile(event.dataTransfer)
+      || dataTransferHasVideoFile(event.dataTransfer)
+    )
       ? 'copy'
       : 'none';
   }, []);
@@ -2087,17 +2134,26 @@ export function Canvas() {
       }
 
       event.preventDefault();
-      const file = resolveDroppedImageFile(event.dataTransfer);
-      if (!file) {
+      const imageFile = resolveDroppedImageFile(event.dataTransfer);
+      if (imageFile) {
+        void createUploadImageNodeAtClientPosition(imageFile, {
+          x: event.clientX,
+          y: event.clientY,
+        });
         return;
       }
 
-      void createUploadImageNodeAtClientPosition(file, {
+      const videoFile = resolveDroppedVideoFile(event.dataTransfer);
+      if (!videoFile) {
+        return;
+      }
+
+      void createVideoNodeFromFileAtClientPosition(videoFile, {
         x: event.clientX,
         y: event.clientY,
       });
     },
-    [createUploadImageNodeAtClientPosition]
+    [createUploadImageNodeAtClientPosition, createVideoNodeFromFileAtClientPosition]
   );
 
   const handleCanvasPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {

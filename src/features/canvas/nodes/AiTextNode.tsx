@@ -16,6 +16,7 @@ import {
   resolveAiTextResult,
   resolveJsonCardDisplayFields,
 } from '@/features/canvas/application/aiText/helpers';
+import type { AiTextInputPart, AiTextInputTextPart, TextAgentConfig } from '@/features/canvas/application/aiText/types';
 import { collectInputReferences } from '@/features/canvas/application/graphReferenceResolver';
 import { resolveErrorContent, showErrorDialog } from '@/features/canvas/application/errorDialog';
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
@@ -64,6 +65,24 @@ const AI_TEXT_NODE_DEFAULT_HEIGHT = 380;
 const AI_TEXT_NODE_MAX_WIDTH = 1200;
 const AI_TEXT_NODE_MAX_HEIGHT = 1000;
 const MAX_VISIBLE_AGENT_CHIPS = 5;
+const STORYBOARD_AUTO_BATCH_SIZE = 6;
+
+interface StoryboardTextSegment {
+  marker: string;
+  content: string;
+}
+
+interface StoryboardBatchPlan {
+  sourcePart: AiTextInputTextPart;
+  prefix: string;
+  batches: Array<{
+    index: number;
+    total: number;
+    markers: string[];
+    parts: AiTextInputPart[];
+    instruction: string;
+  }>;
+}
 
 function serializeDebugJson(value: unknown): string {
   try {
@@ -80,6 +99,7 @@ function sanitizePayloadPreviewForDisplay(value: unknown): unknown {
   const record = value as Record<string, unknown>;
   const {
     inputDiagnostics: _inputDiagnostics,
+    inputParts: _inputParts,
     responseDiagnostics: _responseDiagnostics,
     providerRequest,
     payload,
@@ -152,6 +172,117 @@ function buildCompletenessWarning(args: {
     return null;
   }
   return `检测到输入里有 ${args.expectedCount} 个分镜候选段，但模型本次只返回了 ${args.actualCount} 条 JSON（finish_reason: ${args.finishReason ?? '未知'}）。payload 已包含全部候选段；这通常是模型按示例只生成了首条，建议在 Agent prompt 中明确“必须输出所有候选段，禁止只输出示例/首条”，或拆批生成。`;
+}
+
+function splitStoryboardSegments(content: string): { prefix: string; segments: StoryboardTextSegment[] } | null {
+  const matches = [...content.matchAll(/【(E\d+-\d+)】/g)];
+  if (matches.length <= 1) {
+    return null;
+  }
+
+  const segments = matches.map((match, index) => {
+    const start = match.index ?? 0;
+    const end = index + 1 < matches.length
+      ? matches[index + 1].index ?? content.length
+      : content.length;
+    return {
+      marker: match[1],
+      content: content.slice(start, end).trim(),
+    };
+  }).filter((segment) => segment.content.length > 0);
+
+  if (segments.length <= 1) {
+    return null;
+  }
+
+  return {
+    prefix: content.slice(0, matches[0].index ?? 0).trim(),
+    segments,
+  };
+}
+
+function isStoryboardBatchCandidate(agent: TextAgentConfig | null, expectedCount: number): boolean {
+  if (!agent || expectedCount <= STORYBOARD_AUTO_BATCH_SIZE) {
+    return false;
+  }
+  const signature = [
+    agent.name,
+    agent.prompt,
+    agent.jsonFields.map((field) => `${field.label} ${field.path}`).join(' '),
+  ].join(' ');
+  return /分镜|storyboard/i.test(signature);
+}
+
+function createStoryboardBatchInstruction(markers: string[], batchIndex: number, totalBatches: number): string {
+  return [
+    `这是自动分批生成的第 ${batchIndex + 1}/${totalBatches} 批。`,
+    `本批只处理以下分镜编号：${markers.join('、')}。`,
+    `必须只输出这 ${markers.length} 条分镜对应的合法 JSON 数组，数组元素顺序必须与编号顺序一致。`,
+    '禁止输出本批之外的分镜，禁止输出解释、Markdown、代码块或前后缀文字。',
+    '如果上游 Agent prompt 中有 JSON 示例，示例只用于格式参考，不代表只生成一条。',
+  ].join('\n');
+}
+
+function createStoryboardBatchPlan(
+  agent: TextAgentConfig | null,
+  parts: AiTextInputPart[],
+  expectedMarkers: string[]
+): StoryboardBatchPlan | null {
+  if (!isStoryboardBatchCandidate(agent, expectedMarkers.length)) {
+    return null;
+  }
+
+  const textParts = parts.filter((part): part is AiTextInputTextPart => part.kind === 'text');
+  const candidates = textParts
+    .map((part) => ({ part, split: splitStoryboardSegments(part.content) }))
+    .filter((item): item is { part: AiTextInputTextPart; split: { prefix: string; segments: StoryboardTextSegment[] } } =>
+      Boolean(item.split)
+    )
+    .sort((left, right) => right.split.segments.length - left.split.segments.length);
+  const candidate = candidates[0];
+  if (!candidate || candidate.split.segments.length <= STORYBOARD_AUTO_BATCH_SIZE) {
+    return null;
+  }
+
+  const expectedSet = new Set(expectedMarkers);
+  const orderedSegments = candidate.split.segments.filter((segment) =>
+    expectedSet.size === 0 || expectedSet.has(segment.marker)
+  );
+  if (orderedSegments.length <= STORYBOARD_AUTO_BATCH_SIZE) {
+    return null;
+  }
+
+  const rawBatches: StoryboardTextSegment[][] = [];
+  for (let index = 0; index < orderedSegments.length; index += STORYBOARD_AUTO_BATCH_SIZE) {
+    rawBatches.push(orderedSegments.slice(index, index + STORYBOARD_AUTO_BATCH_SIZE));
+  }
+
+  const total = rawBatches.length;
+  const batches = rawBatches.map((batchSegments, index) => {
+    const markers = batchSegments.map((segment) => segment.marker);
+    const batchContent = [
+      candidate.split.prefix,
+      batchSegments.map((segment) => segment.content).join('\n\n'),
+    ].filter((item) => item.trim().length > 0).join('\n\n');
+
+    return {
+      index,
+      total,
+      markers,
+      instruction: createStoryboardBatchInstruction(markers, index, total),
+      parts: parts.map((part) =>
+        part === candidate.part
+          ? { ...part, content: batchContent }
+          : part
+      ),
+    };
+  });
+
+  return {
+    sourcePart: candidate.part,
+    prefix: candidate.split.prefix,
+    batches,
+  };
 }
 
 function TextNodeIcon({ className = '' }: { className?: string }) {
@@ -474,6 +605,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
         : null,
       inputHash: previewInputHash,
       textPrompt: previewComposedPrompt,
+      inputParts: previewParts,
       inputDiagnostics: {
         userPromptIncluded: effectiveUserPrompt.trim().length > 0,
         userPromptIgnoredBecauseExplicitAgentInputs: hasExplicitAgentInputs(agent),
@@ -573,36 +705,25 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
       let streamDiagnostics: unknown = null;
       let responseUsage: unknown = null;
       let streamFailureWarning: string | null = null;
+      let batchGenerationWarning: string | null = null;
       let lastStreamPreviewUpdateAt = 0;
-      if (enableAiTextStreaming) try {
-        usedStreaming = true;
-        const streamResult = await streamCustomChatCompletion(nextEntry.id, payloadPreview.payload, {
-          onTextDelta: (_delta, fullText) => {
-            rawOutput = fullText;
-            const now = Date.now();
-            if (now - lastStreamPreviewUpdateAt < STREAM_PREVIEW_UPDATE_INTERVAL_MS) {
-              return;
-            }
-            lastStreamPreviewUpdateAt = now;
-            updateNodeData(resultNodeId, {
-              streamPreview: createStreamPreview(fullText),
-              streamReceivedCharacters: fullText.length,
-              isStreaming: true,
-              isGenerating: true,
-              generationStartedAt,
-              generationElapsedMs: null,
-              sourceAiNodeId: id,
-              sourceAgentId: agent.id,
-            });
-          },
-        });
-        if (streamResult.text.trim()) {
-          rawOutput = streamResult.text;
-        }
-        if (rawOutput.trim()) {
+      const storyboardBatchPlan = createStoryboardBatchPlan(
+        agent,
+        payloadPreview.inputParts,
+        payloadPreview.inputDiagnostics.expectedStoryboardMarkers
+      );
+
+      if (storyboardBatchPlan) {
+        const mergedItems: unknown[] = [];
+        const batchWarnings: string[] = [];
+        const batchDiagnostics: Array<Record<string, unknown>> = [];
+
+        for (const batch of storyboardBatchPlan.batches) {
+          const batchLabel = `正在分批生成分镜 ${batch.index + 1}/${batch.total}：${batch.markers.join('、')}`;
+          setNotice(batchLabel);
           updateNodeData(resultNodeId, {
-            streamPreview: createStreamPreview(rawOutput),
-            streamReceivedCharacters: rawOutput.length,
+            streamPreview: batchLabel,
+            streamReceivedCharacters: mergedItems.length,
             isStreaming: true,
             isGenerating: true,
             generationStartedAt,
@@ -610,63 +731,173 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
             sourceAiNodeId: id,
             sourceAgentId: agent.id,
           });
-        }
-        finishReason = streamResult.finishReason ?? null;
-        responseStatus = typeof streamResult.status === 'number' ? streamResult.status : null;
-        requestDebug = streamResult.requestDebug ?? requestDebug;
-        rawStreamTail = streamResult.rawStreamTail ?? null;
-        streamDiagnostics = streamResult.streamDiagnostics ?? null;
-        responseUsage = streamResult.usage ?? null;
-      } catch (streamError) {
-        const message = streamError instanceof Error ? streamError.message : String(streamError);
-        const diagnosticError = streamError as {
-          status?: number;
-          requestDebug?: unknown;
-          rawStreamTail?: string | null;
-          streamDiagnostics?: unknown;
-        };
-        responseStatus = typeof diagnosticError.status === 'number' ? diagnosticError.status : responseStatus;
-        requestDebug = diagnosticError.requestDebug ?? requestDebug;
-        rawStreamTail = diagnosticError.rawStreamTail ?? rawStreamTail;
-        streamDiagnostics = diagnosticError.streamDiagnostics ?? streamDiagnostics;
-        if (rawOutput.trim()) {
-          streamFailureWarning = `流式输出中断，已保留已收到的内容。错误：${message}`;
-          finishReason = finishReason ?? 'stream_error';
-          setNotice(streamFailureWarning);
-          updateNodeData(resultNodeId, {
-            streamPreview: createStreamPreview(rawOutput),
-            streamReceivedCharacters: rawOutput.length,
-            isStreaming: false,
-            isGenerating: true,
-            generationStartedAt,
-            generationElapsedMs: null,
-          });
-        } else {
-          usedStreaming = false;
-          setNotice(`${t('node.aiText.streamingFallback')} ${message}`);
-          updateNodeData(resultNodeId, {
-            rawContent: '',
-            isStreaming: false,
-            isGenerating: true,
-            generationStartedAt,
-            generationElapsedMs: null,
-          });
-        }
-      }
 
-      if (!rawOutput.trim()) {
-        const result = await submitCustomChatCompletion(nextEntry.id, payloadPreview.payload);
-        rawOutput = result.text;
-        finishReason = result.finishReason ?? finishReason;
-        responseStatus = typeof result.status === 'number' ? result.status : responseStatus;
-        requestDebug = result.requestDebug ?? requestDebug;
-        responseUsage = result.usage ?? responseUsage;
-        streamDiagnostics = result.usage
-          ? {
-            ...(streamDiagnostics && typeof streamDiagnostics === 'object' ? streamDiagnostics : {}),
-            usage: result.usage,
+          const batchPayload = await buildOpenAiChatPayload({
+            model: nextEntry.modelId,
+            agentPrompt: agent.prompt,
+            userPrompt: batch.instruction,
+            parts: batch.parts,
+          });
+          const batchRequestDebug = buildCustomChatCompletionRequestDebugPreview(nextEntry.id, batchPayload, false);
+          const result = await submitCustomChatCompletion(nextEntry.id, batchPayload);
+          const resolvedBatch = resolveAiTextResult(result.text);
+          const parsedBatch = resolvedBatch.kind === 'json' ? resolvedBatch.parsedJson ?? null : null;
+          const batchItems = Array.isArray(parsedBatch)
+            ? parsedBatch
+            : parsedBatch !== null
+            ? [parsedBatch]
+            : [];
+
+          if (resolvedBatch.parseError) {
+            batchWarnings.push(`第 ${batch.index + 1} 批 JSON 解析提示：${resolvedBatch.parseError}`);
           }
-          : streamDiagnostics;
+          if (batchItems.length !== batch.markers.length) {
+            batchWarnings.push(`第 ${batch.index + 1} 批期望 ${batch.markers.length} 条，实际解析 ${batchItems.length} 条。`);
+          }
+
+          mergedItems.push(...batchItems);
+          updateNodeData(resultNodeId, {
+            streamPreview: `已完成分镜批次 ${batch.index + 1}/${batch.total}，已合并 ${mergedItems.length} 条。`,
+            streamReceivedCharacters: JSON.stringify(mergedItems).length,
+            isStreaming: true,
+            isGenerating: true,
+            generationStartedAt,
+            generationElapsedMs: null,
+            sourceAiNodeId: id,
+            sourceAgentId: agent.id,
+          });
+          finishReason = result.finishReason ?? finishReason;
+          responseStatus = typeof result.status === 'number' ? result.status : responseStatus;
+          requestDebug = result.requestDebug ?? batchRequestDebug;
+          responseUsage = result.usage ?? responseUsage;
+          batchDiagnostics.push({
+            index: batch.index + 1,
+            total: batch.total,
+            markers: batch.markers,
+            status: result.status ?? null,
+            finishReason: result.finishReason ?? null,
+            outputCharacters: result.text.length,
+            parsedCount: batchItems.length,
+            parseError: resolvedBatch.parseError ?? null,
+            usage: result.usage ?? null,
+          });
+        }
+
+        if (mergedItems.length === 0) {
+          throw new Error('分批生成没有解析到任何 JSON 条目。');
+        }
+
+        rawOutput = JSON.stringify(mergedItems, null, 2);
+        batchGenerationWarning = batchWarnings.length > 0
+          ? batchWarnings.join('\n')
+          : null;
+        streamDiagnostics = {
+          autoBatch: {
+            enabled: true,
+            sourceLabel: storyboardBatchPlan.sourcePart.label,
+            sourceCharacters: storyboardBatchPlan.sourcePart.content.length,
+            prefixCharacters: storyboardBatchPlan.prefix.length,
+            batchSize: STORYBOARD_AUTO_BATCH_SIZE,
+            batchCount: storyboardBatchPlan.batches.length,
+            mergedCount: mergedItems.length,
+            batches: batchDiagnostics,
+          },
+        };
+      } else {
+        if (enableAiTextStreaming) try {
+          usedStreaming = true;
+          const streamResult = await streamCustomChatCompletion(nextEntry.id, payloadPreview.payload, {
+            onTextDelta: (_delta, fullText) => {
+              rawOutput = fullText;
+              const now = Date.now();
+              if (now - lastStreamPreviewUpdateAt < STREAM_PREVIEW_UPDATE_INTERVAL_MS) {
+                return;
+              }
+              lastStreamPreviewUpdateAt = now;
+              updateNodeData(resultNodeId, {
+                streamPreview: createStreamPreview(fullText),
+                streamReceivedCharacters: fullText.length,
+                isStreaming: true,
+                isGenerating: true,
+                generationStartedAt,
+                generationElapsedMs: null,
+                sourceAiNodeId: id,
+                sourceAgentId: agent.id,
+              });
+            },
+          });
+          if (streamResult.text.trim()) {
+            rawOutput = streamResult.text;
+          }
+          if (rawOutput.trim()) {
+            updateNodeData(resultNodeId, {
+              streamPreview: createStreamPreview(rawOutput),
+              streamReceivedCharacters: rawOutput.length,
+              isStreaming: true,
+              isGenerating: true,
+              generationStartedAt,
+              generationElapsedMs: null,
+              sourceAiNodeId: id,
+              sourceAgentId: agent.id,
+            });
+          }
+          finishReason = streamResult.finishReason ?? null;
+          responseStatus = typeof streamResult.status === 'number' ? streamResult.status : null;
+          requestDebug = streamResult.requestDebug ?? requestDebug;
+          rawStreamTail = streamResult.rawStreamTail ?? null;
+          streamDiagnostics = streamResult.streamDiagnostics ?? null;
+          responseUsage = streamResult.usage ?? null;
+        } catch (streamError) {
+          const message = streamError instanceof Error ? streamError.message : String(streamError);
+          const diagnosticError = streamError as {
+            status?: number;
+            requestDebug?: unknown;
+            rawStreamTail?: string | null;
+            streamDiagnostics?: unknown;
+          };
+          responseStatus = typeof diagnosticError.status === 'number' ? diagnosticError.status : responseStatus;
+          requestDebug = diagnosticError.requestDebug ?? requestDebug;
+          rawStreamTail = diagnosticError.rawStreamTail ?? rawStreamTail;
+          streamDiagnostics = diagnosticError.streamDiagnostics ?? streamDiagnostics;
+          if (rawOutput.trim()) {
+            streamFailureWarning = `流式输出中断，已保留已收到的内容。错误：${message}`;
+            finishReason = finishReason ?? 'stream_error';
+            setNotice(streamFailureWarning);
+            updateNodeData(resultNodeId, {
+              streamPreview: createStreamPreview(rawOutput),
+              streamReceivedCharacters: rawOutput.length,
+              isStreaming: false,
+              isGenerating: true,
+              generationStartedAt,
+              generationElapsedMs: null,
+            });
+          } else {
+            usedStreaming = false;
+            setNotice(`${t('node.aiText.streamingFallback')} ${message}`);
+            updateNodeData(resultNodeId, {
+              rawContent: '',
+              isStreaming: false,
+              isGenerating: true,
+              generationStartedAt,
+              generationElapsedMs: null,
+            });
+          }
+        }
+
+        if (!rawOutput.trim()) {
+          const result = await submitCustomChatCompletion(nextEntry.id, payloadPreview.payload);
+          rawOutput = result.text;
+          finishReason = result.finishReason ?? finishReason;
+          responseStatus = typeof result.status === 'number' ? result.status : responseStatus;
+          requestDebug = result.requestDebug ?? requestDebug;
+          responseUsage = result.usage ?? responseUsage;
+          streamDiagnostics = result.usage
+            ? {
+              ...(streamDiagnostics && typeof streamDiagnostics === 'object' ? streamDiagnostics : {}),
+              usage: result.usage,
+            }
+            : streamDiagnostics;
+        }
       }
       let effectiveRawOutput = rawOutput;
       if (!effectiveRawOutput.trim()) {
@@ -700,7 +931,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
           finishReason,
         })
         : null;
-      const combinedGenerationWarning = [streamFailureWarning, generationWarning, completenessWarning]
+      const combinedGenerationWarning = [streamFailureWarning, generationWarning, batchGenerationWarning, completenessWarning]
         .filter((item): item is string => Boolean(item))
         .join('\n');
       const parseError = parsedJson === null && generationWarning
@@ -733,8 +964,13 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
           streamDiagnostics,
         },
       };
+      const {
+        inputDiagnostics: _inputDiagnostics,
+        inputParts: _inputParts,
+        ...payloadPreviewForStorage
+      } = payloadPreview;
       const preparedPayload = {
-        ...payloadPreview,
+        ...payloadPreviewForStorage,
         providerRequest: requestDebug,
       };
       updateNodeData(resultNodeId, {

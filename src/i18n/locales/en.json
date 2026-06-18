@@ -760,6 +760,7 @@
   "node": {
     "menu": {
       "uploadImage": "Upload Image",
+      "uploadVideo": "Upload Video",
       "aiImageGeneration": "AI Image",
       "aiVideoGeneration": "AI Video",
       "aiTextGeneration": "AI Text",
@@ -876,7 +877,10 @@
       "waitingResult": "Waiting for video result",
       "waitingResultDelayed": "Already waited {{minutes}} minutes with no video result yet. Still waiting...",
       "generationFailed": "Video generation failed",
-      "empty": "No video yet",
+      "uploadFailed": "Video upload failed",
+      "empty": "Click or drop video here",
+      "uploading": "Reading video...",
+      "replace": "Replace video",
       "generationElapsed": "Generation elapsed time"
     },
     "panoramaViewer": {
