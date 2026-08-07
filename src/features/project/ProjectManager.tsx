@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, FolderOpen, Pencil, Trash2 } from 'lucide-react';
+import { Plus, FolderOpen, Pencil, Trash2, Download } from 'lucide-react';
 import { useProjectStore } from '@/stores/projectStore';
 import { useCustomProvidersStore } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -10,6 +10,7 @@ import { hasConfiguredImageProvider } from '@/features/canvas/application/provid
 import { MissingApiKeyHint } from '@/features/settings/MissingApiKeyHint';
 import { listModelProviders } from '@/features/canvas/models';
 import { RenameDialog } from './RenameDialog';
+import { ProjectPortabilityControls } from '@/features/portability/ui/ProjectPortabilityControls';
 
 type ProjectSortField = 'name' | 'createdAt' | 'updatedAt';
 type SortDirection = 'asc' | 'desc';
@@ -21,6 +22,7 @@ export function ProjectManager() {
   const [editingProjectName, setEditingProjectName] = useState('');
   const [sortField, setSortField] = useState<ProjectSortField>('createdAt');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [exportRequest, setExportRequest] = useState<{ projectId: string; projectName: string } | null>(null);
   const providerIds = useMemo(() => listModelProviders().map((provider) => provider.id), []);
   const apiKeys = useSettingsStore((state) => state.apiKeys);
   const dreaminaStatus = useSettingsStore((state) => state.dreaminaStatus);
@@ -35,7 +37,16 @@ export function ProjectManager() {
     [apiKeys, customProviders, dreaminaStatus, providerIds]
   );
 
-  const { projects, isOpeningProject, createProject, deleteProject, renameProject, openProject } =
+  const {
+    projects,
+    isOpeningProject,
+    createProject,
+    deleteProject,
+    renameProject,
+    openProject,
+    refreshProjects,
+    waitForProjectPersistence,
+  } =
     useProjectStore();
 
   const handleCreateProject = () => {
@@ -88,8 +99,8 @@ export function ProjectManager() {
   return (
     <div className="ui-scrollbar h-full w-full overflow-auto p-8">
       <div className="max-w-5xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-text-dark">{t('project.title')}</h1>
             <div className="flex items-center gap-2">
               <UiSelect
@@ -113,10 +124,19 @@ export function ProjectManager() {
               </UiSelect>
             </div>
           </div>
-          <UiButton type="button" variant="primary" onClick={handleCreateProject} className="gap-2">
-            <Plus className="w-5 h-5" />
-            {t('project.newProject')}
-          </UiButton>
+          <div className="flex items-center gap-2">
+            <ProjectPortabilityControls
+              projects={projects}
+              exportRequest={exportRequest}
+              onExportHandled={() => setExportRequest(null)}
+              onImported={refreshProjects}
+              onBeforeExport={waitForProjectPersistence}
+            />
+            <UiButton type="button" variant="primary" onClick={handleCreateProject} className="gap-2">
+              <Plus className="w-5 h-5" />
+              {t('project.newProject')}
+            </UiButton>
+          </div>
         </div>
 
         {!hasConfiguredProvider && <MissingApiKeyHint className="mb-8" />}
@@ -139,7 +159,18 @@ export function ProjectManager() {
                   <h3 className="font-semibold text-text-dark truncate flex-1">
                     {project.name}
                   </h3>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setExportRequest({ projectId: project.id, projectName: project.name });
+                      }}
+                      className="p-1 hover:bg-bg-dark rounded"
+                      title={t('portability.project.exportAction')}
+                    >
+                      <Download className="w-4 h-4 text-text-muted hover:text-text-dark" />
+                    </button>
                     <button
                       type="button"
                       onClick={(e) => handleRenameClick(project.id, project.name, e)}

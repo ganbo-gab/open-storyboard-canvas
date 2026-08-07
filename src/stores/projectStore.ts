@@ -210,10 +210,19 @@ function mapNodeImageReferences(
         'snapshotUrl',
         'backgroundImageUrl',
         'backgroundPanoramaUrl',
+        'videoUrl',
+        'localVideoUrl',
+        'audioUrl',
+        'localAudioUrl',
       ]) {
         if (key in nextData) {
           nextData[key] = mapImageUrl(nextData[key] as string | null | undefined) ?? null;
         }
+      }
+
+      if (typeof nextData.generationRetryResultUrl === 'string'
+        && /^(?:data|blob):/i.test(nextData.generationRetryResultUrl.trim())) {
+        nextData.generationRetryResultUrl = null;
       }
 
       if (Array.isArray(nextData.frames)) {
@@ -302,7 +311,7 @@ function trimHistoryForPersistence(history: CanvasHistoryState): CanvasHistorySt
   };
 }
 
-function encodeProject(project: Project): PersistedProject {
+export function encodeProject(project: Project): PersistedProject {
   const imagePool: string[] = [];
   const imageIndexMap = new Map<string, number>();
   const encode = (imageUrl: string | null | undefined) =>
@@ -316,7 +325,7 @@ function encodeProject(project: Project): PersistedProject {
   };
 }
 
-function decodeProject(project: PersistedProject): Project {
+export function decodeProject(project: PersistedProject): Project {
   const decode = (imageUrl: string | null | undefined) =>
     decodeImageReference(imageUrl, project.imagePool);
 
@@ -882,6 +891,8 @@ interface ProjectState {
   isOpeningProject: boolean;
 
   hydrate: () => Promise<void>;
+  refreshProjects: () => Promise<void>;
+  waitForProjectPersistence: (projectId: string) => Promise<void>;
   createProject: (name: string) => string;
   deleteProject: (id: string) => void;
   renameProject: (id: string, name: string) => void;
@@ -929,6 +940,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         isHydrated: true,
       });
     }
+  },
+
+  refreshProjects: async () => {
+    try {
+      const records = await listProjectSummaries();
+      const projects = records.map(toProjectSummary).sort((a, b) => b.updatedAt - a.updatedAt);
+      set({ projects, isHydrated: true });
+    } catch (error) {
+      console.error('Failed to refresh project summaries from project storage', error);
+      throw error;
+    }
+  },
+
+  waitForProjectPersistence: async (projectId) => {
+    await awaitProjectPersistDrain(projectId);
   },
 
   createProject: (name) => {

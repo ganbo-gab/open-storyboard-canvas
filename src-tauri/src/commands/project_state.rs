@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
+use tracing::warn;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -647,6 +648,13 @@ fn prune_unreferenced_images(app: &AppHandle, conn: &Connection) -> Result<(), S
     Ok(())
 }
 
+fn finalize_committed_cleanup(operation: &str, cleanup: Result<(), String>) -> Result<(), String> {
+    if let Err(error) = cleanup {
+        warn!(operation, error = %error, "post-commit project cleanup failed");
+    }
+    Ok(())
+}
+
 fn open_db(app: &AppHandle) -> Result<Connection, String> {
     let db_path = resolve_db_path(app)?;
     let conn = Connection::open(db_path).map_err(|e| format!("Failed to open SQLite DB: {}", e))?;
@@ -696,7 +704,7 @@ impl Default for ProjectDb {
     }
 }
 
-fn with_db<F, R>(app: &AppHandle, db: &State<ProjectDb>, f: F) -> Result<R, String>
+pub(crate) fn with_db<F, R>(app: &AppHandle, db: &State<ProjectDb>, f: F) -> Result<R, String>
 where
     F: FnOnce(&mut Connection) -> Result<R, String>,
 {
@@ -759,7 +767,15 @@ pub fn get_project_record(
     db: State<ProjectDb>,
     project_id: String,
 ) -> Result<Option<ProjectRecord>, String> {
-    with_db(&app, &db, |conn| {
+    get_project_record_impl(&app, &db, &project_id)
+}
+
+pub(crate) fn get_project_record_impl(
+    app: &AppHandle,
+    db: &State<ProjectDb>,
+    project_id: &str,
+) -> Result<Option<ProjectRecord>, String> {
+    with_db(app, db, |conn| {
         let mut stmt = conn
             .prepare(
                 r#"
@@ -810,6 +826,14 @@ pub fn upsert_project_record(
     db: State<ProjectDb>,
     record: ProjectRecord,
 ) -> Result<(), String> {
+    upsert_project_record_impl(&app, &db, record)
+}
+
+pub(crate) fn upsert_project_record_impl(
+    app: &AppHandle,
+    db: &State<ProjectDb>,
+    record: ProjectRecord,
+) -> Result<(), String> {
     let image_pool_json = record.image_pool_json.clone().unwrap_or_else(|| {
         serde_json::to_string(&parse_image_pool_from_history(&record.history_json))
             .unwrap_or_else(|_| "[]".to_string())
@@ -819,7 +843,7 @@ pub fn upsert_project_record(
         &record.history_json,
         Some(&image_pool_json),
     );
-    with_db(&app, &db, |conn| {
+    with_db(app, db, |conn| {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Failed to begin transaction: {}", e))?;
@@ -882,8 +906,7 @@ pub fn upsert_project_record(
         tx.commit()
             .map_err(|e| format!("Failed to commit upsert transaction: {}", e))?;
 
-        prune_unreferenced_images(&app, conn)?;
-        Ok(())
+        finalize_committed_cleanup("upsert", prune_unreferenced_images(app, conn))
     })
 }
 
@@ -944,7 +967,16 @@ pub fn delete_project_record(
         tx.commit()
             .map_err(|e| format!("Failed to commit delete transaction: {}", e))?;
 
-        prune_unreferenced_images(&app, conn)?;
-        Ok(())
+        finalize_committed_cleanup("delete", prune_unreferenced_images(&app, conn))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::finalize_committed_cleanup;
+
+    #[test]
+    fn post_commit_cleanup_failure_does_not_turn_a_committed_write_into_an_error() {
+        assert!(finalize_committed_cleanup("test", Err("injected prune failure".into())).is_ok());
+    }
 }

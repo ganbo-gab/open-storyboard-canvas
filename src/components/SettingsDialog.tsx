@@ -32,6 +32,7 @@ import { PromptManagementSection } from '@/components/settings/PromptManagementS
 import { PromptPresetsSection } from '@/components/settings/PromptPresetsSection';
 import { TextAgentsSection } from '@/components/settings/TextAgentsSection';
 import { AudioModelsSection } from '@/components/settings/AudioModelsSection';
+import { SettingsPortabilitySection } from '@/components/settings/SettingsPortabilitySection';
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -701,7 +702,7 @@ export function SettingsDialog({
               </span>
             </div>
 
-            <nav className="ui-scrollbar flex flex-1 overflow-x-auto pr-10 [&>button]:w-auto [&>button]:shrink-0 sm:block sm:overflow-visible sm:pr-0 sm:[&>button]:w-full">
+            <nav className="ui-scrollbar mr-12 flex flex-1 overflow-x-auto [&>button]:w-auto [&>button]:shrink-0 sm:mr-0 sm:block sm:overflow-visible sm:[&>button]:w-full">
               <button
                 onClick={() => setActiveCategory('general')}
                 className={`
@@ -871,6 +872,20 @@ export function SettingsDialog({
               </button>
 
               <button
+                onClick={() => setActiveCategory('portability')}
+                className={`
+                w-full flex items-center gap-3 px-4 py-2.5 text-left
+                transition-colors
+                ${activeCategory === 'portability'
+                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
+                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
+                  }
+              `}
+              >
+                <span className="text-sm">{t('portability.settings.nav')}</span>
+              </button>
+
+              <button
                 onClick={() => setActiveCategory('about')}
                 className={`
                 w-full flex items-center gap-3 px-4 py-2.5 text-left
@@ -888,6 +903,7 @@ export function SettingsDialog({
 
           {/* Content */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            {activeCategory === 'portability' && <SettingsPortabilitySection />}
             {activeCategory === 'customProviders' && (
               <div className="flex flex-1 flex-col overflow-hidden">
                 <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">

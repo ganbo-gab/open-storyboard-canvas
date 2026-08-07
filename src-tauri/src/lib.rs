@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use commands::ai as ai_commands;
 use commands::image;
+use commands::portability;
 use commands::project_state;
 use commands::system;
 use commands::update;
@@ -87,6 +88,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(project_state::ProjectDb::new())
+        .manage(portability::PortabilityJobs::new())
         .on_page_load(|window, _payload| {
             if window.label() != MAIN_WINDOW_LABEL {
                 return;
@@ -220,6 +222,12 @@ pub fn run() {
             project_state::update_project_viewport_record,
             project_state::rename_project_record,
             project_state::delete_project_record,
+            portability::export_project_bundle,
+            portability::inspect_project_bundle,
+            portability::import_project_bundle,
+            portability::cancel_portability_operation,
+            portability::write_portability_text_file,
+            portability::read_portability_text_file,
             system::get_runtime_system_info,
             update::check_latest_release_tag,
         ])

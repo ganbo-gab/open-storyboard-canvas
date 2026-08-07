@@ -3,6 +3,7 @@ pub mod dreamina;
 mod dreamina_cli;
 pub mod http;
 pub mod image;
+pub mod portability;
 pub mod project_state;
 pub mod system;
 pub mod update;
