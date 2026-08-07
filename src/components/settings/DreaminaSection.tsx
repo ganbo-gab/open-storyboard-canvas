@@ -1,15 +1,28 @@
-import { memo, useCallback, useState } from 'react';
-import { Terminal, Copy, CheckCircle2, RefreshCw, AlertCircle, ExternalLink, Activity, Loader2 } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
+import { memo, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import {
+  Activity,
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  CircleHelp,
+  Copy,
+  ExternalLink,
+  FolderCog,
+  KeyRound,
+  Loader2,
+  RefreshCw,
+  Terminal,
+  WalletCards,
+} from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
-import { useSettingsStore } from '@/stores/settingsStore';
-
-interface DreaminaStatus {
-  kind: 'unknown' | 'not-installed' | 'not-logged-in' | 'logged-in' | 'logged-in-degraded' | 'error';
-  message?: string;
-  credits?: number;
-  resolvedPath?: string;
-}
+import { UiButton, UiIconButton, UiPanel, UiSelect } from '@/components/ui/primitives';
+import {
+  useSettingsStore,
+  type DreaminaStatusSnapshot,
+} from '@/stores/settingsStore';
 
 interface BackendStatus {
   installed: boolean;
@@ -18,12 +31,53 @@ interface BackendStatus {
   error: string | null;
   networkDegraded: boolean;
   resolvedPath: string | null;
+  versionInfo: {
+    version: string | null;
+    commit: string | null;
+    buildTime: string | null;
+  } | null;
+  loginState: 'logged_in' | 'logged_out' | 'unknown';
+  vipLevel: string | null;
+  accountError: string | null;
+  sessionsAvailable: boolean;
+  sessionError: string | null;
+}
+
+interface DreaminaSession {
+  id: number;
+  name: string;
+  isDefault: boolean;
+}
+
+interface DreaminaSessionListResult {
+  ok: boolean;
+  sessions: DreaminaSession[];
+  error: string | null;
+}
+
+interface OAuthStartResult {
+  ok: boolean;
+  alreadyAuthorized: boolean;
+  verificationUri: string | null;
+  userCode: string | null;
+  deviceCode: string | null;
+  expiresIn: number | null;
+  interval: number | null;
+  error: string | null;
+}
+
+interface OAuthCheckResult {
+  ok: boolean;
+  authorized: boolean;
+  pending: boolean;
+  error: string | null;
 }
 
 interface NetworkStage {
   ok: boolean;
   detail: string;
 }
+
 interface NetworkDiagnoseResult {
   dns: NetworkStage;
   tcp: NetworkStage;
@@ -32,271 +86,535 @@ interface NetworkDiagnoseResult {
   overallAdvice: string;
 }
 
-/**
- * Dreamina (即梦) section of the settings dialog.
- *
- * We do NOT ask users to paste credentials here — Dreamina uses an installed
- * CLI (`dreamina`) with a local login session. This section only needs to:
- *   1) Tell the user how to install + log in,
- *   2) Provide a one-click "check login" button that runs `dreamina user_credit`,
- *   3) Show current status / remaining credits.
- * The actual image2image / text2image calls use the same CLI under the hood.
- */
+type MetricTone = 'neutral' | 'success' | 'warning' | 'danger';
+
+function StatusMetric({
+  icon,
+  label,
+  value,
+  detail,
+  tone = 'neutral',
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  detail?: string;
+  tone?: MetricTone;
+}) {
+  const toneClass = tone === 'success'
+    ? 'text-emerald-500'
+    : tone === 'warning'
+      ? 'text-amber-500'
+      : tone === 'danger'
+        ? 'text-red-500'
+        : 'text-text-muted';
+  return (
+    <div className="min-w-0 border-b border-border-dark/60 py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:px-4 sm:first:pl-0 sm:last:border-r-0 sm:last:pr-0">
+      <div className="flex items-center gap-2 text-xs text-text-muted">
+        <span className={toneClass}>{icon}</span>
+        <span>{label}</span>
+      </div>
+      <div className="mt-1 truncate text-sm font-medium text-text-dark" title={value}>{value}</div>
+      {detail && <div className="mt-0.5 truncate text-xs text-text-muted" title={detail}>{detail}</div>}
+    </div>
+  );
+}
+
+function snapshotFromBackend(status: BackendStatus): DreaminaStatusSnapshot {
+  return {
+    installed: status.installed,
+    loggedIn: status.loggedIn,
+    loginState: status.loginState,
+    credits: status.credits,
+    networkDegraded: status.networkDegraded,
+    resolvedPath: status.resolvedPath,
+    version: status.versionInfo?.version ?? null,
+    commit: status.versionInfo?.commit ?? null,
+    buildTime: status.versionInfo?.buildTime ?? null,
+    vipLevel: status.vipLevel,
+    accountError: status.accountError ?? status.error,
+    sessionsAvailable: status.sessionsAvailable,
+    sessionError: status.sessionError,
+  };
+}
+
 export const DreaminaSection = memo(() => {
-  const [status, setStatus] = useState<DreaminaStatus>({ kind: 'unknown' });
+  const { t } = useTranslation();
+  const desktopRuntime = isTauri();
+  const status = useSettingsStore((state) => state.dreaminaStatus);
+  const selectedSessionId = useSettingsStore((state) => state.dreaminaDefaultSessionId);
+  const setSelectedSessionId = useSettingsStore((state) => state.setDreaminaDefaultSessionId);
+  const [sessions, setSessions] = useState<DreaminaSession[]>([
+    { id: 0, name: t('settings.dreamina.sessions.defaultName'), isDefault: true },
+  ]);
   const [checking, setChecking] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [oauth, setOAuth] = useState<OAuthStartResult | null>(null);
+  const [oauthStarting, setOAuthStarting] = useState(false);
+  const [oauthChecking, setOAuthChecking] = useState(false);
+  const [oauthPending, setOAuthPending] = useState(false);
+  const [oauthError, setOAuthError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagnose, setDiagnose] = useState<NetworkDiagnoseResult | null>(null);
 
-  const handleDiagnose = useCallback(async () => {
-    setDiagnosing(true);
-    setDiagnose(null);
+  const refreshSessions = useCallback(async () => {
+    if (!desktopRuntime) return;
+    setSessionLoading(true);
     try {
-      const res = await invoke<NetworkDiagnoseResult>('dreamina_network_diagnose');
-      setDiagnose(res);
-    } catch (err) {
-      setDiagnose({
-        dns: { ok: false, detail: '诊断命令调用失败' },
-        tcp: { ok: false, detail: '' },
-        tls: { ok: false, detail: '' },
-        http: { ok: false, detail: '' },
-        overallAdvice: err instanceof Error ? err.message : String(err),
-      });
+      const result = await invoke<DreaminaSessionListResult>('dreamina_session_list', { limit: 100 });
+      setSessions(result.sessions.length > 0
+        ? result.sessions
+        : [{ id: 0, name: t('settings.dreamina.sessions.defaultName'), isDefault: true }]);
+      setSessionError(result.ok ? null : (result.error ?? t('settings.dreamina.sessions.unavailable')));
+    } catch (error) {
+      setSessions([{ id: 0, name: t('settings.dreamina.sessions.defaultName'), isDefault: true }]);
+      setSessionError(error instanceof Error ? error.message : String(error));
     } finally {
-      setDiagnosing(false);
+      setSessionLoading(false);
     }
-  }, []);
+  }, [desktopRuntime, t]);
 
-  const runCli = useCallback(async (): Promise<BackendStatus> => {
-    try {
-      return await invoke<BackendStatus>('check_dreamina_login');
-    } catch (err) {
-      return { installed: false, loggedIn: false, credits: null, error: err instanceof Error ? err.message : String(err), networkDegraded: false, resolvedPath: null };
-    }
-  }, []);
-
-  const handleCheck = useCallback(async () => {
+  const refreshStatus = useCallback(async () => {
+    if (!desktopRuntime) return;
     setChecking(true);
     try {
-      const res = await runCli();
-      // Mirror the result into settingsStore so the rest of the app (model
-      // catalog, panel pickers) can see Dreamina availability without
-      // re-invoking the CLI.
+      const backend = await invoke<BackendStatus>('check_dreamina_login');
+      useSettingsStore.getState().setDreaminaStatus(snapshotFromBackend(backend));
+      if (backend.installed) {
+        await refreshSessions();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       useSettingsStore.getState().setDreaminaStatus({
-        loggedIn: res.loggedIn,
-        credits: res.credits,
-        networkDegraded: res.networkDegraded,
-      });
-      if (!res.installed) {
-        setStatus({ kind: 'not-installed', message: res.error ?? '未检测到 dreamina CLI,请按下方步骤安装。' });
-        return;
-      }
-      if (!res.loggedIn) {
-        setStatus({
-          kind: 'not-logged-in',
-          message: res.error ?? 'CLI 已安装但未登录，执行 `dreamina login` 完成登录。',
-          resolvedPath: res.resolvedPath ?? undefined,
-        });
-        return;
-      }
-      setStatus({
-        kind: res.networkDegraded ? 'logged-in-degraded' : 'logged-in',
-        credits: res.credits ?? undefined,
-        message: res.networkDegraded ? (res.error ?? '已登录，但积分接口暂不可达（网络波动）') : undefined,
-        resolvedPath: res.resolvedPath ?? undefined,
+        installed: false,
+        loggedIn: false,
+        loginState: 'unknown',
+        credits: null,
+        networkDegraded: false,
+        resolvedPath: null,
+        version: null,
+        commit: null,
+        buildTime: null,
+        vipLevel: null,
+        accountError: message,
+        sessionsAvailable: false,
+        sessionError: null,
       });
     } finally {
       setChecking(false);
     }
-  }, [runCli]);
+  }, [desktopRuntime, refreshSessions]);
+
+  useEffect(() => {
+    void refreshStatus();
+  }, [refreshStatus]);
+
+  const startOAuth = useCallback(async () => {
+    setOAuthStarting(true);
+    setOAuthError(null);
+    setOAuthPending(false);
+    try {
+      const result = await invoke<OAuthStartResult>('dreamina_oauth_start');
+      if (!result.ok) {
+        setOAuthError(result.error ?? t('settings.dreamina.oauth.startFailed'));
+        return;
+      }
+      if (result.alreadyAuthorized) {
+        setOAuth(null);
+        await refreshStatus();
+        return;
+      }
+      setOAuth(result);
+    } catch (error) {
+      setOAuthError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setOAuthStarting(false);
+    }
+  }, [refreshStatus, t]);
+
+  const checkOAuth = useCallback(async () => {
+    if (!oauth?.deviceCode) return;
+    setOAuthChecking(true);
+    setOAuthError(null);
+    try {
+      const result = await invoke<OAuthCheckResult>('dreamina_oauth_check', {
+        deviceCode: oauth.deviceCode,
+        pollSeconds: 30,
+      });
+      if (result.authorized) {
+        setOAuth(null);
+        setOAuthPending(false);
+        await refreshStatus();
+        return;
+      }
+      setOAuthPending(result.pending);
+      if (!result.ok) {
+        setOAuthError(result.error ?? t('settings.dreamina.oauth.checkFailed'));
+      }
+    } catch (error) {
+      setOAuthError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setOAuthChecking(false);
+    }
+  }, [oauth?.deviceCode, refreshStatus, t]);
+
+  const runNetworkDiagnose = useCallback(async () => {
+    if (!desktopRuntime) return;
+    setDiagnosing(true);
+    setDiagnose(null);
+    try {
+      setDiagnose(await invoke<NetworkDiagnoseResult>('dreamina_network_diagnose'));
+    } catch (error) {
+      setDiagnose({
+        dns: { ok: false, detail: t('settings.dreamina.network.commandFailed') },
+        tcp: { ok: false, detail: '' },
+        tls: { ok: false, detail: '' },
+        http: { ok: false, detail: '' },
+        overallAdvice: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setDiagnosing(false);
+    }
+  }, [desktopRuntime, t]);
 
   const copyToClipboard = useCallback(async (text: string, id: string) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(id);
-      setTimeout(() => setCopied(null), 1500);
-    } catch { /* ignore */ }
+      window.setTimeout(() => setCopied(null), 1500);
+    } catch {
+      setCopied(null);
+    }
   }, []);
 
-  const statusColor = status.kind === 'logged-in'
-    ? 'emerald'
-    : status.kind === 'logged-in-degraded'
-      ? 'amber-green'
-      : status.kind === 'not-installed' || status.kind === 'not-logged-in'
-        ? 'amber'
-        : status.kind === 'error' ? 'red' : 'white';
+  if (!desktopRuntime) {
+    return (
+      <div className="space-y-5">
+        <div>
+          <h2 className="text-base font-semibold text-text-dark">{t('settings.dreamina.title')}</h2>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-text-muted">
+            {t('settings.dreamina.description')}
+          </p>
+        </div>
+        <UiPanel className="flex items-start gap-3 p-4" role="status">
+          <Terminal className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-text-dark">
+              {t('settings.dreamina.runtime.desktopOnlyTitle')}
+            </div>
+            <div className="mt-1 text-xs leading-5 text-text-muted">
+              {t('settings.dreamina.runtime.desktopOnlyDescription')}
+            </div>
+          </div>
+        </UiPanel>
+      </div>
+    );
+  }
+
+  const cliTone: MetricTone = status?.installed ? 'success' : status ? 'danger' : 'neutral';
+  const accountTone: MetricTone = status?.loggedIn
+    ? (status.networkDegraded ? 'warning' : 'success')
+    : status?.loginState === 'unknown' ? 'warning' : status ? 'danger' : 'neutral';
+  const sessionKnown = sessions.some((session) => session.id === selectedSessionId);
+  const effectiveSessionError = sessionError
+    ?? status?.sessionError
+    ?? (!sessionKnown ? t('settings.dreamina.sessions.selectedMissing') : null);
+  const accountLabel = status?.loggedIn
+    ? t('settings.dreamina.status.loggedIn')
+    : status?.loginState === 'logged_out'
+      ? t('settings.dreamina.status.loggedOut')
+      : t('settings.dreamina.status.unknown');
+  const versionParts = [status?.commit, status?.buildTime].filter(Boolean);
+  const versionDetail = versionParts.length > 0 ? versionParts.join(' · ') : undefined;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
-        <h2 className="text-base font-semibold text-text-dark">Dreamina 即梦</h2>
-        <p className="mt-1 text-xs text-text-muted">
-          即梦不需要贴 API Key。它通过本地安装的 <code className="rounded bg-bg-dark px-1">dreamina</code> CLI 登录后使用；检测到已登录且账号可用后，画布会自动解锁即梦图片和视频生成能力。
+        <h2 className="text-base font-semibold text-text-dark">{t('settings.dreamina.title')}</h2>
+        <p className="mt-1 max-w-3xl text-xs leading-5 text-text-muted">
+          {t('settings.dreamina.description')}
         </p>
       </div>
 
-      <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.08] p-3">
-        <div className="flex items-start gap-2">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
-          <div className="space-y-1">
-            <div className="text-sm font-medium text-amber-100">官方 CLI 会员限制提醒</div>
-            <p className="text-xs leading-5 text-amber-100/75">
-              即梦官方目前会按账号权益限制 CLI 图片 / 视频能力。登录检测正常只代表本机 CLI 和登录态可用；如果账号没有对应权益，提交任务仍可能被官方拒绝。非会员或受限账号建议优先使用「我的配置」里的自定义服务商。
-            </p>
+      <UiPanel className="p-4" aria-live="polite" aria-busy={checking || sessionLoading}>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border-dark/60 pb-3">
+          <div>
+            <div className="text-sm font-medium text-text-dark">{t('settings.dreamina.runtime.title')}</div>
+            <div className="mt-0.5 text-xs text-text-muted">{t('settings.dreamina.runtime.subtitle')}</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <UiIconButton
+              type="button"
+              onClick={() => void runNetworkDiagnose()}
+              disabled={diagnosing}
+              aria-label={t('settings.dreamina.network.run')}
+              title={t('settings.dreamina.network.run')}
+            >
+              {diagnosing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />}
+            </UiIconButton>
+            <UiIconButton
+              type="button"
+              onClick={() => void refreshStatus()}
+              disabled={checking}
+              aria-label={t('settings.dreamina.runtime.refresh')}
+              title={t('settings.dreamina.runtime.refresh')}
+            >
+              <RefreshCw className={`h-4 w-4 ${checking ? 'animate-spin' : ''}`} />
+            </UiIconButton>
           </div>
         </div>
-      </div>
 
-      {/* Current status card */}
-      <div className={`rounded-lg border p-4 ${
-        statusColor === 'emerald' ? 'border-emerald-500/30 bg-emerald-500/5' :
-        statusColor === 'amber-green' ? 'border-emerald-500/30 bg-emerald-500/5' :
-        statusColor === 'amber' ? 'border-amber-500/30 bg-amber-500/5' :
-        statusColor === 'red' ? 'border-red-500/30 bg-red-500/5' :
-        'border-border-dark bg-bg-dark'
-      }`}>
-        <div className="flex items-start gap-3">
-          {status.kind === 'logged-in' ? (
-            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
-          ) : status.kind === 'logged-in-degraded' ? (
-            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
-          ) : status.kind === 'unknown' ? (
-            <Terminal className="mt-0.5 h-5 w-5 shrink-0 text-text-muted" />
-          ) : (
-            <AlertCircle className={`mt-0.5 h-5 w-5 shrink-0 ${statusColor === 'amber' ? 'text-amber-400' : 'text-red-400'}`} />
-          )}
-          <div className="flex-1">
-            <div className="text-sm font-medium text-text-dark">
-              {status.kind === 'unknown' && '点击下方按钮检测 CLI 安装与登录状态'}
-              {status.kind === 'not-installed' && '未检测到 dreamina CLI'}
-              {status.kind === 'not-logged-in' && 'CLI 已安装 · 未登录'}
-              {status.kind === 'logged-in' && `CLI 登录正常 · 剩余积分 ${status.credits ?? '?'}`}
-              {status.kind === 'logged-in-degraded' && (
-                <span className="inline-flex items-center gap-2">
-                  已登录
-                  <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-normal text-amber-300">网络不稳定</span>
-                </span>
-              )}
-              {status.kind === 'error' && 'CLI 检测出错'}
+        <div className="grid sm:grid-cols-2 xl:grid-cols-4">
+          <StatusMetric
+            icon={<Terminal className="h-4 w-4" />}
+            label={t('settings.dreamina.runtime.cli')}
+            value={checking && !status
+              ? t('settings.dreamina.status.checking')
+              : status?.installed
+                ? (status.version ?? t('settings.dreamina.status.installed'))
+                : t('settings.dreamina.status.notInstalled')}
+            detail={versionDetail}
+            tone={cliTone}
+          />
+          <StatusMetric
+            icon={<KeyRound className="h-4 w-4" />}
+            label={t('settings.dreamina.runtime.account')}
+            value={accountLabel}
+            detail={status?.vipLevel ? t('settings.dreamina.status.vip', { level: status.vipLevel }) : undefined}
+            tone={accountTone}
+          />
+          <StatusMetric
+            icon={<WalletCards className="h-4 w-4" />}
+            label={t('settings.dreamina.runtime.credits')}
+            value={status?.credits === null || status?.credits === undefined
+              ? t('settings.dreamina.status.unavailable')
+              : status.credits.toLocaleString()}
+            tone={status?.credits !== null && status?.credits !== undefined ? 'success' : 'neutral'}
+          />
+          <StatusMetric
+            icon={<FolderCog className="h-4 w-4" />}
+            label={t('settings.dreamina.runtime.session')}
+            value={t('settings.dreamina.sessions.current', { id: selectedSessionId })}
+            detail={status?.sessionsAvailable
+              ? t('settings.dreamina.sessions.available')
+              : t('settings.dreamina.sessions.degraded')}
+            tone={effectiveSessionError ? 'warning' : 'success'}
+          />
+        </div>
+
+        {status?.resolvedPath && (
+          <div className="mt-3 min-w-0 border-t border-border-dark/60 pt-3 text-xs text-text-muted">
+            <span className="font-medium text-text-dark">{t('settings.dreamina.runtime.path')}</span>{' '}
+            <span className="break-all font-mono">{status.resolvedPath}</span>
+          </div>
+        )}
+        {status?.accountError && (
+          <div role="alert" className="mt-3 flex items-start gap-2 border-l-2 border-amber-500 bg-amber-500/5 px-3 py-2 text-xs leading-5 text-text-muted">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <span>{status.accountError}</span>
+          </div>
+        )}
+      </UiPanel>
+
+      {status?.installed && !status.loggedIn && (
+        <section className="border-t border-border-dark pt-5" aria-labelledby="dreamina-oauth-title">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 id="dreamina-oauth-title" className="text-sm font-medium text-text-dark">
+                {t('settings.dreamina.oauth.title')}
+              </h3>
+              <p className="mt-1 text-xs leading-5 text-text-muted">{t('settings.dreamina.oauth.description')}</p>
             </div>
-            {status.message && <div className="mt-1 text-xs text-text-muted">{status.message}</div>}
-            {status.resolvedPath && (
-              <div className="mt-1 text-[10px] text-text-muted/60 font-mono truncate" title={status.resolvedPath}>
-                二进制：{status.resolvedPath}
+            {!oauth && (
+              <UiButton
+                type="button"
+                variant="primary"
+                className="min-h-11 shrink-0 gap-2"
+                onClick={() => void startOAuth()}
+                disabled={oauthStarting}
+              >
+                {oauthStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                {oauthStarting ? t('settings.dreamina.oauth.starting') : t('settings.dreamina.oauth.start')}
+              </UiButton>
+            )}
+          </div>
+
+          {oauth && (
+            <div className="mt-4 grid gap-4 border-l-2 border-accent/50 pl-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+              <div className="min-w-0 space-y-3">
+                <div>
+                  <div className="text-xs font-medium text-text-dark">{t('settings.dreamina.oauth.userCode')}</div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <code className="min-w-0 flex-1 break-all border ui-field px-3 py-2 font-mono text-sm font-semibold tracking-normal text-text-dark">
+                      {oauth.userCode}
+                    </code>
+                    <UiIconButton
+                      type="button"
+                      onClick={() => void copyToClipboard(oauth.userCode ?? '', 'oauth-code')}
+                      aria-label={t('settings.dreamina.oauth.copyCode')}
+                      title={t('settings.dreamina.oauth.copyCode')}
+                    >
+                      {copied === 'oauth-code' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </UiIconButton>
+                  </div>
+                </div>
+                <div className="text-xs leading-5 text-text-muted">
+                  {t('settings.dreamina.oauth.expires', { seconds: oauth.expiresIn ?? '?' })}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <UiButton
+                  type="button"
+                  className="min-h-11 gap-2"
+                  onClick={() => oauth.verificationUri && void openUrl(oauth.verificationUri)}
+                  disabled={!oauth.verificationUri}
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  {t('settings.dreamina.oauth.openVerification')}
+                </UiButton>
+                <UiButton
+                  type="button"
+                  variant="primary"
+                  className="min-h-11 gap-2"
+                  onClick={() => void checkOAuth()}
+                  disabled={oauthChecking}
+                >
+                  {oauthChecking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  {oauthChecking ? t('settings.dreamina.oauth.checking') : t('settings.dreamina.oauth.check')}
+                </UiButton>
+              </div>
+            </div>
+          )}
+          {oauthPending && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-amber-500" role="status">
+              <CircleHelp className="h-4 w-4" />
+              {t('settings.dreamina.oauth.pending')}
+            </div>
+          )}
+          {oauthError && (
+            <div className="mt-3 text-xs leading-5 text-red-500" role="alert">
+              {oauthError} {t('settings.dreamina.oauth.retryHint')}
+            </div>
+          )}
+        </section>
+      )}
+
+      {status?.installed && (
+        <section className="border-t border-border-dark pt-5" aria-labelledby="dreamina-session-title">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 id="dreamina-session-title" className="text-sm font-medium text-text-dark">
+                {t('settings.dreamina.sessions.title')}
+              </h3>
+              <p className="mt-1 text-xs leading-5 text-text-muted">{t('settings.dreamina.sessions.description')}</p>
+            </div>
+            <UiIconButton
+              type="button"
+              onClick={() => void refreshSessions()}
+              disabled={sessionLoading}
+              aria-label={t('settings.dreamina.sessions.refresh')}
+              title={t('settings.dreamina.sessions.refresh')}
+            >
+              <RefreshCw className={`h-4 w-4 ${sessionLoading ? 'animate-spin' : ''}`} />
+            </UiIconButton>
+          </div>
+          <div className="mt-3 max-w-xl">
+            <label htmlFor="dreamina-default-session" className="mb-1.5 block text-xs font-medium text-text-dark">
+              {t('settings.dreamina.sessions.label')}
+            </label>
+            <UiSelect
+              id="dreamina-default-session"
+              value={String(selectedSessionId)}
+              onChange={(event) => setSelectedSessionId(Number(event.target.value))}
+              aria-label={t('settings.dreamina.sessions.label')}
+            >
+              {!sessionKnown && <option value={String(selectedSessionId)}>{t('settings.dreamina.sessions.missingOption', { id: selectedSessionId })}</option>}
+              {sessions.map((session) => (
+                <option key={session.id} value={String(session.id)}>
+                  {session.isDefault
+                    ? t('settings.dreamina.sessions.defaultOption', { name: session.name, id: session.id })
+                    : t('settings.dreamina.sessions.option', { name: session.name, id: session.id })}
+                </option>
+              ))}
+            </UiSelect>
+            {effectiveSessionError && (
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs leading-5 text-amber-500" role="alert">
+                <span>{effectiveSessionError}</span>
+                {selectedSessionId !== 0 && (
+                  <button
+                    type="button"
+                    className="font-medium text-accent hover:underline"
+                    onClick={() => setSelectedSessionId(0)}
+                  >
+                    {t('settings.dreamina.sessions.useDefault')}
+                  </button>
+                )}
               </div>
             )}
           </div>
-          <button
-            type="button"
-            onClick={handleCheck}
-            disabled={checking}
-            className="inline-flex items-center gap-1 rounded-md bg-accent/20 px-3 py-1.5 text-xs text-accent hover:bg-accent/30 disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3 w-3 ${checking ? 'animate-spin' : ''}`} />
-            {checking ? '检测中...' : '检测登录'}
-          </button>
-          <button
-            type="button"
-            onClick={handleDiagnose}
-            disabled={diagnosing}
-            className="inline-flex items-center gap-1 rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-xs text-text-dark hover:bg-white/10 disabled:opacity-50"
-            title="DNS → TCP → TLS → HTTP 逐层测试到 jimeng.jianying.com"
-          >
-            {diagnosing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Activity className="h-3 w-3" />}
-            {diagnosing ? '诊断中...' : '网络体检'}
-          </button>
-        </div>
-      </div>
+        </section>
+      )}
 
-      {/* Network diagnose result */}
       {diagnose && (
-        <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-          <div className="text-sm font-medium text-text-dark mb-2">网络体检结果</div>
-          <div className="grid grid-cols-[80px_1fr] gap-x-3 gap-y-1.5 text-[11px]">
-            {[
-              { key: 'DNS', stage: diagnose.dns },
-              { key: 'TCP', stage: diagnose.tcp },
-              { key: 'TLS', stage: diagnose.tls },
-              { key: 'HTTP', stage: diagnose.http },
-            ].map(({ key, stage }) => (
-              <div key={key} className="contents">
-                <div className="flex items-center gap-1.5 text-text-muted">
-                  <span className={`inline-block h-2 w-2 rounded-full ${stage.ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                  {key}
+        <section className="border-t border-border-dark pt-5" aria-labelledby="dreamina-network-title">
+          <h3 id="dreamina-network-title" className="text-sm font-medium text-text-dark">
+            {t('settings.dreamina.network.title')}
+          </h3>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {([
+              ['DNS', diagnose.dns],
+              ['TCP', diagnose.tcp],
+              ['TLS', diagnose.tls],
+              ['HTTP', diagnose.http],
+            ] as const).map(([label, stage]) => (
+              <div key={label} className="flex min-w-0 items-start gap-2 border-b border-border-dark/60 py-2">
+                {stage.ok
+                  ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                  : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />}
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-text-dark">{label}</div>
+                  <div className="mt-0.5 break-words text-xs leading-5 text-text-muted">{stage.detail || t('settings.dreamina.status.unavailable')}</div>
                 </div>
-                <div className={`break-all ${stage.ok ? 'text-text-dark' : 'text-red-300/90'}`}>{stage.detail || '—'}</div>
               </div>
             ))}
           </div>
-          <div className="mt-3 rounded-md border border-white/10 bg-surface-dark/60 p-2.5 text-[11px] text-text-muted leading-5 whitespace-pre-wrap">
+          <div className="mt-3 whitespace-pre-wrap border-l-2 border-border-dark pl-3 text-xs leading-5 text-text-muted">
             {diagnose.overallAdvice}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Install guide */}
-      <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-        <div className="text-sm font-medium text-text-dark">① 安装 CLI</div>
-        <p className="mt-1 text-[11px] text-text-muted">
-          macOS / Linux 一行命令安装（Windows 用户建议走 WSL）。如果已经装过可跳过这步。
-        </p>
-        <div className="mt-2 flex items-center gap-2">
-          <code className="flex-1 overflow-x-auto rounded-md bg-surface-dark px-3 py-2 text-[11px] text-text-dark font-mono">
-            curl -fsSL https://dreamina.jianying.com/install.sh | bash
-          </code>
+      {!status?.installed && (
+        <details className="border-t border-border-dark pt-5">
+          <summary className="cursor-pointer text-sm font-medium text-text-dark">
+            {t('settings.dreamina.install.title')}
+          </summary>
+          <p className="mt-2 text-xs leading-5 text-text-muted">{t('settings.dreamina.install.description')}</p>
+          <div className="mt-3 flex items-center gap-2">
+            <code className="min-w-0 flex-1 overflow-x-auto border ui-field px-3 py-2 font-mono text-xs text-text-dark">
+              curl -fsSL https://dreamina.jianying.com/install.sh | bash
+            </code>
+            <UiIconButton
+              type="button"
+              onClick={() => void copyToClipboard('curl -fsSL https://dreamina.jianying.com/install.sh | bash', 'install')}
+              aria-label={t('settings.dreamina.install.copy')}
+              title={t('settings.dreamina.install.copy')}
+            >
+              {copied === 'install' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+            </UiIconButton>
+          </div>
           <button
             type="button"
-            onClick={() => copyToClipboard('curl -fsSL https://dreamina.jianying.com/install.sh | bash', 'install')}
-            className="shrink-0 inline-flex items-center gap-1 rounded-md bg-white/5 px-2 py-1.5 text-[11px] text-text-muted hover:bg-white/10"
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-accent hover:underline"
+            onClick={() => void openUrl('https://dreamina.jianying.com/platform/cli')}
           >
-            {copied === 'install' ? <CheckCircle2 className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            {t('settings.dreamina.install.officialPage')}
+            <ExternalLink className="h-3.5 w-3.5" />
           </button>
-        </div>
-        <div className="mt-2 text-[11px] text-text-muted/70">
-          ⓘ 如上述一键脚本失败，可前往 <a href="https://dreamina.jianying.com/platform/cli" target="_blank" rel="noopener" className="inline-flex items-center gap-0.5 text-accent hover:underline">即梦 CLI 官方页<ExternalLink className="h-3 w-3" /></a> 手动下载二进制。
-        </div>
-      </div>
-
-      {/* Login guide */}
-      <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-        <div className="text-sm font-medium text-text-dark">② 登录账号</div>
-        <p className="mt-1 text-[11px] text-text-muted">
-          执行 <code className="rounded bg-surface-dark px-1">dreamina login</code> 会弹出浏览器完成登录，登录信息保存在本地。
-        </p>
-        <div className="mt-2 flex items-center gap-2">
-          <code className="flex-1 rounded-md bg-surface-dark px-3 py-2 text-[11px] text-text-dark font-mono">
-            dreamina login
-          </code>
-          <button
-            type="button"
-            onClick={() => copyToClipboard('dreamina login', 'login')}
-            className="shrink-0 inline-flex items-center gap-1 rounded-md bg-white/5 px-2 py-1.5 text-[11px] text-text-muted hover:bg-white/10"
-          >
-            {copied === 'login' ? <CheckCircle2 className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-          </button>
-        </div>
-        <p className="mt-2 text-[11px] text-text-muted/70">登录后回到这里点「检测登录」。</p>
-      </div>
-
-      {/* Built-in models */}
-      <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-        <div className="text-sm font-medium text-text-dark">③ 画布可用能力</div>
-        <p className="mt-1 text-[11px] text-text-muted">
-          即梦 CLI 登录成功后，本应用会自动提供以下官方能力，生成节点中直接选用即可；能力名称用中文展示，模型原名保留。
-        </p>
-        <ul className="mt-2 space-y-1 text-[11px] text-text-muted list-disc pl-4">
-          <li>图片：文生图支持 3.0 / 3.1 / 4.0 / 4.1 / 4.5 / 4.6 / 4.7 / 5.0；3.x 可选 1k / 2k，4.0+ 可选 2k / 4k。</li>
-          <li>图片：图生图支持 4.0 / 4.1 / 4.5 / 4.6 / 4.7 / 5.0，最多 10 张参考图，可选 2k / 4k。</li>
-          <li>图片：高清放大需要 1 张图，可选 2k / 4k / 8k，其中 4k / 8k 通常需要 VIP 权益。</li>
-          <li>视频：文生视频支持 Seedance 2.0 系列和 mini，时长 4-15 秒，普通模型 720p，seedance2.0_vip 可选 1080p。</li>
-          <li>视频：图生视频需要 1 张首帧图；首尾帧成片需要 2 张图；多帧成片支持 2-20 张图。</li>
-          <li>视频：全能参考成片支持图片最多 9 张、视频最多 3 个、音频最多 3 个；音频参考需约 2-15 秒。</li>
-        </ul>
-        <div className="mt-3 rounded-md border border-white/10 bg-surface-dark/60 p-2.5 text-[11px] leading-5 text-text-muted">
-          参数入口在画布节点的「参数」里。图片分辨率按 1k / 2k / 4k / 8k 展示；视频分辨率按 720p / 1080p 展示。图生视频、首尾帧和多帧成片的比例由参考图推断，因此画布中显示为「智能」。
-        </div>
-      </div>
+        </details>
+      )}
     </div>
   );
 });

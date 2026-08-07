@@ -57,6 +57,12 @@ import {
   type VideoModelConfigValue,
 } from '@/features/canvas/application/videoModelCatalog';
 import {
+  parseDreaminaTransitionSegments,
+  resizeDreaminaTransitionSegments,
+  validateDreaminaVideoRequest,
+  type DreaminaTransitionSegment,
+} from '@/features/canvas/application/dreaminaCapabilities';
+import {
   DEFAULT_VIDEO_INPUT_SCHEMA,
   normalizeVideoInputSchema,
   type VideoInputSchema,
@@ -74,6 +80,7 @@ import {
 } from '@/features/canvas/application/generatedMediaNaming';
 import { CanvasNodeImage } from '@/features/canvas/ui/CanvasNodeImage';
 import { CameraControlPanel } from '@/features/canvas/ui/CameraControlPanel';
+import { DreaminaMultiframeEditor } from '@/features/canvas/ui/DreaminaMultiframeEditor';
 import { buildCameraPrompt } from '@/features/canvas/application/cameraPromptLibrary';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
@@ -435,6 +442,10 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     return promptPresets.find((preset) => preset.id === data.selectedPromptPresetId)?.name ?? null;
   }, [data.selectedPromptPresetId, promptPresets]);
   const isAgnesVideoModel = selectedEntry?.providerId === 'agnes';
+  const isDreaminaMultiframe = selectedEntry?.id === 'dreamina:multi-frame-video';
+  const dreaminaMultiframeImageCount = isDreaminaMultiframe ? schemaIncomingImageItems.length : 0;
+  const dreaminaTransitionValue = resolvedModelConfig?.extraParams?.dreaminaTransitionSegments
+    ?? resolvedModelConfig?.extraParams?.transitionSegments;
   const agnesVideoMode = resolveAgnesVideoMode(resolvedModelConfig?.extraParams);
   const entriesByProvider = useMemo(() => {
     const map = new Map<string, VideoCatalogEntry[]>();
@@ -615,6 +626,40 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     });
   }, [catalog, id, resolvedModelConfig, updateNodeData]);
 
+  const handleDreaminaTransitionsChange = useCallback((segments: DreaminaTransitionSegment[]) => {
+    const base = resolvedModelConfig ?? resolveVideoModelConfig(catalog, null);
+    if (!base) return;
+    const nextExtraParams = { ...(base.extraParams ?? {}) };
+    nextExtraParams.dreaminaTransitionSegments = segments;
+    delete nextExtraParams.transitionSegments;
+    updateNodeData(id, {
+      modelConfig: {
+        ...base,
+        extraParams: nextExtraParams,
+      },
+    });
+  }, [catalog, id, resolvedModelConfig, updateNodeData]);
+
+  useEffect(() => {
+    if (!isDreaminaMultiframe || dreaminaMultiframeImageCount < 3 || !resolvedModelConfig) {
+      return;
+    }
+    const expectedCount = dreaminaMultiframeImageCount - 1;
+    const current = parseDreaminaTransitionSegments(dreaminaTransitionValue);
+    if (current?.length === expectedCount) {
+      return;
+    }
+    handleDreaminaTransitionsChange(
+      resizeDreaminaTransitionSegments(dreaminaTransitionValue, expectedCount),
+    );
+  }, [
+    dreaminaMultiframeImageCount,
+    dreaminaTransitionValue,
+    handleDreaminaTransitionsChange,
+    isDreaminaMultiframe,
+    resolvedModelConfig,
+  ]);
+
   const closeOpenPopovers = useCallback(() => {
     setProviderOpen(false);
     setModelOpen(false);
@@ -749,6 +794,29 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
       ?? '16:9';
     const extraParams = { ...(latestModelConfig.extraParams ?? {}) };
     extraParams.videoInputSchema = latestInputSchema;
+    if (latestEntry.id === 'dreamina:multi-frame-video' && latestIncomingImages.length >= 3) {
+      const transitions = parseDreaminaTransitionSegments(
+        extraParams.dreaminaTransitionSegments ?? extraParams.transitionSegments,
+      );
+      const expectedCount = latestIncomingImages.length - 1;
+      const transitionIssues = validateDreaminaVideoRequest({
+        command: 'multiframe2video',
+        resolution: latestModelConfig.resolution,
+        duration: Number(latestModelConfig.duration) || undefined,
+        ratio: latestModelConfig.aspectRatio,
+        imageCount: latestIncomingImages.length,
+        videoCount: 0,
+        audioCount: 0,
+        transitions,
+      }).filter(({ field }) => field === 'transitions' || field.startsWith('transitions.'));
+      if (transitions?.length !== expectedCount || transitionIssues.length > 0) {
+        const message = t('node.aiVideo.multiframeIncomplete', { count: expectedCount });
+        setParamsOpen(true);
+        setError(message);
+        void showErrorDialog(message, t('common.error'));
+        return null;
+      }
+    }
 
     return {
       prompt,
@@ -1473,16 +1541,22 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
               title={`${t('node.aiVideo.duration')} / ${t('node.aiVideo.resolution')} / ${t('node.aiVideo.aspectRatio')}`}
             >
               <span className="min-w-0 truncate">
-                {resolvedModelConfig.duration}s·{resolvedModelConfig.resolution}·{resolvedModelConfig.aspectRatio}
+                {isDreaminaMultiframe && dreaminaMultiframeImageCount >= 3
+                  ? t('node.aiVideo.multiframeSummary', {
+                    count: dreaminaMultiframeImageCount - 1,
+                    resolution: resolvedModelConfig.resolution,
+                  })
+                  : `${resolvedModelConfig.duration}s·${resolvedModelConfig.resolution}·${resolvedModelConfig.aspectRatio}`}
               </span>
               <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
             </UiButton>
             {paramsOpen && (
               <div
-                className="nowheel absolute bottom-full right-0 z-50 mb-1 w-[300px] space-y-2 rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-2 shadow-xl"
+                className={`ui-scrollbar nowheel absolute bottom-full right-0 z-50 mb-1 max-h-[min(620px,70vh)] space-y-2 overflow-y-auto rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-2 shadow-xl ${isDreaminaMultiframe && dreaminaMultiframeImageCount >= 3 ? 'w-[380px]' : 'w-[300px]'}`}
                 onMouseDown={(event) => event.stopPropagation()}
+                onWheelCapture={(event) => event.stopPropagation()}
               >
-                <div>
+                {(!isDreaminaMultiframe || dreaminaMultiframeImageCount < 3) && <div>
                   <div className="mb-1 text-[10px] text-text-muted">{t('node.aiVideo.duration')}</div>
                   {isAgnesVideoModel ? (
                     <div className="space-y-1">
@@ -1525,7 +1599,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                       })}
                     </div>
                   )}
-                </div>
+                </div>}
                 {isAgnesVideoModel && schemaIncomingImageItems.length > 1 && (
                   <div>
                     <div className="mb-1 text-[10px] text-text-muted">{t('node.aiVideo.agnesMode')}</div>
@@ -1597,6 +1671,13 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                     })}
                   </div>
                 </div>
+                {isDreaminaMultiframe && dreaminaMultiframeImageCount >= 3 && (
+                  <DreaminaMultiframeEditor
+                    imageCount={dreaminaMultiframeImageCount}
+                    value={dreaminaTransitionValue}
+                    onChange={handleDreaminaTransitionsChange}
+                  />
+                )}
               </div>
             )}
           </div>

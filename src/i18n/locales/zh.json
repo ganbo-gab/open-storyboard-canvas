@@ -821,7 +821,16 @@
       "aspectRatio": "宽高比",
       "payloadDebug": "预览将发送的视频请求内容",
       "resolution": "分辨率",
-      "referenceCount": "{{count}} 引用"
+      "referenceCount": "{{count}} 引用",
+      "multiframeTransitions": "{{count}} 段转场",
+      "multiframeHint": "3 张及以上需要为每两帧分别描述转场，不会复用总提示词。",
+      "multiframeSummary": "{{count}} 段·{{resolution}}",
+      "multiframeIncomplete": "请检查 {{count}} 段多帧转场：提示词不能留空，分段时长需要全部填写或全部交由即梦自动分配。",
+      "segmentDurations": "分段时长",
+      "segmentSeconds": "秒数",
+      "frameLabel": "图{{index}}",
+      "transitionPromptLabel": "图{{from}} 到图{{to}} 的转场提示词",
+      "transitionPromptPlaceholder": "描述图{{from}} 到图{{to}} 的动作、镜头与过渡"
     },
     "aiText": {
       "promptPlaceholder": "输入这次任务的 prompt",
@@ -1098,6 +1107,77 @@
     "title": "设置",
     "providers": "密钥",
     "providersDesc": "配置 AI 服务商的 API 密钥",
+    "myConfigurations": "我的配置",
+    "textAgentsNav": "AI 文本 Agent",
+    "dreamina": {
+      "title": "Dreamina 即梦",
+      "description": "使用本机 Dreamina CLI 的 OAuth 登录态，无需在应用中保存 API Key。账号、积分与 session 分开检测，单项故障不会掩盖其他可用能力。",
+      "runtime": {
+        "title": "运行状态",
+        "subtitle": "检测只读取本机 CLI 与账号状态，不会提交生成任务或消耗积分。",
+        "cli": "CLI",
+        "account": "账号",
+        "credits": "积分",
+        "session": "Session",
+        "path": "二进制路径：",
+        "refresh": "重新检测",
+        "desktopOnlyTitle": "Dreamina CLI 仅在桌面版可用",
+        "desktopOnlyDescription": "Web 版无法访问本机 CLI 与 OAuth 登录态。请在 Storyboard Copilot 桌面应用中管理即梦账号、积分和 session。"
+      },
+      "status": {
+        "checking": "检测中...",
+        "installed": "已安装",
+        "notInstalled": "未安装",
+        "loggedIn": "已登录",
+        "loggedOut": "未登录",
+        "unknown": "状态未知",
+        "unavailable": "暂不可用",
+        "vip": "账号等级：{{level}}"
+      },
+      "oauth": {
+        "title": "OAuth 设备授权",
+        "description": "应用会向 CLI 请求一次设备码。打开授权页并输入用户码后，回到这里检查结果。设备码只保存在当前页面内存中。",
+        "start": "开始授权",
+        "starting": "正在请求...",
+        "startFailed": "无法启动 OAuth 授权",
+        "userCode": "用户码",
+        "copyCode": "复制用户码",
+        "expires": "授权材料约 {{seconds}} 秒后过期。",
+        "openVerification": "打开授权页",
+        "check": "检查授权",
+        "checking": "等待授权...",
+        "checkFailed": "无法检查授权结果",
+        "pending": "尚未完成授权。完成网页操作后再次检查。",
+        "retryHint": "请重新开始授权，或运行一次状态检测查看具体原因。"
+      },
+      "sessions": {
+        "title": "默认生成 Session",
+        "description": "图片和视频任务都会提交到这里。Session 列表不可用时仍可安全使用默认 session 0。",
+        "label": "提交到",
+        "refresh": "刷新 session 列表",
+        "defaultName": "默认对话",
+        "current": "Session {{id}}",
+        "available": "列表可用",
+        "degraded": "使用默认回退",
+        "unavailable": "Session 列表暂不可用。账号登录可能仍然正常。",
+        "selectedMissing": "当前选择的 session 不在最新列表中，请刷新或切回默认 session 0。",
+        "missingOption": "Session {{id}}（当前不可用）",
+        "defaultOption": "{{name}} · {{id}}（默认）",
+        "option": "{{name}} · {{id}}",
+        "useDefault": "切回 session 0"
+      },
+      "network": {
+        "run": "运行网络体检",
+        "title": "网络体检结果",
+        "commandFailed": "诊断命令调用失败"
+      },
+      "install": {
+        "title": "安装 Dreamina CLI",
+        "description": "未检测到可执行文件。可使用官方安装脚本，或前往官方页面下载适合当前系统的版本。",
+        "copy": "复制安装命令",
+        "officialPage": "打开 Dreamina CLI 官方页"
+      }
+    },
     "providerGuideText": "不同供应商在模型能力、队列速度和稳定性上可能有差异。建议按当前任务场景切换供应商，并优先使用对应官方文档中的推荐参数。",
     "imageProviderConfig": {
       "preset": "图片模型预设配置",

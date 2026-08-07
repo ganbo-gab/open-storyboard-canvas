@@ -164,6 +164,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             frontend_ready,
             commands::check_dreamina_login,
+            commands::dreamina_oauth_start,
+            commands::dreamina_oauth_check,
+            commands::dreamina_session_list,
+            commands::dreamina_session_create,
+            commands::dreamina_session_rename,
+            commands::dreamina_session_delete,
             commands::dreamina_text2image,
             commands::dreamina_image2image,
             commands::dreamina_image_upscale,

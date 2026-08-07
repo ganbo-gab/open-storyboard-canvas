@@ -10,10 +10,14 @@ import { hasCustomProviderCredential } from '@/features/canvas/application/provi
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
   defaultVideoInputSchemaForProviderKind,
-  normalizeVideoInputSchema,
   resolveVideoInputSchemaFromExtraParams,
   type VideoInputSchema,
 } from './videoInputSchema';
+import {
+  DREAMINA_MULTIFRAME_CAPABILITY,
+  listDreaminaVideoModels,
+  type DreaminaVideoModelCapability,
+} from './dreaminaCapabilities';
 
 export interface VideoCatalogEntry {
   id: string;
@@ -44,14 +48,6 @@ const DEFAULT_RESOLUTIONS = ['1280x720', '720x1280', '1024x1024'];
 const DEFAULT_ASPECT_RATIOS = ['16:9', '9:16', '1:1'];
 const AGNES_VIDEO_RESOLUTIONS = [...AGNES_PROVIDER_DEFAULTS.videoResolutions];
 const AGNES_DEFAULT_DURATION = '5';
-const DREAMINA_SEEDANCE_MODELS = ['seedance2.0', 'seedance2.0fast', 'seedance2.0_vip', 'seedance2.0fast_vip', 'seedance2.0mini'];
-const DREAMINA_IMAGE_VIDEO_MODELS = ['3.0', '3.0fast', '3.0pro', '3.0_fast', '3.0_pro', '3.5pro', '3.5_pro', ...DREAMINA_SEEDANCE_MODELS];
-const DREAMINA_FRAMES_MODELS = ['3.0', '3.5pro', ...DREAMINA_SEEDANCE_MODELS];
-const DREAMINA_VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'];
-const DREAMINA_SEEDANCE_DURATIONS = Array.from({ length: 12 }, (_, index) => String(index + 4));
-const DREAMINA_3_DURATIONS = Array.from({ length: 8 }, (_, index) => String(index + 3));
-const DREAMINA_35_DURATIONS = Array.from({ length: 9 }, (_, index) => String(index + 4));
-
 interface DreaminaProviderStatus {
   loggedIn: boolean;
 }
@@ -149,109 +145,42 @@ export function buildVideoModelCatalog(
   }
   if (dreaminaStatus?.loggedIn) {
     const dreaminaProvider = '即梦 CLI';
-    const videoResolutionFor = (modelVersion: string) =>
-      modelVersion === 'seedance2.0_vip' ? ['720p', '1080p'] : ['720p'];
-    const durationFor = (modelVersion: string) => {
-      if (modelVersion.startsWith('3.0')) return DREAMINA_3_DURATIONS;
-      if (modelVersion === '3.5pro' || modelVersion === '3.5_pro') return DREAMINA_35_DURATIONS;
-      return DREAMINA_SEEDANCE_DURATIONS;
+    const appendDreaminaModels = (
+      command: DreaminaVideoModelCapability['command'],
+      entryKind: string,
+      label: string,
+    ) => {
+      for (const capability of listDreaminaVideoModels(command)) {
+        entries.push({
+          id: `dreamina:${entryKind}:${capability.model}`,
+          providerId: 'dreamina',
+          providerLabel: dreaminaProvider,
+          modelId: capability.model,
+          modelLabel: `${label} · ${capability.model}`,
+          defaultExtraParams: { modelVersion: capability.model },
+          supportedDurations: [...capability.durations],
+          supportedResolutions: [...capability.resolutions],
+          supportedAspectRatios: [...capability.aspectRatios],
+          inputSchema: capability.inputSchema,
+          usable: true,
+        });
+      }
     };
-    const textOnlySchema = normalizeVideoInputSchema({
-      images: { enabled: false, min: 0, max: 0, roles: ['reference'], requireImageHost: false },
-      video: { enabled: false, min: 0, max: 0, field: '' },
-      audio: { enabled: false, min: 0, max: 0, field: '' },
-    });
-    const oneImageSchema = normalizeVideoInputSchema({
-      images: { enabled: true, min: 1, max: 1, roles: ['firstFrame'], requireImageHost: false },
-      video: { enabled: false, min: 0, max: 0, field: '' },
-      audio: { enabled: false, min: 0, max: 0, field: '' },
-    });
-    const twoImageSchema = normalizeVideoInputSchema({
-      images: { enabled: true, min: 2, max: 2, roles: ['firstFrame', 'lastFrame'], requireImageHost: false },
-      video: { enabled: false, min: 0, max: 0, field: '' },
-      audio: { enabled: false, min: 0, max: 0, field: '' },
-    });
-    const multiImageSchema = normalizeVideoInputSchema({
-      images: { enabled: true, min: 2, max: 20, roles: ['keyframe'], requireImageHost: false },
-      video: { enabled: false, min: 0, max: 0, field: '' },
-      audio: { enabled: false, min: 0, max: 0, field: '' },
-    });
-    const allReferenceSchema = normalizeVideoInputSchema({
-      images: { enabled: true, min: 0, max: 9, roles: ['reference', 'firstFrame', 'lastFrame', 'keyframe'], requireImageHost: false },
-      video: { enabled: true, min: 0, max: 3, field: 'video' },
-      audio: { enabled: true, min: 0, max: 3, field: 'audio' },
-    });
 
-    for (const modelVersion of DREAMINA_SEEDANCE_MODELS) {
-      entries.push({
-        id: `dreamina:all-reference-video:${modelVersion}`,
-        providerId: 'dreamina',
-        providerLabel: dreaminaProvider,
-        modelId: modelVersion,
-        modelLabel: `全能参考成片 · ${modelVersion}`,
-        defaultExtraParams: { modelVersion },
-        supportedDurations: DREAMINA_SEEDANCE_DURATIONS,
-        supportedResolutions: videoResolutionFor(modelVersion),
-        supportedAspectRatios: DREAMINA_VIDEO_RATIOS,
-        inputSchema: allReferenceSchema,
-        usable: true,
-      });
-    }
-    for (const modelVersion of DREAMINA_SEEDANCE_MODELS) {
-      entries.push({
-        id: `dreamina:text-video:${modelVersion}`,
-        providerId: 'dreamina',
-        providerLabel: dreaminaProvider,
-        modelId: modelVersion,
-        modelLabel: `文生视频 · ${modelVersion}`,
-        defaultExtraParams: { modelVersion },
-        supportedDurations: DREAMINA_SEEDANCE_DURATIONS,
-        supportedResolutions: videoResolutionFor(modelVersion),
-        supportedAspectRatios: DREAMINA_VIDEO_RATIOS,
-        inputSchema: textOnlySchema,
-        usable: true,
-      });
-    }
-    for (const modelVersion of DREAMINA_IMAGE_VIDEO_MODELS) {
-      entries.push({
-        id: `dreamina:image-video:${modelVersion}`,
-        providerId: 'dreamina',
-        providerLabel: dreaminaProvider,
-        modelId: modelVersion,
-        modelLabel: `图生视频 · ${modelVersion}`,
-        defaultExtraParams: { modelVersion },
-        supportedDurations: durationFor(modelVersion),
-        supportedResolutions: videoResolutionFor(modelVersion),
-        supportedAspectRatios: ['auto'],
-        inputSchema: oneImageSchema,
-        usable: true,
-      });
-    }
-    for (const modelVersion of DREAMINA_FRAMES_MODELS) {
-      entries.push({
-        id: `dreamina:frames-video:${modelVersion}`,
-        providerId: 'dreamina',
-        providerLabel: dreaminaProvider,
-        modelId: modelVersion,
-        modelLabel: `首尾帧成片 · ${modelVersion}`,
-        defaultExtraParams: { modelVersion },
-        supportedDurations: durationFor(modelVersion),
-        supportedResolutions: videoResolutionFor(modelVersion),
-        supportedAspectRatios: ['auto'],
-        inputSchema: twoImageSchema,
-        usable: true,
-      });
-    }
+    appendDreaminaModels('multimodal2video', 'all-reference-video', '全能参考成片');
+    appendDreaminaModels('text2video', 'text-video', '文生视频');
+    appendDreaminaModels('image2video', 'image-video', '图生视频');
+    appendDreaminaModels('frames2video', 'frames-video', '首尾帧成片');
     entries.push({
       id: 'dreamina:multi-frame-video',
       providerId: 'dreamina',
       providerLabel: dreaminaProvider,
       modelId: 'multi-frame-video',
       modelLabel: '多帧成片 · 智能多图',
-      supportedDurations: ['3', '5', '8', '12', '15'],
-      supportedResolutions: ['智能'],
-      supportedAspectRatios: ['auto'],
-      inputSchema: multiImageSchema,
+      supportedDurations: [...DREAMINA_MULTIFRAME_CAPABILITY.durations],
+      supportedResolutions: [...DREAMINA_MULTIFRAME_CAPABILITY.resolutions],
+      supportedAspectRatios: [...DREAMINA_MULTIFRAME_CAPABILITY.aspectRatios],
+      inputSchema: DREAMINA_MULTIFRAME_CAPABILITY.inputSchema,
       usable: true,
     });
   }
@@ -275,6 +204,9 @@ export function resolveVideoModelConfig(
   const currentEntry = current
     ? catalog.find((entry) => entry.id === current.entryId && entry.usable)
     : undefined;
+  if (current?.entryId.startsWith('dreamina:') && !currentEntry) {
+    return undefined;
+  }
   const entry = currentEntry ?? catalog.find((candidate) => candidate.usable);
   if (!entry) {
     return undefined;

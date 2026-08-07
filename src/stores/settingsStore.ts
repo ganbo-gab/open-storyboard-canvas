@@ -204,6 +204,22 @@ export const DEFAULT_AUDIO_GENERATION_SETTINGS: AudioGenerationSettings = {
   ],
 };
 
+export interface DreaminaStatusSnapshot {
+  installed: boolean;
+  loggedIn: boolean;
+  loginState: 'logged_in' | 'logged_out' | 'unknown';
+  credits: number | null;
+  networkDegraded: boolean;
+  resolvedPath: string | null;
+  version: string | null;
+  commit: string | null;
+  buildTime: string | null;
+  vipLevel: string | null;
+  accountError: string | null;
+  sessionsAvailable: boolean;
+  sessionError: string | null;
+}
+
 interface SettingsState {
   isHydrated: boolean;
   apiKeys: ProviderApiKeys;
@@ -242,8 +258,10 @@ interface SettingsState {
   audioGenerationSettings: AudioGenerationSettings;
   multiAnglePromptTemplate: string;
   lightingPromptTemplate: string;
-  /** Last-seen Dreamina login status; refreshed by the settings screen on demand. */
-  dreaminaStatus?: { loggedIn: boolean; credits: number | null; networkDegraded: boolean } | null;
+  /** Last-seen non-sensitive Dreamina runtime diagnostics. */
+  dreaminaStatus?: DreaminaStatusSnapshot | null;
+  /** Dreamina session used by every generation command. Session 0 is always valid. */
+  dreaminaDefaultSessionId: number;
   /** Per-panel memory of the model/provider/ratio picker selection. */
   lastModelConfigByPanel?: Record<string, { entryId: string; ratio: string; extraParams?: Record<string, unknown> } | undefined>;
   setProviderApiKey: (providerId: string, key: string) => void;
@@ -300,7 +318,8 @@ interface SettingsState {
   setLightingPromptTemplate: (template: string) => void;
   resetMultiAnglePromptTemplate: () => void;
   resetLightingPromptTemplate: () => void;
-  setDreaminaStatus: (status: { loggedIn: boolean; credits: number | null; networkDegraded: boolean } | null) => void;
+  setDreaminaStatus: (status: DreaminaStatusSnapshot | null) => void;
+  setDreaminaDefaultSessionId: (sessionId: number) => void;
   setPanelModelConfig: (panelKey: string, cfg: { entryId: string; ratio: string; extraParams?: Record<string, unknown> } | undefined) => void;
 }
 
@@ -316,6 +335,11 @@ function normalizeHexColor(input: string): string {
 
 function normalizeApiKey(input: string): string {
   return input.trim();
+}
+
+function normalizeDreaminaSessionId(input: unknown): number {
+  const sessionId = typeof input === 'number' ? input : Number(input);
+  return Number.isSafeInteger(sessionId) && sessionId >= 0 ? sessionId : 0;
 }
 
 function trimTrailingSlash(input: string): string {
@@ -974,6 +998,7 @@ export const useSettingsStore = create<SettingsState>()(
       multiAnglePromptTemplate: DEFAULT_MULTI_ANGLE_PROMPT_TEMPLATE,
       lightingPromptTemplate: DEFAULT_LIGHTING_PROMPT_TEMPLATE,
       dreaminaStatus: null,
+      dreaminaDefaultSessionId: 0,
       lastModelConfigByPanel: {},
       setProviderApiKey: (providerId, key) =>
         set((state) => ({
@@ -1268,6 +1293,9 @@ export const useSettingsStore = create<SettingsState>()(
           ),
         })),
       setDreaminaStatus: (status) => set({ dreaminaStatus: status }),
+      setDreaminaDefaultSessionId: (sessionId) => set({
+        dreaminaDefaultSessionId: normalizeDreaminaSessionId(sessionId),
+      }),
       setPanelModelConfig: (panelKey, cfg) =>
         set((state) => ({
           lastModelConfigByPanel: {
@@ -1278,7 +1306,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'settings-storage',
-      version: 20,
+      version: 21,
       onRehydrateStorage: () => {
         return (_state, error) => {
           if (error) {
@@ -1321,6 +1349,7 @@ export const useSettingsStore = create<SettingsState>()(
           audioGenerationSettings?: AudioGenerationSettings;
           multiAnglePromptTemplate?: string;
           lightingPromptTemplate?: string;
+          dreaminaDefaultSessionId?: number;
         };
         const persistedWithoutPricing = { ...((persistedState ?? {}) as Record<string, unknown>) };
         delete persistedWithoutPricing.showNodePrice;
@@ -1407,6 +1436,7 @@ export const useSettingsStore = create<SettingsState>()(
             multiAnglePromptTemplate:
               state.multiAnglePromptTemplate?.trim() || DEFAULT_MULTI_ANGLE_PROMPT_TEMPLATE,
             lightingPromptTemplate: migratedLightingTemplate,
+            dreaminaDefaultSessionId: normalizeDreaminaSessionId(state.dreaminaDefaultSessionId),
           };
         }
 
@@ -1452,6 +1482,7 @@ export const useSettingsStore = create<SettingsState>()(
           multiAnglePromptTemplate:
             state.multiAnglePromptTemplate?.trim() || DEFAULT_MULTI_ANGLE_PROMPT_TEMPLATE,
           lightingPromptTemplate: migratedLightingTemplate,
+          dreaminaDefaultSessionId: normalizeDreaminaSessionId(state.dreaminaDefaultSessionId),
         };
       },
     }

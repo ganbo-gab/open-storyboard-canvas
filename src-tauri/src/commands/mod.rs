@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod dreamina;
+mod dreamina_cli;
 pub mod http;
 pub mod image;
 pub mod project_state;

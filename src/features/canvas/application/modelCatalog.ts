@@ -8,6 +8,11 @@ import {
 } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { listImageModels, listModelProviders } from '@/features/canvas/models';
+import {
+  DREAMINA_IMAGE_MODEL_CAPABILITIES,
+  DREAMINA_IMAGE_RATIOS,
+  DREAMINA_UPSCALE_RESOLUTIONS,
+} from './dreaminaCapabilities';
 import { hasConfiguredCustomProvider } from './providerAvailability';
 
 /**
@@ -123,31 +128,19 @@ export function buildImageModelCatalog({
   // exception is "image_upscale" which stays as its own entry because its
   // semantics (no prompt, just HD upscale) are different from generation.
   if (dreaminaStatus?.loggedIn) {
-    const R_EARLY = ['1k', '2k']; // 3.0 / 3.1
-    const R_MID = ['2k', '4k'];   // 4.x / 5.0
-    const RATIOS_STD = ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'];
-    const versions: Array<{ id: string; label: string; ratios: string[]; resolutions: string[]; note?: string }> = [
-      { id: '5.0',  label: '即梦 · 5.0（文生图 / 图生图）', ratios: RATIOS_STD, resolutions: R_MID },
-      { id: '4.7',  label: '即梦 · 4.7（文生图 / 图生图）', ratios: RATIOS_STD, resolutions: R_MID },
-      { id: '4.6',  label: '即梦 · 4.6（文生图 / 图生图）', ratios: RATIOS_STD, resolutions: R_MID },
-      { id: '4.5',  label: '即梦 · 4.5（文生图 / 图生图）', ratios: RATIOS_STD, resolutions: R_MID },
-      { id: '4.1',  label: '即梦 · 4.1（文生图 / 图生图）', ratios: RATIOS_STD, resolutions: R_MID },
-      { id: '4.0',  label: '即梦 · 4.0（文生图 / 图生图）', ratios: RATIOS_STD, resolutions: R_MID },
-      { id: '3.1',  label: '即梦 · 3.1（仅文生图）',    ratios: RATIOS_STD, resolutions: R_EARLY, note: 'only-text2image' },
-      { id: '3.0',  label: '即梦 · 3.0（仅文生图）',    ratios: RATIOS_STD, resolutions: R_EARLY, note: 'only-text2image' },
-    ];
-    for (const v of versions) {
+    for (const capability of [...DREAMINA_IMAGE_MODEL_CAPABILITIES].reverse()) {
+      const supportsImageInput = capability.commands.includes('image2image');
       entries.push({
-        id: `dreamina:${v.id}`,
+        id: `dreamina:${capability.model}`,
         kind: 'dreamina',
         providerId: 'dreamina',
         providerLabel: '即梦 CLI',
-        modelId: v.id,
-        modelLabel: v.label,
-        supportedRatios: v.ratios,
+        modelId: capability.model,
+        modelLabel: `即梦 · ${capability.model}（${supportsImageInput ? '文生图 / 图生图' : '仅文生图'}）`,
+        supportedRatios: ['auto', ...DREAMINA_IMAGE_RATIOS],
         usable: true,
-        notReadyReason: v.note === 'only-text2image' ? '3.x 仅支持文生图；如有参考图请换 4.0+' : undefined,
-        supportedResolutions: v.resolutions,
+        notReadyReason: supportsImageInput ? undefined : '3.x 仅支持文生图；如有参考图请换 4.0+',
+        supportedResolutions: [...capability.resolutions],
         // model_version is baked into the entry id; no separate dropdown needed.
         supportedModelVersions: undefined,
       });
@@ -163,7 +156,7 @@ export function buildImageModelCatalog({
       supportedRatios: ['auto'],
       usable: true,
       notReadyReason: undefined,
-      supportedResolutions: ['2k', '4k', '8k'],
+      supportedResolutions: [...DREAMINA_UPSCALE_RESOLUTIONS],
       supportedModelVersions: undefined,
     });
   }

@@ -741,7 +741,7 @@ export function SettingsDialog({
                   }
               `}
               >
-                <span className="text-sm">添加供应商</span>
+                <span className="text-sm">{t('settings.addProvider')}</span>
               </button>
 
               <button
@@ -755,7 +755,7 @@ export function SettingsDialog({
                   }
               `}
               >
-                <span className="text-sm">我的配置</span>
+                <span className="text-sm">{t('settings.myConfigurations')}</span>
               </button>
 
               <button
@@ -769,7 +769,7 @@ export function SettingsDialog({
                   }
               `}
               >
-                <span className="text-sm">Dreamina 即梦</span>
+                <span className="text-sm">{t('settings.dreamina.title')}</span>
               </button>
 
               <button
@@ -853,7 +853,7 @@ export function SettingsDialog({
                   }
               `}
               >
-                <span className="text-sm">AI 文本 Agent</span>
+                <span className="text-sm">{t('settings.textAgentsNav')}</span>
               </button>
 
               <button
@@ -907,27 +907,7 @@ export function SettingsDialog({
             {activeCategory === 'dreamina' && (
               <div className="flex flex-1 flex-col overflow-hidden">
                 <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">
-                  <div className="grid grid-cols-[1fr_280px] gap-4">
-                    <DreaminaSection />
-                    {/* Right-side tips column — mirrors the 添加服务商 layout. */}
-                    <div className="space-y-3">
-                      <div className="rounded-lg border border-border-dark bg-bg-dark p-3">
-                        <div className="text-xs font-medium text-text-dark">提示 · 即梦</div>
-                        <ul className="mt-2 space-y-1.5 text-[11px] text-text-muted leading-5 list-disc pl-4">
-                          <li>即梦通过本地 CLI + 本地登录态调用，不需要贴 API Key。</li>
-                          <li>若「检测登录」显示<strong className="text-emerald-400"> 已登录 · 网络不稳定</strong>，说明本地 session 有效，只是积分接口暂时不可达，可直接使用生图。</li>
-                          <li>若显示未登录：先运行 <code className="rounded bg-surface-dark px-1">dreamina login</code>，登录完回到这里再检测一次。</li>
-                          <li>如果检测按钮始终报「未找到 CLI」，请在终端里 <code className="rounded bg-surface-dark px-1">which dreamina</code> 确认二进制真的在 PATH 中；Tauri 可能继承不到登录 shell 的 PATH。</li>
-                        </ul>
-                      </div>
-
-                      <div className="rounded-lg border border-dashed border-border-dark bg-bg-dark/50 p-3">
-                        <div className="text-[11px] text-text-muted leading-5">
-                          ⓘ 即梦生图速度受账号队列影响，首次生成 / 高峰期可能等 30～90s 属正常现象，背景有在跑。
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <DreaminaSection />
                 </div>
               </div>
             )}

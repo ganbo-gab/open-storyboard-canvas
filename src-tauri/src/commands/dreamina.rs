@@ -3,6 +3,20 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
 
+use super::dreamina_cli::{
+    build_image2image_args, build_image_upscale_args, build_multiframe_args, build_multimodal_args,
+    build_text2image_args, build_video_args, command_succeeded, parse_cli_output,
+    parse_cli_version, parse_credit, parse_oauth_material, parse_sessions, CommandExpectation,
+};
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreaminaCliVersion {
+    pub version: Option<String>,
+    pub commit: Option<String>,
+    pub build_time: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DreaminaStatus {
@@ -17,6 +31,56 @@ pub struct DreaminaStatus {
     pub network_degraded: bool,
     /// The actual binary path we ended up invoking, for diagnostic UI.
     pub resolved_path: Option<String>,
+    pub version_info: Option<DreaminaCliVersion>,
+    pub login_state: String,
+    pub vip_level: Option<String>,
+    pub user_name: Option<String>,
+    pub user_id: Option<String>,
+    pub account_error: Option<String>,
+    pub sessions_available: bool,
+    pub session_error: Option<String>,
+}
+
+struct RawCliOutput {
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
+fn run_cli(binary: &PathBuf, args: &[String]) -> Result<RawCliOutput, String> {
+    let mut command = Command::new(binary);
+    command.args(args);
+    build_cli_env(&mut command);
+    let output = command
+        .output()
+        .map_err(|error| format!("执行 dreamina 失败：{error}"))?;
+    Ok(RawCliOutput {
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+fn concise_cli_error(output: &RawCliOutput) -> String {
+    let source = if output.stderr.trim().is_empty() {
+        &output.stdout
+    } else {
+        &output.stderr
+    };
+    source.chars().take(400).collect()
+}
+
+fn read_cli_version(binary: &PathBuf) -> Option<DreaminaCliVersion> {
+    let output = run_cli(binary, &["--version".to_string()]).ok()?;
+    if !output.success {
+        return None;
+    }
+    let parsed = parse_cli_version(&output.stdout);
+    Some(DreaminaCliVersion {
+        version: parsed.version,
+        commit: parsed.commit,
+        build_time: parsed.build_time,
+    })
 }
 
 /// Look for the `dreamina` binary on PATH plus the well-known install prefixes
@@ -206,153 +270,138 @@ fn classify_cli_error(combined: &str) -> (bool, bool) {
     (is_network, is_auth)
 }
 
-/// Run `dreamina user_credit` and infer install / login / remaining-credit state.
+/// Inspect account and session capabilities independently. A broken session
+/// store must not turn a valid credit response into a false "logged out" state.
 #[tauri::command]
 pub async fn check_dreamina_login() -> DreaminaStatus {
-    // 1) Try to locate the binary. Tauri subprocesses on macOS frequently launch
-    //    with a stripped PATH (missing /usr/local/bin, Homebrew, ~/.local/bin),
-    //    so letting std::process::Command do its own PATH lookup often fails
-    //    even when the user clearly has `dreamina` on their login shell.
     let binary = match locate_dreamina_binary() {
-        Some(p) => p,
+        Some(binary) => binary,
         None => {
+            let error = "未找到 dreamina CLI 二进制（已检查 PATH / ~/.dreamina / ~/.local/bin / ~/.cargo/bin / /opt/homebrew / /usr/local）".to_string();
             return DreaminaStatus {
                 installed: false,
                 logged_in: false,
                 credits: None,
-                error: Some("未找到 dreamina CLI 二进制（已检查 PATH / ~/.dreamina / ~/.local/bin / ~/.cargo/bin / /opt/homebrew / /usr/local）".into()),
+                error: Some(error.clone()),
                 network_degraded: false,
                 resolved_path: None,
+                version_info: None,
+                login_state: "logged_out".to_string(),
+                vip_level: None,
+                user_name: None,
+                user_id: None,
+                account_error: Some(error),
+                sessions_available: false,
+                session_error: Some("Dreamina CLI is not installed.".to_string()),
             };
         }
     };
 
     let resolved_path = binary.to_string_lossy().to_string();
+    let version_info = read_cli_version(&binary);
+    let session_probe = run_cli(
+        &binary,
+        &[
+            "session".to_string(),
+            "list".to_string(),
+            "-n".to_string(),
+            "5".to_string(),
+        ],
+    );
+    let (sessions_available, session_error) = match session_probe {
+        Ok(output) if output.success => (true, None),
+        Ok(output) => (false, Some(concise_cli_error(&output))),
+        Err(error) => (false, Some(error)),
+    };
 
-    // 2) Try `dreamina user_credit` first — it's the cheapest way to get the
-    //    credit balance AND confirm login in one round trip when the backend
-    //    cooperates.
-    let mut cmd = Command::new(&binary);
-    cmd.arg("user_credit");
-    build_cli_env(&mut cmd);
-    let output = match cmd.output() {
-        Ok(o) => o,
-        Err(err) => {
+    let credit_output = match run_cli(&binary, &["user_credit".to_string()]) {
+        Ok(output) => output,
+        Err(error) => {
             return DreaminaStatus {
                 installed: true,
                 logged_in: false,
                 credits: None,
-                error: Some(format!("执行 {resolved_path} 失败：{err}")),
+                error: Some(error.clone()),
                 network_degraded: false,
                 resolved_path: Some(resolved_path),
+                version_info,
+                login_state: "unknown".to_string(),
+                vip_level: None,
+                user_name: None,
+                user_id: None,
+                account_error: Some(error),
+                sessions_available,
+                session_error,
             };
         }
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if !output.status.success() {
-        let combined = if stderr.is_empty() {
-            stdout.clone()
-        } else {
-            stderr.clone()
+    if credit_output.success {
+        let credit = parse_credit(&credit_output.stdout);
+        return DreaminaStatus {
+            installed: true,
+            logged_in: true,
+            credits: credit.total_credit,
+            error: None,
+            network_degraded: false,
+            resolved_path: Some(resolved_path),
+            version_info,
+            login_state: "logged_in".to_string(),
+            vip_level: credit.vip_level,
+            user_name: credit.user_name,
+            user_id: credit.user_id,
+            account_error: None,
+            sessions_available,
+            session_error,
         };
-        let (is_network, is_auth) = classify_cli_error(&combined);
+    }
 
-        // Explicit auth failure → not logged in. This is the only branch that
-        // should report `logged_in: false` based on a CLI exit.
-        if is_auth && !is_network {
-            return DreaminaStatus {
-                installed: true,
-                logged_in: false,
-                credits: None,
-                error: Some("检测到 CLI 未登录，运行 `dreamina login` 后重试".into()),
-                network_degraded: false,
-                resolved_path: Some(resolved_path),
-            };
-        }
-
-        // Network error or ambiguous error → fall back to `list_task` which
-        // reads the local login session token; if that succeeds, the session
-        // is intact even though the credit endpoint happens to be down.
-        let mut list_cmd = Command::new(&binary);
-        list_cmd.arg("list_task");
-        build_cli_env(&mut list_cmd);
-        if let Ok(list_out) = list_cmd.output() {
-            if list_out.status.success() {
-                return DreaminaStatus {
-                    installed: true,
-                    logged_in: true,
-                    credits: None,
-                    error: Some("已登录，但积分接口暂不可达（网络波动）".into()),
-                    network_degraded: true,
-                    resolved_path: Some(resolved_path),
-                };
-            }
-            // list_task also failed — inspect its error to decide.
-            let ls_stderr = String::from_utf8_lossy(&list_out.stderr).to_string();
-            let ls_stdout = String::from_utf8_lossy(&list_out.stdout).to_string();
-            let ls_combined = if ls_stderr.is_empty() {
-                ls_stdout
-            } else {
-                ls_stderr
-            };
-            let (_, ls_auth) = classify_cli_error(&ls_combined);
-            if ls_auth {
-                return DreaminaStatus {
-                    installed: true,
-                    logged_in: false,
-                    credits: None,
-                    error: Some("检测到 CLI 未登录，运行 `dreamina login` 后重试".into()),
-                    network_degraded: false,
-                    resolved_path: Some(resolved_path),
-                };
-            }
-        }
-
-        // Neither endpoint confirmed anything; bubble up the original error
-        // but flag it as network-degraded so the UI doesn't cry wolf about
-        // login when it can't actually tell.
+    let credit_error = concise_cli_error(&credit_output);
+    let (is_network, is_auth) = classify_cli_error(&credit_error);
+    if is_auth && !is_network {
+        let error = "检测到 CLI 未登录，请在设置中启动 OAuth Device Flow。".to_string();
         return DreaminaStatus {
             installed: true,
             logged_in: false,
             credits: None,
-            error: Some(if is_network {
-                format!(
-                    "网络不可达，无法确认登录状态：{}",
-                    combined.chars().take(200).collect::<String>()
-                )
-            } else {
-                combined.chars().take(400).collect()
-            }),
-            network_degraded: is_network,
+            error: Some(error.clone()),
+            network_degraded: false,
             resolved_path: Some(resolved_path),
+            version_info,
+            login_state: "logged_out".to_string(),
+            vip_level: None,
+            user_name: None,
+            user_id: None,
+            account_error: Some(error),
+            sessions_available,
+            session_error,
         };
     }
 
-    // 3) Success path: try to extract a credit number from stdout. The CLI's
-    //    human output varies slightly across versions (e.g. "credits: 12345",
-    //    "剩余积分: 12,345", "balance 12345"), so we just pick the first
-    //    reasonable integer ≥ 0.
-    let credits = stdout
-        .split(|c: char| !c.is_ascii_digit())
-        .filter_map(|s| {
-            if s.is_empty() {
-                None
-            } else {
-                s.parse::<i64>().ok()
-            }
-        })
-        .find(|v| *v >= 0);
-
+    let task_probe = run_cli(&binary, &["list_task".to_string()]);
+    let logged_in = matches!(task_probe, Ok(ref output) if output.success);
+    let account_error = if logged_in {
+        "已确认本地登录，但积分接口暂不可达。".to_string()
+    } else if is_network {
+        format!("网络不可达，无法确认账号状态：{credit_error}")
+    } else {
+        credit_error
+    };
     DreaminaStatus {
         installed: true,
-        logged_in: true,
-        credits,
-        error: None,
-        network_degraded: false,
+        logged_in,
+        credits: None,
+        error: Some(account_error.clone()),
+        network_degraded: is_network,
         resolved_path: Some(resolved_path),
+        version_info,
+        login_state: if logged_in { "logged_in" } else { "unknown" }.to_string(),
+        vip_level: None,
+        user_name: None,
+        user_id: None,
+        account_error: Some(account_error),
+        sessions_available,
+        session_error,
     }
 }
 
@@ -368,46 +417,39 @@ pub async fn check_dreamina_login() -> DreaminaStatus {
 #[serde(rename_all = "camelCase")]
 pub struct DreaminaSubmitResult {
     pub ok: bool,
-    /// The task submit_id (hex) extracted from the CLI output when detectable.
     pub submit_id: Option<String>,
+    pub gen_status: Option<String>,
+    pub fail_reason: Option<String>,
+    pub compliance_required: bool,
+    pub exit_code: Option<i32>,
     pub stdout: String,
     pub stderr: String,
     pub error: Option<String>,
 }
 
-/// Scan the CLI output for the first 12+ hex-char token that looks like a
-/// submit_id. The CLI prints "submit_id=<hex>" in success paths.
-fn extract_submit_id(text: &str) -> Option<String> {
-    // Match key=value style first.
-    for line in text.lines() {
-        if let Some(idx) = line.find("submit_id") {
-            let after = &line[idx + "submit_id".len()..];
-            let after =
-                after.trim_start_matches(|c: char| c == ':' || c == '=' || c == ' ' || c == '"');
-            let id: String = after
-                .chars()
-                .take_while(|c| c.is_ascii_hexdigit())
-                .collect();
-            if id.len() >= 12 {
-                return Some(id);
-            }
+impl DreaminaSubmitResult {
+    fn failure(error: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            submit_id: None,
+            gen_status: None,
+            fail_reason: None,
+            compliance_required: false,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            error: Some(error.into()),
         }
     }
-    None
 }
 
-async fn run_dreamina_subcommand(args: Vec<String>) -> DreaminaSubmitResult {
+async fn run_dreamina_subcommand(
+    args: Vec<String>,
+    expectation: CommandExpectation,
+) -> DreaminaSubmitResult {
     let binary = match locate_dreamina_binary() {
         Some(p) => p,
-        None => {
-            return DreaminaSubmitResult {
-                ok: false,
-                submit_id: None,
-                stdout: String::new(),
-                stderr: String::new(),
-                error: Some("未找到 dreamina CLI 二进制".into()),
-            };
-        }
+        None => return DreaminaSubmitResult::failure("未找到 dreamina CLI 二进制"),
     };
 
     let mut cmd = Command::new(&binary);
@@ -420,38 +462,304 @@ async fn run_dreamina_subcommand(args: Vec<String>) -> DreaminaSubmitResult {
     // caller set --poll explicitly for its own timeout.
     let output = match cmd.output() {
         Ok(o) => o,
-        Err(err) => {
-            return DreaminaSubmitResult {
-                ok: false,
-                submit_id: None,
-                stdout: String::new(),
-                stderr: String::new(),
-                error: Some(format!("执行 dreamina 失败：{err}")),
-            };
-        }
+        Err(err) => return DreaminaSubmitResult::failure(format!("执行 dreamina 失败：{err}")),
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let submit_id = extract_submit_id(&stdout).or_else(|| extract_submit_id(&stderr));
-    let ok = output.status.success();
+    let parsed = parse_cli_output(&stdout, &stderr);
+    let ok = command_succeeded(output.status.success(), expectation, &parsed);
     let error = if ok {
         None
     } else {
-        let combined = if stderr.is_empty() {
+        let diagnostic = if let Some(reason) = parsed.fail_reason.as_deref() {
+            reason.to_string()
+        } else if output.status.success() && expectation == CommandExpectation::Submit {
+            "Dreamina CLI 未返回有效的 submit_id + gen_status（querying/success），提交结果未被接受。".to_string()
+        } else if stderr.trim().is_empty() {
             stdout.clone()
         } else {
             stderr.clone()
         };
-        Some(combined.chars().take(400).collect::<String>())
+        Some(diagnostic.chars().take(400).collect::<String>())
     };
     DreaminaSubmitResult {
         ok,
-        submit_id,
+        submit_id: parsed.submit_id,
+        gen_status: parsed.gen_status,
+        fail_reason: parsed.fail_reason,
+        compliance_required: parsed.compliance_required,
+        exit_code: output.status.code(),
         stdout,
         stderr,
         error,
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreaminaOAuthStartResult {
+    pub ok: bool,
+    pub already_authorized: bool,
+    pub verification_uri: Option<String>,
+    pub user_code: Option<String>,
+    pub device_code: Option<String>,
+    pub expires_in: Option<i64>,
+    pub interval: Option<i64>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreaminaOAuthCheckResult {
+    pub ok: bool,
+    pub authorized: bool,
+    pub pending: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreaminaSession {
+    pub id: i64,
+    pub name: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreaminaSessionListResult {
+    pub ok: bool,
+    pub sessions: Vec<DreaminaSession>,
+    pub error: Option<String>,
+}
+
+fn default_dreamina_session() -> DreaminaSession {
+    DreaminaSession {
+        id: 0,
+        name: "Default".to_string(),
+        is_default: true,
+    }
+}
+
+#[tauri::command]
+pub async fn dreamina_oauth_start() -> DreaminaOAuthStartResult {
+    let binary = match locate_dreamina_binary() {
+        Some(binary) => binary,
+        None => {
+            return DreaminaOAuthStartResult {
+                ok: false,
+                already_authorized: false,
+                verification_uri: None,
+                user_code: None,
+                device_code: None,
+                expires_in: None,
+                interval: None,
+                error: Some("未找到 dreamina CLI 二进制".to_string()),
+            };
+        }
+    };
+    let output = match run_cli(&binary, &["login".to_string(), "--headless".to_string()]) {
+        Ok(output) => output,
+        Err(error) => {
+            return DreaminaOAuthStartResult {
+                ok: false,
+                already_authorized: false,
+                verification_uri: None,
+                user_code: None,
+                device_code: None,
+                expires_in: None,
+                interval: None,
+                error: Some(error),
+            };
+        }
+    };
+    let material = parse_oauth_material(&format!("{}\n{}", output.stdout, output.stderr));
+    let has_material = material.verification_uri.is_some()
+        && material.user_code.is_some()
+        && material.device_code.is_some();
+    let already_authorized = output.success && !has_material;
+    let ok = output.success && (has_material || already_authorized);
+    DreaminaOAuthStartResult {
+        ok,
+        already_authorized,
+        verification_uri: material.verification_uri,
+        user_code: material.user_code,
+        device_code: material.device_code,
+        expires_in: material.expires_in,
+        interval: material.interval,
+        error: if ok {
+            None
+        } else {
+            Some(concise_cli_error(&output))
+        },
+    }
+}
+
+#[tauri::command]
+pub async fn dreamina_oauth_check(
+    device_code: String,
+    poll_seconds: Option<u32>,
+) -> DreaminaOAuthCheckResult {
+    let device_code = device_code.trim().to_string();
+    if device_code.is_empty() {
+        return DreaminaOAuthCheckResult {
+            ok: false,
+            authorized: false,
+            pending: false,
+            error: Some("OAuth device_code 不能为空".to_string()),
+        };
+    }
+    let binary = match locate_dreamina_binary() {
+        Some(binary) => binary,
+        None => {
+            return DreaminaOAuthCheckResult {
+                ok: false,
+                authorized: false,
+                pending: false,
+                error: Some("未找到 dreamina CLI 二进制".to_string()),
+            };
+        }
+    };
+    let output = match run_cli(
+        &binary,
+        &[
+            "login".to_string(),
+            "checklogin".to_string(),
+            format!("--device_code={device_code}"),
+            format!("--poll={}", poll_seconds.unwrap_or(0).min(120)),
+        ],
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            return DreaminaOAuthCheckResult {
+                ok: false,
+                authorized: false,
+                pending: false,
+                error: Some(error),
+            };
+        }
+    };
+    if output.success {
+        return DreaminaOAuthCheckResult {
+            ok: true,
+            authorized: true,
+            pending: false,
+            error: None,
+        };
+    }
+    let diagnostic = concise_cli_error(&output).replace(&device_code, "[redacted]");
+    let lower = diagnostic.to_ascii_lowercase();
+    let pending = lower.contains("authorization_pending")
+        || lower.contains("pending")
+        || lower.contains("not authorized")
+        || lower.contains("timeout");
+    DreaminaOAuthCheckResult {
+        ok: pending,
+        authorized: false,
+        pending,
+        error: if pending { None } else { Some(diagnostic) },
+    }
+}
+
+#[tauri::command]
+pub async fn dreamina_session_list(limit: Option<u32>) -> DreaminaSessionListResult {
+    let binary = match locate_dreamina_binary() {
+        Some(binary) => binary,
+        None => {
+            return DreaminaSessionListResult {
+                ok: false,
+                sessions: vec![default_dreamina_session()],
+                error: Some("未找到 dreamina CLI 二进制".to_string()),
+            };
+        }
+    };
+    let output = match run_cli(
+        &binary,
+        &[
+            "session".to_string(),
+            "list".to_string(),
+            "-n".to_string(),
+            limit.unwrap_or(30).clamp(1, 100).to_string(),
+        ],
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            return DreaminaSessionListResult {
+                ok: false,
+                sessions: vec![default_dreamina_session()],
+                error: Some(error),
+            };
+        }
+    };
+    if !output.success {
+        return DreaminaSessionListResult {
+            ok: false,
+            sessions: vec![default_dreamina_session()],
+            error: Some(concise_cli_error(&output)),
+        };
+    }
+    let sessions = parse_sessions(&output.stdout)
+        .into_iter()
+        .map(|session| DreaminaSession {
+            id: session.id,
+            name: session.name,
+            is_default: session.id == 0,
+        })
+        .collect();
+    DreaminaSessionListResult {
+        ok: true,
+        sessions,
+        error: None,
+    }
+}
+
+#[tauri::command]
+pub async fn dreamina_session_create(name: Option<String>) -> DreaminaSubmitResult {
+    let mut args = vec!["session".to_string(), "create".to_string()];
+    if let Some(name) = name
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+    {
+        args.push(name);
+    }
+    run_dreamina_subcommand(args, CommandExpectation::Utility).await
+}
+
+#[tauri::command]
+pub async fn dreamina_session_rename(session_id: i64, name: String) -> DreaminaSubmitResult {
+    if session_id <= 0 {
+        return DreaminaSubmitResult::failure("默认 session 0 不能重命名");
+    }
+    if name.trim().is_empty() {
+        return DreaminaSubmitResult::failure("Session 名称不能为空");
+    }
+    run_dreamina_subcommand(
+        vec![
+            "session".to_string(),
+            "rename".to_string(),
+            session_id.to_string(),
+            name.trim().to_string(),
+        ],
+        CommandExpectation::Utility,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn dreamina_session_delete(session_id: i64) -> DreaminaSubmitResult {
+    if session_id <= 0 {
+        return DreaminaSubmitResult::failure("默认 session 0 不能删除");
+    }
+    run_dreamina_subcommand(
+        vec![
+            "session".to_string(),
+            "delete".to_string(),
+            session_id.to_string(),
+        ],
+        CommandExpectation::Utility,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -460,20 +768,21 @@ pub async fn dreamina_text2image(
     model_version: Option<String>,
     ratio: Option<String>,
     resolution_type: Option<String>,
+    session_id: Option<i64>,
     poll_seconds: Option<u32>,
 ) -> DreaminaSubmitResult {
-    let mut args: Vec<String> = vec!["text2image".into(), format!("--prompt={prompt}")];
-    if let Some(m) = model_version {
-        args.push(format!("--model_version={m}"));
-    }
-    if let Some(r) = ratio.filter(|s| s != "auto") {
-        args.push(format!("--ratio={r}"));
-    }
-    if let Some(rt) = resolution_type {
-        args.push(format!("--resolution_type={rt}"));
-    }
-    args.push(format!("--poll={}", poll_seconds.unwrap_or(60)));
-    run_dreamina_subcommand(args).await
+    let args = match build_text2image_args(
+        &prompt,
+        model_version.as_deref(),
+        ratio.as_deref(),
+        resolution_type.as_deref(),
+        session_id,
+        poll_seconds.unwrap_or(60),
+    ) {
+        Ok(args) => args,
+        Err(error) => return DreaminaSubmitResult::failure(error),
+    };
+    run_dreamina_subcommand(args, CommandExpectation::Submit).await
 }
 
 #[tauri::command]
@@ -483,31 +792,22 @@ pub async fn dreamina_image2image(
     model_version: Option<String>,
     ratio: Option<String>,
     resolution_type: Option<String>,
+    session_id: Option<i64>,
     poll_seconds: Option<u32>,
 ) -> DreaminaSubmitResult {
-    if image_paths.is_empty() {
-        return DreaminaSubmitResult {
-            ok: false,
-            submit_id: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            error: Some("image2image 需要至少一张本地图片路径".into()),
-        };
-    }
-    let mut args: Vec<String> = vec!["image2image".into(), format!("--prompt={prompt}")];
-    // The CLI accepts --images repeated OR comma-joined; comma is simpler.
-    args.push(format!("--images={}", image_paths.join(",")));
-    if let Some(m) = model_version {
-        args.push(format!("--model_version={m}"));
-    }
-    if let Some(r) = ratio.filter(|s| s != "auto") {
-        args.push(format!("--ratio={r}"));
-    }
-    if let Some(rt) = resolution_type {
-        args.push(format!("--resolution_type={rt}"));
-    }
-    args.push(format!("--poll={}", poll_seconds.unwrap_or(120)));
-    run_dreamina_subcommand(args).await
+    let args = match build_image2image_args(
+        &prompt,
+        &image_paths,
+        model_version.as_deref(),
+        ratio.as_deref(),
+        resolution_type.as_deref(),
+        session_id,
+        poll_seconds.unwrap_or(120),
+    ) {
+        Ok(args) => args,
+        Err(error) => return DreaminaSubmitResult::failure(error),
+    };
+    run_dreamina_subcommand(args, CommandExpectation::Submit).await
 }
 
 #[tauri::command]
@@ -519,14 +819,14 @@ pub async fn dreamina_query_result(
     if let Some(d) = download_dir {
         args.push(format!("--download_dir={d}"));
     }
-    run_dreamina_subcommand(args).await
+    run_dreamina_subcommand(args, CommandExpectation::Query).await
 }
 
 /// Run `dreamina list_task` and return the full JSON stdout so the caller
 /// (frontend gateway) can scan for a specific submit_id + gen_status.
 #[tauri::command]
 pub async fn dreamina_list_task() -> DreaminaSubmitResult {
-    run_dreamina_subcommand(vec!["list_task".into()]).await
+    run_dreamina_subcommand(vec!["list_task".into()], CommandExpectation::Utility).await
 }
 
 /// Dreamina HD upscale — single input image, optional resolution tier.
@@ -535,23 +835,19 @@ pub async fn dreamina_list_task() -> DreaminaSubmitResult {
 pub async fn dreamina_image_upscale(
     image_path: String,
     resolution_type: Option<String>,
+    session_id: Option<i64>,
     poll_seconds: Option<u32>,
 ) -> DreaminaSubmitResult {
-    if image_path.trim().is_empty() {
-        return DreaminaSubmitResult {
-            ok: false,
-            submit_id: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            error: Some("image_upscale 需要一张本地图片路径".into()),
-        };
-    }
-    let mut args: Vec<String> = vec!["image_upscale".into(), format!("--image={image_path}")];
-    if let Some(rt) = resolution_type {
-        args.push(format!("--resolution_type={rt}"));
-    }
-    args.push(format!("--poll={}", poll_seconds.unwrap_or(120)));
-    run_dreamina_subcommand(args).await
+    let args = match build_image_upscale_args(
+        &image_path,
+        resolution_type.as_deref(),
+        session_id,
+        poll_seconds.unwrap_or(120),
+    ) {
+        Ok(args) => args,
+        Err(error) => return DreaminaSubmitResult::failure(error),
+    };
+    run_dreamina_subcommand(args, CommandExpectation::Submit).await
 }
 
 #[tauri::command]
@@ -561,23 +857,24 @@ pub async fn dreamina_text2video(
     ratio: Option<String>,
     duration: Option<u32>,
     video_resolution: Option<String>,
+    session_id: Option<i64>,
     poll_seconds: Option<u32>,
 ) -> DreaminaSubmitResult {
-    let mut args: Vec<String> = vec!["text2video".into(), format!("--prompt={prompt}")];
-    if let Some(m) = model_version {
-        args.push(format!("--model_version={m}"));
-    }
-    if let Some(r) = ratio.filter(|s| s != "auto") {
-        args.push(format!("--ratio={r}"));
-    }
-    if let Some(d) = duration {
-        args.push(format!("--duration={d}"));
-    }
-    if let Some(vr) = video_resolution {
-        args.push(format!("--video_resolution={vr}"));
-    }
-    args.push(format!("--poll={}", poll_seconds.unwrap_or(180)));
-    run_dreamina_subcommand(args).await
+    let args = match build_video_args(
+        "text2video",
+        &prompt,
+        &[],
+        model_version.as_deref(),
+        ratio.as_deref(),
+        duration,
+        video_resolution.as_deref(),
+        session_id,
+        poll_seconds.unwrap_or(180),
+    ) {
+        Ok(args) => args,
+        Err(error) => return DreaminaSubmitResult::failure(error),
+    };
+    run_dreamina_subcommand(args, CommandExpectation::Submit).await
 }
 
 #[tauri::command]
@@ -587,33 +884,24 @@ pub async fn dreamina_image2video(
     model_version: Option<String>,
     duration: Option<u32>,
     video_resolution: Option<String>,
+    session_id: Option<i64>,
     poll_seconds: Option<u32>,
 ) -> DreaminaSubmitResult {
-    if image_path.trim().is_empty() {
-        return DreaminaSubmitResult {
-            ok: false,
-            submit_id: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            error: Some("图生视频需要一张首帧图片".into()),
-        };
-    }
-    let mut args: Vec<String> = vec![
-        "image2video".into(),
-        format!("--image={image_path}"),
-        format!("--prompt={prompt}"),
-    ];
-    if let Some(m) = model_version {
-        args.push(format!("--model_version={m}"));
-    }
-    if let Some(d) = duration {
-        args.push(format!("--duration={d}"));
-    }
-    if let Some(vr) = video_resolution {
-        args.push(format!("--video_resolution={vr}"));
-    }
-    args.push(format!("--poll={}", poll_seconds.unwrap_or(180)));
-    run_dreamina_subcommand(args).await
+    let args = match build_video_args(
+        "image2video",
+        &prompt,
+        &[image_path],
+        model_version.as_deref(),
+        None,
+        duration,
+        video_resolution.as_deref(),
+        session_id,
+        poll_seconds.unwrap_or(180),
+    ) {
+        Ok(args) => args,
+        Err(error) => return DreaminaSubmitResult::failure(error),
+    };
+    run_dreamina_subcommand(args, CommandExpectation::Submit).await
 }
 
 #[tauri::command]
@@ -624,34 +912,24 @@ pub async fn dreamina_frames2video(
     model_version: Option<String>,
     duration: Option<u32>,
     video_resolution: Option<String>,
+    session_id: Option<i64>,
     poll_seconds: Option<u32>,
 ) -> DreaminaSubmitResult {
-    if first_path.trim().is_empty() || last_path.trim().is_empty() {
-        return DreaminaSubmitResult {
-            ok: false,
-            submit_id: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            error: Some("首尾帧成片需要第一帧和最后一帧两张图片".into()),
-        };
-    }
-    let mut args: Vec<String> = vec![
-        "frames2video".into(),
-        format!("--first={first_path}"),
-        format!("--last={last_path}"),
-        format!("--prompt={prompt}"),
-    ];
-    if let Some(m) = model_version {
-        args.push(format!("--model_version={m}"));
-    }
-    if let Some(d) = duration {
-        args.push(format!("--duration={d}"));
-    }
-    if let Some(vr) = video_resolution {
-        args.push(format!("--video_resolution={vr}"));
-    }
-    args.push(format!("--poll={}", poll_seconds.unwrap_or(180)));
-    run_dreamina_subcommand(args).await
+    let args = match build_video_args(
+        "frames2video",
+        &prompt,
+        &[first_path, last_path],
+        model_version.as_deref(),
+        None,
+        duration,
+        video_resolution.as_deref(),
+        session_id,
+        poll_seconds.unwrap_or(180),
+    ) {
+        Ok(args) => args,
+        Err(error) => return DreaminaSubmitResult::failure(error),
+    };
+    run_dreamina_subcommand(args, CommandExpectation::Submit).await
 }
 
 #[tauri::command]
@@ -661,49 +939,24 @@ pub async fn dreamina_multiframe2video(
     duration: Option<f64>,
     transition_prompts: Option<Vec<String>>,
     transition_durations: Option<Vec<String>>,
+    video_resolution: String,
+    session_id: Option<i64>,
     poll_seconds: Option<u32>,
 ) -> DreaminaSubmitResult {
-    let clean_paths: Vec<String> = image_paths
-        .into_iter()
-        .map(|path| path.trim().to_string())
-        .filter(|path| !path.is_empty())
-        .collect();
-    if clean_paths.len() < 2 {
-        return DreaminaSubmitResult {
-            ok: false,
-            submit_id: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            error: Some("多帧成片至少需要 2 张图片".into()),
-        };
-    }
-
-    let mut args: Vec<String> = vec![
-        "multiframe2video".into(),
-        format!("--images={}", clean_paths.join(",")),
-    ];
-    if clean_paths.len() == 2 {
-        if let Some(p) = prompt.filter(|value| !value.trim().is_empty()) {
-            args.push(format!("--prompt={p}"));
-        }
-        if let Some(d) = duration {
-            args.push(format!("--duration={d}"));
-        }
-    } else {
-        let transitions = transition_prompts.unwrap_or_default();
-        for item in transitions {
-            if !item.trim().is_empty() {
-                args.push(format!("--transition-prompt={}", item.trim()));
-            }
-        }
-        for item in transition_durations.unwrap_or_default() {
-            if !item.trim().is_empty() {
-                args.push(format!("--transition-duration={}", item.trim()));
-            }
-        }
-    }
-    args.push(format!("--poll={}", poll_seconds.unwrap_or(240)));
-    run_dreamina_subcommand(args).await
+    let args = match build_multiframe_args(
+        &image_paths,
+        prompt.as_deref(),
+        duration,
+        transition_prompts.as_deref(),
+        transition_durations.as_deref(),
+        &video_resolution,
+        session_id,
+        poll_seconds.unwrap_or(240),
+    ) {
+        Ok(args) => args,
+        Err(error) => return DreaminaSubmitResult::failure(error),
+    };
+    run_dreamina_subcommand(args, CommandExpectation::Submit).await
 }
 
 #[tauri::command]
@@ -716,48 +969,25 @@ pub async fn dreamina_multimodal2video(
     ratio: Option<String>,
     duration: Option<u32>,
     video_resolution: Option<String>,
+    session_id: Option<i64>,
     poll_seconds: Option<u32>,
 ) -> DreaminaSubmitResult {
-    let clean_images: Vec<String> = image_paths.into_iter().filter(|p| !p.trim().is_empty()).collect();
-    let clean_videos: Vec<String> = video_paths.into_iter().filter(|p| !p.trim().is_empty()).collect();
-    let clean_audios: Vec<String> = audio_paths.into_iter().filter(|p| !p.trim().is_empty()).collect();
-    if clean_images.is_empty() && clean_videos.is_empty() {
-        return DreaminaSubmitResult {
-            ok: false,
-            submit_id: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            error: Some("全能参考成片至少需要 1 张图片或 1 个视频参考".into()),
-        };
-    }
-
-    let mut args: Vec<String> = vec!["multimodal2video".into()];
-    if !prompt.trim().is_empty() {
-        args.push(format!("--prompt={prompt}"));
-    }
-    for path in clean_images {
-        args.push(format!("--image={}", path.trim()));
-    }
-    for path in clean_videos {
-        args.push(format!("--video={}", path.trim()));
-    }
-    for path in clean_audios {
-        args.push(format!("--audio={}", path.trim()));
-    }
-    if let Some(m) = model_version {
-        args.push(format!("--model_version={m}"));
-    }
-    if let Some(r) = ratio.filter(|s| s != "auto") {
-        args.push(format!("--ratio={r}"));
-    }
-    if let Some(d) = duration {
-        args.push(format!("--duration={d}"));
-    }
-    if let Some(vr) = video_resolution {
-        args.push(format!("--video_resolution={vr}"));
-    }
-    args.push(format!("--poll={}", poll_seconds.unwrap_or(240)));
-    run_dreamina_subcommand(args).await
+    let args = match build_multimodal_args(
+        &prompt,
+        &image_paths,
+        &video_paths,
+        &audio_paths,
+        model_version.as_deref(),
+        ratio.as_deref(),
+        duration,
+        video_resolution.as_deref(),
+        session_id,
+        poll_seconds.unwrap_or(240),
+    ) {
+        Ok(args) => args,
+        Err(error) => return DreaminaSubmitResult::failure(error),
+    };
+    run_dreamina_subcommand(args, CommandExpectation::Submit).await
 }
 
 /// Stage a data: URL as a temp file so Dreamina CLI (which only accepts local
@@ -815,7 +1045,11 @@ pub async fn dreamina_stage_reference_media(
         .filter(|c| c.is_ascii_alphanumeric())
         .take(8)
         .collect::<String>();
-    let resolved_ext = if safe_ext.is_empty() { "bin".to_string() } else { safe_ext };
+    let resolved_ext = if safe_ext.is_empty() {
+        "bin".to_string()
+    } else {
+        safe_ext
+    };
 
     let dir = dreamina_staging_dir().ok_or_else(|| "HOME not set".to_string())?;
     fs::create_dir_all(&dir).map_err(|e| format!("mkdir failed: {e}"))?;
@@ -998,7 +1232,7 @@ pub async fn dreamina_network_diagnose() -> NetworkDiagnoseResult {
     };
 
     let overall_advice = if !tls.ok {
-        "TLS 握手被中断 —— 这是即梦 CLI 无法生图的根因。常见原因：\n1. 本机防火墙 / 杀软拦截字节跳动域名；\n2. VPN / 代理未放行 jianying.com；\n3. 当前网络/运营商对该域做 TLS 层干扰。\n建议：关闭 VPN 或代理、切到 4G/5G 手机热点、换一个网络重试。另外 CLI 版本 4946b9d-dirty 是 dev 构建，可能被服务端 TLS 指纹限制，可考虑重装最新版 Dreamina CLI。".into()
+        "TLS 握手被中断 —— 这是即梦 CLI 无法生图的根因。常见原因：\n1. 本机防火墙 / 杀软拦截字节跳动域名；\n2. VPN / 代理未放行 jianying.com；\n3. 当前网络/运营商对该域做 TLS 层干扰。\n建议：关闭 VPN 或代理、切到 4G/5G 手机热点、换一个网络重试；同时在设置中核对 CLI 版本是否为当前发布版。".into()
     } else if !http.ok {
         "TLS 握手通了但 HTTP 层失败。可能是服务端短时维护 / 限流，稍后重试即可。".into()
     } else {
@@ -1039,4 +1273,53 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_network_and_login_failures_independently() {
+        assert_eq!(
+            classify_cli_error("Post image_generate: EOF"),
+            (true, false)
+        );
+        assert_eq!(classify_cli_error("please login first"), (false, true));
+        assert_eq!(
+            classify_cli_error("auth request failed: TLS handshake EOF"),
+            (true, true)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mock_binary_output_obeys_strict_submit_contract() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory =
+            std::env::temp_dir().join(format!("storyboard-dreamina-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let binary = directory.join("dreamina-mock");
+        fs::write(
+            &binary,
+            "#!/bin/sh\nprintf '%s\\n' '{\"submit_id\":\"be6ad4e0-ecbd-4d70-8ace-5d0995c39832\",\"gen_status\":\"success\"}'\n",
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&binary).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&binary, permissions).unwrap();
+
+        let output = run_cli(&binary, &["text2image".to_string()]).unwrap();
+        let parsed = parse_cli_output(&output.stdout, &output.stderr);
+        assert!(command_succeeded(
+            output.success,
+            CommandExpectation::Submit,
+            &parsed
+        ));
+        assert_eq!(parsed.gen_status.as_deref(), Some("success"));
+
+        fs::remove_dir_all(directory).unwrap();
+    }
 }

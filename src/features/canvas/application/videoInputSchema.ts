@@ -21,8 +21,8 @@ export interface VideoInputSchema {
   audio: VideoMediaInputSchema;
 }
 
-const MAX_REFERENCE_IMAGES = 20;
-const MAX_MEDIA_REFERENCES = 9;
+const MAX_REFERENCE_IMAGES = 30;
+const MAX_MEDIA_REFERENCES = 10;
 const VALID_REFERENCE_ROLES = new Set<VideoReferenceRole>([
   'reference',
   'firstFrame',

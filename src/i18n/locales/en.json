@@ -821,7 +821,16 @@
       "aspectRatio": "Aspect Ratio",
       "payloadDebug": "Preview video request content",
       "resolution": "Resolution",
-      "referenceCount": "{{count}} refs"
+      "referenceCount": "{{count}} refs",
+      "multiframeTransitions": "{{count}} transitions",
+      "multiframeHint": "With 3 or more frames, describe every transition separately. The overall prompt is not duplicated across segments.",
+      "multiframeSummary": "{{count}} segments·{{resolution}}",
+      "multiframeIncomplete": "Check all {{count}} multi-frame transitions: prompts cannot be empty, and durations must be set for every segment or left entirely to Dreamina.",
+      "segmentDurations": "Per-segment timing",
+      "segmentSeconds": "Seconds",
+      "frameLabel": "Image {{index}}",
+      "transitionPromptLabel": "Transition prompt from image {{from}} to image {{to}}",
+      "transitionPromptPlaceholder": "Describe the action, camera, and transition from image {{from}} to image {{to}}"
     },
     "aiText": {
       "promptPlaceholder": "Enter the prompt for this task",
@@ -1098,6 +1107,77 @@
     "title": "Settings",
     "providers": "API Key",
     "providersDesc": "Configure AI provider API keys",
+    "myConfigurations": "My Configurations",
+    "textAgentsNav": "AI Text Agents",
+    "dreamina": {
+      "title": "Dreamina",
+      "description": "Uses the local Dreamina CLI OAuth session, so no API key is stored in the app. Account, credit, and session health are checked independently so one degraded capability does not hide the others.",
+      "runtime": {
+        "title": "Runtime status",
+        "subtitle": "These checks only read local CLI and account state. They never submit generation tasks or consume credits.",
+        "cli": "CLI",
+        "account": "Account",
+        "credits": "Credits",
+        "session": "Session",
+        "path": "Binary path:",
+        "refresh": "Refresh status",
+        "desktopOnlyTitle": "Dreamina CLI is available in the desktop app",
+        "desktopOnlyDescription": "The Web build cannot access your local CLI or OAuth session. Manage the Dreamina account, credits, and session in the Storyboard Copilot desktop app."
+      },
+      "status": {
+        "checking": "Checking...",
+        "installed": "Installed",
+        "notInstalled": "Not installed",
+        "loggedIn": "Signed in",
+        "loggedOut": "Signed out",
+        "unknown": "Unknown",
+        "unavailable": "Unavailable",
+        "vip": "Account tier: {{level}}"
+      },
+      "oauth": {
+        "title": "OAuth device authorization",
+        "description": "The app requests a device code from the CLI. Open the verification page, enter the user code, then return here to check the result. The device code stays only in this page's memory.",
+        "start": "Start authorization",
+        "starting": "Requesting...",
+        "startFailed": "Could not start OAuth authorization",
+        "userCode": "User code",
+        "copyCode": "Copy user code",
+        "expires": "Authorization material expires in about {{seconds}} seconds.",
+        "openVerification": "Open verification page",
+        "check": "Check authorization",
+        "checking": "Waiting...",
+        "checkFailed": "Could not check authorization",
+        "pending": "Authorization is not complete yet. Finish the browser step, then check again.",
+        "retryHint": "Start authorization again, or refresh runtime status for a more specific diagnosis."
+      },
+      "sessions": {
+        "title": "Default generation session",
+        "description": "Image and video tasks are submitted here. If session listing is unavailable, default session 0 remains safe to use.",
+        "label": "Submit to",
+        "refresh": "Refresh session list",
+        "defaultName": "Default conversation",
+        "current": "Session {{id}}",
+        "available": "List available",
+        "degraded": "Default fallback",
+        "unavailable": "The session list is unavailable. Account authentication may still be healthy.",
+        "selectedMissing": "The selected session is not in the latest list. Refresh or switch to default session 0.",
+        "missingOption": "Session {{id}} (unavailable)",
+        "defaultOption": "{{name}} · {{id}} (default)",
+        "option": "{{name}} · {{id}}",
+        "useDefault": "Use session 0"
+      },
+      "network": {
+        "run": "Run network diagnostics",
+        "title": "Network diagnostic result",
+        "commandFailed": "Could not run diagnostics"
+      },
+      "install": {
+        "title": "Install Dreamina CLI",
+        "description": "No executable was found. Use the official installer or open the official page to download the build for your system.",
+        "copy": "Copy install command",
+        "officialPage": "Open the Dreamina CLI page"
+      }
+    },
     "providerGuideText": "Different providers vary in model capability, queue speed, and stability. Switch providers based on your task, and follow each provider's recommended parameters.",
     "imageProviderConfig": {
       "preset": "Image Model Preset Configuration",
