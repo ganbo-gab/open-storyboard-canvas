@@ -216,6 +216,124 @@ describe('custom provider image request contracts', () => {
     }));
   });
 
+  it('uses one constrained geometry result for modern 3:4 4K preview and submission', async () => {
+    useCustomProvidersStore.getState().replaceAll([provider({
+      supportedResolutions: ['1K', '2K', '4K'],
+      extraParams: {
+        providerConfigVersion: 'new-v1',
+        providerKind: 'openai-images',
+        requestComposer: 'modern',
+      },
+    })]);
+    const request = {
+      prompt: 'portrait poster',
+      model: 'custom:provider-1:gpt-image-2',
+      size: '4K',
+      aspect_ratio: '3:4',
+      extra_params: { resolutionType: '4K' },
+    };
+
+    const preview = buildCustomProviderRequestDebugPreview(request);
+    const previewBody = preview.body as Record<string, unknown>;
+    const size = String(previewBody.size);
+    const [width, height] = size.split('x').map(Number);
+
+    expect(width).toBeLessThan(height);
+    expect(width * height).toBeLessThanOrEqual(8_294_400);
+    expect(size).not.toBe('2880x3840');
+    expect(preview.imageOutputDiagnostic).toMatchObject({
+      kind: 'image-output-geometry',
+      source: 'tier-derived',
+      resolvedSize: size,
+      limits: { maxPixels: 8_294_400, alignment: 8 },
+    });
+
+    customHttpRequestMock.mockImplementationOnce(() => response(200, {
+      data: [{ b64_json: 'a'.repeat(400) }],
+    }));
+    const job = await waitForTerminalJob(await submitCustomProviderJob(request));
+
+    expect(job.status).toBe('succeeded');
+    expect(customHttpRequestMock).toHaveBeenCalledTimes(1);
+    expect(customHttpRequestMock.mock.calls[0][0].body).toEqual(expect.objectContaining({ size }));
+  });
+
+  it('rejects an explicit modern pixel size over the default limit before HTTP', async () => {
+    useCustomProvidersStore.getState().replaceAll([provider({
+      supportedResolutions: ['2880x3840'],
+      extraParams: {
+        providerConfigVersion: 'new-v1',
+        providerKind: 'openai-images',
+        requestComposer: 'modern',
+      },
+    })]);
+    const request = {
+      prompt: 'portrait poster',
+      model: 'custom:provider-1:gpt-image-2',
+      size: '2880x3840',
+      aspect_ratio: '3:4',
+    };
+
+    expect(() => buildCustomProviderRequestDebugPreview(request)).toThrow(/2880x3840.*8,294,400/);
+    const job = await waitForTerminalJob(await submitCustomProviderJob(request));
+    expect(job.status).toBe('failed');
+    expect(job.error).toContain('imageOutputLimits');
+    expect(customHttpRequestMock).not.toHaveBeenCalled();
+  });
+
+  it('honors a configured modern pixel-limit override without rewriting an explicit size', () => {
+    useCustomProvidersStore.getState().replaceAll([provider({
+      supportedResolutions: ['2880x3840'],
+      extraParams: {
+        providerConfigVersion: 'new-v1',
+        providerKind: 'openai-images',
+        requestComposer: 'modern',
+        imageOutputLimits: { maxPixels: 12_000_000, alignment: 16 },
+      },
+    })]);
+
+    const preview = buildCustomProviderRequestDebugPreview({
+      prompt: 'portrait poster',
+      model: 'custom:provider-1:gpt-image-2',
+      size: '2880x3840',
+      aspect_ratio: '3:4',
+    });
+
+    expect(preview.body).toEqual(expect.objectContaining({ size: '2880x3840' }));
+    expect(preview.imageOutputDiagnostic).toMatchObject({
+      status: 'valid',
+      source: 'explicit-pixel-size',
+      resolvedSize: '2880x3840',
+      limits: { maxPixels: 12_000_000, alignment: 16 },
+    });
+  });
+
+  it('rejects an oversized declarative ratio mapping before JSON or multipart composition', () => {
+    useCustomProvidersStore.getState().replaceAll([provider({
+      extraParams: {
+        imageOutputLimits: { maxPixels: 8_294_400 },
+        imageRequestContract: {
+          version: 1,
+          textToImage: {
+            bodyMode: 'json',
+            bodyTemplate: { model: '{{model}}', prompt: '{{prompt}}', size: '{{size}}' },
+          },
+          ratioMappings: {
+            '3:4': { size: '2880x3840' },
+          },
+        },
+      },
+    })]);
+
+    expect(() => buildCustomProviderRequestDebugPreview({
+      prompt: 'portrait poster',
+      model: 'custom:provider-1:gpt-image-2',
+      size: '4K',
+      aspect_ratio: '3:4',
+    })).toThrow(/2880x3840.*8,294,400/);
+    expect(customHttpRequestMock).not.toHaveBeenCalled();
+  });
+
   it('keeps a real model binding in legacy multipart even when modelField is blank', () => {
     useCustomProvidersStore.getState().replaceAll([provider({
       endpointPath: '/images/edits',

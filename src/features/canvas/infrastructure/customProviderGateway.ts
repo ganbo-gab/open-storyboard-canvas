@@ -26,6 +26,14 @@ import {
   reduceAspectRatio,
 } from '@/features/canvas/application/imageData';
 import {
+  MODERN_OPENAI_IMAGE_OUTPUT_LIMITS,
+  normalizeImageOutputLimits,
+  normalizeImageResolutionTier,
+  requireImageOutputGeometry,
+  type ImageOutputGeometryDiagnostic,
+  type ResolvedImageOutputGeometry,
+} from '@/features/canvas/application/imageOutputGeometry';
+import {
   applyCustomImageRatioMapping,
   CUSTOM_IMAGE_REQUEST_LEGACY_FALLBACK_KEY,
   diagnoseImageAspectMismatch,
@@ -140,6 +148,7 @@ interface ImageRequestExecutionPlan {
   body?: unknown;
   multipart?: CustomHttpMultipartBody;
   explicitContract: ResolvedCustomImageContract | null;
+  imageOutputDiagnostic?: ImageOutputGeometryDiagnostic;
 }
 
 function explicitContractOwnsRequestShape(
@@ -164,6 +173,7 @@ export interface CustomProviderRequestDebugPreview {
   timeoutMs?: number;
   body?: unknown;
   multipart?: unknown;
+  imageOutputDiagnostic?: ImageOutputGeometryDiagnostic;
   error?: string;
 }
 
@@ -504,15 +514,7 @@ const OPENAI_IMAGE_PARAM_KEYS = [
 ] as const;
 
 function normalizeResolutionTier(value: unknown): '1k' | '2k' | '4k' | 'auto' | null {
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return null;
-  if (normalized === 'auto' || normalized === '智能' || normalized === '自动') return 'auto';
-  if (/^(0\.5k|512)$/.test(normalized)) return '1k';
-  if (/^(1k|1024|1024p)$/.test(normalized)) return '1k';
-  if (/^(2k|2048|1080p|1440p)$/.test(normalized)) return '2k';
-  if (/^(4k|4096|2160p|uhd)$/.test(normalized)) return '4k';
-  return null;
+  return normalizeImageResolutionTier(value);
 }
 
 function normalizeRatioKey(value: string | undefined): string {
@@ -520,59 +522,49 @@ function normalizeRatioKey(value: string | undefined): string {
   return value.trim();
 }
 
-const MODERN_SIZE_BY_TIER: Record<'1k' | '2k' | '4k', Record<string, string>> = {
-  '1k': {
-    '1:1': '1024x1024',
-    '16:9': '1024x576',
-    '9:16': '576x1024',
-    '4:3': '1024x768',
-    '3:4': '768x1024',
-    '3:2': '1024x682',
-    '2:3': '682x1024',
-    '21:9': '1344x576',
-    '2:1': '1024x512',
-    '4:1': '1024x256',
-  },
-  '2k': {
-    '1:1': '2048x2048',
-    '16:9': '2048x1152',
-    '9:16': '1152x2048',
-    '4:3': '2048x1536',
-    '3:4': '1536x2048',
-    '3:2': '2048x1365',
-    '2:3': '1365x2048',
-    '21:9': '2560x1080',
-    '2:1': '2048x1024',
-    '4:1': '2048x512',
-  },
-  '4k': {
-    '1:1': '2048x2048',
-    '16:9': '3840x2160',
-    '9:16': '2160x3840',
-    '4:3': '3840x2880',
-    '3:4': '2880x3840',
-    '3:2': '3840x2560',
-    '2:3': '2560x3840',
-    '21:9': '5120x2160',
-    '2:1': '4096x2048',
-    '4:1': '4096x1024',
-  },
-};
+function modernProviderUsesOpenAiPixelGeometry(cfg: CustomProviderConfig): boolean {
+  if (!isModernProviderConfig(cfg)) return false;
+  const kind = modernProviderKind(cfg);
+  return kind === 'openai-responses'
+    || kind === 'openai-chat-image'
+    || kind === 'openai-images'
+    || kind === 'midjourney'
+    || (!kind && cfg.apiStyle === 'openai-compatible');
+}
+
+function configuredImageOutputLimits(
+  cfg: CustomProviderConfig,
+  includeModernDefaults = false,
+) {
+  return normalizeImageOutputLimits(
+    cfg.extraParams?.imageOutputLimits,
+    includeModernDefaults && modernProviderUsesOpenAiPixelGeometry(cfg)
+      ? MODERN_OPENAI_IMAGE_OUTPUT_LIMITS
+      : {},
+  );
+}
+
+function resolveModernOpenAiGeometry(
+  cfg: CustomProviderConfig,
+  request: GenerateRequest,
+): ResolvedImageOutputGeometry {
+  const selectedResolution = request.extra_params?.resolutionType ?? request.size;
+  const explicitOrSelected = isPixelSize(selectedResolution)
+    ? selectedResolution
+    : isPixelSize(request.size)
+      ? request.size
+      : selectedResolution;
+  return requireImageOutputGeometry({
+    aspectRatio: request.aspect_ratio,
+    selectedSize: explicitOrSelected,
+    supportedPixelSizes: cfg.supportedResolutions,
+    limits: configuredImageOutputLimits(cfg, true),
+    defaultTier: '1k',
+  });
+}
 
 function resolveModernOpenAiSize(cfg: CustomProviderConfig, request: GenerateRequest): string {
-  const selectedResolution = request.extra_params?.resolutionType ?? request.size;
-  if (isPixelSize(selectedResolution)) return selectedResolution.trim();
-  const tier = normalizeResolutionTier(selectedResolution);
-  if (tier === 'auto') return 'auto';
-  if (tier) {
-    const ratioKey = normalizeRatioKey(request.aspect_ratio);
-    const byRatio = MODERN_SIZE_BY_TIER[tier][ratioKey];
-    if (byRatio) return byRatio;
-  }
-  if (isPixelSize(request.size)) return request.size.trim();
-  const configuredSizes = (cfg.supportedResolutions ?? []).filter(isPixelSize).map((size) => size.trim());
-  return pickClosestPixelSize(configuredSizes, request.aspect_ratio)
-    ?? fallbackPixelSizeForAspectRatio(request.aspect_ratio);
+  return resolveModernOpenAiGeometry(cfg, request).size;
 }
 
 function referenceImageToGeminiPart(imageSource: string): Record<string, unknown> | null {
@@ -1207,12 +1199,33 @@ function applyContractImageFieldsToBody(
   });
 }
 
+function resolveExplicitContractOutputGeometry(
+  cfg: CustomProviderConfig,
+  request: GenerateRequest,
+  resolved: ResolvedCustomImageContract,
+): ResolvedImageOutputGeometry | null {
+  const ratioSelection = applyCustomImageRatioMapping(
+    resolved.contract,
+    request.aspect_ratio,
+    resolved.context,
+  );
+  const mappedSize = ratioSelection.mapping?.size;
+  if (mappedSize === undefined && !isPixelSize(ratioSelection.size)) return null;
+  return requireImageOutputGeometry({
+    aspectRatio: request.aspect_ratio,
+    selectedSize: mappedSize === undefined ? ratioSelection.size : undefined,
+    mappedSize,
+    limits: configuredImageOutputLimits(cfg, true),
+  });
+}
+
 function buildExplicitContractRequestBody(
   cfg: CustomProviderConfig,
   modelName: string,
   request: GenerateRequest,
   resolved: ResolvedCustomImageContract,
 ): Record<string, unknown> {
+  resolveExplicitContractOutputGeometry(cfg, request, resolved);
   const ratioSelection = applyCustomImageRatioMapping(
     resolved.contract,
     request.aspect_ratio,
@@ -1345,11 +1358,22 @@ function resolveOpenAiCompatibleSize(
   request: GenerateRequest,
   selectedResolution: unknown,
 ): string {
-  if (isPixelSize(selectedResolution)) return selectedResolution.trim();
-  if (isPixelSize(request.size)) return request.size.trim();
+  const validate = (size: string) => {
+    const limits = configuredImageOutputLimits(cfg);
+    if (Object.keys(limits).length === 0) return size.trim();
+    return requireImageOutputGeometry({
+      aspectRatio: request.aspect_ratio,
+      selectedSize: size,
+      limits,
+    }).size;
+  };
+  if (isPixelSize(selectedResolution)) return validate(selectedResolution);
+  if (isPixelSize(request.size)) return validate(request.size);
   const configuredSizes = (cfg.supportedResolutions ?? []).filter(isPixelSize).map((size) => size.trim());
-  return pickClosestPixelSize(configuredSizes, request.aspect_ratio)
-    ?? fallbackPixelSizeForAspectRatio(request.aspect_ratio);
+  return validate(
+    pickClosestPixelSize(configuredSizes, request.aspect_ratio)
+      ?? fallbackPixelSizeForAspectRatio(request.aspect_ratio),
+  );
 }
 
 function normalizeImageGenerationToolSizes(
@@ -2185,12 +2209,39 @@ function logCustomProviderPhase(
   log('[CustomProviderGeneration]', { phase, ...details });
 }
 
+function resolvePlanImageOutputGeometry(
+  cfg: CustomProviderConfig,
+  request: GenerateRequest,
+  explicitContract: ResolvedCustomImageContract | null,
+): ResolvedImageOutputGeometry | null {
+  if (explicitContract) {
+    return resolveExplicitContractOutputGeometry(cfg, request, explicitContract);
+  }
+  if (modernProviderUsesOpenAiPixelGeometry(cfg)) {
+    return resolveModernOpenAiGeometry(cfg, request);
+  }
+  const limits = configuredImageOutputLimits(cfg);
+  const selected = request.extra_params?.resolutionType ?? request.size;
+  const explicitSize = isPixelSize(selected)
+    ? selected
+    : isPixelSize(request.size)
+      ? request.size
+      : null;
+  if (!explicitSize || Object.keys(limits).length === 0) return null;
+  return requireImageOutputGeometry({
+    aspectRatio: request.aspect_ratio,
+    selectedSize: explicitSize,
+    limits,
+  });
+}
+
 function buildImageRequestExecutionPlan(
   cfg: CustomProviderConfig,
   model: string,
   request: GenerateRequest,
 ): ImageRequestExecutionPlan {
   const explicitContract = resolveExplicitCustomImageContract(cfg, model, request);
+  const imageOutputGeometry = resolvePlanImageOutputGeometry(cfg, request, explicitContract);
   const configuredBodyMode = resolveCustomProviderBodyMode(cfg, request.extra_params);
   const method = explicitContract?.variant?.method ?? cfg.httpMethod ?? 'POST';
   // Signed/proxy-only markers are a security boundary, not a fallback body
@@ -2213,6 +2264,7 @@ function buildImageRequestExecutionPlan(
       ),
       headers: {},
       explicitContract,
+      imageOutputDiagnostic: imageOutputGeometry?.diagnostic,
     };
   }
   if (method === 'GET' && bodyMode === 'multipart') {
@@ -2273,7 +2325,16 @@ function buildImageRequestExecutionPlan(
       headers[key] = value;
     });
   }
-  return { method, bodyMode, url, headers, body, multipart, explicitContract };
+  return {
+    method,
+    bodyMode,
+    url,
+    headers,
+    body,
+    multipart,
+    explicitContract,
+    imageOutputDiagnostic: imageOutputGeometry?.diagnostic,
+  };
 }
 
 export function buildCustomProviderRequestDebugPreview(
@@ -2286,7 +2347,7 @@ export function buildCustomProviderRequestDebugPreview(
 
   const { cfg, model } = resolved;
   const plan = buildImageRequestExecutionPlan(cfg, model, request);
-  const { method, bodyMode, url, headers, body, multipart } = plan;
+  const { method, bodyMode, url, headers, body, multipart, imageOutputDiagnostic } = plan;
 
   if (bodyMode === 'signed') {
     return {
@@ -2298,6 +2359,7 @@ export function buildCustomProviderRequestDebugPreview(
       bodyMode,
       url: maskDebugUrl(url),
       headers: {},
+      imageOutputDiagnostic,
       error:
         '该配置被识别为签名鉴权/代理路线（signed_proxy_required）。预览不会伪造 AK/SK、时间戳或 Action 签名，请改为后端代理后的普通接口。',
     };
@@ -2314,6 +2376,7 @@ export function buildCustomProviderRequestDebugPreview(
     headers: summarizeDebugHeaders(headers),
     body: method === 'POST' && body ? summarizeDebugValue(body) : undefined,
     multipart: method === 'POST' && multipart ? summarizeDebugMultipart(multipart) : undefined,
+    imageOutputDiagnostic,
   };
 }
 
