@@ -7,6 +7,7 @@ import {
   Camera,
   Check,
   Crop,
+  Crosshair,
   Eraser,
   Eye,
   EyeOff,
@@ -22,6 +23,7 @@ import {
   Monitor,
   Move3d,
   Plus,
+  PanelBottom,
   RotateCcw,
   Rotate3d,
   Save,
@@ -32,6 +34,7 @@ import {
   Upload,
   UserPlus,
   Users,
+  Video,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -56,6 +59,8 @@ import {
   type DirectorStudioTransformMode,
   type DirectorStudioViewSettings,
 } from '@/features/canvas/domain/canvasNodes';
+import type { DirectorRecordedVideo } from '@/features/canvas/application/directorVideoRecording';
+import { normalizeDirectorMotionProject } from '@/features/canvas/application/directorMotion';
 import {
   DIRECTOR_STUDIO_BODY_STYLES,
   normalizeBlueprintBodyControls,
@@ -77,6 +82,11 @@ import {
 import type { BlueprintReferenceImage } from '@/features/canvas/application/blueprintPrompt';
 import { showErrorDialog } from '@/features/canvas/application/errorDialog';
 import { BlueprintCustomActionModal } from '@/features/canvas/ui/BlueprintCustomActionModal';
+import { DirectorActionLibrary } from '@/features/canvas/ui/DirectorActionLibrary';
+import { DirectorCameraPilotHud } from '@/features/canvas/ui/DirectorCameraPilotHud';
+import { DirectorTimeline } from '@/features/canvas/ui/DirectorTimeline';
+import { DirectorVideoExportDialog } from '@/features/canvas/ui/DirectorVideoExportDialog';
+import { useDirectorStudioMotion } from '@/features/canvas/ui/useDirectorStudioMotion';
 import { ensurePos3d, genBlueprintItemId, pos3dToLegacy } from '@/features/canvas/ui/blueprintCoordinates';
 import { useCanvasStore } from '@/stores/canvasStore';
 
@@ -474,6 +484,7 @@ interface DirectorStudioShellProps {
   onItemsChange: (items: BlueprintItem[]) => void;
   onUpdateNodeData: (patch: Partial<BlueprintNodeData>) => void;
   onAddSnapshotToCanvas?: (snapshotUrl: string) => Promise<boolean | void> | boolean | void;
+  onAddVideoToCanvas?: (video: DirectorRecordedVideo) => Promise<boolean | void> | boolean | void;
   onClose: () => void;
 }
 
@@ -610,6 +621,9 @@ function normalizeDirectorSnapshot(
     screenshotResolution: normalizeScreenshotResolution(snapshot.screenshotResolution),
     snapshotUrl: snapshot.snapshotUrl ?? null,
     snapshotHistory: normalizeSnapshotHistory(snapshot.snapshotUrl ?? null, snapshot.snapshotHistory),
+    motionProject: snapshot.motionProject === undefined
+      ? undefined
+      : normalizeDirectorMotionProject(snapshot.motionProject),
   };
 }
 
@@ -702,6 +716,9 @@ function captureDirectorSnapshot(
     screenshotResolution: normalizeScreenshotResolution(data.screenshotResolution),
     snapshotUrl: snapshotUrl ?? data.snapshotUrl ?? null,
     snapshotHistory: appendSnapshotHistory(existingHistory, snapshotUrl ?? data.snapshotUrl ?? null),
+    motionProject: data.motionProject === undefined
+      ? undefined
+      : normalizeDirectorMotionProject(data.motionProject),
   };
 }
 
@@ -725,6 +742,7 @@ function createBlankSnapshot(): DirectorStudioProjectSnapshot {
     screenshotResolution: '1080p',
     snapshotUrl: null,
     snapshotHistory: [],
+    motionProject: undefined,
   };
 }
 
@@ -748,6 +766,9 @@ function snapshotKey(snapshot: DirectorStudioProjectSnapshot): string {
     screenshotResolution: normalizeScreenshotResolution(snapshot.screenshotResolution),
     snapshotUrl: snapshot.snapshotUrl ?? null,
     snapshotHistory: normalizeSnapshotHistory(snapshot.snapshotUrl ?? null, snapshot.snapshotHistory),
+    motionProject: snapshot.motionProject === undefined
+      ? undefined
+      : normalizeDirectorMotionProject(snapshot.motionProject),
   });
 }
 
@@ -962,6 +983,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     onItemsChange,
     onUpdateNodeData,
     onAddSnapshotToCanvas,
+    onAddVideoToCanvas,
     onClose,
   } = props;
   const { t } = useTranslation();
@@ -1019,6 +1041,8 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
     height: typeof window === 'undefined' ? 900 : window.innerHeight,
   }));
+  const compactLayout = viewportSize.width < 1100;
+  const mobileLayout = viewportSize.width < 640;
   const [toolbarLayoutVersion, setToolbarLayoutVersion] = useState(0);
   const [basePromptDraft, setBasePromptDraft] = useState(data.basePrompt ?? '');
   const [inspectorTextDraft, setInspectorTextDraft] = useState<InspectorTextDraft>(() =>
@@ -1055,6 +1079,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   useEffect(() => {
     onAddSnapshotToCanvasRef.current = onAddSnapshotToCanvas;
   }, [onAddSnapshotToCanvas]);
+
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -1118,6 +1143,101 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     () => getUniqueActionPresets(data.customActionPresets),
     [data.customActionPresets],
   );
+
+  const updateItem = useCallback((itemId: string, patch: Partial<BlueprintItem>) => {
+    const nextItems = latestItemsRef.current.map((item) =>
+      item.id === itemId ? { ...item, ...patch } : item
+    );
+    latestItemsRef.current = nextItems;
+    latestDataRef.current = { ...latestDataRef.current, items: nextItems };
+    onItemsChangeRef.current(nextItems);
+  }, []);
+
+  const updateItemActionImmediately = useCallback((item: BlueprintItem, action: string) => {
+    const hadPendingTextDraft =
+      inspectorTextDraftDirtyRef.current && inspectorTextDraftRef.current.itemId === item.id;
+    if (!hadPendingTextDraft && inspectorTextCommitTimerRef.current !== null) {
+      window.clearTimeout(inspectorTextCommitTimerRef.current);
+      inspectorTextCommitTimerRef.current = null;
+    }
+    const baseDraft = inspectorTextDraftRef.current.itemId === item.id
+      ? inspectorTextDraftRef.current
+      : createInspectorTextDraft(item);
+    const nextDraft = {
+      ...baseDraft,
+      action,
+    };
+    inspectorTextDraftRef.current = nextDraft;
+    inspectorTextDraftDirtyRef.current = hadPendingTextDraft;
+    setInspectorTextDraft(nextDraft);
+    updateItem(item.id, { action });
+  }, [updateItem]);
+
+  const {
+    motionProject,
+    timelineOpen,
+    setTimelineOpen,
+    motionTime,
+    motionPlaying,
+    setMotionPlaying,
+    motionSelection,
+    setMotionSelection,
+    motionShowRoutes,
+    setMotionShowRoutes,
+    motionPreviewMode,
+    pilotActive,
+    setPilotActive,
+    pilotTargetId,
+    setPilotTargetId,
+    actionLibraryOpen,
+    setActionLibraryOpen,
+    videoExportOpen,
+    setVideoExportOpen,
+    videoExportResolution,
+    setVideoExportResolution,
+    videoExportFps,
+    setVideoExportFps,
+    videoExportRecording,
+    videoExportProgress,
+    videoExportError,
+    videoExportResult,
+    availableVideoFormat,
+    updateMotionProject,
+    patchMotionKeyframe,
+    moveMotionKeyframe,
+    duplicateMotionKeyframe,
+    deleteMotionKeyframe,
+    addCameraMotionKeyframe,
+    recordPilotCamera,
+    addObjectMotionKeyframe,
+    addActionMotionKeyframe,
+    updateMotionDuration,
+    applyMotionActionState,
+    saveMotionClip,
+    updateMotionClip,
+    duplicateMotionClip,
+    deleteMotionClip,
+    applyCameraPreset,
+    setMotionTimeAndApply,
+    selectMotionRouteKeyframe,
+    moveMotionRouteKeyframe,
+    insertMotionRouteKeyframe,
+    setPreviewModeAndApply,
+    toggleCameraPilot,
+    openVideoExport,
+    startVideoExport,
+    cancelVideoExport,
+    saveVideoExport,
+    addVideoExportToCanvas,
+    stopMotionActivity,
+  } = useDirectorStudioMotion({
+    data,
+    selectedItem,
+    editorRef,
+    onUpdateNodeData,
+    onUpdateItemAction: updateItemActionImmediately,
+    onAddVideoToCanvas,
+  });
 
   const commitInspectorTextDraft = useCallback(() => {
     if (inspectorTextCommitTimerRef.current !== null) {
@@ -1297,15 +1417,23 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   const showSidePanel = useCallback((panel: SidePanel) => {
     setTopFloatingSurface('side');
     setSidePanel(panel);
-  }, []);
+    if (compactLayout && panel) setPanelOpen(false);
+  }, [compactLayout]);
 
   const toggleSidePanel = useCallback((panel: Exclude<SidePanel, null>) => {
     setTopFloatingSurface('side');
-    setSidePanel((value) => value === panel ? null : panel);
-  }, []);
+    const nextPanel = sidePanel === panel ? null : panel;
+    setSidePanel(nextPanel);
+    if (compactLayout && nextPanel) setPanelOpen(false);
+  }, [compactLayout, sidePanel]);
+
+  useEffect(() => {
+    if (compactLayout && sidePanel) setPanelOpen(false);
+  }, [compactLayout, sidePanel]);
 
   const selectItemForEditing = useCallback((itemId: string | null) => {
     commitPendingTextDrafts();
+    setMotionSelection(null);
     onSelectedItemChange(itemId);
     setFollowSelectedItem(false);
     if (!itemId) {
@@ -1315,12 +1443,13 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     setActiveTransformMode('move');
     showSidePanel('inspector');
     setPanelMode('elements');
-  }, [commitPendingTextDrafts, onSelectedItemChange, showSidePanel]);
+  }, [commitPendingTextDrafts, onSelectedItemChange, setMotionSelection, showSidePanel]);
 
   const handleClose = useCallback(() => {
     commitPendingTextDrafts();
+    stopMotionActivity();
     onCloseRef.current();
-  }, [commitPendingTextDrafts]);
+  }, [commitPendingTextDrafts, stopMotionActivity]);
 
   useEffect(() => {
     if (!selectedItem && activeTransformMode) {
@@ -1332,6 +1461,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isEditableEventTarget(event.target)) return;
       if (event.key !== 'Escape') return;
+      if (pilotActive || actionLibraryOpen || videoExportOpen || customActionModalOpen) return;
       if (activeTransformMode) {
         setActiveTransformMode(null);
         event.preventDefault();
@@ -1366,7 +1496,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeDialog, activeTransformMode, assetPickerItemId, handleClose, importOpen, lightboxSnapshotUrl, sidePanel]);
+  }, [actionLibraryOpen, activeDialog, activeTransformMode, assetPickerItemId, customActionModalOpen, handleClose, importOpen, lightboxSnapshotUrl, pilotActive, sidePanel, videoExportOpen]);
 
   const camera = useMemo(() => normalizeCamera(data.camera), [data.camera]);
   const lighting = useMemo(() => normalizeLighting(data.lighting), [data.lighting]);
@@ -1633,9 +1763,22 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   const deleteSelectedItem = useCallback(() => {
     if (!selectedItem) return;
     setActiveTransformMode(null);
-    onItemsChange(data.items.filter((item) => item.id !== selectedItem.id));
+    const nextItems = data.items.filter((item) => item.id !== selectedItem.id);
+    if (data.motionProject === undefined) {
+      onItemsChange(nextItems);
+    } else {
+      const nextMotionProject = normalizeDirectorMotionProject(data.motionProject);
+      const objectTracks = { ...nextMotionProject.objectTracks };
+      const actionTracks = { ...nextMotionProject.actionTracks };
+      delete objectTracks[selectedItem.id];
+      delete actionTracks[selectedItem.id];
+      onUpdateNodeData({
+        items: nextItems,
+        motionProject: { ...nextMotionProject, objectTracks, actionTracks },
+      });
+    }
     selectItemForEditing(null);
-  }, [data.items, onItemsChange, selectItemForEditing, selectedItem]);
+  }, [data.items, data.motionProject, onItemsChange, onUpdateNodeData, selectItemForEditing, selectedItem]);
 
   const copySelectedItem = useCallback(() => {
     if (!selectedItem) return false;
@@ -1666,35 +1809,6 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     copiedItemRef.current = nextItem;
     return true;
   }, [copyLabelSuffix, data.items, defaultElementLabelBase, onItemsChange, selectItemForEditing]);
-
-  const updateItem = useCallback((itemId: string, patch: Partial<BlueprintItem>) => {
-    const nextItems = latestItemsRef.current.map((item) =>
-      item.id === itemId ? { ...item, ...patch } : item
-    );
-    latestItemsRef.current = nextItems;
-    latestDataRef.current = { ...latestDataRef.current, items: nextItems };
-    onItemsChangeRef.current(nextItems);
-  }, []);
-
-  const updateItemActionImmediately = useCallback((item: BlueprintItem, action: string) => {
-    const hadPendingTextDraft =
-      inspectorTextDraftDirtyRef.current && inspectorTextDraftRef.current.itemId === item.id;
-    if (!hadPendingTextDraft && inspectorTextCommitTimerRef.current !== null) {
-      window.clearTimeout(inspectorTextCommitTimerRef.current);
-      inspectorTextCommitTimerRef.current = null;
-    }
-    const baseDraft = inspectorTextDraftRef.current.itemId === item.id
-      ? inspectorTextDraftRef.current
-      : createInspectorTextDraft(item);
-    const nextDraft = {
-      ...baseDraft,
-      action,
-    };
-    inspectorTextDraftRef.current = nextDraft;
-    inspectorTextDraftDirtyRef.current = hadPendingTextDraft;
-    setInspectorTextDraft(nextDraft);
-    updateItem(item.id, { action });
-  }, [updateItem]);
 
   const saveCurrentActionPreset = useCallback(() => {
     commitInspectorTextDraft();
@@ -1903,8 +2017,8 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     onItemsChange([...data.items, ...itemsToAdd]);
     selectItemForEditing(itemsToAdd[0].id);
     setPanelMode('elements');
-    setPanelOpen(true);
-  }, [data.items, onItemsChange, selectItemForEditing]);
+    if (!compactLayout) setPanelOpen(true);
+  }, [compactLayout, data.items, onItemsChange, selectItemForEditing]);
 
   const getSuggestedInsertPosition = useCallback(() => (
     editorRef.current?.getSuggestedInsertPosition() ?? DEFAULT_INSERT_POSITION
@@ -2258,7 +2372,9 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   }, [importPanorama, t]);
 
   const sceneWidth = Math.max(320, viewportSize.width);
-  const sceneHeight = Math.max(320, viewportSize.height);
+  const motionTimelineHeight = timelineOpen ? 232 : 0;
+  const motionToolbarHeight = mobileLayout ? 168 : compactLayout ? 120 : 96;
+  const sceneHeight = Math.max(320, viewportSize.height - motionTimelineHeight);
   const rawPanoramaUrl = data.backgroundPanoramaUrl ?? data.backgroundImageUrl ?? null;
   const panoramaUrl = rawPanoramaUrl ? resolveImageDisplayUrl(rawPanoramaUrl) ?? rawPanoramaUrl : null;
   const panoramaImportStageLabel = panoramaImportStage
@@ -2324,6 +2440,22 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         event.stopPropagation();
         event.stopImmediatePropagation();
       };
+      if (pilotActive) return;
+      if (actionLibraryOpen) {
+        if (event.key === 'Escape') {
+          setActionLibraryOpen(false);
+          claimShortcut();
+        }
+        return;
+      }
+      if (videoExportOpen) {
+        if (event.key === 'Escape' && !videoExportRecording) {
+          setVideoExportOpen(false);
+          claimShortcut();
+        }
+        return;
+      }
+      if (customActionModalOpen) return;
       if (activeDialog === 'shortcuts') {
         if (editingShortcutId) {
           if (event.key === 'Escape') {
@@ -2375,6 +2507,11 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         return;
       }
       if (shortcutMatchesEvent(event, shortcuts.delete)) {
+        if (motionSelection) {
+          deleteMotionKeyframe(motionSelection);
+          claimShortcut();
+          return;
+        }
         if (!selectedItem) return;
         deleteSelectedItem();
         claimShortcut();
@@ -2461,21 +2598,28 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     window.addEventListener('keydown', handleShortcut, true);
     return () => window.removeEventListener('keydown', handleShortcut, true);
   }, [
+    actionLibraryOpen,
     activeDialog,
     captureScreenshot,
     copySelectedItem,
+    customActionModalOpen,
     data.directorStudioShortcuts,
+    deleteMotionKeyframe,
     deleteSelectedItem,
     editingShortcutId,
     onUpdateNodeData,
     openFloatingPanel,
     pasteCopiedItem,
+    pilotActive,
+    motionSelection,
     redoCanvas,
     saveProject,
     selectedItem,
     shortcuts,
     undoCanvas,
     updateViewSettings,
+    videoExportOpen,
+    videoExportRecording,
     viewSettings.showAdvancedPedestrianTags,
   ]);
 
@@ -2515,6 +2659,9 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       onClick: () => setActiveTransformMode((value) => value ? null : 'move'),
     },
     { key: 'params', label: t('directorStudio.toolbar.params'), title: t('directorStudio.toolbar.params'), icon: SlidersHorizontal, active: sidePanel === 'inspector', onClick: () => toggleSidePanel('inspector') },
+    { key: 'timeline', label: t('directorStudio.motion.timeline.title'), title: t('directorStudio.motion.timeline.title'), icon: PanelBottom, active: timelineOpen, onClick: () => setTimelineOpen((value) => !value) },
+    { key: 'pilot', label: t('directorStudio.motion.pilot.enter'), title: t('directorStudio.motion.pilot.enter'), icon: Crosshair, active: pilotActive, onClick: toggleCameraPilot },
+    { key: 'exportVideo', label: t('directorStudio.motion.export.title'), title: motionProject.cameraTrack.length < 2 ? t('directorStudio.motion.export.needsCamera') : t('directorStudio.motion.export.title'), icon: Video, disabled: motionProject.cameraTrack.length < 2, onClick: openVideoExport },
     { key: 'cameraPreset', label: t('directorStudio.toolbar.cameraPreset'), title: t('directorStudio.toolbar.cameraPreset'), icon: Camera, active: floatingPanel === 'camera', onClick: () => openFloatingPanel('camera') },
     { key: 'lighting', label: t('directorStudio.toolbar.lighting'), title: t('directorStudio.toolbar.lighting'), icon: Lightbulb, active: floatingPanel === 'lighting', onClick: () => openFloatingPanel('lighting') },
     {
@@ -2540,40 +2687,46 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
     >
-      <header className="absolute inset-x-0 top-0 z-50 flex h-14 items-center justify-between border-b border-white/10 bg-[#101113]/82 px-4 shadow-[0_10px_34px_rgba(0,0,0,0.28)] backdrop-blur-xl">
-        <div className="flex items-center gap-3">
-          <div className="text-base font-semibold tracking-normal">{t('directorStudio.title')}</div>
+      <header className="absolute inset-x-0 top-0 z-50 flex h-14 items-center justify-between gap-2 border-b border-white/10 bg-[#101113]/82 px-2 shadow-[0_10px_34px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:px-4">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <div className="truncate whitespace-nowrap text-sm font-semibold tracking-normal sm:text-base">{t('directorStudio.title')}</div>
           <div className={`rounded border px-2 py-0.5 text-[11px] ${
             hasUnsavedChanges ? 'border-amber-300/30 bg-amber-300/10 text-amber-200' : 'border-emerald-300/25 bg-emerald-300/10 text-emerald-200'
           }`}>
             {hasUnsavedChanges ? t('directorStudio.unsaved') : t('directorStudio.saved')}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           <button
             type="button"
             onClick={() => { void saveProject(); }}
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-3 text-sm font-medium text-black hover:bg-white/90"
+            className="inline-flex h-9 w-9 items-center justify-center gap-2 rounded-md bg-white px-0 text-sm font-medium text-black hover:bg-white/90 sm:w-auto sm:px-3"
+            title={t('directorStudio.saveProject')}
+            aria-label={t('directorStudio.saveProject')}
           >
             <Save className="h-4 w-4" />
-            {t('directorStudio.saveProject')}
+            <span className="hidden sm:inline">{t('directorStudio.saveProject')}</span>
           </button>
           <button
             type="button"
             onClick={() => setImportOpen(true)}
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-white/12 bg-white/6 px-3 text-sm text-white/75 hover:bg-white/12 hover:text-white"
+            className="inline-flex h-9 w-9 items-center justify-center gap-2 rounded-md border border-white/12 bg-white/6 px-0 text-sm text-white/75 hover:bg-white/12 hover:text-white sm:w-auto sm:px-3"
+            title={t('directorStudio.panoramaImport')}
+            aria-label={t('directorStudio.panoramaImport')}
           >
             <Upload className="h-4 w-4" />
-            {t('directorStudio.panoramaImport')}
+            <span className="hidden sm:inline">{t('directorStudio.panoramaImport')}</span>
           </button>
           {rawPanoramaUrl ? (
             <button
               type="button"
               onClick={clearPanorama}
-              className="inline-flex h-9 items-center gap-2 rounded-md border border-red-300/20 bg-red-500/10 px-3 text-sm text-red-100 hover:bg-red-500/18"
+              className="inline-flex h-9 w-9 items-center justify-center gap-2 rounded-md border border-red-300/20 bg-red-500/10 px-0 text-sm text-red-100 hover:bg-red-500/18 sm:w-auto sm:px-3"
+              title={t('directorStudio.clearPanorama')}
+              aria-label={t('directorStudio.clearPanorama')}
             >
               <Eraser className="h-4 w-4" />
-              {t('directorStudio.clearPanorama')}
+              <span className="hidden sm:inline">{t('directorStudio.clearPanorama')}</span>
             </button>
           ) : null}
           <button
@@ -2589,7 +2742,14 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
 
       <div className="absolute inset-0 z-0 overflow-hidden bg-[#071012]">
         {panelOpen ? (
-        <aside className="absolute bottom-24 left-4 top-16 z-30 flex w-[320px] min-h-0 flex-col overflow-hidden rounded-lg border border-white/12 bg-[#0d0f11]/84 shadow-[0_18px_60px_rgba(0,0,0,0.36)] backdrop-blur-xl">
+        <aside
+          className="absolute top-16 z-30 flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/12 bg-[#0d0f11]/84 shadow-[0_18px_60px_rgba(0,0,0,0.36)] backdrop-blur-xl"
+          style={{
+            left: compactLayout ? 12 : 16,
+            width: compactLayout ? Math.min(360, viewportSize.width - 24) : 320,
+            bottom: motionTimelineHeight + motionToolbarHeight,
+          }}
+        >
           <div className="flex items-center gap-1 border-b border-white/10 p-2">
             {([
               ['projects', FolderOpen, t('directorStudio.projects')],
@@ -2858,6 +3018,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                 key={mode}
                 type="button"
                 onClick={() => {
+                  if (compactLayout) setSidePanel(null);
                   setPanelMode(mode);
                   setPanelOpen(true);
                 }}
@@ -2905,6 +3066,22 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
               grid={grid}
               viewSettings={viewSettings}
               keyboardShortcutsEnabled={activeDialog !== 'shortcuts'}
+              motionProject={motionProject}
+              motionRoutesVisible={motionShowRoutes}
+              motionRouteSelection={motionSelection && motionSelection.kind !== 'action'
+                ? {
+                    kind: motionSelection.kind,
+                    trackId: motionSelection.trackId,
+                    keyframeId: motionSelection.keyframeId,
+                  }
+                : null}
+              onMotionRoutePointSelect={selectMotionRouteKeyframe}
+              onMotionRoutePointMove={moveMotionRouteKeyframe}
+              onMotionRoutePointInsert={insertMotionRouteKeyframe}
+              pilotActive={pilotActive}
+              onPilotActiveChange={setPilotActive}
+              onPilotRecordCamera={recordPilotCamera}
+              onPilotTargetChange={setPilotTargetId}
             />
           </Suspense>
 
@@ -3179,7 +3356,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
             </div>
           ) : null}
 
-          {showSidePanelSwitcher ? (
+          {showSidePanelSwitcher && !compactLayout ? (
             <div
               className="absolute right-[364px] top-20 z-40 flex flex-col gap-1 rounded-full border border-white/12 bg-[#151618]/92 p-1 shadow-xl backdrop-blur-xl"
               style={{ zIndex: sidePanelZIndex + 1 }}
@@ -3209,8 +3386,13 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
 
           {sidePanel === 'inspector' ? (
             <aside
-              className="absolute bottom-24 right-4 top-16 z-30 flex w-[336px] flex-col rounded-lg border border-white/12 bg-[#151618]/96 shadow-2xl"
-              style={{ zIndex: sidePanelZIndex }}
+              className="absolute top-16 z-30 flex flex-col rounded-lg border border-white/12 bg-[#151618]/96 shadow-2xl"
+              style={{
+                zIndex: sidePanelZIndex,
+                right: compactLayout ? 12 : 16,
+                width: compactLayout ? Math.min(360, viewportSize.width - 24) : 336,
+                bottom: motionTimelineHeight + motionToolbarHeight,
+              }}
               onPointerDownCapture={() => bringFloatingSurfaceToFront('side')}
             >
               <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
@@ -3626,8 +3808,13 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
 
             {sidePanel === 'snapshot' && data.snapshotUrl ? (
               <aside
-                className="absolute bottom-24 right-4 top-16 z-30 flex w-[340px] flex-col rounded-lg border border-white/12 bg-[#151618]/96 p-3 shadow-2xl"
-                style={{ zIndex: sidePanelZIndex }}
+                className="absolute top-16 z-30 flex flex-col rounded-lg border border-white/12 bg-[#151618]/96 p-3 shadow-2xl"
+                style={{
+                  zIndex: sidePanelZIndex,
+                  right: compactLayout ? 12 : 16,
+                  width: compactLayout ? Math.min(360, viewportSize.width - 24) : 340,
+                  bottom: motionTimelineHeight + motionToolbarHeight,
+                }}
                 onPointerDownCapture={() => bringFloatingSurfaceToFront('side')}
               >
                 <div className="mb-3 flex items-center justify-between">
@@ -3761,8 +3948,8 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
             </div>
           ) : null}
 
-          <div className="pointer-events-none absolute inset-x-0 bottom-5 z-40 flex justify-center">
-            <div className="pointer-events-auto flex max-w-[calc(100%-48px)] items-center gap-1 overflow-x-auto rounded-lg border border-white/12 bg-[#151618]/92 p-1.5 shadow-2xl">
+          <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center" style={{ bottom: motionTimelineHeight + 20 }}>
+            <div className="pointer-events-auto flex max-w-[calc(100%-24px)] flex-wrap items-center justify-center gap-1 rounded-lg border border-white/12 bg-[#151618]/92 p-1.5 shadow-2xl">
               {toolbarButtons.map((button) => {
                 const Icon = button.icon;
                 if (button.key === 'transform') {
@@ -3785,7 +3972,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                         type="button"
                         disabled={button.disabled}
                         onClick={button.onClick}
-                        className={`flex h-8 min-w-[58px] items-center justify-center gap-1 rounded px-1.5 text-[10px] ${
+                      className={`flex h-8 w-9 items-center justify-center gap-1 rounded px-1 text-[10px] min-[1700px]:w-auto min-[1700px]:min-w-[58px] min-[1700px]:px-1.5 ${
                           button.active
                             ? 'text-accent'
                             : button.disabled
@@ -3794,7 +3981,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                         }`}
                       >
                         <Icon className="h-4 w-4" />
-                        <span className="max-w-[42px] truncate">{button.label}</span>
+                        <span className="hidden max-w-[42px] truncate min-[1700px]:block">{button.label}</span>
                       </button>
                       <div className="flex items-center gap-0.5">
                         {TRANSFORM_MODE_OPTIONS.map((option) => {
@@ -3837,7 +4024,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                     disabled={button.disabled}
                     onClick={button.onClick}
                     title={button.title}
-                    className={`flex h-10 min-w-[74px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-2 text-[10px] transition-colors ${
+                    className={`flex h-10 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-[10px] transition-colors min-[1700px]:w-auto min-[1700px]:min-w-[74px] min-[1700px]:px-2 ${
                       button.active
                         ? 'bg-accent/25 text-accent'
                         : button.disabled
@@ -3846,12 +4033,55 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                     }`}
                   >
                     <Icon className="h-4 w-4" />
-                    <span className="max-w-full truncate">{button.label}</span>
+                    <span className="hidden max-w-full truncate min-[1700px]:block">{button.label}</span>
                   </button>
                 );
               })}
             </div>
           </div>
+
+          <DirectorCameraPilotHud
+            active={pilotActive}
+            recording={false}
+            currentTime={motionTime}
+            targetLabel={data.items.find((item) => item.id === pilotTargetId)?.label ?? null}
+            onExit={() => editorRef.current?.exitPilot()}
+          />
+
+          {timelineOpen ? (
+            <DirectorTimeline
+              project={motionProject}
+              items={data.items}
+              currentTime={motionTime}
+              isPlaying={motionPlaying}
+              selection={motionSelection}
+              showRoutes={motionShowRoutes}
+              previewMode={motionPreviewMode}
+              pilotActive={pilotActive}
+              onTimeChange={setMotionTimeAndApply}
+              onTogglePlayback={() => setMotionPlaying((value) => !value)}
+              onGoToStart={() => { setMotionPlaying(false); setMotionTimeAndApply(0); }}
+              onLoopChange={(loop) => {
+                updateMotionProject((project) => ({ ...project, loop }));
+              }}
+              onDurationChange={updateMotionDuration}
+              onSelectionChange={setMotionSelection}
+              onMoveKeyframe={moveMotionKeyframe}
+              onPatchKeyframe={patchMotionKeyframe}
+              onDuplicateKeyframe={duplicateMotionKeyframe}
+              onDeleteKeyframe={deleteMotionKeyframe}
+              onAddCameraKeyframe={addCameraMotionKeyframe}
+              onAddObjectKeyframe={addObjectMotionKeyframe}
+              onAddActionKeyframe={(itemId) => addActionMotionKeyframe(itemId)}
+              onShowRoutesChange={setMotionShowRoutes}
+              onPreviewModeChange={setPreviewModeAndApply}
+              onTogglePilot={toggleCameraPilot}
+              onOpenActionLibrary={() => setActionLibraryOpen(true)}
+              onOpenExport={openVideoExport}
+              onApplyCameraPreset={applyCameraPreset}
+              onClose={() => setTimelineOpen(false)}
+            />
+          ) : null}
         </main>
       </div>
 
@@ -4057,6 +4287,42 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
           </section>
         </div>
       ) : null}
+
+      <DirectorActionLibrary
+        isOpen={actionLibraryOpen}
+        selectedItem={selectedItem}
+        project={motionProject}
+        currentTime={motionTime}
+        customActionPoses={data.customActionPoses ?? {}}
+        onClose={() => setActionLibraryOpen(false)}
+        onApplyStaticPose={(poseId, pose) => applyMotionActionState({ poseId, pose })}
+        onApplyProceduralAction={(actionId) => applyMotionActionState({ actionId })}
+        onApplyClip={(clip) => applyMotionActionState({ clipId: clip.id })}
+        onSaveClip={saveMotionClip}
+        onRenameClip={(clipId, name) => updateMotionClip(clipId, { name: name.trim() || t('directorStudio.motion.library.untitledClip') })}
+        onDuplicateClip={duplicateMotionClip}
+        onDeleteClip={deleteMotionClip}
+        onLoopClip={(clipId, loop) => updateMotionClip(clipId, { loop })}
+      />
+
+      <DirectorVideoExportDialog
+        isOpen={videoExportOpen}
+        durationSeconds={motionProject.durationSeconds}
+        format={videoExportResult ? { mimeType: videoExportResult.mimeType, extension: videoExportResult.extension } : availableVideoFormat}
+        resolution={videoExportResolution}
+        fps={videoExportFps}
+        isRecording={videoExportRecording}
+        progress={videoExportProgress}
+        error={videoExportError}
+        result={videoExportResult}
+        onResolutionChange={setVideoExportResolution}
+        onFpsChange={setVideoExportFps}
+        onStart={() => { void startVideoExport(); }}
+        onCancel={cancelVideoExport}
+        onSave={saveVideoExport}
+        onAddToCanvas={() => { void addVideoExportToCanvas(); }}
+        onClose={() => setVideoExportOpen(false)}
+      />
 
       <BlueprintCustomActionModal
         isOpen={customActionModalOpen}

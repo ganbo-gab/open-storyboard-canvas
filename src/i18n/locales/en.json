@@ -457,6 +457,56 @@
       "enter": "Enter Studio"
     },
     "resolutionNote": "This version exports by the selected frame; 1440p and 4K scale from the current viewport.",
+    "motion": {
+      "timeline": {
+        "title": "Timeline", "camera": "Camera", "actionTrack": "{{name}} · Action", "tracks": "Tracks",
+        "play": "Play", "pause": "Pause", "goToStart": "Go to start", "loop": "Loop playback",
+        "currentTime": "Current time", "duration": "Duration", "routePreview": "Director route view",
+        "shotPreview": "Final camera view", "showRoutes": "Show motion routes", "hideRoutes": "Hide motion routes",
+        "addKeyframe": "Add keyframe"
+      },
+      "inspector": {
+        "title": "Motion Inspector", "empty": "Select a keyframe to edit it.", "time": "Time",
+        "easing": "Interpolation", "linear": "Linear", "smooth": "Smooth", "fov": "Field of view",
+        "orientToPath": "Face travel direction", "duplicate": "Duplicate", "delete": "Delete keyframe"
+      },
+      "library": {
+        "title": "Action Library", "poses": "Static Poses", "actions": "Playable Actions", "clips": "Custom Clips",
+        "custom": "Custom", "selectPerson": "Select a person to apply a pose, action, or clip.",
+        "clipNamePlaceholder": "Clip name", "saveClip": "Save Track as Clip", "noClips": "No custom clips yet",
+        "keyframes": "keyframes", "apply": "Apply clip", "rename": "Rename clip", "duplicate": "Duplicate clip",
+        "loop": "Loop clip", "delete": "Delete clip", "timeAt": "Apply at {{time}}s", "untitledClip": "Untitled clip"
+      },
+      "pilot": {
+        "enter": "Pilot Camera", "exit": "Exit pilot mode", "active": "Camera pilot", "noTarget": "No tracking target"
+      },
+      "cameraPresets": {
+        "title": "Camera Route", "cinematicPush": "Cinematic Push", "characterFollow": "Character Follow",
+        "fastChase": "Fast Chase", "productOrbit": "Product Orbit", "craneRise": "Crane Rise", "lateralDolly": "Lateral Dolly"
+      },
+      "export": {
+        "title": "Reference Video", "needsCamera": "Add at least two camera keyframes before exporting.",
+        "resolution": "Resolution", "fps": "Frame rate", "duration": "Duration", "format": "Format",
+        "unsupported": "Unavailable", "recording": "Recording clean scene", "remaining": "About {{seconds}}s remaining",
+        "complete": "{{format}} recording complete", "start": "Start Recording", "cancel": "Cancel Recording",
+        "save": "Save to Disk", "addToCanvas": "Add to Canvas", "failed": "Reference video recording failed.",
+        "sceneUnavailable": "The 3D scene is not ready for recording.", "canvasNodeName": "Director Studio Reference Video",
+        "addToCanvasFailed": "Could not add the recorded video to the canvas."
+      },
+      "actions": {
+        "walk": "Walk", "run": "Run", "squatRise": "Squat and Rise", "stepOver": "Step Over", "jump": "Jump", "wave": "Wave"
+      },
+      "poses": {
+        "standNeutral": "Neutral Stand", "standAttention": "Stand at Attention", "leanForward": "Lean Forward",
+        "leanBack": "Lean Back", "handsOnHips": "Hands on Hips", "armsCrossed": "Arms Crossed",
+        "sitUpright": "Sit Upright", "sitRelaxed": "Sit Relaxed", "squatLow": "Low Squat",
+        "kneelOne": "One-Knee Kneel", "kneelTwo": "Two-Knee Kneel", "lieBack": "Lie Back",
+        "walkStride": "Walking Stride", "runStride": "Running Stride", "pointForward": "Point Forward",
+        "reachUp": "Reach Up", "wave": "Wave", "lookUp": "Look Up", "lookDown": "Look Down",
+        "lookLeft": "Look Left", "lookRight": "Look Right", "talkGesture": "Talking Gesture",
+        "observe": "Observe", "jumpApex": "Jump Apex"
+      }
+    },
     "prompt": {
       "title": "Prompt Draft",
       "placeholder": "Describe the overall shot, style, mood, and direction. It will be combined with spatial layout, element actions, and linked references.",

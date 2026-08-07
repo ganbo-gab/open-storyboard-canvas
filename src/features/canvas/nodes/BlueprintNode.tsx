@@ -35,6 +35,12 @@ import { DirectorStudioShell } from '@/features/canvas/ui/DirectorStudioShell';
 import { BLUEPRINT_DEFAULT_COLORS as LEGEND_COLORS } from '@/features/canvas/ui/blueprintCoordinates';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { persistImageSource } from '@/commands/image';
+import { persistVideoSource } from '@/commands/image';
+import { isTauri } from '@tauri-apps/api/core';
+import {
+  directorVideoBlobToDataUrl,
+  type DirectorRecordedVideo,
+} from '@/features/canvas/application/directorVideoRecording';
 
 type BlueprintNodeProps = NodeProps & { data: BlueprintNodeData };
 
@@ -113,6 +119,7 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
   const addEdge = useCanvasStore((s) => s.addEdge);
   const findNodePosition = useCanvasStore((s) => s.findNodePosition);
   const setSelectedNode = useCanvasStore((s) => s.setSelectedNode);
+  const setActiveDirectorStudioNode = useCanvasStore((s) => s.setActiveDirectorStudioNode);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [directorStudioOpen, setDirectorStudioOpen] = useState(false);
   const [openedDirectorStudioProjects, setOpenedDirectorStudioProjects] = useState<DirectorStudioProjectRecord[] | null>(null);
@@ -144,13 +151,23 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
 
   const openDirectorStudio = useCallback((sourcePatch?: Partial<BlueprintNodeData>) => {
     syncDirectorStudioProjectLibrary(sourcePatch);
+    setActiveDirectorStudioNode(id);
     setDirectorStudioOpen(true);
-  }, [syncDirectorStudioProjectLibrary]);
+  }, [id, setActiveDirectorStudioNode, syncDirectorStudioProjectLibrary]);
 
   const closeDirectorStudio = useCallback(() => {
+    if (useCanvasStore.getState().activeDirectorStudioNodeId === id) {
+      setActiveDirectorStudioNode(null);
+    }
     setDirectorStudioOpen(false);
     setOpenedDirectorStudioProjects(null);
-  }, []);
+  }, [id, setActiveDirectorStudioNode]);
+
+  useEffect(() => () => {
+    if (useCanvasStore.getState().activeDirectorStudioNodeId === id) {
+      setActiveDirectorStudioNode(null);
+    }
+  }, [id, setActiveDirectorStudioNode]);
 
   useEffect(() => {
     if (data.openDirectorStudioOnCreate !== true) return;
@@ -342,6 +359,32 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
     updateNodeData,
   ]);
 
+  const handleAddVideoToCanvas = useCallback(async (video: DirectorRecordedVideo) => {
+    try {
+      const dataUrl = await directorVideoBlobToDataUrl(video.blob);
+      const storedVideoUrl = isTauri() ? await persistVideoSource(dataUrl) : dataUrl;
+      const position = findNodePosition(id, 384, 288);
+      const videoNodeId = addNode(CANVAS_NODE_TYPES.video, position, {
+        videoUrl: storedVideoUrl,
+        localVideoUrl: storedVideoUrl,
+        aspectRatio: '16:9',
+        durationSeconds: video.durationSeconds,
+        sourceFileName: `director-studio-preview.${video.extension}`,
+        displayName: t('directorStudio.motion.export.canvasNodeName'),
+        sourceType: 'director-studio-recording',
+      });
+      addEdge(id, videoNodeId);
+      setSelectedNode(videoNodeId);
+      return true;
+    } catch (error) {
+      await showErrorDialog(
+        error instanceof Error ? error.message : t('directorStudio.motion.export.addToCanvasFailed'),
+        t('common.error'),
+      );
+      return false;
+    }
+  }, [addEdge, addNode, findNodePosition, id, setSelectedNode, t]);
+
   const compactSnapshotUrl = data.snapshotUrl
     ? resolveImageDisplayUrl(data.snapshotUrl) ?? data.snapshotUrl
     : null;
@@ -449,6 +492,7 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
           onItemsChange={handleItemsChange}
           onUpdateNodeData={updateBlueprintNodeData}
           onAddSnapshotToCanvas={handleAddSnapshotToCanvas}
+          onAddVideoToCanvas={handleAddVideoToCanvas}
           onClose={closeDirectorStudio}
         />
       )}

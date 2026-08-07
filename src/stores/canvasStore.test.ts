@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { CANVAS_NODE_TYPES } from '@/features/canvas/domain/canvasNodes';
+import {
+  CANVAS_NODE_TYPES,
+  type BlueprintNodeData,
+  type CanvasNode,
+  type DirectorMotionProjectV1,
+} from '@/features/canvas/domain/canvasNodes';
 import { MAX_CANVAS_BATCH_ADD_NODES, useCanvasStore } from './canvasStore';
 
 function resetCanvasStore(): void {
@@ -8,12 +13,28 @@ function resetCanvasStore(): void {
     nodes: [],
     edges: [],
     selectedNodeId: null,
+    activeDirectorStudioNodeId: null,
     activeToolDialog: null,
     history: { past: [], future: [] },
     dragHistorySnapshot: null,
     currentViewport: { x: 0, y: 0, zoom: 1 },
     canvasViewportSize: { width: 1_280, height: 720 },
   });
+}
+
+function createDirectorNode(data: Partial<BlueprintNodeData> = {}): CanvasNode {
+  return {
+    id: 'director-node',
+    type: CANVAS_NODE_TYPES.blueprint,
+    position: { x: 0, y: 0 },
+    data: {
+      mode: 'flat',
+      items: [],
+      referenceImages: [],
+      aspectRatio: '16:9',
+      ...data,
+    },
+  } as CanvasNode;
 }
 
 describe('canvasStore.addNodesBatch', () => {
@@ -106,5 +127,73 @@ describe('canvasStore.addNodesBatch', () => {
     ])).toThrowError(RangeError);
     expect(useCanvasStore.getState().nodes).toEqual([]);
     expect(useCanvasStore.getState().history.past).toEqual([]);
+  });
+});
+
+describe('canvasStore Director Studio persistence', () => {
+  beforeEach(resetCanvasStore);
+
+  it('restores V1 motion for the workspace and saved Director projects', () => {
+    const motionProject: DirectorMotionProjectV1 = {
+      schemaVersion: 1,
+      durationSeconds: 6,
+      loop: true,
+      cameraTrack: [
+        {
+          id: 'camera',
+          time: 2,
+          easing: 'smooth',
+          position: { x: 1, y: 2, z: 3 },
+          target: { x: 0, y: 1, z: 0 },
+          fov: 50,
+          trackTargetId: null,
+          trackTargetBodyPart: null,
+        },
+      ],
+      objectTracks: {},
+      actionTracks: {},
+      customClips: [],
+    };
+    const node = createDirectorNode({
+      motionProject,
+      directorStudioProjects: [{
+        id: 'saved-project',
+        name: 'Saved project',
+        createdAt: 1,
+        updatedAt: 2,
+        snapshot: {
+          mode: 'flat',
+          items: [],
+          referenceImages: [],
+          aspectRatio: '16:9',
+          motionProject,
+        },
+      }],
+    });
+
+    useCanvasStore.getState().setCanvasData([node], []);
+
+    const data = useCanvasStore.getState().nodes[0].data as BlueprintNodeData;
+    expect(data.motionProject).toEqual(motionProject);
+    expect(data.directorStudioProjects?.[0].snapshot.motionProject).toEqual(motionProject);
+  });
+
+  it('keeps legacy missing motion absent until an edit creates it', () => {
+    useCanvasStore.getState().setCanvasData([createDirectorNode()], []);
+
+    const data = useCanvasStore.getState().nodes[0].data as BlueprintNodeData;
+    expect(data.motionProject).toBeUndefined();
+  });
+
+  it('resets ephemeral Studio mount state without adding canvas history', () => {
+    useCanvasStore.getState().setCanvasData([createDirectorNode()], []);
+    const historyBeforeOpen = useCanvasStore.getState().history;
+
+    useCanvasStore.getState().setActiveDirectorStudioNode('director-node');
+    expect(useCanvasStore.getState().activeDirectorStudioNodeId).toBe('director-node');
+    expect(useCanvasStore.getState().history).toBe(historyBeforeOpen);
+
+    useCanvasStore.getState().setCanvasData([createDirectorNode()], []);
+    expect(useCanvasStore.getState().activeDirectorStudioNodeId).toBeNull();
   });
 });

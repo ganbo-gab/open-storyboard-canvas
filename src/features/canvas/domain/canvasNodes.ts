@@ -456,6 +456,70 @@ export interface BlueprintActionPose {
   groupRotX?: number;
 }
 
+export interface DirectorMotionVector3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export type DirectorMotionEasing = 'linear' | 'smooth';
+
+export interface DirectorMotionKeyframeBase {
+  id: string;
+  time: number;
+  easing: DirectorMotionEasing;
+}
+
+export interface DirectorCameraKeyframe extends DirectorMotionKeyframeBase {
+  position: DirectorMotionVector3;
+  target: DirectorMotionVector3;
+  fov: number;
+  trackTargetId?: string | null;
+  trackTargetBodyPart?: string | null;
+}
+
+export interface DirectorObjectKeyframe extends DirectorMotionKeyframeBase {
+  position: DirectorMotionVector3;
+  rotation: DirectorMotionVector3;
+  scale: DirectorMotionVector3;
+  /** Person routes can blend toward their path tangent while moving. */
+  orientToPath?: boolean;
+}
+
+export interface DirectorActionState {
+  poseId?: string | null;
+  actionId?: string | null;
+  clipId?: string | null;
+  pose?: BlueprintActionPose;
+  bodyControls?: BlueprintBodyControls;
+}
+
+export interface DirectorActionKeyframe extends DirectorMotionKeyframeBase, DirectorActionState {}
+
+export interface DirectorActionClipKeyframe extends DirectorActionState {
+  id: string;
+  time: number;
+  easing: DirectorMotionEasing;
+}
+
+export interface DirectorActionClip {
+  id: string;
+  name: string;
+  durationSeconds: number;
+  loop: boolean;
+  keyframes: DirectorActionClipKeyframe[];
+}
+
+export interface DirectorMotionProjectV1 {
+  schemaVersion: 1;
+  durationSeconds: number;
+  loop: boolean;
+  cameraTrack: DirectorCameraKeyframe[];
+  objectTracks: Record<string, DirectorObjectKeyframe[]>;
+  actionTracks: Record<string, DirectorActionKeyframe[]>;
+  customClips: DirectorActionClip[];
+}
+
 export interface DirectorStudioCameraSettings {
   fov: number;
   lensDistance: number;
@@ -541,6 +605,7 @@ export interface DirectorStudioProjectSnapshot {
   themeColor?: string;
   snapshotUrl?: string | null;
   snapshotHistory?: string[];
+  motionProject?: DirectorMotionProjectV1;
 }
 
 export interface DirectorStudioProjectRecord {
@@ -578,6 +643,8 @@ export interface BlueprintNodeData extends NodeDisplayData {
   snapshotUrl?: string | null;
   /** Recent Director Studio screenshots, stored oldest to newest. */
   snapshotHistory?: string[];
+  /** Optional V1 Director Studio timeline. Missing means a legacy static scene. */
+  motionProject?: DirectorMotionProjectV1;
   directorStudioProjects?: DirectorStudioProjectRecord[];
   activeDirectorStudioProjectId?: string | null;
   /** One-shot UI flag used by Director Studio shortcuts. Cleared after the

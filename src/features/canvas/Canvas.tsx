@@ -1106,6 +1106,7 @@ export function Canvas() {
   const addEdge = useCanvasStore((state) => state.addEdge);
   const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
   const selectedNodeId = useCanvasStore((state) => state.selectedNodeId);
+  const activeDirectorStudioNodeId = useCanvasStore((state) => state.activeDirectorStudioNodeId);
   const deleteEdge = useCanvasStore((state) => state.deleteEdge);
   const deleteNode = useCanvasStore((state) => state.deleteNode);
   const deleteNodes = useCanvasStore((state) => state.deleteNodes);
@@ -4000,7 +4001,7 @@ export function Canvas() {
         multiSelectionKeyCode={['Control', 'Meta']}
         selectionKeyCode={['Control', 'Meta']}
         deleteKeyCode={null}
-        onlyRenderVisibleElements
+        onlyRenderVisibleElements={!activeDirectorStudioNodeId}
         zoomOnDoubleClick={false}
         proOptions={{ hideAttribution: true }}
         className="canvas-flow"

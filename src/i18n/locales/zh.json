@@ -457,6 +457,52 @@
       "enter": "进入导演台"
     },
     "resolutionNote": "当前版本按选中画幅导出截图；1440p 与 4K 会基于当前视口放大输出。",
+    "motion": {
+      "timeline": {
+        "title": "时间轴", "camera": "摄影机", "actionTrack": "{{name}} · 动作", "tracks": "轨道",
+        "play": "播放", "pause": "暂停", "goToStart": "回到开头", "loop": "循环播放",
+        "currentTime": "当前时间", "duration": "总时长", "routePreview": "看路线", "shotPreview": "看成片",
+        "showRoutes": "显示运动路线", "hideRoutes": "隐藏运动路线", "addKeyframe": "添加关键帧"
+      },
+      "inspector": {
+        "title": "运动参数", "empty": "选中关键帧后可编辑。", "time": "时间", "easing": "插值",
+        "linear": "线性", "smooth": "平滑", "fov": "视场角", "orientToPath": "面向行进方向",
+        "duplicate": "复制", "delete": "删除关键帧"
+      },
+      "library": {
+        "title": "动作库", "poses": "静态姿势", "actions": "可播放动作", "clips": "自定义动作",
+        "custom": "自定义", "selectPerson": "请先选择一个人物。", "clipNamePlaceholder": "动作名称",
+        "saveClip": "轨道存为动作", "noClips": "暂无自定义动作", "keyframes": "个关键帧",
+        "apply": "应用动作", "rename": "重命名", "duplicate": "复制动作", "loop": "循环动作",
+        "delete": "删除动作", "timeAt": "应用到 {{time}}秒", "untitledClip": "未命名动作"
+      },
+      "pilot": {
+        "enter": "掌镜", "exit": "退出掌镜", "active": "掌镜模式", "noTarget": "未锁定目标"
+      },
+      "cameraPresets": {
+        "title": "运镜模板", "cinematicPush": "电影慢推", "characterFollow": "人物跟拍",
+        "fastChase": "快速追拍", "productOrbit": "产品环绕", "craneRise": "摇臂升起", "lateralDolly": "横向移镜"
+      },
+      "export": {
+        "title": "参考视频", "needsCamera": "至少添加两个摄影机关键帧才能导出。",
+        "resolution": "分辨率", "fps": "帧率", "duration": "时长", "format": "格式", "unsupported": "不可用",
+        "recording": "正在录制纯净场景", "remaining": "预计剩余 {{seconds}}秒", "complete": "{{format}} 录制完成",
+        "start": "开始录制", "cancel": "取消录制", "save": "保存到磁盘", "addToCanvas": "添加到画布",
+        "failed": "参考视频录制失败。", "sceneUnavailable": "3D 场景尚未准备好。",
+        "canvasNodeName": "导演台参考视频", "addToCanvasFailed": "录制视频添加到画布失败。"
+      },
+      "actions": {
+        "walk": "行走", "run": "奔跑", "squatRise": "蹲起", "stepOver": "跨步", "jump": "跳跃", "wave": "挥手"
+      },
+      "poses": {
+        "standNeutral": "自然站立", "standAttention": "立正", "leanForward": "身体前倾", "leanBack": "身体后仰",
+        "handsOnHips": "双手叉腰", "armsCrossed": "双臂交叉", "sitUpright": "端坐", "sitRelaxed": "放松坐姿",
+        "squatLow": "低蹲", "kneelOne": "单膝跪地", "kneelTwo": "双膝跪地", "lieBack": "仰躺",
+        "walkStride": "行走跨步", "runStride": "奔跑跨步", "pointForward": "向前指", "reachUp": "向上伸手",
+        "wave": "挥手", "lookUp": "抬头", "lookDown": "低头", "lookLeft": "看向左侧", "lookRight": "看向右侧",
+        "talkGesture": "对话手势", "observe": "观察", "jumpApex": "跳跃顶点"
+      }
+    },
     "prompt": {
       "title": "提示词草稿",
       "placeholder": "写入整体画面、风格、情绪和导演意图，会与空间布局、元素动作、关联图一起送入 AI 图片节点。",

@@ -42,6 +42,7 @@ import {
 import { EXPORT_RESULT_DISPLAY_NAME } from '@/features/canvas/domain/nodeDisplay';
 import { nodeCatalog } from '@/features/canvas/application/nodeCatalog';
 import { canvasNodeFactory } from '@/features/canvas/application/canvasServices';
+import { normalizeDirectorMotionProject } from '@/features/canvas/application/directorMotion';
 import { usePanelStateStore } from '@/stores/panelStateStore';
 import {
   ensureAtLeastOneMinEdge,
@@ -134,6 +135,7 @@ interface CanvasState {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
   selectedNodeId: string | null;
+  activeDirectorStudioNodeId: string | null;
   activeToolDialog: ActiveToolDialog | null;
   history: CanvasHistoryState;
   dragHistorySnapshot: CanvasHistorySnapshot | null;
@@ -221,6 +223,7 @@ interface CanvasState {
   ungroupNode: (groupNodeId: string) => boolean;
   deleteEdge: (edgeId: string) => void;
   setSelectedNode: (nodeId: string | null) => void;
+  setActiveDirectorStudioNode: (nodeId: string | null) => void;
 
   openToolDialog: (dialog: ActiveToolDialog) => void;
   closeToolDialog: () => void;
@@ -513,6 +516,9 @@ function normalizeDirectorSnapshot(
     themeColor: normalizeOptionalString(record?.themeColor),
     snapshotUrl: normalizeNullableString(record?.snapshotUrl),
     snapshotHistory: normalizeStringArray(record?.snapshotHistory),
+    motionProject: record?.motionProject === undefined
+      ? undefined
+      : normalizeDirectorMotionProject(record.motionProject),
   };
 }
 
@@ -586,6 +592,9 @@ function normalizeBlueprintNodeData(data: CanvasNodeData, fallback: BlueprintNod
     themeColor: normalizeOptionalString(record.themeColor),
     snapshotUrl: normalizeNullableString(record.snapshotUrl),
     snapshotHistory: normalizeStringArray(record.snapshotHistory),
+    motionProject: record.motionProject === undefined
+      ? undefined
+      : normalizeDirectorMotionProject(record.motionProject),
     directorStudioProjects: projects,
     activeDirectorStudioProjectId:
       activeDirectorStudioProjectId && projects.some((project) => project.id === activeDirectorStudioProjectId)
@@ -1028,6 +1037,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
+  activeDirectorStudioNodeId: null,
   activeToolDialog: null,
   history: { past: [], future: [] },
   dragHistorySnapshot: null,
@@ -1167,6 +1177,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       nodes: normalizedNodes,
       edges: normalizedEdges,
       selectedNodeId: null,
+      activeDirectorStudioNodeId: null,
       activeToolDialog: null,
       history: normalizeHistory(history),
       dragHistorySnapshot: null,
@@ -2220,6 +2231,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set({ selectedNodeId: nodeId });
   },
 
+  setActiveDirectorStudioNode: (nodeId) => {
+    set({ activeDirectorStudioNodeId: nodeId });
+  },
+
   openToolDialog: (dialog) => {
     set({ activeToolDialog: dialog });
   },
@@ -2286,6 +2301,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         nodes: [],
         edges: [],
         selectedNodeId: null,
+        activeDirectorStudioNodeId: null,
         activeToolDialog: null,
         history: {
           past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),

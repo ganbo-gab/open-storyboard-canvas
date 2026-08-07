@@ -10,12 +10,17 @@ import {
   useSettingsStore,
 } from '@/stores/settingsStore';
 import type {
+  BlueprintActionPose,
+  BlueprintBodyControls,
   BlueprintItem,
   DirectorStudioGridSettings,
   DirectorStudioLightingSettings,
   DirectorStudioTransformMode,
   DirectorStudioViewSettings,
+  DirectorMotionProjectV1,
+  DirectorMotionVector3,
 } from '@/features/canvas/domain/canvasNodes';
+import { DIRECTOR_STATIC_POSE_MAP, type SampledDirectorMotionFrame } from '@/features/canvas/application/directorMotion';
 import type { BlueprintReferenceImage } from '@/features/canvas/application/blueprintPrompt';
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
 import { BLUEPRINT_SPRITE_PRESETS } from './blueprintPresets';
@@ -67,6 +72,27 @@ export interface BlueprintSceneHandle {
   fitCamera: () => void;
   focusItem: (itemId: string) => void;
   getSuggestedInsertPosition: () => { x: number; y: number; z: number };
+  getCameraSnapshot: () => DirectorSceneCameraSnapshot | null;
+  getCanvas: () => HTMLCanvasElement | null;
+  applyMotionFrame: (frame: SampledDirectorMotionFrame, previewMode?: 'route' | 'shot') => void;
+  renderFrame: () => void;
+  setExportMode: (enabled: boolean, size?: { width: number; height: number }) => void;
+  enterPilot: () => void;
+  exitPilot: () => void;
+}
+
+export interface DirectorSceneCameraSnapshot {
+  position: DirectorMotionVector3;
+  target: DirectorMotionVector3;
+  fov: number;
+  trackTargetId?: string | null;
+  trackTargetBodyPart?: string | null;
+}
+
+export interface DirectorMotionRouteSelection {
+  kind: 'camera' | 'object';
+  trackId: string;
+  keyframeId: string;
 }
 
 export interface BlueprintSceneExportOptions {
@@ -110,6 +136,21 @@ export interface BlueprintSceneProps {
   viewSettings?: DirectorStudioViewSettings;
   keyboardShortcutsEnabled?: boolean;
   fullBleed?: boolean;
+  motionProject?: DirectorMotionProjectV1;
+  motionRoutesVisible?: boolean;
+  motionRouteSelection?: DirectorMotionRouteSelection | null;
+  onMotionRoutePointSelect?: (selection: DirectorMotionRouteSelection, time: number) => void;
+  onMotionRoutePointMove?: (selection: DirectorMotionRouteSelection, position: DirectorMotionVector3) => void;
+  onMotionRoutePointInsert?: (
+    kind: DirectorMotionRouteSelection['kind'],
+    trackId: string,
+    time: number,
+    position: DirectorMotionVector3,
+  ) => void;
+  pilotActive?: boolean;
+  onPilotActiveChange?: (active: boolean) => void;
+  onPilotRecordCamera?: (snapshot: DirectorSceneCameraSnapshot) => void;
+  onPilotTargetChange?: (itemId: string | null) => void;
 }
 
 function getItemHeight(item: BlueprintItem): number {
@@ -134,6 +175,64 @@ function normalizeItemScale(item: BlueprintItem): { x: number; y: number; z: num
     y: Number.isFinite(item.scale3d?.y) ? THREE.MathUtils.clamp(item.scale3d!.y, 0.1, 5) : 1,
     z: Number.isFinite(item.scale3d?.z) ? THREE.MathUtils.clamp(item.scale3d!.z, 0.1, 5) : 1,
   };
+}
+
+function getItemMeshCacheKey(
+  item: BlueprintItem,
+  gltfReady: boolean,
+  bodyControls: BlueprintBodyControls | undefined = item.bodyControls,
+): string {
+  const useGltf = item.category === 'person'
+    && (globalThis as any).__BLUEPRINT_USE_GLTF__ === true
+    && gltfReady;
+  const personVariant = item.category === 'person' ? (useGltf ? 'gltf' : 'proc') : 'na';
+  const bodyControlsKey = item.category === 'person' ? JSON.stringify(bodyControls ?? {}) : '';
+  const roleKey = item.category === 'person' ? (item.directorStudioRole ?? 'main') : 'na';
+  return `${item.category}|${item.presetId ?? ''}|${item.action ?? ''}|${personVariant}|${roleKey}|${bodyControlsKey}`;
+}
+
+function createBlueprintItemMesh(
+  item: BlueprintItem,
+  gltfReady: boolean,
+  customActionPoses: Record<string, BlueprintActionPose> | undefined,
+  bodyControls: BlueprintBodyControls | undefined = item.bodyControls,
+): any {
+  const color = new THREE.Color(item.color);
+  const heightM = getItemHeight(item);
+  let mesh: any;
+  if (item.category === 'person') {
+    const useGltf = (globalThis as any).__BLUEPRINT_USE_GLTF__ === true && gltfReady;
+    const gltf = useGltf ? createGltfPersonMesh(color, heightM) : null;
+    if (gltf) {
+      mesh = gltf;
+      applyGltfPersonAction(mesh, item.action, {
+        customPoses: { ...DIRECTOR_STATIC_POSE_MAP, ...(customActionPoses ?? {}) },
+      });
+    } else {
+      mesh = createPersonMeshGroup(color, heightM, item.presetId, bodyControls, {
+        role: item.directorStudioRole,
+      });
+      applyPersonActionTransform(mesh, item.action, {
+        customPoses: { ...DIRECTOR_STATIC_POSE_MAP, ...(customActionPoses ?? {}) },
+      });
+    }
+  } else {
+    mesh = createObjectMeshGroup(color, heightM, item.presetId);
+  }
+  mesh.traverse((object: any) => { if (object.isMesh) object.name = `item:${item.id}`; });
+  mesh.userData.itemId = item.id;
+  mesh.userData.cacheKey = getItemMeshCacheKey(item, gltfReady, bodyControls);
+  mesh.userData.baseRotation = {
+    x: mesh.rotation.x,
+    y: mesh.rotation.y,
+    z: mesh.rotation.z,
+  };
+  mesh.userData.baseScale = {
+    x: mesh.scale.x,
+    y: mesh.scale.y,
+    z: mesh.scale.z,
+  };
+  return mesh;
 }
 
 function toThreeTransformMode(mode: DirectorStudioTransformMode): 'translate' | 'rotate' | 'scale' {
@@ -252,6 +351,11 @@ function clampPanoramaCameraState(state: {
   state.distance = THREE.MathUtils.clamp(state.distance, 2, PANORAMA_MAX_CAMERA_DISTANCE);
   const maxTargetRadius = Math.max(0, PANORAMA_CAMERA_RADIUS_LIMIT - state.distance);
   clampVectorToRadiusInPlace(state.target, maxTargetRadius);
+}
+
+function clampPanoramaCameraPoints(position: any, target: any): void {
+  clampVectorToRadiusInPlace(position, PANORAMA_CAMERA_RADIUS_LIMIT);
+  clampVectorToRadiusInPlace(target, PANORAMA_CAMERA_RADIUS_LIMIT);
 }
 
 function isPedestrianItem(item: BlueprintItem): boolean {
@@ -420,6 +524,16 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   viewSettings: rawViewSettings = DEFAULT_VIEW_SETTINGS,
   keyboardShortcutsEnabled = true,
   fullBleed = false,
+  motionProject,
+  motionRoutesVisible = true,
+  motionRouteSelection = null,
+  onMotionRoutePointSelect,
+  onMotionRoutePointMove,
+  onMotionRoutePointInsert,
+  pilotActive = false,
+  onPilotActiveChange,
+  onPilotRecordCamera,
+  onPilotTargetChange,
 }, ref) {
   const { t } = useTranslation();
   const panoramaControlSensitivity = useSettingsStore((s) => s.panoramaControlSensitivity);
@@ -446,6 +560,21 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   const floorRef = useRef<any>(null);
   const ambientLightRef = useRef<any>(null);
   const mainLightRef = useRef<any>(null);
+  const motionRoutesRef = useRef<any>(null);
+  const exportModeRef = useRef(false);
+  const exportSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const exportVisibilityRef = useRef<{
+    grid: boolean;
+    floor: boolean;
+    selectionRing: boolean;
+    hoverRing: boolean;
+    transformHelper: boolean;
+    motionRoutes: boolean;
+  } | null>(null);
+  const motionPreviewModeRef = useRef<'route' | 'shot'>('route');
+  const routePreviewCameraRef = useRef<DirectorSceneCameraSnapshot | null>(null);
+  const pilotStateRef = useRef({ active: false, yaw: 0, pitch: 0, position: new THREE.Vector3() });
+  const cameraSnapshotTargetRef = useRef<DirectorSceneCameraSnapshot | null>(null);
   const transformControlsRef = useRef<TransformControls | null>(null);
   const transformHelperRef = useRef<any>(null);
   const transformDraggingRef = useRef(false);
@@ -547,6 +676,27 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       target.z + s.distance * Math.cos(pitch) * Math.cos(yaw),
     );
     camera.lookAt(target);
+  }, []);
+
+  const getCameraSnapshot = useCallback((): DirectorSceneCameraSnapshot | null => {
+    const camera = cameraRef.current;
+    if (!camera) return null;
+    const position = camera.position.clone();
+    const target = camStateRef.current.target.clone();
+    if (modeRef.current === 'panorama') {
+      clampPanoramaCameraPoints(position, target);
+      camera.position.copy(position);
+      camStateRef.current.target.copy(target);
+    }
+    const snapshot = {
+      position: { x: position.x, y: position.y, z: position.z },
+      target: { x: target.x, y: target.y, z: target.z },
+      fov: camera.fov,
+      trackTargetId: cameraSnapshotTargetRef.current?.trackTargetId ?? null,
+      trackTargetBodyPart: cameraSnapshotTargetRef.current?.trackTargetBodyPart ?? null,
+    } satisfies DirectorSceneCameraSnapshot;
+    cameraSnapshotTargetRef.current = snapshot;
+    return snapshot;
   }, []);
 
   const handleResetCamera = useCallback(() => {
@@ -907,58 +1057,19 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     items.forEach((it) => {
       const p = ensurePos3d(it);
       let mesh = meshByIdRef.current.get(it.id) as any | undefined;
-      const heightM = getItemHeight(it);
       // Cache key includes preset + action so any of those changing forces
       // a rebuild (e.g. switching from "站立" to "蹲下" needs new transform).
       // The `gltf` segment also flips when the GLTF template finishes
       // loading so existing procedural-fallback person meshes are rebuilt
       // with the higher-fidelity model.
-      const personVariant = it.category === 'person' ? (gltfReady ? 'gltf' : 'proc') : 'na';
-      const bodyControlsKey = it.category === 'person' ? JSON.stringify(it.bodyControls ?? {}) : '';
-      const roleKey = it.category === 'person' ? (it.directorStudioRole ?? 'main') : 'na';
-      const cacheKey = `${it.category}|${it.presetId ?? ''}|${it.action ?? ''}|${personVariant}|${roleKey}|${bodyControlsKey}`;
+      const cacheKey = getItemMeshCacheKey(it, gltfReady);
       if (mesh && (mesh as any).userData.cacheKey !== cacheKey) {
         group.remove(mesh);
         meshByIdRef.current.delete(it.id);
         mesh = undefined;
       }
       if (!mesh) {
-        const col = new THREE.Color(it.color);
-        if (it.category === 'person') {
-          // Procedural humanoid is the default — its skeleton matches the
-          // BlueprintActionPose schema 1:1, so keyword presets and AI-imported
-          // poses behave consistently. The GLTF factory is kept around but
-          // gated behind an explicit opt-in (set window.__BLUEPRINT_USE_GLTF__
-          // = true in devtools to try it) until we have a model whose bind
-          // pose and Mixamo bone-local frames don't fight the schema.
-          const tryGltf = (globalThis as any).__BLUEPRINT_USE_GLTF__ === true;
-          const gltf = tryGltf ? createGltfPersonMesh(col, heightM) : null;
-          if (gltf) {
-            mesh = gltf;
-            applyGltfPersonAction(mesh, it.action, { customPoses: customActionPoses });
-          } else {
-            mesh = createPersonMeshGroup(col, heightM, it.presetId, it.bodyControls, {
-              role: it.directorStudioRole,
-            });
-            applyPersonActionTransform(mesh, it.action, { customPoses: customActionPoses });
-          }
-        } else {
-          mesh = createObjectMeshGroup(col, heightM, it.presetId);
-        }
-        // Tag every child so the raycaster can find the parent itemId.
-        (mesh as any).traverse((o: any) => { if (o.isMesh) o.name = `item:${it.id}`; });
-        (mesh as any).userData.itemId = it.id;
-        (mesh as any).userData.cacheKey = cacheKey;
-        (mesh as any).userData.baseRotation = {
-          x: mesh.rotation.x,
-          y: mesh.rotation.y,
-          z: mesh.rotation.z,
-        };
-        (mesh as any).userData.baseScale = {
-          x: mesh.scale.x,
-          y: mesh.scale.y,
-          z: mesh.scale.z,
-        };
+        mesh = createBlueprintItemMesh(it, gltfReady, customActionPoses);
         group.add(mesh);
         meshByIdRef.current.set(it.id, mesh);
       } else {
@@ -1004,6 +1115,105 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     });
     requestRender();
   }, [items, customActionPoses, gltfReady, requestRender]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const previous = motionRoutesRef.current;
+    if (previous) {
+      previous.traverse((object: any) => {
+        const mesh = object as any;
+        if (mesh.geometry) mesh.geometry.dispose();
+        const material = mesh.material as any;
+        if (Array.isArray(material)) material.forEach((entry: any) => entry.dispose());
+        else material?.dispose();
+      });
+      scene.remove(previous);
+    }
+    const routes = new THREE.Group();
+    routes.name = '__directorMotionRoutes';
+    const addRoute = (
+      kind: DirectorMotionRouteSelection['kind'],
+      trackId: string,
+      keyframes: Array<{ id: string; time: number; position: DirectorMotionVector3 }>,
+      color: number,
+      dashed = false,
+    ) => {
+      const points = keyframes.map((keyframe) => new THREE.Vector3(
+        keyframe.position.x,
+        keyframe.position.y + 0.03,
+        keyframe.position.z,
+      ));
+      if (points.length >= 2) {
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const material = dashed
+          ? new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.7, dashSize: 0.18, gapSize: 0.12 })
+          : new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 });
+        const line = new THREE.Line(geometry, material);
+        line.userData.directorRouteTrack = { kind, trackId, keyframes };
+        if (dashed) line.computeLineDistances();
+        routes.add(line);
+      }
+      keyframes.forEach((keyframe, index) => {
+        const marker = new THREE.Mesh(
+          new THREE.SphereGeometry(0.1, 12, 8),
+          new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.9,
+            depthTest: false,
+          }),
+        );
+        marker.position.copy(points[index]);
+        marker.renderOrder = 20;
+        marker.userData.directorRoutePoint = {
+          kind,
+          trackId,
+          keyframeId: keyframe.id,
+          time: keyframe.time,
+          position: keyframe.position,
+          color,
+        };
+        routes.add(marker);
+      });
+    };
+    Object.entries(motionProject?.objectTracks ?? {}).forEach(([itemId, track]) => {
+      addRoute('object', itemId, track, itemsRef.current.find((item) => item.id === itemId)?.category === 'person' ? 0xf59e0b : 0x60a5fa, true);
+    });
+    addRoute('camera', 'camera', motionProject?.cameraTrack ?? [], 0x67e8f9);
+    routes.visible = motionRoutesVisible && !exportModeRef.current;
+    scene.add(routes);
+    motionRoutesRef.current = routes;
+    requestRender();
+    return () => {
+      routes.traverse((object: any) => {
+        const mesh = object as any;
+        if (mesh.geometry) mesh.geometry.dispose();
+        const material = mesh.material as any;
+        if (Array.isArray(material)) material.forEach((entry: any) => entry.dispose());
+        else material?.dispose();
+      });
+      scene.remove(routes);
+      if (motionRoutesRef.current === routes) motionRoutesRef.current = null;
+    };
+  }, [motionProject, motionRoutesVisible, requestRender]);
+
+  useEffect(() => {
+    const routes = motionRoutesRef.current;
+    if (!routes) return;
+    routes.traverse((object: any) => {
+      const point = object.userData?.directorRoutePoint;
+      if (!point || !object.material) return;
+      const selected = motionRouteSelection !== null
+        && motionRouteSelection.kind === point.kind
+        && motionRouteSelection.trackId === point.trackId
+        && motionRouteSelection.keyframeId === point.keyframeId;
+      object.scale.setScalar(selected ? 1.4 : 1);
+      object.material.color.setHex(selected ? 0xffffff : point.color);
+      object.material.opacity = selected ? 1 : 0.9;
+    });
+    requestRender();
+  }, [motionRouteSelection, requestRender]);
 
   const commitTransformFromMesh = useCallback((itemId: string) => {
     const mesh = meshByIdRef.current.get(itemId);
@@ -1199,14 +1409,30 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   // Pointer interactions
   // ---------------------------------------------------------------------
   const interactRef = useRef<{
-    mode: 'idle' | 'orbit' | 'pan' | 'drag';
+    mode: 'idle' | 'orbit' | 'pan' | 'drag' | 'routeDrag';
     dragItemId: string | null;
     dragLastPos3d: { x: number; y: number; z: number } | null;
+    routeSelection: DirectorMotionRouteSelection | null;
+    routeDragObject: any | null;
+    routePlaneY: number;
+    routeLastPosition: DirectorMotionVector3 | null;
     lastX: number;
     lastY: number;
     pointerId: number | null;
     moved: boolean;
-  }>({ mode: 'idle', dragItemId: null, dragLastPos3d: null, lastX: 0, lastY: 0, pointerId: null, moved: false });
+  }>({
+    mode: 'idle',
+    dragItemId: null,
+    dragLastPos3d: null,
+    routeSelection: null,
+    routeDragObject: null,
+    routePlaneY: 0,
+    routeLastPosition: null,
+    lastX: 0,
+    lastY: 0,
+    pointerId: null,
+    moved: false,
+  });
 
   const getLocalXY = (e: PointerEvent | React.PointerEvent | React.MouseEvent) => {
     const rect = rendererRef.current!.domElement.getBoundingClientRect();
@@ -1230,6 +1456,74 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     return Boolean(controls.axis);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveWidth, effectiveHeight, transformMode]);
+
+  const raycastMotionRoutePoint = useCallback((lx: number, ly: number) => {
+    const camera = cameraRef.current;
+    const routes = motionRoutesRef.current;
+    if (!camera || !routes?.visible || exportModeRef.current) return null;
+    const rc = new THREE.Raycaster();
+    const n = ndc(lx, ly);
+    rc.setFromCamera(new THREE.Vector2(n.x, n.y), camera);
+    const hit = rc.intersectObjects(routes.children, true)
+      .find((candidate: any) => candidate.object.userData?.directorRoutePoint);
+    if (!hit) return null;
+    const data = (hit.object as any).userData.directorRoutePoint as {
+      kind: DirectorMotionRouteSelection['kind'];
+      trackId: string;
+      keyframeId: string;
+      time: number;
+      position: DirectorMotionVector3;
+    };
+    return {
+      selection: { kind: data.kind, trackId: data.trackId, keyframeId: data.keyframeId },
+      time: data.time,
+      position: data.position,
+      object: hit.object as any,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveHeight, effectiveWidth]);
+
+  const raycastMotionRouteSegment = useCallback((lx: number, ly: number) => {
+    const camera = cameraRef.current;
+    const routes = motionRoutesRef.current;
+    if (!camera || !routes?.visible || exportModeRef.current) return null;
+    const rc = new THREE.Raycaster();
+    rc.params.Line = { threshold: 0.28 };
+    const n = ndc(lx, ly);
+    rc.setFromCamera(new THREE.Vector2(n.x, n.y), camera);
+    const hit = rc.intersectObjects(routes.children, false)
+      .find((candidate: any) => candidate.object.userData?.directorRouteTrack);
+    if (!hit) return null;
+    const data = (hit.object as any).userData.directorRouteTrack as {
+      kind: DirectorMotionRouteSelection['kind'];
+      trackId: string;
+      keyframes: Array<{ time: number; position: DirectorMotionVector3 }>;
+    };
+    let best: { distance: number; time: number; position: DirectorMotionVector3 } | null = null;
+    for (let index = 0; index < data.keyframes.length - 1; index += 1) {
+      const from = data.keyframes[index];
+      const to = data.keyframes[index + 1];
+      const line = new THREE.Line3(
+        new THREE.Vector3(from.position.x, from.position.y + 0.03, from.position.z),
+        new THREE.Vector3(to.position.x, to.position.y + 0.03, to.position.z),
+      );
+      const amount = line.closestPointToPointParameter((hit as any).point, true);
+      const closest = line.at(amount, new THREE.Vector3());
+      const distance = closest.distanceTo((hit as any).point);
+      if (best && distance >= best.distance) continue;
+      best = {
+        distance,
+        time: THREE.MathUtils.lerp(from.time, to.time, amount),
+        position: {
+          x: THREE.MathUtils.lerp(from.position.x, to.position.x, amount),
+          y: THREE.MathUtils.lerp(from.position.y, to.position.y, amount),
+          z: THREE.MathUtils.lerp(from.position.z, to.position.z, amount),
+        },
+      };
+    }
+    return best ? { ...best, kind: data.kind, trackId: data.trackId } : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveHeight, effectiveWidth]);
 
   const raycastItem = useCallback((lx: number, ly: number): string | null => {
     const camera = cameraRef.current!;
@@ -1298,13 +1592,142 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     };
   }, [effectiveHeight, effectiveWidth, raycastGround]);
 
+  const applyPilotCamera = useCallback(() => {
+    const camera = cameraRef.current;
+    if (!camera || !pilotStateRef.current.active) return;
+    const state = pilotStateRef.current;
+    const direction = new THREE.Vector3(
+      Math.cos(state.pitch) * Math.sin(state.yaw),
+      Math.sin(state.pitch),
+      Math.cos(state.pitch) * Math.cos(state.yaw),
+    ).normalize();
+    if (modeRef.current === 'panorama') {
+      clampVectorToRadiusInPlace(state.position, PANORAMA_CAMERA_RADIUS_LIMIT);
+    }
+    const target = state.position.clone().addScaledVector(direction, 3);
+    if (modeRef.current === 'panorama') {
+      clampPanoramaCameraPoints(state.position, target);
+    }
+    camera.position.copy(state.position);
+    camera.lookAt(target);
+    camStateRef.current.target.copy(target);
+    camStateRef.current.distance = Math.max(0.01, state.position.distanceTo(target));
+    cameraSnapshotTargetRef.current = {
+      position: { x: state.position.x, y: state.position.y, z: state.position.z },
+      target: { x: target.x, y: target.y, z: target.z },
+      fov: camera.fov,
+      trackTargetId: cameraSnapshotTargetRef.current?.trackTargetId ?? null,
+      trackTargetBodyPart: cameraSnapshotTargetRef.current?.trackTargetBodyPart ?? null,
+    };
+    requestRender();
+  }, [requestRender]);
+
+  useEffect(() => {
+    if (!pilotActive) {
+      pilotStateRef.current.active = false;
+      return;
+    }
+    const canvas = rendererRef.current?.domElement as HTMLCanvasElement | undefined;
+    if (!canvas) return;
+    pilotStateRef.current.active = true;
+    const keys = new Set<string>();
+    let moveRaf: number | null = null;
+    const clear = () => {
+      keys.clear();
+      if (moveRaf !== null) cancelAnimationFrame(moveRaf);
+      moveRaf = null;
+    };
+    const step = () => {
+      if (!pilotStateRef.current.active || !cameraRef.current) { moveRaf = null; return; }
+      const state = pilotStateRef.current;
+      const speed = keys.has('shift') ? 0.16 : 0.06;
+      const forward = new THREE.Vector3(Math.sin(state.yaw), 0, Math.cos(state.yaw));
+      const right = new THREE.Vector3(forward.z, 0, -forward.x);
+      if (keys.has('w') || keys.has('arrowup')) state.position.addScaledVector(forward, speed);
+      if (keys.has('s') || keys.has('arrowdown')) state.position.addScaledVector(forward, -speed);
+      if (keys.has('a') || keys.has('arrowleft')) state.position.addScaledVector(right, -speed);
+      if (keys.has('d') || keys.has('arrowright')) state.position.addScaledVector(right, speed);
+      if (keys.has('e')) state.position.y += speed;
+      if (keys.has('q')) state.position.y -= speed;
+      applyPilotCamera();
+      moveRaf = requestAnimationFrame(step);
+    };
+    const ensureMove = () => {
+      if (moveRaf === null) moveRaf = requestAnimationFrame(step);
+    };
+    const onKeyDownPilot = (event: KeyboardEvent) => {
+      if (isEditableKeyboardTarget(event.target)) return;
+      const key = event.key.toLowerCase();
+      if (key === 'escape') {
+        event.preventDefault();
+        pilotStateRef.current.active = false;
+        if (document.pointerLockElement) document.exitPointerLock?.();
+        onPilotActiveChange?.(false);
+        return;
+      }
+      if (key === 'enter') {
+        event.preventDefault();
+        const camera = getCameraSnapshot();
+        if (camera) onPilotRecordCamera?.(camera);
+        return;
+      }
+      if (key === 'f') {
+        event.preventDefault();
+        const target = raycastItem(effectiveWidth / 2, effectiveHeight / 2);
+        onPilotTargetChange?.(target);
+        cameraSnapshotTargetRef.current = {
+          ...(cameraSnapshotTargetRef.current ?? getCameraSnapshot()!),
+          trackTargetId: target,
+        };
+        return;
+      }
+      if (['w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift'].includes(key)) {
+        keys.add(key);
+        event.preventDefault();
+        ensureMove();
+      }
+    };
+    const onKeyUpPilot = (event: KeyboardEvent) => keys.delete(event.key.toLowerCase());
+    const onMouseMovePilot = (event: MouseEvent) => {
+      if (!pilotStateRef.current.active) return;
+      pilotStateRef.current.yaw -= event.movementX * 0.0024;
+      pilotStateRef.current.pitch = THREE.MathUtils.clamp(pilotStateRef.current.pitch - event.movementY * 0.0024, -1.35, 1.35);
+      applyPilotCamera();
+    };
+    const onPointerLockChange = () => {
+      if (document.pointerLockElement !== canvas && pilotStateRef.current.active) {
+        pilotStateRef.current.active = false;
+        onPilotActiveChange?.(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDownPilot, true);
+    window.addEventListener('keyup', onKeyUpPilot, true);
+    window.addEventListener('mousemove', onMouseMovePilot);
+    document.addEventListener('pointerlockchange', onPointerLockChange);
+    return () => {
+      window.removeEventListener('keydown', onKeyDownPilot, true);
+      window.removeEventListener('keyup', onKeyUpPilot, true);
+      window.removeEventListener('mousemove', onMouseMovePilot);
+      document.removeEventListener('pointerlockchange', onPointerLockChange);
+      clear();
+    };
+  }, [applyPilotCamera, effectiveHeight, effectiveWidth, getCameraSnapshot, onPilotActiveChange, onPilotRecordCamera, onPilotTargetChange, pilotActive, raycastItem]);
+
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (!rendererRef.current) return;
+    if (pilotStateRef.current.active) {
+      (rendererRef.current.domElement as HTMLCanvasElement).requestPointerLock?.();
+      e.preventDefault();
+      return;
+    }
     const local = getLocalXY(e);
     if (isTransformControlPointerActive(local.x, local.y, e.button)) {
       interactRef.current.mode = 'idle';
       interactRef.current.dragItemId = null;
       interactRef.current.dragLastPos3d = null;
+      interactRef.current.routeSelection = null;
+      interactRef.current.routeDragObject = null;
+      interactRef.current.routeLastPosition = null;
       return;
     }
     const host = hostElRef.current;
@@ -1317,6 +1740,19 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     interactRef.current.moved = false;
 
     if (e.button === 0) {
+      const routePoint = pointerModeRef.current !== 'position'
+        ? raycastMotionRoutePoint(local.x, local.y)
+        : null;
+      if (routePoint) {
+        interactRef.current.mode = 'routeDrag';
+        interactRef.current.routeSelection = routePoint.selection;
+        interactRef.current.routeDragObject = routePoint.object;
+        interactRef.current.routePlaneY = routePoint.position.y;
+        interactRef.current.routeLastPosition = null;
+        onMotionRoutePointSelect?.(routePoint.selection, routePoint.time);
+        e.preventDefault();
+        return;
+      }
       const itemId = raycastItem(local.x, local.y);
       if (itemId && pointerModeRef.current !== 'position') {
         interactRef.current.mode = 'drag';
@@ -1335,7 +1771,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       e.preventDefault();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTransformControlPointerActive, mode, raycastItem, onSelectedItemChange]);
+  }, [isTransformControlPointerActive, onMotionRoutePointSelect, onSelectedItemChange, raycastItem, raycastMotionRoutePoint]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const st = interactRef.current;
@@ -1344,7 +1780,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       setCanvasCursor('grabbing');
       return;
     }
-    if (st.mode === 'drag' || st.mode === 'orbit') {
+    if (st.mode === 'drag' || st.mode === 'routeDrag' || st.mode === 'orbit') {
       setCanvasCursor('grabbing');
     } else if (st.mode === 'pan') {
       setCanvasCursor('move');
@@ -1429,6 +1865,29 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
         st.dragLastPos3d = { x: nextPoint.x, y: nextPoint.y - poseYOffset, z: nextPoint.z };
         requestRender();
       }
+    } else if (st.mode === 'routeDrag' && st.routeSelection && st.routeDragObject) {
+      const point = raycastGround(local.x, local.y, st.routePlaneY);
+      if (point) {
+        if (modeRef.current === 'panorama') clampPanoramaPointAtFixedY(point);
+        const position = { x: point.x, y: point.y, z: point.z };
+        st.routeDragObject.position.set(position.x, position.y + 0.03, position.z);
+        const routeLine = motionRoutesRef.current?.children.find((child: any) => {
+          const track = child.userData?.directorRouteTrack;
+          return track?.kind === st.routeSelection?.kind && track?.trackId === st.routeSelection?.trackId;
+        });
+        const track = routeLine?.userData?.directorRouteTrack;
+        const pointIndex = track?.keyframes.findIndex((keyframe: { id: string }) => (
+          keyframe.id === st.routeSelection?.keyframeId
+        )) ?? -1;
+        const positions = routeLine?.geometry?.getAttribute('position');
+        if (pointIndex >= 0 && positions) {
+          positions.setXYZ(pointIndex, position.x, position.y + 0.03, position.z);
+          positions.needsUpdate = true;
+          routeLine.computeLineDistances?.();
+        }
+        st.routeLastPosition = position;
+        requestRender();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -1456,6 +1915,9 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
         return { ...it, pos3d: finalP, x: legacy.x, y: legacy.y };
       });
       onItemsChangeRef.current(next);
+    }
+    if (st.mode === 'routeDrag' && st.routeSelection && st.routeLastPosition) {
+      onMotionRoutePointMove?.(st.routeSelection, st.routeLastPosition);
     }
     // Move-XY mode: a click on the ground (no orbit drag) teleports the
     // currently-selected item to the clicked floor position.
@@ -1488,14 +1950,39 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     st.mode = 'idle';
     st.dragItemId = null;
     st.dragLastPos3d = null;
+    st.routeSelection = null;
+    st.routeDragObject = null;
+    st.routeLastPosition = null;
     st.pointerId = null;
     st.moved = false;
     setCanvasCursor(fullBleed ? 'grab' : 'default');
-  }, [fullBleed, onPointerModeChange, raycastGround, setCanvasCursor]);
+  }, [fullBleed, onMotionRoutePointMove, onPointerModeChange, raycastGround, setCanvasCursor]);
+
+  const handleDoubleClick = useCallback((event: React.MouseEvent) => {
+    if (pilotStateRef.current.active || pointerModeRef.current === 'position') return;
+    const local = getLocalXY(event);
+    if (raycastMotionRoutePoint(local.x, local.y)) return;
+    const segment = raycastMotionRouteSegment(local.x, local.y);
+    if (!segment) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onMotionRoutePointInsert?.(
+      segment.kind,
+      segment.trackId,
+      segment.time,
+      segment.position,
+    );
+  }, [onMotionRoutePointInsert, raycastMotionRoutePoint, raycastMotionRouteSegment]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (transformDraggingRef.current) return;
     e.preventDefault();
+    if (pilotStateRef.current.active && cameraRef.current) {
+      cameraRef.current.fov = THREE.MathUtils.clamp(cameraRef.current.fov + e.deltaY * 0.04, 10, 150);
+      cameraRef.current.updateProjectionMatrix();
+      requestRender();
+      return;
+    }
     if (!viewSettings.wheelZoomEnabled) return;
     const zoomsOut = viewSettings.reverseWheelZoom ? e.deltaY < 0 : e.deltaY > 0;
     const sensitivityMultiplier = mode === 'panorama' ? panoramaControlSensitivityMultiplier : 1;
@@ -1742,6 +2229,159 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     return canvas.toDataURL('image/png');
   }, [effectiveHeight, effectiveWidth]);
 
+  const renderFrame = useCallback(() => {
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    if (!renderer || !scene || !camera) return;
+    renderer.render(scene, camera);
+    updateOverlayLabelsRef.current();
+  }, []);
+
+  const getCanvas = useCallback(() => rendererRef.current?.domElement as HTMLCanvasElement | null, []);
+
+  const applyMotionFrame = useCallback((frame: SampledDirectorMotionFrame, previewMode: 'route' | 'shot' = 'shot') => {
+    const itemsById = new Map(itemsRef.current.map((item) => [item.id, item]));
+    Object.entries(frame.objects).forEach(([itemId, sampled]) => {
+      const item = itemsById.get(itemId);
+      let mesh = meshByIdRef.current.get(itemId);
+      if (!mesh || !item) return;
+      const sampledAction = frame.actions[itemId];
+      const pose = sampledAction?.pose;
+      if (item.category === 'person') {
+        const bodyControls = sampledAction?.bodyControls ?? item.bodyControls;
+        const cacheKey = getItemMeshCacheKey(item, gltfReady, bodyControls);
+        if (mesh.userData?.cacheKey !== cacheKey && itemsGroupRef.current) {
+          const previousMesh = mesh;
+          mesh = createBlueprintItemMesh(item, gltfReady, customActionPoses, bodyControls);
+          itemsGroupRef.current.remove(previousMesh);
+          itemsGroupRef.current.add(mesh);
+          meshByIdRef.current.set(itemId, mesh);
+          const transformControls = transformControlsRef.current;
+          if (transformControls && transformControls.object === previousMesh) {
+            transformControls.detach();
+            transformControls.attach(mesh);
+          }
+        }
+        const actionId = sampledAction?.poseId
+          ?? sampledAction?.actionId
+          ?? sampledAction?.clipId
+          ?? item.action;
+        const customPoses = {
+          ...DIRECTOR_STATIC_POSE_MAP,
+          ...(customActionPoses ?? {}),
+          ...(actionId && pose ? { [actionId]: pose } : {}),
+        };
+        if ((globalThis as any).__BLUEPRINT_USE_GLTF__ === true && gltfReady) applyGltfPersonAction(mesh, actionId, { customPoses });
+        else applyPersonActionTransform(mesh, actionId, { customPoses });
+      }
+      const poseYOffset = mesh.userData?.poseYOffset ?? 0;
+      const baseRotation = mesh.userData?.baseRotation ?? { x: 0, y: 0, z: 0 };
+      const baseScale = mesh.userData?.baseScale ?? { x: 1, y: 1, z: 1 };
+      mesh.position.set(sampled.position.x, sampled.position.y + poseYOffset, sampled.position.z);
+      mesh.rotation.set(baseRotation.x + sampled.rotation.x, baseRotation.y + sampled.rotation.y, baseRotation.z + sampled.rotation.z);
+      mesh.scale.set(baseScale.x * sampled.scale.x, baseScale.y * sampled.scale.y, baseScale.z * sampled.scale.z);
+    });
+    const camera = cameraRef.current;
+    if (camera && previewMode === 'route' && motionPreviewModeRef.current === 'shot' && routePreviewCameraRef.current) {
+      const routeCamera = routePreviewCameraRef.current;
+      camera.position.set(routeCamera.position.x, routeCamera.position.y, routeCamera.position.z);
+      camera.lookAt(routeCamera.target.x, routeCamera.target.y, routeCamera.target.z);
+      camera.fov = routeCamera.fov;
+      camera.updateProjectionMatrix();
+      camStateRef.current.target.set(routeCamera.target.x, routeCamera.target.y, routeCamera.target.z);
+      camStateRef.current.distance = camera.position.distanceTo(camStateRef.current.target);
+      cameraSnapshotTargetRef.current = routeCamera;
+    }
+    if (camera && previewMode === 'shot') {
+      if (motionPreviewModeRef.current === 'route') {
+        routePreviewCameraRef.current = {
+          position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+          target: {
+            x: camStateRef.current.target.x,
+            y: camStateRef.current.target.y,
+            z: camStateRef.current.target.z,
+          },
+          fov: camera.fov,
+          trackTargetId: null,
+          trackTargetBodyPart: null,
+        };
+      }
+      if (frame.camera) {
+        const position = new THREE.Vector3(frame.camera.position.x, frame.camera.position.y, frame.camera.position.z);
+        const target = new THREE.Vector3(frame.camera.target.x, frame.camera.target.y, frame.camera.target.z);
+        if (modeRef.current === 'panorama') clampPanoramaCameraPoints(position, target);
+        camera.position.copy(position);
+        camera.lookAt(target);
+        camera.fov = Math.max(10, Math.min(150, frame.camera.fov));
+        camera.updateProjectionMatrix();
+        camStateRef.current.target.copy(target);
+        camStateRef.current.distance = camera.position.distanceTo(camStateRef.current.target);
+        cameraSnapshotTargetRef.current = frame.camera;
+      }
+    }
+    motionPreviewModeRef.current = previewMode;
+    requestRender();
+  }, [customActionPoses, gltfReady, requestRender]);
+
+  const setExportMode = useCallback((enabled: boolean, size?: { width: number; height: number }) => {
+    if (enabled && !exportModeRef.current) {
+      exportVisibilityRef.current = {
+        grid: gridRef.current?.visible ?? false,
+        floor: floorRef.current?.visible ?? false,
+        selectionRing: selectionRingRef.current?.visible ?? false,
+        hoverRing: hoverRingRef.current?.visible ?? false,
+        transformHelper: transformHelperRef.current?.visible ?? false,
+        motionRoutes: motionRoutesRef.current?.visible ?? false,
+      };
+    }
+    const previousVisibility = exportVisibilityRef.current;
+    exportModeRef.current = enabled;
+    exportSizeRef.current = enabled ? size ?? null : null;
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    if (renderer && camera) {
+      const nextWidth = enabled ? size?.width ?? effectiveWidth : effectiveWidth;
+      const nextHeight = enabled ? size?.height ?? effectiveHeight : effectiveHeight;
+      renderer.setPixelRatio(enabled ? 1 : Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(nextWidth, nextHeight, false);
+      camera.aspect = nextWidth / Math.max(1, nextHeight);
+      camera.updateProjectionMatrix();
+    }
+    if (gridRef.current) gridRef.current.visible = enabled ? false : previousVisibility?.grid ?? grid.visible;
+    if (floorRef.current) floorRef.current.visible = enabled ? false : previousVisibility?.floor ?? grid.visible;
+    if (selectionRingRef.current) selectionRingRef.current.visible = enabled ? false : previousVisibility?.selectionRing ?? false;
+    if (hoverRingRef.current) hoverRingRef.current.visible = enabled ? false : previousVisibility?.hoverRing ?? false;
+    if (transformHelperRef.current) transformHelperRef.current.visible = enabled ? false : previousVisibility?.transformHelper ?? false;
+    if (motionRoutesRef.current) motionRoutesRef.current.visible = enabled ? false : previousVisibility?.motionRoutes ?? motionRoutesVisible;
+    if (!enabled) exportVisibilityRef.current = null;
+    requestRender();
+  }, [effectiveHeight, effectiveWidth, grid.visible, motionRoutesVisible, requestRender]);
+
+  const enterPilot = useCallback(() => {
+    const camera = cameraRef.current;
+    const canvas = rendererRef.current?.domElement as HTMLCanvasElement | undefined;
+    if (!camera || !canvas) return;
+    const direction = new THREE.Vector3();
+    camera.getWorldDirection(direction);
+    pilotStateRef.current.active = true;
+    pilotStateRef.current.position.copy(camera.position);
+    if (modeRef.current === 'panorama') {
+      clampVectorToRadiusInPlace(pilotStateRef.current.position, PANORAMA_CAMERA_RADIUS_LIMIT);
+      camera.position.copy(pilotStateRef.current.position);
+    }
+    pilotStateRef.current.yaw = Math.atan2(direction.x, direction.z);
+    pilotStateRef.current.pitch = Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1));
+    canvas.requestPointerLock?.();
+    onPilotActiveChange?.(true);
+  }, [onPilotActiveChange]);
+
+  const exitPilot = useCallback(() => {
+    pilotStateRef.current.active = false;
+    if (document.pointerLockElement) document.exitPointerLock?.();
+    onPilotActiveChange?.(false);
+  }, [onPilotActiveChange]);
+
   return (
     <BlueprintSceneInternals
       hostElRef={hostElRef}
@@ -1753,6 +2393,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       handlePointerDown={handlePointerDown}
       handlePointerMove={handlePointerMove}
       handlePointerUp={handlePointerUp}
+      handleDoubleClick={handleDoubleClick}
       handleWheel={handleWheel}
       handleContextMenu={handleContextMenu}
       overlayLabels={overlayLabels}
@@ -1773,6 +2414,13 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       handleFocusItem={handleFocusItem}
       exportPng={exportScenePng}
       getSuggestedInsertPosition={getSuggestedInsertPosition}
+      getCameraSnapshot={getCameraSnapshot}
+      getCanvas={getCanvas}
+      applyMotionFrame={applyMotionFrame}
+      renderFrame={renderFrame}
+      setExportMode={setExportMode}
+      enterPilot={enterPilot}
+      exitPilot={exitPilot}
       sceneRef={sceneRef}
       t={t}
       forwardRef={ref}
@@ -1798,6 +2446,7 @@ interface InternalsProps {
   handlePointerDown: (e: React.PointerEvent) => void;
   handlePointerMove: (e: React.PointerEvent) => void;
   handlePointerUp: (e: React.PointerEvent) => void;
+  handleDoubleClick: (e: React.MouseEvent) => void;
   handleWheel: (e: React.WheelEvent) => void;
   handleContextMenu: (e: React.MouseEvent) => void;
   overlayLabels: BlueprintItem[];
@@ -1818,6 +2467,13 @@ interface InternalsProps {
   handleFocusItem: (itemId: string) => void;
   exportPng: (options?: BlueprintSceneExportOptions) => string | null;
   getSuggestedInsertPosition: () => { x: number; y: number; z: number };
+  getCameraSnapshot: () => DirectorSceneCameraSnapshot | null;
+  getCanvas: () => HTMLCanvasElement | null;
+  applyMotionFrame: (frame: SampledDirectorMotionFrame, previewMode?: 'route' | 'shot') => void;
+  renderFrame: () => void;
+  setExportMode: (enabled: boolean, size?: { width: number; height: number }) => void;
+  enterPilot: () => void;
+  exitPilot: () => void;
   sceneRef: React.MutableRefObject<any>;
   t: ReturnType<typeof useTranslation>['t'];
   forwardRef: React.Ref<BlueprintSceneHandle>;
@@ -1826,7 +2482,7 @@ interface InternalsProps {
 function BlueprintSceneInternals({
   hostElRef, canvasHostRef, overlayRef, miniMapRef,
   effectiveWidth, effectiveHeight,
-  handlePointerDown, handlePointerMove, handlePointerUp, handleWheel, handleContextMenu,
+  handlePointerDown, handlePointerMove, handlePointerUp, handleDoubleClick, handleWheel, handleContextMenu,
   overlayLabels,
   showAdvancedPedestrianTags,
   pedestrianNumberById,
@@ -1834,6 +2490,7 @@ function BlueprintSceneInternals({
   pointerMode, onPointerModeChange,
   hint, mode, referenceImages, fullBleed,
   handleResetCamera, handleFitCamera, handleFocusItem, exportPng, getSuggestedInsertPosition,
+  getCameraSnapshot, getCanvas, applyMotionFrame, renderFrame, setExportMode, enterPilot, exitPilot,
   t,
   forwardRef,
 }: InternalsProps) {
@@ -1843,7 +2500,14 @@ function BlueprintSceneInternals({
     fitCamera: handleFitCamera,
     focusItem: handleFocusItem,
     getSuggestedInsertPosition,
-  }), [exportPng, getSuggestedInsertPosition, handleFocusItem, handleResetCamera, handleFitCamera]);
+    getCameraSnapshot,
+    getCanvas,
+    applyMotionFrame,
+    renderFrame,
+    setExportMode,
+    enterPilot,
+    exitPilot,
+  }), [applyMotionFrame, enterPilot, exitPilot, exportPng, getCameraSnapshot, getCanvas, getSuggestedInsertPosition, handleFitCamera, handleFocusItem, handleResetCamera, renderFrame, setExportMode]);
 
   const tree = (
     <div
@@ -1856,6 +2520,7 @@ function BlueprintSceneInternals({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
+      onDoubleClick={handleDoubleClick}
       onWheel={handleWheel}
       onContextMenu={handleContextMenu}
     >
