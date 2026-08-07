@@ -152,6 +152,8 @@
   "canvasToolbar": {
     "assets": "Assets",
     "assetsTitle": "View current project assets",
+    "bulkPromptImport": "Bulk Import",
+    "bulkPromptImportTitle": "Import prompts from a text or spreadsheet file",
     "addAiText": "Add AI text node",
     "addAiImage": "Add AI image node",
     "addAiVideo": "Add AI video node",
@@ -159,6 +161,61 @@
     "createDirectorStudio": "Create and open Director Studio",
     "createPanoramaDirectorStudio": "Create and open Panorama Director Studio",
     "panoramaDirectorStudio": "Panorama Studio"
+  },
+  "promptImport": {
+    "title": "Bulk Prompt Import",
+    "stage": {
+      "select": "Select and parse a file",
+      "mapping": "Map columns, rows, and preview",
+      "confirm": "Confirm node creation"
+    },
+    "fileLabel": "Prompt file",
+    "supportedFiles": "Supported: .txt, .csv, .tsv, .xlsx (maximum 20 MB)",
+    "txtMode": {
+      "label": "TXT row mode",
+      "nonEmptyLines": "Non-empty lines",
+      "paragraphs": "Blank-line paragraphs"
+    },
+    "parse": "Parse File",
+    "parsing": "Parsing file",
+    "cancelParsing": "Cancel Parsing",
+    "sheet": "Worksheet",
+    "hasHeader": "First row is a header",
+    "promptColumn": "Prompt column",
+    "nameColumn": "Name column",
+    "noNameColumn": "No name column",
+    "range": "Import range",
+    "rangeStart": "Start data row",
+    "rangeEnd": "End data row",
+    "totalRows": "{{count}} data rows",
+    "validRows": "{{count}} nodes",
+    "skippedRows": "{{count}} empty prompts skipped",
+    "duplicateRows": "{{count}} duplicates retained",
+    "preview": "Data preview",
+    "previewLimit": "Showing {{count}} rows",
+    "back": "Back",
+    "reviewImport": "Review Import",
+    "confirmTitle": "Create {{count}} AI image nodes",
+    "confirmSummary": "{{skipped}} empty prompts will be skipped; {{duplicates}} duplicate prompts will be retained.",
+    "fitImportedNodes": "Fit the new nodes after import",
+    "noAutomaticGeneration": "Import creates editable nodes only. It does not start image generation.",
+    "importNodes": "Import {{count}} Nodes",
+    "defaultNodeName": "Prompt {{index}}",
+    "warnings": {
+      "decodedAsGb18030": "The file was decoded as GB18030. Verify the preview before importing."
+    },
+    "errors": {
+      "aborted": "Parsing was cancelled.",
+      "emptyFile": "The selected file is empty.",
+      "fileTooLarge": "The selected file exceeds the 20 MB limit.",
+      "invalidDelimitedFile": "The CSV or TSV file has an unclosed quoted field.",
+      "invalidFile": "The file could not be read. Check its encoding and contents.",
+      "invalidXlsx": "The XLSX workbook could not be parsed.",
+      "tooManyRows": "The parsed file exceeds the 20,000-row limit.",
+      "tooManySheets": "The workbook exceeds the 20-worksheet limit.",
+      "unsupportedFileType": "Choose a .txt, .csv, .tsv, or .xlsx file.",
+      "tooManyNodes": "This range contains {{count}} valid prompts. Reduce it to {{limit}} or fewer nodes and import in batches."
+    }
   },
   "gridSplit": {
     "title": "Grid Split",

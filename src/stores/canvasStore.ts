@@ -69,8 +69,16 @@ export interface CanvasHistoryState {
   future: CanvasHistorySnapshot[];
 }
 
+export interface AddNodesBatchInput {
+  type: CanvasNodeType;
+  position: { x: number; y: number };
+  dimensions?: { width: number; height: number };
+  data?: Partial<CanvasNodeData>;
+}
+
 const MAX_HISTORY_STEPS = 50;
 const MAX_HEAVY_HISTORY_STEPS = 12;
+export const MAX_CANVAS_BATCH_ADD_NODES = 500;
 const IMAGE_NODE_VISUAL_MIN_EDGE = 96;
 const DIRECTOR_STUDIO_PROJECT_SIGNATURE_SEPARATOR = '\u001f';
 const DIRECTOR_STUDIO_PROJECT_LIBRARY_SEPARATOR = '\u001e';
@@ -148,6 +156,7 @@ interface CanvasState {
     position: { x: number; y: number },
     data?: Partial<CanvasNodeData>
   ) => string;
+  addNodesBatch: (inputs: AddNodesBatchInput[]) => string[];
   addEdge: (source: string, target: string) => string | null;
   findNodePosition: (sourceNodeId: string, newNodeWidth: number, newNodeHeight: number) => { x: number; y: number };
   findNodePositions: (
@@ -1232,6 +1241,44 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       dragHistorySnapshot: null,
     });
     return newNode.id;
+  },
+
+  addNodesBatch: (inputs) => {
+    if (inputs.length === 0) {
+      return [];
+    }
+    if (inputs.length > MAX_CANVAS_BATCH_ADD_NODES) {
+      throw new RangeError(`A canvas batch can add at most ${MAX_CANVAS_BATCH_ADD_NODES} nodes.`);
+    }
+
+    const state = get();
+    const newNodes = inputs.map((input) => {
+      const node = canvasNodeFactory.createNode(
+        input.type,
+        input.position,
+        input.data ?? {},
+      );
+      if (!input.dimensions) {
+        return node;
+      }
+      const { width, height } = input.dimensions;
+      if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+        throw new RangeError('Canvas batch node dimensions must be finite positive numbers.');
+      }
+      return {
+        ...node,
+        measured: { width, height },
+      };
+    });
+    set({
+      nodes: [...state.nodes, ...newNodes],
+      history: {
+        past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
+        future: [],
+      },
+      dragHistorySnapshot: null,
+    });
+    return newNodes.map((node) => node.id);
   },
 
   addEdge: (source, target) => {

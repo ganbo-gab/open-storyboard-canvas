@@ -37,6 +37,7 @@
     "react-image-crop": "^11.0.10",
     "react-konva": "^18.2.10",
     "react-markdown": "^10.1.0",
+    "read-excel-file": "9.3.5",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "three": "^0.179.1",

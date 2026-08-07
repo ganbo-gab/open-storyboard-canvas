@@ -1,9 +1,15 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
-import { ImagePlus, Globe2, LayoutGrid, Images, Video } from 'lucide-react';
+import { ImagePlus, Globe2, LayoutGrid, Images, ListPlus, Video } from 'lucide-react';
 
 import { CANVAS_NODE_TYPES, type CanvasNodeData, type CanvasNodeType } from '@/features/canvas/domain/canvasNodes';
+import {
+  buildPromptImportNodeDrafts,
+  getPromptImportNodeBounds,
+  type PromptImportMappedRow,
+} from '@/features/canvas/application/promptImport';
+import { PromptImportDialog } from '@/features/canvas/ui/PromptImportDialog';
 import { useCanvasStore } from '@/stores/canvasStore';
 
 interface SideToolbarItem {
@@ -65,6 +71,8 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
   const { t } = useTranslation();
   const reactFlow = useReactFlow();
   const addNode = useCanvasStore((s) => s.addNode);
+  const addNodesBatch = useCanvasStore((s) => s.addNodesBatch);
+  const [isPromptImportOpen, setIsPromptImportOpen] = useState(false);
 
   const handleAdd = useCallback((type: CanvasNodeType, data?: Partial<CanvasNodeData>) => {
     // Drop near the current viewport center, with a small random nudge so
@@ -90,33 +98,90 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
     addNode(type, position, data);
   }, [addNode, reactFlow]);
 
+  const handleImport = useCallback((
+    rows: PromptImportMappedRow[],
+    options: { fitView: boolean },
+  ) => {
+    let origin = { x: 120, y: 80 };
+    const container = document.querySelector('.react-flow') as HTMLElement | null;
+    if (container) {
+      const rect = container.getBoundingClientRect();
+      origin = reactFlow.screenToFlowPosition({
+        x: rect.left + Math.min(120, rect.width * 0.1),
+        y: rect.top + Math.min(96, rect.height * 0.1),
+      });
+    } else {
+      const viewport = reactFlow.getViewport();
+      origin = {
+        x: (-viewport.x + 96) / Math.max(0.01, viewport.zoom),
+        y: (-viewport.y + 72) / Math.max(0.01, viewport.zoom),
+      };
+    }
+
+    const drafts = buildPromptImportNodeDrafts(
+      rows,
+      origin,
+      (index) => t('promptImport.defaultNodeName', { index }),
+    );
+    addNodesBatch(drafts.map((draft) => ({
+      type: CANVAS_NODE_TYPES.imageEdit,
+      position: draft.position,
+      dimensions: draft.dimensions,
+      data: draft.data,
+    })));
+
+    const importedBounds = getPromptImportNodeBounds(drafts);
+    if (options.fitView && importedBounds) {
+      void reactFlow.fitBounds(importedBounds, {
+        padding: 0.12,
+        duration: 300,
+      });
+    }
+  }, [addNodesBatch, reactFlow, t]);
+
   return (
-    <div className="absolute left-3 top-1/2 z-20 flex -translate-y-1/2 flex-col gap-2 rounded-xl border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-bg)] p-2 shadow-[var(--canvas-rail-shadow)] backdrop-blur">
-      <button
-        type="button"
-        title={t('canvasToolbar.assetsTitle')}
-        onClick={(event) => onOpenAssets?.(event.currentTarget.getBoundingClientRect())}
-        className="flex w-16 flex-col items-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] px-2 py-2 text-[10px] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
-      >
-        <Images className="h-4 w-4" />
-        <span className="leading-tight">{t('canvasToolbar.assets')}</span>
-      </button>
-      {TOOLBAR_ITEMS.map((item) => {
-        const Icon = item.icon;
-        return (
-          <button
-            key={item.type}
-            type="button"
-            title={t(item.titleKey)}
-            onClick={() => handleAdd(item.type, item.data)}
-            className="flex w-16 flex-col items-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] px-2 py-2 text-[10px] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
-          >
-            <Icon className="h-4 w-4" />
-            <span className="leading-tight">{t(item.labelKey)}</span>
-          </button>
-        );
-      })}
-    </div>
+    <>
+      <div className="absolute left-3 top-1/2 z-20 flex max-h-[calc(100%-24px)] -translate-y-1/2 flex-col gap-2 overflow-y-auto rounded-xl border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-bg)] p-2 shadow-[var(--canvas-rail-shadow)] backdrop-blur">
+        <button
+          type="button"
+          title={t('canvasToolbar.assetsTitle')}
+          onClick={(event) => onOpenAssets?.(event.currentTarget.getBoundingClientRect())}
+          className="flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] px-2 py-2 text-[10px] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
+        >
+          <Images className="h-4 w-4" />
+          <span className="leading-tight">{t('canvasToolbar.assets')}</span>
+        </button>
+        <button
+          type="button"
+          title={t('canvasToolbar.bulkPromptImportTitle')}
+          onClick={() => setIsPromptImportOpen(true)}
+          className="flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] px-2 py-2 text-[10px] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
+        >
+          <ListPlus className="h-4 w-4" />
+          <span className="leading-tight">{t('canvasToolbar.bulkPromptImport')}</span>
+        </button>
+        {TOOLBAR_ITEMS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.type}
+              type="button"
+              title={t(item.titleKey)}
+              onClick={() => handleAdd(item.type, item.data)}
+              className="flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] px-2 py-2 text-[10px] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
+            >
+              <Icon className="h-4 w-4" />
+              <span className="leading-tight">{t(item.labelKey)}</span>
+            </button>
+          );
+        })}
+      </div>
+      <PromptImportDialog
+        isOpen={isPromptImportOpen}
+        onClose={() => setIsPromptImportOpen(false)}
+        onImport={handleImport}
+      />
+    </>
   );
 });
 

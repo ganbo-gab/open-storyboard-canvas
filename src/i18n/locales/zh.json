@@ -152,6 +152,8 @@
   "canvasToolbar": {
     "assets": "资产",
     "assetsTitle": "查看当前项目资产",
+    "bulkPromptImport": "批量导入",
+    "bulkPromptImportTitle": "从文本或表格文件批量导入提示词",
     "addAiText": "添加 AI 文本节点",
     "addAiImage": "添加 AI 图片节点",
     "addAiVideo": "添加 AI 视频节点",
@@ -159,6 +161,61 @@
     "createDirectorStudio": "新建并打开导演台",
     "createPanoramaDirectorStudio": "新建并打开全景导演台",
     "panoramaDirectorStudio": "全景导演台"
+  },
+  "promptImport": {
+    "title": "批量导入提示词",
+    "stage": {
+      "select": "选择并解析文件",
+      "mapping": "设置列、范围并预览",
+      "confirm": "确认创建节点"
+    },
+    "fileLabel": "提示词文件",
+    "supportedFiles": "支持 .txt、.csv、.tsv、.xlsx，最大 20 MB",
+    "txtMode": {
+      "label": "TXT 分行方式",
+      "nonEmptyLines": "按非空行",
+      "paragraphs": "按空行分段"
+    },
+    "parse": "解析文件",
+    "parsing": "正在解析文件",
+    "cancelParsing": "取消解析",
+    "sheet": "工作表",
+    "hasHeader": "第一行为表头",
+    "promptColumn": "提示词列",
+    "nameColumn": "名称列",
+    "noNameColumn": "不使用名称列",
+    "range": "导入范围",
+    "rangeStart": "起始数据行",
+    "rangeEnd": "结束数据行",
+    "totalRows": "共 {{count}} 条数据",
+    "validRows": "将创建 {{count}} 个节点",
+    "skippedRows": "跳过 {{count}} 条空提示词",
+    "duplicateRows": "保留 {{count}} 条重复提示词",
+    "preview": "数据预览",
+    "previewLimit": "当前显示 {{count}} 行",
+    "back": "返回",
+    "reviewImport": "检查导入摘要",
+    "confirmTitle": "创建 {{count}} 个 AI 图片节点",
+    "confirmSummary": "将跳过 {{skipped}} 条空提示词，并保留 {{duplicates}} 条重复提示词。",
+    "fitImportedNodes": "导入后适应新节点",
+    "noAutomaticGeneration": "导入只创建可编辑节点，不会自动发起图片生成。",
+    "importNodes": "导入 {{count}} 个节点",
+    "defaultNodeName": "提示词 {{index}}",
+    "warnings": {
+      "decodedAsGb18030": "文件已按 GB18030 编码解析，请在导入前检查预览内容。"
+    },
+    "errors": {
+      "aborted": "已取消解析。",
+      "emptyFile": "所选文件为空。",
+      "fileTooLarge": "所选文件超过 20 MB 限制。",
+      "invalidDelimitedFile": "CSV 或 TSV 文件中存在未闭合的引号字段。",
+      "invalidFile": "无法读取文件，请检查编码和文件内容。",
+      "invalidXlsx": "无法解析该 XLSX 工作簿。",
+      "tooManyRows": "解析结果超过 20,000 行限制。",
+      "tooManySheets": "工作簿超过 20 个工作表限制。",
+      "unsupportedFileType": "请选择 .txt、.csv、.tsv 或 .xlsx 文件。",
+      "tooManyNodes": "当前范围包含 {{count}} 条有效提示词，请缩小至 {{limit}} 个以内并分批导入。"
+    }
   },
   "gridSplit": {
     "title": "宫格切分",

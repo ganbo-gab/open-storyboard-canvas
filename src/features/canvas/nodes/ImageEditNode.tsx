@@ -67,6 +67,7 @@ import {
   removeTextRange,
   resolveReferenceAwareDeleteRange,
 } from '@/features/canvas/application/referenceTokenEditing';
+import { resolvePromptCaretScrollTop } from '@/features/canvas/application/promptCaret';
 import {
   DEFAULT_IMAGE_MODEL_ID,
   getImageModel,
@@ -115,6 +116,17 @@ interface PickerAnchor {
   top: number;
 }
 
+interface TextareaCaretOffset extends PickerAnchor {
+  contentLeft: number;
+  contentTop: number;
+  lineHeight: number;
+}
+
+interface PromptViewportSnapshot {
+  scrollTop: number;
+  scrollLeft: number;
+}
+
 const PICKER_FALLBACK_ANCHOR: PickerAnchor = { left: 8, top: 8 };
 const PICKER_Y_OFFSET_PX = 20;
 const FUNCTION_PICKER_WIDTH_PX = 280;
@@ -131,7 +143,7 @@ const PROMPT_PRESET_GROUP_ID = '__prompt_presets__';
 function getTextareaCaretOffset(
   textarea: HTMLTextAreaElement,
   caretIndex: number
-): PickerAnchor {
+): TextareaCaretOffset {
   const mirror = document.createElement('div');
   const computed = window.getComputedStyle(textarea);
   const mirrorStyle = mirror.style;
@@ -160,14 +172,18 @@ function getTextareaCaretOffset(
 
   document.body.appendChild(mirror);
 
-  const left = marker.offsetLeft - textarea.scrollLeft;
-  const top = marker.offsetTop - textarea.scrollTop;
+  const contentLeft = marker.offsetLeft;
+  const contentTop = marker.offsetTop;
+  const lineHeight = Number.parseFloat(computed.lineHeight) || 24;
 
   document.body.removeChild(mirror);
 
   return {
-    left: Math.max(0, left),
-    top: Math.max(0, top),
+    left: Math.max(0, contentLeft - textarea.scrollLeft),
+    top: Math.max(0, contentTop - textarea.scrollTop),
+    contentLeft,
+    contentTop,
+    lineHeight,
   };
 }
 
@@ -945,14 +961,41 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     }
   }, [payloadDebugText, t]);
 
-  const syncPromptHighlightScroll = () => {
+  const syncPromptHighlightScroll = useCallback(() => {
     if (!promptRef.current || !promptHighlightRef.current) {
       return;
     }
 
     promptHighlightRef.current.scrollTop = promptRef.current.scrollTop;
     promptHighlightRef.current.scrollLeft = promptRef.current.scrollLeft;
-  };
+  }, []);
+
+  const restorePromptCaret = useCallback((
+    nextCursor: number,
+    previousViewport: PromptViewportSnapshot,
+  ) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const textarea = promptRef.current;
+        if (!textarea) {
+          return;
+        }
+
+        textarea.focus({ preventScroll: true });
+        textarea.setSelectionRange(nextCursor, nextCursor);
+        const caret = getTextareaCaretOffset(textarea, nextCursor);
+        textarea.scrollTop = resolvePromptCaretScrollTop({
+          caretContentTop: caret.contentTop,
+          caretHeight: caret.lineHeight,
+          previousScrollTop: previousViewport.scrollTop,
+          viewportHeight: textarea.clientHeight,
+          scrollHeight: textarea.scrollHeight,
+        });
+        textarea.scrollLeft = previousViewport.scrollLeft;
+        syncPromptHighlightScroll();
+      });
+    });
+  }, [syncPromptHighlightScroll]);
 
   const insertGraphReference = useCallback((referenceIndex: number) => {
     const marker = incomingReferenceItems[referenceIndex]?.token;
@@ -962,6 +1005,10 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     const currentPrompt = promptDraftRef.current;
     const cursor = pickerCursor ?? currentPrompt.length;
     const { nextText: nextPrompt, nextCursor } = insertReferenceToken(currentPrompt, cursor, marker);
+    const previousViewport = {
+      scrollTop: promptRef.current?.scrollTop ?? 0,
+      scrollLeft: promptRef.current?.scrollLeft ?? 0,
+    };
 
     setPromptDraft(nextPrompt);
     flushPromptDraft(nextPrompt);
@@ -969,12 +1016,8 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     setPickerCursor(null);
     setPickerActiveIndex(0);
 
-    requestAnimationFrame(() => {
-      promptRef.current?.focus();
-      promptRef.current?.setSelectionRange(nextCursor, nextCursor);
-      syncPromptHighlightScroll();
-    });
-  }, [flushPromptDraft, incomingReferenceItems, pickerCursor]);
+    restorePromptCaret(nextCursor, previousViewport);
+  }, [flushPromptDraft, incomingReferenceItems, pickerCursor, restorePromptCaret]);
 
   const selectPromptPresetFromFunctionPicker = useCallback((presetId: string) => {
     updateNodeData(id, {
@@ -1030,6 +1073,10 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
 
       const textarea = event.currentTarget;
       const cursor = textarea.selectionStart ?? promptDraftRef.current.length;
+      const previousViewport = {
+        scrollTop: textarea.scrollTop,
+        scrollLeft: textarea.scrollLeft,
+      };
 
       try {
         const prepared = await prepareNodeImageFromFile(imageFile);
@@ -1065,11 +1112,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         setPickerCursor(null);
         setPickerActiveIndex(0);
 
-        requestAnimationFrame(() => {
-          promptRef.current?.focus();
-          promptRef.current?.setSelectionRange(nextCursor, nextCursor);
-          syncPromptHighlightScroll();
-        });
+        restorePromptCaret(nextCursor, previousViewport);
       } catch (pasteError) {
         const resolvedError = resolveErrorContent(pasteError, t('common.error'));
         void showErrorDialog(
@@ -1079,7 +1122,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         );
       }
     },
-    [addEdge, addNode, flushPromptDraft, id, incomingImages.length, t]
+    [addEdge, addNode, flushPromptDraft, id, incomingImages.length, restorePromptCaret, t]
   );
 
   const handlePromptKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
