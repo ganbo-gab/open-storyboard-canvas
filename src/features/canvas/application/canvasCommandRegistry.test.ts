@@ -1,0 +1,796 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import { useCanvasStore } from '@/stores/canvasStore';
+import {
+  CANVAS_COMMAND_VERSION,
+  CANVAS_COMMAND_TYPES,
+  type CanvasTransaction,
+} from '../domain/canvasCommands';
+import { CANVAS_NODE_TYPES } from '../domain/canvasNodes';
+import { canvasCommandRegistry } from './canvasCommandService';
+import { canvasEventBus } from './canvasServices';
+
+function resetCanvas(): void {
+  useCanvasStore.setState({
+    nodes: [],
+    edges: [],
+    revision: 0,
+    selectedNodeId: null,
+    activeDirectorStudioNodeId: null,
+    activeToolDialog: null,
+    history: { past: [], future: [] },
+    dragHistorySnapshot: null,
+    currentViewport: { x: 0, y: 0, zoom: 1 },
+    canvasViewportSize: { width: 1280, height: 720 },
+  });
+}
+
+function createAtomicGraphTransaction(expectedRevision = 0): CanvasTransaction {
+  return {
+    id: 'create-connected-pair',
+    origin: 'agent',
+    expectedRevision,
+    commands: [
+      {
+        type: 'node.create',
+        version: CANVAS_COMMAND_VERSION,
+        input: {
+          nodeType: CANVAS_NODE_TYPES.imageEdit,
+          nodeId: 'source-node',
+          position: { x: 10, y: 20 },
+          configuration: { prompt: 'Opening shot' },
+        },
+      },
+      {
+        type: 'node.create',
+        version: CANVAS_COMMAND_VERSION,
+        input: {
+          nodeType: CANVAS_NODE_TYPES.imageEdit,
+          nodeId: 'target-node',
+          position: { x: 400, y: 20 },
+          configuration: { prompt: 'Continuation' },
+        },
+      },
+      {
+        type: 'edge.connect',
+        version: CANVAS_COMMAND_VERSION,
+        input: {
+          sourceNodeId: 'source-node',
+          targetNodeId: 'target-node',
+          edgeId: 'stable-edge',
+        },
+      },
+    ],
+  };
+}
+
+describe('CanvasCommandRegistry transactions', () => {
+  beforeEach(resetCanvas);
+
+  it('registers a schema, effect, validator, inspector, and redacted summary for every command', () => {
+    const definitions = canvasCommandRegistry.list();
+    expect(definitions.map((definition) => definition.type)).toEqual(CANVAS_COMMAND_TYPES);
+    expect(definitions.every((definition) => (
+      definition.schema.version === CANVAS_COMMAND_VERSION
+      && definition.schema.input.additionalProperties === false
+      && typeof definition.effect === 'string'
+      && typeof definition.summarize === 'function'
+    ))).toBe(true);
+
+    const summary = canvasCommandRegistry.summarize({
+      type: 'node.setPrompt',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeId: 'node', prompt: 'private prompt text' },
+    });
+    expect(summary).not.toContain('private prompt text');
+  });
+
+  it('commits a multi-command graph transaction once with one undo and stable references', () => {
+    let mutationCount = 0;
+    const unsubscribe = useCanvasStore.subscribe(() => {
+      mutationCount += 1;
+    });
+
+    const result = canvasCommandRegistry.executeTransaction(createAtomicGraphTransaction());
+    unsubscribe();
+
+    expect(result).toMatchObject({
+      ok: true,
+      revisionBefore: 0,
+      revisionAfter: 1,
+      references: {
+        nodeIds: ['source-node', 'target-node'],
+        edgeIds: ['stable-edge'],
+      },
+    });
+    expect(useCanvasStore.getState()).toMatchObject({
+      revision: 1,
+      history: { past: [{ nodes: [], edges: [] }], future: [] },
+    });
+    expect(useCanvasStore.getState().nodes.map((node) => node.id)).toEqual(['source-node', 'target-node']);
+    expect(useCanvasStore.getState().edges.map((edge) => edge.id)).toEqual(['stable-edge']);
+    expect(mutationCount).toBe(1);
+
+    expect(useCanvasStore.getState().undo()).toBe(true);
+    expect(useCanvasStore.getState().nodes).toEqual([]);
+    expect(useCanvasStore.getState().edges).toEqual([]);
+  });
+
+  it('rolls back every draft change when a later command fails', () => {
+    const result = canvasCommandRegistry.executeTransaction({
+      id: 'rollback-test',
+      origin: 'agent',
+      expectedRevision: 0,
+      commands: [
+        {
+          type: 'node.create',
+          version: CANVAS_COMMAND_VERSION,
+          input: {
+            nodeType: CANVAS_NODE_TYPES.imageEdit,
+            nodeId: 'must-not-remain',
+            position: { x: 0, y: 0 },
+          },
+        },
+        {
+          type: 'node.rename',
+          version: CANVAS_COMMAND_VERSION,
+          input: { nodeId: 'missing-node', displayName: 'Invalid' },
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'not_found', commandIndex: 1, commandType: 'node.rename' },
+    });
+    expect(useCanvasStore.getState()).toMatchObject({
+      nodes: [],
+      edges: [],
+      revision: 0,
+      history: { past: [], future: [] },
+    });
+  });
+
+  it('rejects a stale revision before execution and returns a current retry preview', () => {
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.upload, { x: 0, y: 0 });
+    const stateBefore = useCanvasStore.getState();
+    const result = canvasCommandRegistry.executeTransaction(createAtomicGraphTransaction(0));
+
+    expect(result).toMatchObject({
+      ok: false,
+      revisionBefore: 1,
+      revisionAfter: 1,
+      error: {
+        code: 'revision_conflict',
+        details: { expectedRevision: 0, actualRevision: 1 },
+      },
+      retryPreview: { baseRevision: 1, valid: true },
+    });
+    expect(useCanvasStore.getState().nodes).toBe(stateBefore.nodes);
+    expect(useCanvasStore.getState().history).toBe(stateBefore.history);
+  });
+
+  it('rejects unknown command fields instead of allowing arbitrary node patches', async () => {
+    const result = await canvasCommandRegistry.execute({
+      type: 'node.rename',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeId: 'node',
+        displayName: 'Name',
+        data: { isGenerating: true },
+      },
+    } as never);
+    expect(result).toMatchObject({ ok: false, error: { code: 'invalid_command' } });
+  });
+
+  it('returns structured failures for malformed commands and transaction envelopes', async () => {
+    await expect(canvasCommandRegistry.execute(null as never)).resolves.toMatchObject({
+      ok: false,
+      commandType: undefined,
+      error: { code: 'invalid_command', message: 'Command must be an object.' },
+    });
+    expect(canvasCommandRegistry.inspect(null as never)).toMatchObject({
+      valid: false,
+      errors: [{ code: 'invalid_command', message: 'Command must be an object.' }],
+    });
+
+    expect(canvasCommandRegistry.executeTransaction(null as never)).toMatchObject({
+      ok: false,
+      transactionId: '',
+      error: { code: 'invalid_command', message: 'Transaction must be an object.' },
+    });
+    expect(canvasCommandRegistry.executeTransaction({
+      id: 'invalid-command-entry',
+      origin: 'agent',
+      expectedRevision: 0,
+      commands: [null],
+    } as never)).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', commandIndex: 0 },
+    });
+  });
+
+  it('rejects direct creation of result and workflow-owned node types', async () => {
+    const result = await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: CANVAS_NODE_TYPES.exportImage,
+        position: { x: 0, y: 0 },
+      },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'invalid_command',
+        message: expect.stringContaining('validated generation or export workflows'),
+      },
+    });
+    expect(useCanvasStore.getState().nodes).toEqual([]);
+  });
+
+  it('rejects external-side-effect commands inside graph transactions', () => {
+    const result = canvasCommandRegistry.executeTransaction({
+      id: 'not-atomic',
+      origin: 'agent',
+      expectedRevision: 0,
+      commands: [{
+        type: 'generation.submit',
+        version: CANVAS_COMMAND_VERSION,
+        input: { nodeIds: ['node'] },
+      }],
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'not_atomic', commandIndex: 0, commandType: 'generation.submit' },
+    });
+  });
+
+  it('rejects credentials and non-JSON values in model extra parameters', async () => {
+    const credentialResult = await canvasCommandRegistry.execute({
+      type: 'node.setModelConfig',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeId: 'node',
+        modelId: 'model',
+        extraParams: { headers: { Authorization: 'Bearer secret' } },
+      },
+    });
+    expect(credentialResult).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: expect.stringContaining('approved settings workflow') },
+    });
+
+    const nestedCredentialResult = await canvasCommandRegistry.execute({
+      type: 'node.setModelConfig',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeId: 'node',
+        modelId: 'model',
+        extraParams: { transport: { proxyAuthorization: 'Bearer secret' } },
+      },
+    });
+    expect(nestedCredentialResult).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: expect.stringContaining('approved settings workflow') },
+    });
+
+    const nonJsonResult = await canvasCommandRegistry.execute({
+      type: 'node.setModelConfig',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeId: 'node',
+        modelId: 'model',
+        extraParams: { callback: () => undefined },
+      },
+    } as never);
+    expect(nonJsonResult).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: expect.stringContaining('JSON-compatible') },
+    });
+  });
+
+  it('writes model configuration to the fields each generation node actually consumes', async () => {
+    const imageCreate = await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: CANVAS_NODE_TYPES.imageEdit,
+        nodeId: 'image-model-node',
+        position: { x: 0, y: 0 },
+        configuration: { modelId: 'custom:image-model', aspectRatio: '3:4' },
+      },
+    }, 'agent');
+    expect(imageCreate.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'image-model-node')?.data)
+      .toMatchObject({
+        model: 'custom:image-model',
+        requestAspectRatio: '3:4',
+        modelConfig: { entryId: 'custom:image-model', ratio: '3:4' },
+      });
+
+    const videoCreate = await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: CANVAS_NODE_TYPES.aiVideo,
+        nodeId: 'video-model-node',
+        position: { x: 400, y: 0 },
+        configuration: { modelId: 'custom:video-model', aspectRatio: '16:9' },
+      },
+    }, 'agent');
+    expect(videoCreate.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'video-model-node')?.data)
+      .toMatchObject({
+        modelConfig: {
+          entryId: 'custom:video-model',
+          duration: '5',
+          resolution: '720p',
+          aspectRatio: '16:9',
+        },
+      });
+
+    const setImageConfig = await canvasCommandRegistry.execute({
+      type: 'node.setModelConfig',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeId: 'image-model-node',
+        modelId: 'dreamina:new-image-model',
+        aspectRatio: '9:16',
+        resolution: '4K',
+        extraParams: { quality: 'high' },
+      },
+    }, 'agent');
+    expect(setImageConfig.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'image-model-node')?.data)
+      .toMatchObject({
+        model: 'dreamina:new-image-model',
+        size: '4K',
+        requestAspectRatio: '9:16',
+        extraParams: { quality: 'high', resolutionType: '4K' },
+        modelConfig: {
+          entryId: 'dreamina:new-image-model',
+          ratio: '9:16',
+          extraParams: { quality: 'high', resolutionType: '4K' },
+        },
+      });
+
+    const setVideoConfig = await canvasCommandRegistry.execute({
+      type: 'node.setModelConfig',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeId: 'video-model-node',
+        modelId: 'dreamina:new-video-model',
+        duration: '10',
+        resolution: '1080p',
+        aspectRatio: '9:16',
+        extraParams: { mode: 'frames' },
+      },
+    }, 'agent');
+    expect(setVideoConfig.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'video-model-node')?.data)
+      .toMatchObject({
+        extraParams: { mode: 'frames' },
+        modelConfig: {
+          entryId: 'dreamina:new-video-model',
+          duration: '10',
+          resolution: '1080p',
+          aspectRatio: '9:16',
+          extraParams: { mode: 'frames' },
+        },
+      });
+  });
+
+  it('rejects node-inapplicable model fields instead of silently dropping them', async () => {
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.aiAudio, { x: 0, y: 0 });
+    const nodeId = useCanvasStore.getState().nodes[0].id;
+    const result = await canvasCommandRegistry.execute({
+      type: 'node.setModelConfig',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeId,
+        modelId: 'audio-model',
+        duration: '10',
+      },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: expect.stringContaining('duration') },
+    });
+  });
+
+  it('marks generated media renames as custom so downloads use the new name', async () => {
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.exportImage, { x: 0, y: 0 }, {
+      displayName: 'Generated image',
+      generatedNamingMode: 'default',
+      generatedFileName: 'genimg_20260810_0001.png',
+    });
+    const nodeId = useCanvasStore.getState().nodes[0].id;
+    const result = await canvasCommandRegistry.execute({
+      type: 'node.rename',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeId, displayName: 'Hero close-up' },
+    });
+    expect(result.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes[0].data).toMatchObject({
+      displayName: 'Hero close-up',
+      generatedNamingMode: 'custom',
+    });
+  });
+
+  it('does not add history for equivalent model config and isolates stored command objects', async () => {
+    const position = { x: 10, y: 20 };
+    await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: CANVAS_NODE_TYPES.imageEdit,
+        nodeId: 'isolated-node',
+        position,
+      },
+    });
+    position.x = 999;
+    expect(useCanvasStore.getState().nodes[0].position).toEqual({ x: 10, y: 20 });
+
+    const extraParams = { nested: { quality: 'high' } };
+    await canvasCommandRegistry.execute({
+      type: 'node.setModelConfig',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeId: 'isolated-node',
+        modelId: 'custom:model',
+        aspectRatio: '16:9',
+        extraParams,
+      },
+    });
+    const stateAfterFirstUpdate = useCanvasStore.getState();
+    extraParams.nested.quality = 'mutated';
+    expect(stateAfterFirstUpdate.nodes[0].data.extraParams).toEqual({
+      nested: { quality: 'high' },
+    });
+
+    const secondResult = await canvasCommandRegistry.execute({
+      type: 'node.setModelConfig',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeId: 'isolated-node',
+        modelId: 'custom:model',
+        aspectRatio: '16:9',
+        extraParams: { nested: { quality: 'high' } },
+      },
+    });
+    expect(secondResult).toMatchObject({
+      ok: true,
+      revisionBefore: stateAfterFirstUpdate.revision,
+      revisionAfter: stateAfterFirstUpdate.revision,
+    });
+    expect(useCanvasStore.getState().history).toBe(stateAfterFirstUpdate.history);
+  });
+
+  it('keeps UI-only node creation available to UI while denying the Agent', async () => {
+    const agentResult = await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeType: CANVAS_NODE_TYPES.panorama, position: { x: 0, y: 0 } },
+    }, 'agent');
+    expect(agentResult).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: expect.stringContaining('dedicated source-mode form') },
+    });
+
+    const uiResult = await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeType: CANVAS_NODE_TYPES.panorama, position: { x: 0, y: 0 } },
+    }, 'ui');
+    expect(uiResult).toMatchObject({ ok: true });
+  });
+
+  it('produces equivalent graph/history results for UI and Agent origins', () => {
+    const uiResult = canvasCommandRegistry.executeTransaction({
+      ...createAtomicGraphTransaction(),
+      id: 'ui-parity',
+      origin: 'ui',
+    });
+    expect(uiResult.ok).toBe(true);
+    const uiState = useCanvasStore.getState();
+    const uiProjection = {
+      nodes: uiState.nodes,
+      edges: uiState.edges,
+      history: uiState.history,
+      revision: uiState.revision,
+    };
+
+    resetCanvas();
+    const agentResult = canvasCommandRegistry.executeTransaction({
+      ...createAtomicGraphTransaction(),
+      id: 'agent-parity',
+      origin: 'agent',
+    });
+    expect(agentResult.ok).toBe(true);
+    const agentState = useCanvasStore.getState();
+    expect({
+      nodes: agentState.nodes,
+      edges: agentState.edges,
+      history: agentState.history,
+      revision: agentState.revision,
+    }).toEqual(uiProjection);
+  });
+
+  it('groups and ungroups through atomic commands with stable ordering and one undo per action', async () => {
+    const createResult = canvasCommandRegistry.executeTransaction({
+      id: 'group-seed',
+      origin: 'ui',
+      expectedRevision: 0,
+      commands: [
+        {
+          type: 'node.create',
+          version: CANVAS_COMMAND_VERSION,
+          input: { nodeType: CANVAS_NODE_TYPES.upload, nodeId: 'prefix', position: { x: -300, y: 0 } },
+        },
+        {
+          type: 'node.create',
+          version: CANVAS_COMMAND_VERSION,
+          input: { nodeType: CANVAS_NODE_TYPES.imageEdit, nodeId: 'left', position: { x: 0, y: 0 } },
+        },
+        {
+          type: 'node.create',
+          version: CANVAS_COMMAND_VERSION,
+          input: { nodeType: CANVAS_NODE_TYPES.imageEdit, nodeId: 'right', position: { x: 320, y: 40 } },
+        },
+      ],
+    });
+    expect(createResult.ok).toBe(true);
+    useCanvasStore.setState((state) => ({
+      nodes: state.nodes.map((node) => node.id === 'prefix' ? { ...node, selected: true } : node),
+    }));
+
+    const groupResult = await canvasCommandRegistry.execute({
+      type: 'group.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeIds: ['left', 'right'], groupId: 'group', displayName: 'Shot group' },
+    }, 'ui');
+    expect(groupResult).toMatchObject({ ok: true, revisionBefore: 1, revisionAfter: 2 });
+    expect(useCanvasStore.getState().nodes.map((node) => node.id)).toEqual([
+      'prefix',
+      'group',
+      'left',
+      'right',
+    ]);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'prefix')?.selected).toBe(false);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'group')?.selected).toBe(true);
+    expect(useCanvasStore.getState().history.past).toHaveLength(2);
+
+    const ungroupResult = await canvasCommandRegistry.execute({
+      type: 'group.ungroup',
+      version: CANVAS_COMMAND_VERSION,
+      input: { groupIds: ['group'] },
+    }, 'agent');
+    expect(ungroupResult).toMatchObject({ ok: true, revisionBefore: 2, revisionAfter: 3 });
+    expect(useCanvasStore.getState().nodes.map((node) => node.id)).toEqual(['prefix', 'left', 'right']);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'left')).toMatchObject({
+      parentId: undefined,
+      position: { x: 0, y: 0 },
+    });
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'right')).toMatchObject({
+      parentId: undefined,
+      position: { x: 320, y: 40 },
+    });
+    expect(useCanvasStore.getState().history.past).toHaveLength(3);
+  });
+});
+
+describe('CanvasCommandRegistry read and generation facades', () => {
+  beforeEach(resetCanvas);
+
+  it('returns typed lookup and capability errors for non-graph commands', async () => {
+    const missingSelection = await canvasCommandRegistry.execute({
+      type: 'selection.set',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeIds: ['missing-node'] },
+    });
+    expect(missingSelection).toMatchObject({
+      ok: false,
+      error: { code: 'not_found' },
+    });
+
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.upload, { x: 0, y: 0 });
+    const uploadNodeId = useCanvasStore.getState().nodes[0].id;
+    const unsupportedGeneration = await canvasCommandRegistry.execute({
+      type: 'generation.submit',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeIds: [uploadNodeId] },
+    });
+    expect(unsupportedGeneration).toMatchObject({
+      ok: false,
+      error: { code: 'unsupported_command' },
+    });
+
+    const missingStatus = await canvasCommandRegistry.execute({
+      type: 'generation.status',
+      version: CANVAS_COMMAND_VERSION,
+      input: { jobId: 'missing-job' },
+    });
+    expect(missingStatus).toMatchObject({
+      ok: false,
+      error: { code: 'not_found' },
+    });
+  });
+
+  it('returns bounded serializable graph projections without full media bodies', async () => {
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.upload, { x: 0, y: 0 }, {
+      displayName: 'Reference',
+      imageUrl: `data:image/png;base64,${'a'.repeat(2_000)}`,
+      prompt: 'A'.repeat(2_000),
+      apiKey: 'must-not-leak',
+      request: {
+        headers: {
+          Authorization: 'Bearer must-not-leak',
+          'X-API-Key': 'must-not-leak',
+        },
+      },
+      localPath: '/Users/example/private/reference.png',
+    });
+    const result = await canvasCommandRegistry.execute({
+      type: 'canvas.query',
+      version: CANVAS_COMMAND_VERSION,
+      input: { scope: 'graph', limit: 10 },
+    });
+    expect(result.ok).toBe(true);
+    const serialized = JSON.stringify(result.ok ? result.output.value : null);
+    expect(serialized).toContain('[media:');
+    expect(serialized).toContain('A'.repeat(1_500));
+    expect(serialized).toContain('[asset-reference:local]');
+    expect(serialized).not.toContain('a'.repeat(1_000));
+    expect(serialized).not.toContain('must-not-leak');
+  });
+
+  it('indexes nested storyboard, audio, and Director Studio assets through one catalog', async () => {
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.storyboardSplit, { x: 0, y: 0 }, {
+      frames: [{
+        id: 'frame-1',
+        imageUrl: 'https://example.com/frame.png',
+        previewImageUrl: null,
+        aspectRatio: '16:9',
+        note: 'Opening frame',
+        order: 0,
+      }],
+    });
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.audio, { x: 200, y: 0 }, {
+      audioUrl: 'https://example.com/voice.mp3',
+    });
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.blueprint, { x: 400, y: 0 }, {
+      snapshotUrl: 'data:image/png;base64,director-snapshot',
+      referenceImages: [{ id: 'hero', url: 'https://example.com/hero.png', label: 'Hero' }],
+      items: [{
+        id: 'actor',
+        label: 'Actor',
+        x: 0,
+        y: 0,
+        color: '#fff',
+        refImageUrl: 'https://example.com/actor.png',
+        refImageName: 'Actor identity',
+      }],
+      directorStudioProjects: [{
+        id: 'project-1',
+        name: 'Shot A',
+        createdAt: 1,
+        updatedAt: 1,
+        coverUrl: 'https://example.com/cover.png',
+        snapshot: {
+          mode: 'flat',
+          items: [{
+            id: 'saved-actor',
+            label: 'Saved actor',
+            x: 0,
+            y: 0,
+            color: '#fff',
+            refImageUrl: 'https://example.com/saved-actor.png',
+            refImageName: 'Saved actor identity',
+          }],
+          referenceImages: [],
+          aspectRatio: '16:9',
+          snapshotUrl: 'https://example.com/project-shot.png',
+        },
+      }],
+    });
+
+    const result = await canvasCommandRegistry.execute({
+      type: 'asset.list',
+      version: CANVAS_COMMAND_VERSION,
+      input: { limit: 100 },
+    });
+    expect(result.ok).toBe(true);
+    const assets = result.ok ? result.output.value as Array<Record<string, unknown>> : [];
+    expect(assets.map((asset) => asset.kind)).toEqual(expect.arrayContaining(['image', 'audio']));
+    expect(assets.map((asset) => asset.title)).toEqual(expect.arrayContaining([
+      'Opening frame',
+      'Hero',
+      'Actor identity',
+      'Saved actor identity',
+      'Shot A · 封面',
+      'Shot A · 快照',
+    ]));
+    expect(JSON.stringify(assets)).not.toContain('https://example.com');
+    expect(JSON.stringify(assets)).not.toContain('director-snapshot');
+  });
+
+  it('reports generation dispatch as accepted without presenting a stale job id as a new receipt', async () => {
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.imageEdit, { x: 0, y: 0 }, {
+      generationJobId: 'job-42',
+      isGenerating: true,
+    });
+    const nodeId = useCanvasStore.getState().nodes[0].id;
+    const triggered: string[] = [];
+    const unsubscribe = canvasEventBus.subscribe('generation-node/trigger', ({ nodeId: triggeredId }) => {
+      triggered.push(triggeredId);
+    });
+
+    const result = await canvasCommandRegistry.execute({
+      type: 'generation.submit',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeIds: [nodeId] },
+    }, 'ui');
+    unsubscribe();
+
+    expect(result).toMatchObject({
+      ok: true,
+      output: {
+        references: { nodeIds: [nodeId] },
+        value: { acceptedNodeIds: [nodeId], status: 'accepted' },
+      },
+    });
+    expect(result.ok ? result.output.references.jobIds : undefined).toBeUndefined();
+    expect(triggered).toEqual([nodeId]);
+
+    const status = await canvasCommandRegistry.execute({
+      type: 'generation.status',
+      version: CANVAS_COMMAND_VERSION,
+      input: { jobId: 'job-42' },
+    });
+    expect(status).toMatchObject({
+      ok: true,
+      output: {
+        references: { nodeId, jobId: 'job-42' },
+        value: { status: 'running' },
+      },
+    });
+  });
+
+  it('resolves generation status and result location through linked result nodes', async () => {
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.imageEdit, { x: 0, y: 0 });
+    const sourceNodeId = useCanvasStore.getState().nodes[0].id;
+    useCanvasStore.getState().addDerivedExportNode(
+      sourceNodeId,
+      'https://example.com/generated.png',
+      '16:9',
+      undefined,
+    );
+    const resultNodeId = useCanvasStore.getState().nodes.find((node) => (
+      node.type === CANVAS_NODE_TYPES.exportImage
+    ))?.id as string;
+    useCanvasStore.getState().updateNodeData(resultNodeId, { generationJobId: 'linked-job' });
+    useCanvasStore.getState().addEdge(sourceNodeId, resultNodeId);
+
+    const status = await canvasCommandRegistry.execute({
+      type: 'generation.status',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeId: sourceNodeId },
+    });
+    expect(status).toMatchObject({
+      ok: true,
+      output: {
+        references: {
+          nodeId: sourceNodeId,
+          nodeIds: expect.arrayContaining([sourceNodeId, resultNodeId]),
+          jobId: 'linked-job',
+        },
+        value: {
+          status: 'succeeded',
+          resultNodeId,
+          resultNodeIds: [resultNodeId],
+        },
+      },
+    });
+  });
+});

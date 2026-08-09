@@ -19,6 +19,8 @@ import {
   type AiAudioNodeData,
 } from '@/features/canvas/domain/canvasNodes';
 import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
+import { canvasEventBus } from '@/features/canvas/application/canvasServices';
+import { subscribeCanvasGenerationTrigger } from '@/features/canvas/application/canvasGenerationTriggers';
 import {
   resolveAudioInputSchemaFromExtraParams,
   type AudioInputSchema,
@@ -842,6 +844,13 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
     t,
     updateNodeData,
   ]);
+
+  useEffect(() => subscribeCanvasGenerationTrigger(
+    canvasEventBus,
+    CANVAS_NODE_TYPES.aiAudio,
+    id,
+    handleGenerate,
+  ), [handleGenerate, id]);
 
   const handleOpenPayloadDebug = useCallback(() => {
     try {

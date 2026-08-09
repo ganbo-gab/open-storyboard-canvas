@@ -1,0 +1,200 @@
+import {
+  CANVAS_NODE_TYPES,
+  type CanvasEdge,
+  type CanvasNode,
+} from '../domain/canvasNodes';
+import type { CanvasEventBus } from './ports';
+import { supportsCanvasGenerationTrigger } from './canvasGenerationTriggers';
+
+export type CanvasGenerationStatus = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed';
+
+export interface CanvasGenerationStatusProjection {
+  nodeId: string;
+  jobId: string | null;
+  jobIds: string[];
+  status: CanvasGenerationStatus;
+  resultNodeId: string | null;
+  resultNodeIds: string[];
+  hasResult: boolean;
+  error: string | null;
+}
+
+export interface CanvasGenerationSubmitResult {
+  acceptedNodeIds: string[];
+  status: 'accepted';
+}
+
+type GenerationData = {
+  isGenerating?: unknown;
+  generationJobId?: unknown;
+  generationError?: unknown;
+  lastError?: unknown;
+  resultNodeId?: unknown;
+  imageUrl?: unknown;
+  videoUrl?: unknown;
+  audioUrl?: unknown;
+  rawContent?: unknown;
+  content?: unknown;
+};
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function hasGenerationResult(data: GenerationData): boolean {
+  return [data.imageUrl, data.videoUrl, data.audioUrl, data.rawContent, data.content]
+    .some((value) => typeof value === 'string' && value.length > 0);
+}
+
+function projectNodeStatus(node: CanvasNode): CanvasGenerationStatusProjection {
+  const data = node.data as GenerationData;
+  const error = readString(data.generationError) ?? readString(data.lastError);
+  const explicitResultNodeId = readString(data.resultNodeId);
+  const hasResult = Boolean(explicitResultNodeId) || hasGenerationResult(data);
+  const jobId = readString(data.generationJobId);
+  let status: CanvasGenerationStatus = 'idle';
+  if (error) {
+    status = 'failed';
+  } else if (data.isGenerating === true) {
+    status = jobId ? 'running' : 'queued';
+  } else if (hasResult) {
+    status = 'succeeded';
+  }
+
+  return {
+    nodeId: node.id,
+    jobId,
+    jobIds: jobId ? [jobId] : [],
+    status,
+    resultNodeId: explicitResultNodeId,
+    resultNodeIds: explicitResultNodeId ? [explicitResultNodeId] : [],
+    hasResult,
+    error,
+  };
+}
+
+function isGenerationResultNode(node: CanvasNode): boolean {
+  return node.type === CANVAS_NODE_TYPES.exportImage
+    || node.type === CANVAS_NODE_TYPES.video
+    || node.type === CANVAS_NODE_TYPES.audio
+    || node.type === CANVAS_NODE_TYPES.jsonCard;
+}
+
+function readExplicitResultNodeIds(node: CanvasNode): string[] {
+  const data = node.data as GenerationData & { resultNodeIds?: unknown };
+  const values = [
+    readString(data.resultNodeId),
+    ...(Array.isArray(data.resultNodeIds)
+      ? data.resultNodeIds.map(readString)
+      : []),
+  ];
+  return values.filter((value): value is string => Boolean(value));
+}
+
+function findGenerationResultNodes(
+  nodes: CanvasNode[],
+  edges: CanvasEdge[],
+  sourceNode: CanvasNode,
+): CanvasNode[] {
+  const resultIds = new Set(readExplicitResultNodeIds(sourceNode));
+  edges.forEach((edge) => {
+    if (edge.source === sourceNode.id) {
+      resultIds.add(edge.target);
+    }
+  });
+  return nodes.filter((node) => resultIds.has(node.id) && isGenerationResultNode(node));
+}
+
+function aggregateSourceStatus(
+  sourceNode: CanvasNode,
+  resultNodes: CanvasNode[],
+): CanvasGenerationStatusProjection {
+  const projections = resultNodes.map(projectNodeStatus);
+  const latestProjection = projections[projections.length - 1];
+  const jobIds = Array.from(new Set(projections.flatMap((projection) => projection.jobIds)));
+  const resultNodeIds = resultNodes.map((node) => node.id);
+  const error = projections.find((projection) => projection.error)?.error ?? null;
+  let status: CanvasGenerationStatus = 'idle';
+  if (projections.some((projection) => projection.status === 'running')) {
+    status = 'running';
+  } else if (projections.some((projection) => projection.status === 'queued')) {
+    status = 'queued';
+  } else if (projections.some((projection) => projection.status === 'failed')) {
+    status = 'failed';
+  } else if (projections.some((projection) => projection.status === 'succeeded')) {
+    status = 'succeeded';
+  }
+
+  return {
+    nodeId: sourceNode.id,
+    jobId: latestProjection?.jobId ?? jobIds[jobIds.length - 1] ?? null,
+    jobIds,
+    status,
+    resultNodeId: latestProjection?.nodeId ?? null,
+    resultNodeIds,
+    hasResult: projections.some((projection) => projection.hasResult),
+    error,
+  };
+}
+
+export class CanvasGenerationFacade {
+  constructor(private readonly eventBus: CanvasEventBus) {}
+
+  supportsNode(node: CanvasNode): boolean {
+    return supportsCanvasGenerationTrigger(node.type);
+  }
+
+  submit(nodeIds: string[], nodes: CanvasNode[]): CanvasGenerationSubmitResult {
+    const nodeById = new Map(nodes.map((node) => [node.id, node] as const));
+    const acceptedNodeIds: string[] = [];
+
+    for (const nodeId of Array.from(new Set(nodeIds))) {
+      const node = nodeById.get(nodeId);
+      if (!node || !this.supportsNode(node)) {
+        continue;
+      }
+      this.eventBus.publish('generation-node/trigger', { nodeId });
+      acceptedNodeIds.push(nodeId);
+    }
+
+    return { acceptedNodeIds, status: 'accepted' };
+  }
+
+  getStatus(
+    nodes: CanvasNode[],
+    edges: CanvasEdge[],
+    input: { nodeId?: string; jobId?: string },
+  ): CanvasGenerationStatusProjection | null {
+    const node = input.jobId
+      ? nodes.find((candidate) => (
+        readString((candidate.data as GenerationData).generationJobId) === input.jobId
+      ))
+      : nodes.find((candidate) => candidate.id === input.nodeId);
+    if (!node) {
+      return null;
+    }
+
+    if (input.nodeId && this.supportsNode(node)) {
+      const resultNodes = findGenerationResultNodes(nodes, edges, node);
+      if (resultNodes.length > 0) {
+        return aggregateSourceStatus(node, resultNodes);
+      }
+    }
+    return projectNodeStatus(node);
+  }
+
+  locateResultNodeId(
+    nodes: CanvasNode[],
+    edges: CanvasEdge[],
+    input: { nodeId?: string; jobId?: string },
+  ): string | null {
+    const status = this.getStatus(nodes, edges, input);
+    if (!status) {
+      return null;
+    }
+    if (status.resultNodeId && nodes.some((node) => node.id === status.resultNodeId)) {
+      return status.resultNodeId;
+    }
+    return status.hasResult ? status.nodeId : null;
+  }
+}

@@ -3,7 +3,9 @@ import { useReactFlow } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
 import { ImagePlus, Globe2, LayoutGrid, Images, ListPlus, Video } from 'lucide-react';
 
-import { CANVAS_NODE_TYPES, type CanvasNodeData, type CanvasNodeType } from '@/features/canvas/domain/canvasNodes';
+import { CANVAS_NODE_TYPES, type CanvasNodeType } from '@/features/canvas/domain/canvasNodes';
+import { CANVAS_COMMAND_VERSION } from '@/features/canvas/domain/canvasCommands';
+import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
 import {
   buildPromptImportNodeDrafts,
   getPromptImportNodeBounds,
@@ -17,7 +19,7 @@ interface SideToolbarItem {
   labelKey: string;
   titleKey: string;
   icon: React.ComponentType<{ className?: string }>;
-  data?: Partial<CanvasNodeData>;
+  openDirectorStudio?: boolean;
 }
 
 function TextIcon({ className }: { className?: string }) {
@@ -54,7 +56,7 @@ const TOOLBAR_ITEMS: SideToolbarItem[] = [
     labelKey: 'node.menu.blueprint',
     titleKey: 'canvasToolbar.createDirectorStudio',
     icon: LayoutGrid,
-    data: { openDirectorStudioOnCreate: true },
+    openDirectorStudio: true,
   },
 ];
 
@@ -70,11 +72,10 @@ interface CanvasSideToolbarProps {
 export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps) => {
   const { t } = useTranslation();
   const reactFlow = useReactFlow();
-  const addNode = useCanvasStore((s) => s.addNode);
   const addNodesBatch = useCanvasStore((s) => s.addNodesBatch);
   const [isPromptImportOpen, setIsPromptImportOpen] = useState(false);
 
-  const handleAdd = useCallback((type: CanvasNodeType, data?: Partial<CanvasNodeData>) => {
+  const handleAdd = useCallback((type: CanvasNodeType, openDirectorStudio = false) => {
     // Drop near the current viewport center, with a small random nudge so
     // repeated clicks don't stack.
     let position = { x: 240, y: 160 };
@@ -95,8 +96,16 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
     } catch {
       /* fallback position already set */
     }
-    addNode(type, position, data);
-  }, [addNode, reactFlow]);
+    void canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: type,
+        position,
+        configuration: openDirectorStudio ? { openDirectorStudio: true } : undefined,
+      },
+    }, 'ui');
+  }, [reactFlow]);
 
   const handleImport = useCallback((
     rows: PromptImportMappedRow[],
@@ -167,7 +176,7 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
               key={item.type}
               type="button"
               title={t(item.titleKey)}
-              onClick={() => handleAdd(item.type, item.data)}
+              onClick={() => handleAdd(item.type, item.openDirectorStudio)}
               className="flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] px-2 py-2 text-[10px] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
             >
               <Icon className="h-4 w-4" />

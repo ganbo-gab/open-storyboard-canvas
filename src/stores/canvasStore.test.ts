@@ -12,6 +12,7 @@ function resetCanvasStore(): void {
   useCanvasStore.setState({
     nodes: [],
     edges: [],
+    revision: 0,
     selectedNodeId: null,
     activeDirectorStudioNodeId: null,
     activeToolDialog: null,
@@ -127,6 +128,29 @@ describe('canvasStore.addNodesBatch', () => {
     ])).toThrowError(RangeError);
     expect(useCanvasStore.getState().nodes).toEqual([]);
     expect(useCanvasStore.getState().history.past).toEqual([]);
+  });
+});
+
+describe('canvasStore revision contract', () => {
+  beforeEach(resetCanvasStore);
+
+  it('advances for persistent graph mutations but not selection or viewport changes', () => {
+    const nodeId = useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.imageEdit, { x: 0, y: 0 });
+    expect(useCanvasStore.getState().revision).toBe(1);
+
+    useCanvasStore.getState().setViewportState({ x: 20, y: 30, zoom: 1.2 });
+    useCanvasStore.getState().setSelectedNode(nodeId);
+    useCanvasStore.getState().onNodesChange([{ id: nodeId, type: 'select', selected: true }]);
+    expect(useCanvasStore.getState().revision).toBe(1);
+
+    useCanvasStore.getState().updateNodeData(nodeId, { prompt: 'Updated prompt' });
+    expect(useCanvasStore.getState().revision).toBe(2);
+
+    useCanvasStore.getState().updateNodePosition(nodeId, { x: 100, y: 120 });
+    expect(useCanvasStore.getState().revision).toBe(3);
+
+    expect(useCanvasStore.getState().undo()).toBe(true);
+    expect(useCanvasStore.getState().revision).toBe(4);
   });
 });
 

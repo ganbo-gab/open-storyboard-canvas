@@ -31,6 +31,7 @@ import {
   canvasAiGateway,
   canvasEventBus,
 } from '@/features/canvas/application/canvasServices';
+import { subscribeCanvasGenerationTrigger } from '@/features/canvas/application/canvasGenerationTriggers';
 import {
   parseInputImageSignature,
   parseInputReferenceSignature,
@@ -915,12 +916,12 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   ]);
 
   useEffect(() => {
-    return canvasEventBus.subscribe('generation-node/trigger', ({ nodeId }) => {
-      if (nodeId !== id) {
-        return;
-      }
-      void handleGenerate();
-    });
+    return subscribeCanvasGenerationTrigger(
+      canvasEventBus,
+      CANVAS_NODE_TYPES.imageEdit,
+      id,
+      handleGenerate,
+    );
   }, [handleGenerate, id]);
 
   const handleOpenPayloadDebug = useCallback(async () => {

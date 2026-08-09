@@ -62,6 +62,7 @@ import {
   validateDreaminaVideoRequest,
   type DreaminaTransitionSegment,
 } from '@/features/canvas/application/dreaminaCapabilities';
+import { subscribeCanvasGenerationTrigger } from '@/features/canvas/application/canvasGenerationTriggers';
 import {
   DEFAULT_VIDEO_INPUT_SCHEMA,
   normalizeVideoInputSchema,
@@ -1003,12 +1004,12 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
   }, [payloadDebugText, t]);
 
   useEffect(() => {
-    return canvasEventBus.subscribe('generation-node/trigger', ({ nodeId }) => {
-      if (nodeId !== id) {
-        return;
-      }
-      void handleGenerate();
-    });
+    return subscribeCanvasGenerationTrigger(
+      canvasEventBus,
+      CANVAS_NODE_TYPES.aiVideo,
+      id,
+      handleGenerate,
+    );
   }, [handleGenerate, id]);
 
   const handlePromptKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {

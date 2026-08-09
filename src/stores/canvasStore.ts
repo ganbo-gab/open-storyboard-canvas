@@ -99,6 +99,14 @@ const DIRECTOR_STUDIO_ASPECT_FRAMES = new Set([
 ]);
 const DIRECTOR_STUDIO_SCREENSHOT_RESOLUTIONS = new Set(['1080p', '1440p', '4k']);
 
+function normalizeCanvasRevision(revision: unknown): number {
+  return Number.isSafeInteger(revision) && Number(revision) >= 0 ? Number(revision) : 0;
+}
+
+function nextCanvasRevision(revision: unknown): number {
+  return normalizeCanvasRevision(revision) + 1;
+}
+
 function getDirectorStudioProjectLibrarySignature(projects: unknown): string {
   if (!Array.isArray(projects) || projects.length === 0) {
     return '';
@@ -131,9 +139,10 @@ function areDirectorStudioProjectLibrariesEquivalent(previousProjects: unknown, 
   return getDirectorStudioProjectLibrarySignature(previousProjects) === getDirectorStudioProjectLibrarySignature(nextProjects);
 }
 
-interface CanvasState {
+export interface CanvasState {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
+  revision: number;
   selectedNodeId: string | null;
   activeDirectorStudioNodeId: string | null;
   activeToolDialog: ActiveToolDialog | null;
@@ -159,6 +168,12 @@ interface CanvasState {
     data?: Partial<CanvasNodeData>
   ) => string;
   addNodesBatch: (inputs: AddNodesBatchInput[]) => string[];
+  commitGraphTransaction: (input: {
+    expectedRevision: number;
+    nodes: CanvasNode[];
+    edges: CanvasEdge[];
+    selectedNodeId: string | null;
+  }) => number | null;
   addEdge: (source: string, target: string) => string | null;
   findNodePosition: (sourceNodeId: string, newNodeWidth: number, newNodeHeight: number) => { x: number; y: number };
   findNodePositions: (
@@ -1036,6 +1051,7 @@ function createDefaultStoryboardExportOptions(): StoryboardExportOptions {
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   nodes: [],
   edges: [],
+  revision: 0,
   selectedNodeId: null,
   activeDirectorStudioNodeId: null,
   activeToolDialog: null,
@@ -1125,6 +1141,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       return {
         nodes: nextNodes,
+        revision: hasMeaningfulChange ? nextCanvasRevision(state.revision) : state.revision,
         selectedNodeId: resolveSelectedNodeId(state.selectedNodeId, nextNodes),
         activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, nextNodes),
         history: nextHistory,
@@ -1144,6 +1161,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       return {
         edges: nextEdges,
+        revision: nextCanvasRevision(state.revision),
         history: {
           past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
           future: [],
@@ -1161,6 +1179,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         { ...connection, sourceHandle, targetHandle, type: 'disconnectableEdge' },
         state.edges
       ),
+      revision: nextCanvasRevision(state.revision),
       history: {
         past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
         future: [],
@@ -1173,15 +1192,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const normalizedNodes = normalizeNodes(nodes);
     const normalizedEdges = normalizeEdgesWithNodes(edges, normalizedNodes);
 
-    set({
+    set((state) => ({
       nodes: normalizedNodes,
       edges: normalizedEdges,
+      revision: nextCanvasRevision(state.revision),
       selectedNodeId: null,
       activeDirectorStudioNodeId: null,
       activeToolDialog: null,
       history: normalizeHistory(history),
       dragHistorySnapshot: null,
-    });
+    }));
   },
 
   setViewportState: (viewport) => {
@@ -1245,6 +1265,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const newNode = canvasNodeFactory.createNode(type, position, data);
     set({
       nodes: [...state.nodes, newNode],
+      revision: nextCanvasRevision(state.revision),
       history: {
         past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
         future: [],
@@ -1283,6 +1304,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
     set({
       nodes: [...state.nodes, ...newNodes],
+      revision: nextCanvasRevision(state.revision),
       history: {
         past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
         future: [],
@@ -1290,6 +1312,35 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       dragHistorySnapshot: null,
     });
     return newNodes.map((node) => node.id);
+  },
+
+  commitGraphTransaction: ({ expectedRevision, nodes, edges, selectedNodeId }) => {
+    let committedRevision: number | null = null;
+    set((state) => {
+      const currentRevision = normalizeCanvasRevision(state.revision);
+      if (currentRevision !== expectedRevision) {
+        return {};
+      }
+      committedRevision = nextCanvasRevision(currentRevision);
+      return {
+        nodes,
+        edges,
+        selectedNodeId: resolveSelectedNodeId(selectedNodeId, nodes),
+        activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, nodes),
+        activeDirectorStudioNodeId:
+          state.activeDirectorStudioNodeId
+          && nodes.some((node) => node.id === state.activeDirectorStudioNodeId)
+            ? state.activeDirectorStudioNodeId
+            : null,
+        revision: committedRevision,
+        history: {
+          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
+          future: [],
+        },
+        dragHistorySnapshot: null,
+      };
+    });
+    return committedRevision;
   },
 
   addEdge: (source, target) => {
@@ -1321,6 +1372,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
     set({
       edges: [...state.edges, newEdge],
+      revision: nextCanvasRevision(state.revision),
     });
 
     return edgeId;
@@ -1578,6 +1630,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
     set({
       nodes: [...state.nodes, node],
+      revision: nextCanvasRevision(state.revision),
       selectedNodeId: node.id,
       activeToolDialog: null,
       history: {
@@ -1650,6 +1703,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
     set({
       nodes: [...state.nodes, node],
+      revision: nextCanvasRevision(state.revision),
       selectedNodeId: node.id,
       activeToolDialog: null,
       history: {
@@ -1681,6 +1735,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
     set({
       nodes: [...state.nodes, node],
+      revision: nextCanvasRevision(state.revision),
       selectedNodeId: node.id,
       activeToolDialog: null,
       history: {
@@ -1731,6 +1786,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       return {
         nodes: nextNodes,
+        revision: nextCanvasRevision(state.revision),
         history: {
           past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
           future: [],
@@ -1790,6 +1846,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       return {
         nodes: nextNodes,
+        revision: nextCanvasRevision(state.revision),
         history: {
           past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
           future: [],
@@ -1822,7 +1879,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         return {};
       }
 
-      return { nodes: nextNodes };
+      return { nodes: nextNodes, revision: nextCanvasRevision(state.revision) };
     });
   },
 
@@ -1871,6 +1928,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       return {
         nodes: nextNodes,
+        revision: nextCanvasRevision(state.revision),
         history: {
           past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
           future: [],
@@ -1918,6 +1976,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       return {
         nodes: nextNodes,
+        revision: nextCanvasRevision(state.revision),
         history: {
           past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
           future: [],
@@ -1955,6 +2014,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       return {
         nodes: nextNodes,
         edges: normalizeEdgesWithNodes(state.edges, nextNodes),
+        revision: nextCanvasRevision(state.revision),
         history: {
           past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
           future: [],
@@ -1991,6 +2051,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       return {
         nodes: nextNodes,
         edges: nextEdges,
+        revision: nextCanvasRevision(state.revision),
         selectedNodeId:
           state.selectedNodeId && deleteSet.has(state.selectedNodeId) ? null : state.selectedNodeId,
         activeToolDialog:
@@ -2137,6 +2198,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
     set({
       nodes: nextNodes,
+      revision: nextCanvasRevision(state.revision),
       selectedNodeId: groupNode.id,
       activeToolDialog:
         state.activeToolDialog && memberSet.has(state.activeToolDialog.nodeId)
@@ -2194,6 +2256,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set({
       nodes: nextNodes,
       edges: nextEdges,
+      revision: nextCanvasRevision(state.revision),
       selectedNodeId: state.selectedNodeId === groupNodeId ? null : state.selectedNodeId,
       activeToolDialog:
         state.activeToolDialog?.nodeId === groupNodeId ? null : state.activeToolDialog,
@@ -2216,6 +2279,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       return {
         edges: state.edges.filter((edge) => edge.id !== edgeId),
+        revision: nextCanvasRevision(state.revision),
         history: {
           past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
           future: [],
@@ -2256,6 +2320,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set({
       nodes: target.nodes,
       edges: target.edges,
+      revision: nextCanvasRevision(state.revision),
       selectedNodeId: resolveSelectedNodeId(state.selectedNodeId, target.nodes),
       activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, target.nodes),
       history: {
@@ -2280,6 +2345,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set({
       nodes: target.nodes,
       edges: target.edges,
+      revision: nextCanvasRevision(state.revision),
       selectedNodeId: resolveSelectedNodeId(state.selectedNodeId, target.nodes),
       activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, target.nodes),
       history: {
@@ -2300,6 +2366,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       return {
         nodes: [],
         edges: [],
+        revision: nextCanvasRevision(state.revision),
         selectedNodeId: null,
         activeDirectorStudioNodeId: null,
         activeToolDialog: null,

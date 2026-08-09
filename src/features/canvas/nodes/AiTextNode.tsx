@@ -29,6 +29,7 @@ import { insertReferenceToken } from '@/features/canvas/application/referenceTok
 import { clearBrowserTextSelection } from '@/features/canvas/application/textSelection';
 import { useChatModelCatalog, type ChatCatalogEntry } from '@/features/canvas/application/chatModelCatalog';
 import { canvasEventBus } from '@/features/canvas/application/canvasServices';
+import { subscribeCanvasGenerationTrigger } from '@/features/canvas/application/canvasGenerationTriggers';
 import {
   buildCustomChatCompletionRequestDebugPreview,
   streamCustomChatCompletion,
@@ -1096,11 +1097,14 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
   }, [enabledAgents, isGeneratingPreview, runAgent, runningAutomation, t]);
 
   useEffect(() => {
-    return canvasEventBus.subscribe('generation-node/trigger', ({ nodeId }) => {
-      if (nodeId === id) {
-        void runAgent(selectedAgent?.id);
-      }
-    });
+    return subscribeCanvasGenerationTrigger(
+      canvasEventBus,
+      CANVAS_NODE_TYPES.aiText,
+      id,
+      async () => {
+        await runAgent(selectedAgent?.id);
+      },
+    );
   }, [id, runAgent, selectedAgent?.id]);
 
   const handlePromptKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {

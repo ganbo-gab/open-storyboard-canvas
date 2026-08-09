@@ -37,6 +37,10 @@ import {
   type CanvasMouseBindingSlot,
 } from '@/stores/settingsStore';
 import { canvasEventBus } from '@/features/canvas/application/canvasServices';
+import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
+import { canvasNavigationFacade } from '@/features/canvas/application/canvasNavigationFacade';
+import { CANVAS_COMMAND_VERSION } from '@/features/canvas/domain/canvasCommands';
+import { CANVAS_GENERATION_NODE_TYPES } from '@/features/canvas/domain/canvasCapabilities';
 import { useCanvasPersistence } from '@/features/canvas/hooks/useCanvasPersistence';
 import { useCanvasGenerationPolling } from '@/features/canvas/hooks/useCanvasGenerationPolling';
 import { useCanvasShortcuts } from '@/features/canvas/hooks/useCanvasShortcuts';
@@ -73,6 +77,10 @@ import {
 import { prepareVideoNodeDataFromFile, prepareVideoNodeDataFromSource } from '@/features/canvas/application/videoUpload';
 import { prepareAudioNodeDataFromFile, prepareAudioNodeDataFromSource } from '@/features/canvas/application/audioUpload';
 import {
+  buildCanvasAssetCatalog,
+  type CanvasAssetCatalogItem,
+} from '@/features/canvas/application/canvasAssetCatalog';
+import {
   getConnectMenuNodeTypes,
   nodeHasSourceHandle,
   nodeHasTargetHandle,
@@ -90,12 +98,7 @@ import { MissingApiKeyHint } from '@/features/settings/MissingApiKeyHint';
 
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 const CANVAS_MARQUEE_MIN_DISTANCE = 4;
-const CANVAS_BATCH_TRIGGER_TYPES = new Set<CanvasNodeType>([
-  CANVAS_NODE_TYPES.imageEdit,
-  CANVAS_NODE_TYPES.aiVideo,
-  CANVAS_NODE_TYPES.aiText,
-  CANVAS_NODE_TYPES.storyboardGen,
-]);
+const CANVAS_BATCH_TRIGGER_TYPES = new Set<CanvasNodeType>(CANVAS_GENERATION_NODE_TYPES);
 
 interface PendingConnectStart {
   nodeId: string;
@@ -889,136 +892,38 @@ function getClientPosition(event: MouseEvent | TouchEvent): { x: number; y: numb
   return { x: touch.clientX, y: touch.clientY };
 }
 
-function getNodeDisplayTitle(node: CanvasNode, fallback: string): string {
-  const data = node.data as Record<string, unknown>;
-  const displayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
-  if (displayName) {
-    return displayName;
+function toAssetPanelItem(asset: CanvasAssetCatalogItem): CanvasAssetItem | null {
+  if (asset.kind === 'audio') {
+    return null;
   }
-  const sourceFileName = typeof data.sourceFileName === 'string' ? data.sourceFileName.trim() : '';
-  return sourceFileName || fallback;
-}
-
-function getNodeAssetSourceLabel(node: CanvasNode): string {
-  switch (node.type) {
-    case CANVAS_NODE_TYPES.upload:
-      return '上传图';
-    case CANVAS_NODE_TYPES.imageEdit:
-      return 'AI 图片';
-    case CANVAS_NODE_TYPES.exportImage:
-      return '结果图';
-    case CANVAS_NODE_TYPES.panorama:
-      return '全景图';
-    case CANVAS_NODE_TYPES.storyboardSplit:
-      return '故事板帧';
-    case CANVAS_NODE_TYPES.storyboardGen:
-      return '故事板生成图';
-    case CANVAS_NODE_TYPES.video:
-      return '视频';
-    default:
-      return '图片资产';
+  if (asset.kind === 'image') {
+    return {
+      id: asset.id,
+      nodeId: asset.nodeId,
+      kind: 'image',
+      rawImageUrl: asset.url,
+      rawPreviewImageUrl: asset.previewUrl,
+      imageUrl: resolveImageDisplayUrl(asset.url),
+      previewImageUrl: resolveImageDisplayUrl(asset.previewUrl || asset.url),
+      aspectRatio: asset.aspectRatio,
+      title: asset.title,
+      sourceLabel: asset.sourceLabel,
+      order: asset.order,
+    };
   }
-}
-
-function resolveAssetPreview(rawImageUrl: string, rawPreviewImageUrl?: string | null): {
-  imageUrl: string;
-  previewImageUrl: string;
-} {
-  const imageUrl = resolveImageDisplayUrl(rawImageUrl);
   return {
-    imageUrl,
-    previewImageUrl: resolveImageDisplayUrl(rawPreviewImageUrl || rawImageUrl),
+    id: asset.id,
+    nodeId: asset.nodeId,
+    kind: 'video',
+    rawVideoUrl: asset.url,
+    rawThumbnailUrl: asset.previewUrl,
+    videoUrl: resolveImageDisplayUrl(asset.url),
+    thumbnailUrl: asset.previewUrl ? resolveImageDisplayUrl(asset.previewUrl) : null,
+    aspectRatio: asset.aspectRatio,
+    title: asset.title,
+    sourceLabel: asset.sourceLabel,
+    order: asset.order,
   };
-}
-
-function extractCanvasAssets(nodes: CanvasNode[]): CanvasAssetItem[] {
-  const assets: CanvasAssetItem[] = [];
-
-  nodes.forEach((node, nodeIndex) => {
-    const data = node.data as Record<string, unknown>;
-    const sourceLabel = getNodeAssetSourceLabel(node);
-    const baseOrder = nodeIndex * 1000;
-
-    const imageUrl = typeof data.imageUrl === 'string' ? data.imageUrl : '';
-    if (imageUrl) {
-      const previewImageUrl =
-        typeof data.previewImageUrl === 'string' ? data.previewImageUrl : null;
-      const resolved = resolveAssetPreview(imageUrl, previewImageUrl);
-      assets.push({
-        id: `${node.id}:image`,
-        nodeId: node.id,
-        kind: 'image',
-        rawImageUrl: imageUrl,
-        rawPreviewImageUrl: previewImageUrl,
-        aspectRatio: typeof data.aspectRatio === 'string' ? data.aspectRatio : undefined,
-        title: getNodeDisplayTitle(node, sourceLabel),
-        sourceLabel,
-        order: baseOrder,
-        ...resolved,
-      });
-    }
-
-    if (node.type === CANVAS_NODE_TYPES.video) {
-      const videoUrl = typeof data.localVideoUrl === 'string' && data.localVideoUrl.trim()
-        ? data.localVideoUrl
-        : typeof data.videoUrl === 'string'
-          ? data.videoUrl
-          : '';
-      if (videoUrl) {
-        const thumbnailUrl =
-          typeof data.thumbnailUrl === 'string' && data.thumbnailUrl.trim()
-            ? data.thumbnailUrl
-            : null;
-        assets.push({
-          id: `${node.id}:video`,
-          nodeId: node.id,
-          kind: 'video',
-          rawVideoUrl: videoUrl,
-          rawThumbnailUrl: thumbnailUrl,
-          videoUrl: resolveImageDisplayUrl(videoUrl),
-          thumbnailUrl: thumbnailUrl ? resolveImageDisplayUrl(thumbnailUrl) : null,
-          aspectRatio: typeof data.aspectRatio === 'string' ? data.aspectRatio : undefined,
-          title: getNodeDisplayTitle(node, sourceLabel),
-          sourceLabel,
-          order: baseOrder,
-        });
-      }
-    }
-
-    if (Array.isArray(data.frames)) {
-      data.frames.forEach((frame, frameIndex) => {
-        if (!frame || typeof frame !== 'object') {
-          return;
-        }
-        const frameRecord = frame as Record<string, unknown>;
-        const frameImageUrl =
-          typeof frameRecord.imageUrl === 'string' ? frameRecord.imageUrl : '';
-        if (!frameImageUrl) {
-          return;
-        }
-        const framePreviewImageUrl =
-          typeof frameRecord.previewImageUrl === 'string' ? frameRecord.previewImageUrl : null;
-        const frameNote = typeof frameRecord.note === 'string' ? frameRecord.note.trim() : '';
-        const frameOrder = Number.isFinite(frameRecord.order)
-          ? Number(frameRecord.order)
-          : frameIndex;
-        assets.push({
-          id: `${node.id}:frame:${String(frameRecord.id ?? frameIndex)}`,
-          nodeId: node.id,
-          kind: 'image',
-          rawImageUrl: frameImageUrl,
-          rawPreviewImageUrl: framePreviewImageUrl,
-          aspectRatio: typeof frameRecord.aspectRatio === 'string' ? frameRecord.aspectRatio : undefined,
-          title: frameNote || `${getNodeDisplayTitle(node, '故事板')} · 第 ${frameIndex + 1} 帧`,
-          sourceLabel,
-          order: baseOrder + frameOrder + 1,
-          ...resolveAssetPreview(frameImageUrl, framePreviewImageUrl),
-        });
-      });
-    }
-  });
-
-  return assets;
 }
 
 function createPreviewPath(line: PreviewConnectionLine): string {
@@ -1111,7 +1016,6 @@ export function Canvas() {
   const deleteNode = useCanvasStore((state) => state.deleteNode);
   const deleteNodes = useCanvasStore((state) => state.deleteNodes);
   const groupNodes = useCanvasStore((state) => state.groupNodes);
-  const ungroupNode = useCanvasStore((state) => state.ungroupNode);
   const undo = useCanvasStore((state) => state.undo);
   const redo = useCanvasStore((state) => state.redo);
   const openToolDialog = useCanvasStore((state) => state.openToolDialog);
@@ -1140,7 +1044,11 @@ export function Canvas() {
     [apiKeys, customProviders, dreaminaStatus, providerIds]
   );
   const canvasAssets = useMemo(
-    () => (isAssetPanelOpen ? extractCanvasAssets(nodes) : EMPTY_CANVAS_ASSETS),
+    () => (isAssetPanelOpen
+      ? buildCanvasAssetCatalog(nodes)
+          .map(toAssetPanelItem)
+          .filter((asset): asset is CanvasAssetItem => asset !== null)
+      : EMPTY_CANVAS_ASSETS),
     [isAssetPanelOpen, nodes]
   );
   const assetPanelAssets = useMemo(() => {
@@ -1199,6 +1107,29 @@ export function Canvas() {
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+
+  useEffect(() => canvasNavigationFacade.registerBridge({
+    focusNodeIds: async (nodeIds, options) => {
+      const nodeIdSet = new Set(nodeIds);
+      const targetNodes = reactFlowInstance.getNodes().filter((node) => nodeIdSet.has(node.id));
+      if (targetNodes.length !== nodeIdSet.size) {
+        return false;
+      }
+      if (options.select) {
+        applyNodesChange(reactFlowInstance.getNodes().map((node) => ({
+          id: node.id,
+          type: 'select' as const,
+          selected: nodeIdSet.has(node.id),
+        })));
+        setSelectedNode(nodeIds.length === 1 ? nodeIds[0] : null);
+      }
+      return reactFlowInstance.fitView({
+        nodes: targetNodes,
+        padding: options.padding,
+        duration: 300,
+      });
+    },
+  }), [applyNodesChange, reactFlowInstance, setSelectedNode]);
 
   useEffect(() => {
     const element = wrapperRef.current;
@@ -2521,33 +2452,42 @@ export function Canvas() {
   }, [reactFlowInstance]);
 
   const handleBatchGroup = useCallback(() => {
-    const groupedNodeId = groupNodes(selectedNodeIds);
-    if (!groupedNodeId) {
-      return;
-    }
-    scheduleCanvasPersist(0);
-  }, [groupNodes, scheduleCanvasPersist, selectedNodeIds]);
+    void canvasCommandRegistry.execute({
+      type: 'group.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeIds: selectedNodeIds },
+    }, 'ui').then((result) => {
+      if (result.ok) scheduleCanvasPersist(0);
+    });
+  }, [scheduleCanvasPersist, selectedNodeIds]);
 
   const handleBatchUngroup = useCallback(() => {
-    let changed = false;
-    for (const groupNodeId of selectedGroupNodeIds) {
-      changed = ungroupNode(groupNodeId) || changed;
-    }
-    if (changed) {
-      scheduleCanvasPersist(0);
-    }
-  }, [scheduleCanvasPersist, selectedGroupNodeIds, ungroupNode]);
+    void canvasCommandRegistry.execute({
+      type: 'group.ungroup',
+      version: CANVAS_COMMAND_VERSION,
+      input: { groupIds: selectedGroupNodeIds },
+    }, 'ui').then((result) => {
+      if (result.ok) scheduleCanvasPersist(0);
+    });
+  }, [scheduleCanvasPersist, selectedGroupNodeIds]);
 
   const handleBatchTrigger = useCallback(() => {
-    selectedBatchTriggerNodeIds.forEach((nodeId) => {
-      canvasEventBus.publish('generation-node/trigger', { nodeId });
-    });
+    void canvasCommandRegistry.execute({
+      type: 'generation.submit',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeIds: selectedBatchTriggerNodeIds },
+    }, 'ui');
   }, [selectedBatchTriggerNodeIds]);
 
   const handleBatchDelete = useCallback(() => {
-    deleteNodes(selectedNodeIds);
-    scheduleCanvasPersist(0);
-  }, [deleteNodes, scheduleCanvasPersist, selectedNodeIds]);
+    void canvasCommandRegistry.execute({
+      type: 'node.delete',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeIds: selectedNodeIds },
+    }, 'ui').then((result) => {
+      if (result.ok) scheduleCanvasPersist(0);
+    });
+  }, [scheduleCanvasPersist, selectedNodeIds]);
 
   useEffect(() => {
     if (selectedNodeIds.length === 1) {
