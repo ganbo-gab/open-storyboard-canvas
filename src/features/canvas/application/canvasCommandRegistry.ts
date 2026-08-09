@@ -202,8 +202,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isFinitePosition(value: unknown): boolean {
-  return isRecord(value) && Number.isFinite(value.x) && Number.isFinite(value.y);
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isCanvasCommandOrigin(value: unknown): value is CanvasCommandOrigin {
+  return value === 'ui' || value === 'agent' || value === 'system';
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: readonly string[]): boolean {
+  const allowed = new Set(allowedKeys);
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function validateFinitePosition(value: unknown, label: string, errors: string[]): void {
+  if (!isPlainRecord(value)
+    || !hasOnlyKeys(value, ['x', 'y'])
+    || !Object.prototype.hasOwnProperty.call(value, 'x')
+    || !Object.prototype.hasOwnProperty.call(value, 'y')
+    || !Number.isFinite(value.x)
+    || !Number.isFinite(value.y)) {
+    errors.push(`${label} must contain only finite x and y values.`);
+  }
 }
 
 function validateString(value: unknown, label: string, errors: string[], allowEmpty = false): void {
@@ -246,7 +270,7 @@ function validateJsonConfiguration(
     });
     return;
   }
-  if (!isRecord(value)) {
+  if (!isPlainRecord(value)) {
     errors.push(`${label} must contain only JSON-compatible values.`);
     return;
   }
@@ -318,7 +342,7 @@ function validateCreateConfiguration(
   value: unknown,
   errors: string[],
 ): void {
-  if (!isRecord(value)) {
+  if (!isPlainRecord(value)) {
     errors.push('configuration must be an object.');
     return;
   }
@@ -364,7 +388,7 @@ function validateCommandInput(
 ): string[] {
   const errors: string[] = [];
   const input = command.input as unknown;
-  if (!isRecord(input)) {
+  if (!isPlainRecord(input)) {
     return ['Command input must be an object.'];
   }
   const schema = INPUT_SCHEMAS[command.type];
@@ -373,7 +397,7 @@ function validateCommandInput(
     errors.push(`Unknown ${command.type} input field: ${unknownKey}.`);
   }
   for (const required of schema.required) {
-    if (!(required in input)) {
+    if (!Object.prototype.hasOwnProperty.call(input, required)) {
       errors.push(`Missing required ${command.type} input field: ${required}.`);
     }
   }
@@ -384,7 +408,7 @@ function validateCommandInput(
       if (command.input.nodeIds !== undefined) validateStringArray(command.input.nodeIds, 'nodeIds', errors, true);
       break;
     case 'node.create':
-      if (!(command.input.nodeType in canvasNodeCapabilityManifest)) {
+      if (!Object.prototype.hasOwnProperty.call(canvasNodeCapabilityManifest, command.input.nodeType)) {
         errors.push('nodeType is not registered.');
       } else if (!canCreateCanvasNodeDirectly(command.input.nodeType, origin)) {
         const capability: CanvasNodeCapabilityDeclaration =
@@ -396,14 +420,21 @@ function validateCommandInput(
             ?? 'nodeType requires a dedicated creation workflow.',
         );
       }
-      if (!isFinitePosition(command.input.position)) errors.push('position must contain finite x and y values.');
+      validateFinitePosition(command.input.position, 'position', errors);
       if (command.input.nodeId !== undefined) validateString(command.input.nodeId, 'nodeId', errors);
-      if (command.input.dimensions && (
-        !Number.isFinite(command.input.dimensions.width)
-        || command.input.dimensions.width <= 0
-        || !Number.isFinite(command.input.dimensions.height)
-        || command.input.dimensions.height <= 0
-      )) errors.push('dimensions must contain finite positive width and height values.');
+      if (command.input.dimensions !== undefined) {
+        const dimensions = command.input.dimensions as unknown;
+        if (!isPlainRecord(dimensions)
+          || !hasOnlyKeys(dimensions, ['width', 'height'])
+          || !Object.prototype.hasOwnProperty.call(dimensions, 'width')
+          || !Object.prototype.hasOwnProperty.call(dimensions, 'height')
+          || !Number.isFinite(dimensions.width)
+          || Number(dimensions.width) <= 0
+          || !Number.isFinite(dimensions.height)
+          || Number(dimensions.height) <= 0) {
+          errors.push('dimensions must contain only finite positive width and height values.');
+        }
+      }
       if (command.input.configuration !== undefined) {
         validateCreateConfiguration(command.input.nodeType, command.input.configuration, errors);
       }
@@ -431,20 +462,33 @@ function validateCommandInput(
       if (command.input.resolution !== undefined) validateString(command.input.resolution, 'resolution', errors);
       if (command.input.duration !== undefined) validateString(command.input.duration, 'duration', errors);
       if (command.input.extraParams !== undefined) {
-        validateJsonConfiguration(command.input.extraParams, 'extraParams', errors);
+        if (!isPlainRecord(command.input.extraParams)) {
+          errors.push('extraParams must be an object.');
+        } else {
+          validateJsonConfiguration(command.input.extraParams, 'extraParams', errors);
+        }
       }
       break;
     case 'node.move':
       if (!Array.isArray(command.input.positions) || command.input.positions.length === 0) {
         errors.push('positions must be a non-empty array.');
-      } else if (command.input.positions.some((item) => !item || typeof item.nodeId !== 'string' || !item.nodeId.trim() || !isFinitePosition(item.position))) {
-        errors.push('positions must contain valid nodeId and position records.');
+      } else {
+        command.input.positions.forEach((item, index) => {
+          if (!isPlainRecord(item)
+            || !hasOnlyKeys(item, ['nodeId', 'position'])
+            || typeof item.nodeId !== 'string'
+            || !item.nodeId.trim()) {
+            errors.push(`positions[${index}] must contain only nodeId and position.`);
+            return;
+          }
+          validateFinitePosition(item.position, `positions[${index}].position`, errors);
+        });
       }
       break;
     case 'node.layout':
       validateStringArray(command.input.nodeIds, 'nodeIds', errors);
       if (!['horizontal', 'vertical', 'grid'].includes(command.input.direction)) errors.push('Invalid layout direction.');
-      if (command.input.origin !== undefined && !isFinitePosition(command.input.origin)) errors.push('origin must contain finite x and y values.');
+      if (command.input.origin !== undefined) validateFinitePosition(command.input.origin, 'origin', errors);
       if (command.input.gap !== undefined && (!Number.isFinite(command.input.gap) || command.input.gap < 0)) errors.push('gap must be a non-negative finite number.');
       if (command.input.columns !== undefined && (!Number.isInteger(command.input.columns) || command.input.columns <= 0)) errors.push('columns must be a positive integer.');
       break;
@@ -476,12 +520,14 @@ function validateCommandInput(
     case 'viewport.focus':
       validateStringArray(command.input.nodeIds, 'nodeIds', errors);
       if (command.input.padding !== undefined && (!Number.isFinite(command.input.padding) || command.input.padding < 0 || command.input.padding > 1)) errors.push('padding must be between zero and one.');
+      if (command.input.select !== undefined && typeof command.input.select !== 'boolean') errors.push('select must be a boolean.');
       break;
     case 'asset.list':
       if (command.input.kind !== undefined && !['image', 'video', 'audio'].includes(command.input.kind)) errors.push('Invalid asset kind.');
       break;
     case 'asset.locate':
       validateString(command.input.assetId, 'assetId', errors);
+      if (command.input.select !== undefined && typeof command.input.select !== 'boolean') errors.push('select must be a boolean.');
       break;
     case 'generation.submit':
       validateStringArray(command.input.nodeIds, 'nodeIds', errors);
@@ -491,6 +537,9 @@ function validateCommandInput(
       if (!command.input.nodeId && !command.input.jobId) errors.push('nodeId or jobId is required.');
       if (command.input.nodeId !== undefined) validateString(command.input.nodeId, 'nodeId', errors);
       if (command.input.jobId !== undefined) validateString(command.input.jobId, 'jobId', errors);
+      if (command.type === 'generation.locateResult'
+        && command.input.select !== undefined
+        && typeof command.input.select !== 'boolean') errors.push('select must be a boolean.');
       break;
   }
 
@@ -559,8 +608,25 @@ export class CanvasCommandRegistry {
     command: CanvasCommand,
     origin: CanvasCommandOrigin = 'agent',
   ): CanvasCommandError[] {
-    if (!command || typeof command !== 'object') {
+    if (!isPlainRecord(command)) {
       return [{ code: 'invalid_command', message: 'Command must be an object.' }];
+    }
+    if (!isCanvasCommandOrigin(origin)) {
+      return [{ code: 'invalid_command', message: 'Command origin must be ui, agent, or system.' }];
+    }
+    const unknownField = Object.keys(command).find((key) => ![
+      'type',
+      'version',
+      'input',
+    ].includes(key));
+    if (unknownField) {
+      return [{ code: 'invalid_command', message: `Unknown command field: ${unknownField}.` }];
+    }
+    const missingField = ['type', 'version', 'input'].find((key) => (
+      !Object.prototype.hasOwnProperty.call(command, key)
+    ));
+    if (missingField) {
+      return [{ code: 'invalid_command', message: `Missing command field: ${missingField}.` }];
     }
     if (command.version !== CANVAS_COMMAND_VERSION) {
       return [{ code: 'invalid_command', message: `Unsupported command version ${String(command.version)}.` }];
@@ -695,7 +761,84 @@ export class CanvasCommandRegistry {
     if (validationErrors.length > 0) {
       return { ok: false, error: validationErrors[0] };
     }
+    const restrictedNodeId = this.findOriginRestrictedNodeId(command, draft, origin);
+    if (restrictedNodeId) {
+      const node = draft.nodes.find((candidate) => candidate.id === restrictedNodeId);
+      const capability: CanvasNodeCapabilityDeclaration | null = node
+        ? canvasNodeCapabilityManifest[node.type]
+        : null;
+      return {
+        ok: false,
+        error: {
+          code: 'invalid_command',
+          message: capability?.reason
+            ?? `Node ${restrictedNodeId} can only be edited by UI-origin commands.`,
+        },
+      };
+    }
     return applyCanvasGraphCommand(command, draft, this.dependencies.nodeFactory, origin);
+  }
+
+  private findOriginRestrictedNodeId(
+    command: CanvasCommand,
+    draft: CanvasGraphDraft,
+    origin: CanvasCommandOrigin,
+  ): string | null {
+    if (origin === 'ui' || command.type === 'node.create') {
+      return null;
+    }
+
+    const seedIds = new Set<string>();
+    switch (command.type) {
+      case 'node.delete':
+      case 'node.layout':
+      case 'group.create':
+        command.input.nodeIds.forEach((nodeId) => seedIds.add(nodeId));
+        break;
+      case 'node.rename':
+      case 'node.setPrompt':
+      case 'node.setModelConfig':
+        seedIds.add(command.input.nodeId);
+        break;
+      case 'node.move':
+        command.input.positions.forEach(({ nodeId }) => seedIds.add(nodeId));
+        break;
+      case 'edge.connect':
+        seedIds.add(command.input.sourceNodeId);
+        seedIds.add(command.input.targetNodeId);
+        break;
+      case 'edge.disconnect': {
+        const edgeIds = new Set(command.input.edgeIds);
+        draft.edges.forEach((edge) => {
+          if (edgeIds.has(edge.id)) {
+            seedIds.add(edge.source);
+            seedIds.add(edge.target);
+          }
+        });
+        break;
+      }
+      case 'group.ungroup':
+        command.input.groupIds.forEach((groupId) => seedIds.add(groupId));
+        break;
+      default:
+        return null;
+    }
+
+    let addedDescendant = true;
+    while (addedDescendant) {
+      addedDescendant = false;
+      draft.nodes.forEach((node) => {
+        if (node.parentId && seedIds.has(node.parentId) && !seedIds.has(node.id)) {
+          seedIds.add(node.id);
+          addedDescendant = true;
+        }
+      });
+    }
+
+    return draft.nodes.find((node) => (
+      seedIds.has(node.id)
+      && canvasNodeCapabilityManifest[node.type].status !== 'supported'
+    ))?.id ?? null;
   }
 
   private inspectNonGraphImpact(command: CanvasCommand): CanvasCommandImpact {

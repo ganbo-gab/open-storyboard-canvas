@@ -9,6 +9,7 @@ import {
 import { CANVAS_NODE_TYPES } from '../domain/canvasNodes';
 import { canvasCommandRegistry } from './canvasCommandService';
 import { canvasEventBus } from './canvasServices';
+import { CanvasTransactionCoordinator } from './canvasTransactionCoordinator';
 
 function resetCanvas(): void {
   useCanvasStore.setState({
@@ -170,6 +171,61 @@ describe('CanvasCommandRegistry transactions', () => {
     expect(useCanvasStore.getState().history).toBe(stateBefore.history);
   });
 
+  it('rejects a revision change at commit and rebuilds the retry preview', () => {
+    let revision = 0;
+    const coordinator = new CanvasTransactionCoordinator({
+      prepareGraphCommand: (_command, draft) => ({
+        ok: true,
+        draft,
+        impact: {
+          effect: 'graph',
+          summary: 'Simulated graph change.',
+          affectedNodeIds: ['node'],
+          affectedEdgeIds: [],
+          creates: { nodes: 0, edges: 0, groups: 0 },
+          deletes: { nodes: 0, edges: 0, groups: 0 },
+          requiresExternalSideEffect: false,
+        },
+        output: { references: { nodeId: 'node' } },
+        changed: true,
+      }),
+    }, {
+      getSnapshot: () => ({
+        nodes: [],
+        edges: [],
+        selectedNodeId: null,
+        revision,
+      }),
+      commitGraphTransaction: () => {
+        revision = 1;
+        return null;
+      },
+      setSelection: () => undefined,
+    });
+
+    const result = coordinator.execute({
+      id: 'commit-cas',
+      origin: 'agent',
+      expectedRevision: 0,
+      commands: [{
+        type: 'node.delete',
+        version: CANVAS_COMMAND_VERSION,
+        input: { nodeIds: ['node'] },
+      }],
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      revisionBefore: 0,
+      revisionAfter: 1,
+      error: {
+        code: 'revision_conflict',
+        details: { expectedRevision: 0, actualRevision: 1 },
+      },
+      retryPreview: { baseRevision: 1, valid: true },
+    });
+  });
+
   it('rejects unknown command fields instead of allowing arbitrary node patches', async () => {
     const result = await canvasCommandRegistry.execute({
       type: 'node.rename',
@@ -207,6 +263,78 @@ describe('CanvasCommandRegistry transactions', () => {
     } as never)).toMatchObject({
       ok: false,
       error: { code: 'invalid_command', commandIndex: 0 },
+    });
+
+    await expect(canvasCommandRegistry.execute({
+      type: 'canvas.query',
+      version: CANVAS_COMMAND_VERSION,
+      input: { scope: 'graph' },
+      unsafe: true,
+    } as never)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: 'Unknown command field: unsafe.' },
+    });
+    await expect(canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeType: CANVAS_NODE_TYPES.panorama, position: { x: 0, y: 0 } },
+    }, 'external' as never)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: 'Command origin must be ui, agent, or system.' },
+    });
+    expect(canvasCommandRegistry.executeTransaction({
+      id: 'unknown-transaction-field',
+      origin: 'agent',
+      expectedRevision: 0,
+      commands: [createAtomicGraphTransaction().commands[0]],
+      unsafe: true,
+    } as never)).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: 'Unknown transaction field: unsafe.' },
+    });
+
+    const inheritedCommand = Object.create({
+      type: 'canvas.query',
+      version: CANVAS_COMMAND_VERSION,
+      input: { scope: 'graph' },
+    });
+    await expect(canvasCommandRegistry.execute(inheritedCommand as never)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command' },
+    });
+
+    const malformedPosition = {
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: CANVAS_NODE_TYPES.imageEdit,
+        position: { x: 0, y: 0, localPath: '/private/bypass' },
+      },
+    } as never;
+    await expect(canvasCommandRegistry.execute(malformedPosition)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: expect.stringContaining('only finite x and y') },
+    });
+    expect(canvasCommandRegistry.inspect(malformedPosition)).toMatchObject({
+      valid: false,
+      errors: [{ code: 'invalid_command', message: expect.stringContaining('only finite x and y') }],
+    });
+
+    await expect(canvasCommandRegistry.execute({
+      type: 'node.setModelConfig',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeId: 'node', modelId: 'model', extraParams: 'invalid' },
+    } as never)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: 'extraParams must be an object.' },
+    });
+    await expect(canvasCommandRegistry.execute({
+      type: 'viewport.focus',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeIds: ['node'], select: 'yes' },
+    } as never)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: 'select must be a boolean.' },
     });
   });
 
@@ -484,6 +612,28 @@ describe('CanvasCommandRegistry transactions', () => {
       input: { nodeType: CANVAS_NODE_TYPES.panorama, position: { x: 0, y: 0 } },
     }, 'ui');
     expect(uiResult).toMatchObject({ ok: true });
+
+    const panoramaNodeId = useCanvasStore.getState().nodes[0].id;
+    const agentEditResult = await canvasCommandRegistry.execute({
+      type: 'node.rename',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeId: panoramaNodeId, displayName: 'Bypass' },
+    }, 'agent');
+    expect(agentEditResult).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: expect.stringContaining('dedicated source-mode form') },
+    });
+    expect(useCanvasStore.getState().nodes[0].data.displayName).not.toBe('Bypass');
+
+    const systemCreateResult = await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeType: CANVAS_NODE_TYPES.blueprint, position: { x: 100, y: 0 } },
+    }, 'system');
+    expect(systemCreateResult).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command' },
+    });
   });
 
   it('produces equivalent graph/history results for UI and Agent origins', () => {
@@ -630,6 +780,9 @@ describe('CanvasCommandRegistry read and generation facades', () => {
         },
       },
       localPath: '/Users/example/private/reference.png',
+      uncommonPath: '/Volumes/private/reference.png',
+      relativeFilePath: 'private/reference.png',
+      bytes: new Uint8Array([1, 2, 3, 4]),
     });
     const result = await canvasCommandRegistry.execute({
       type: 'canvas.query',
@@ -641,8 +794,12 @@ describe('CanvasCommandRegistry read and generation facades', () => {
     expect(serialized).toContain('[media:');
     expect(serialized).toContain('A'.repeat(1_500));
     expect(serialized).toContain('[asset-reference:local]');
+    expect(serialized).toContain('[asset-reference]');
+    expect(serialized).toContain('[binary:4]');
     expect(serialized).not.toContain('a'.repeat(1_000));
     expect(serialized).not.toContain('must-not-leak');
+    expect(serialized).not.toContain('/Volumes/private');
+    expect(serialized).not.toContain('private/reference.png');
   });
 
   it('indexes nested storyboard, audio, and Director Studio assets through one catalog', async () => {
@@ -791,6 +948,41 @@ describe('CanvasCommandRegistry read and generation facades', () => {
           resultNodeIds: [resultNodeId],
         },
       },
+    });
+
+    useCanvasStore.getState().updateNodeData(sourceNodeId, {
+      generationJobId: 'source-job',
+      isGenerating: true,
+    });
+    const runningStatus = await canvasCommandRegistry.execute({
+      type: 'generation.status',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeId: sourceNodeId, jobId: 'source-job' },
+    });
+    expect(runningStatus).toMatchObject({
+      ok: true,
+      output: {
+        references: {
+          nodeId: sourceNodeId,
+          nodeIds: expect.arrayContaining([sourceNodeId, resultNodeId]),
+          jobId: 'source-job',
+          jobIds: expect.arrayContaining(['source-job', 'linked-job']),
+        },
+        value: {
+          status: 'running',
+          resultNodeId,
+        },
+      },
+    });
+
+    const locate = await canvasCommandRegistry.execute({
+      type: 'generation.locateResult',
+      version: CANVAS_COMMAND_VERSION,
+      input: { jobId: 'source-job' },
+    });
+    expect(locate).toMatchObject({
+      ok: true,
+      output: { references: { nodeId: resultNodeId, jobId: 'source-job' } },
     });
   });
 });

@@ -68,11 +68,9 @@ function isAssetReferenceKey(key: string): boolean {
 
 function looksLikeAbsoluteLocalPath(value: string): boolean {
   return value.startsWith('file://')
-    || value.startsWith('/Users/')
-    || value.startsWith('/home/')
-    || value.startsWith('/tmp/')
-    || value.startsWith('/private/')
-    || value.startsWith('/var/folders/')
+    || value.startsWith('/')
+    || value.startsWith('~/')
+    || value.startsWith('\\\\')
     || /^[a-zA-Z]:[\\/]/.test(value);
 }
 
@@ -81,9 +79,7 @@ function summarizeAssetReference(value: string): string {
   if (value.startsWith('blob:')) return '[media:blob]';
   if (value.startsWith('http://') || value.startsWith('https://')) return '[asset-reference:remote]';
   if (looksLikeAbsoluteLocalPath(value)) return '[asset-reference:local]';
-  return value.length > DEFAULT_STRING_LIMIT
-    ? `${value.slice(0, DEFAULT_STRING_LIMIT)}...`
-    : value;
+  return '[asset-reference]';
 }
 
 function redactStandaloneRemoteUrl(value: string): string {
@@ -112,6 +108,12 @@ export function projectCanvasReadValue(
   }
   if (depth > MAX_OBJECT_DEPTH) {
     return '[truncated]';
+  }
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+    return `[binary:${value.byteLength}]`;
+  }
+  if (typeof Blob !== 'undefined' && value instanceof Blob) {
+    return `[binary:blob:${value.size}]`;
   }
   if (typeof value === 'string') {
     if (isAssetReferenceKey(key)) {

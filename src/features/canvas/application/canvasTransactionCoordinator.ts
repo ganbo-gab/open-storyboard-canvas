@@ -104,13 +104,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 function transactionIdOf(value: unknown): string {
-  return isRecord(value) && typeof value.id === 'string' ? value.id : '';
+  return isPlainRecord(value)
+    && Object.prototype.hasOwnProperty.call(value, 'id')
+    && typeof value.id === 'string'
+    ? value.id
+    : '';
 }
 
 function validateTransactionEnvelope(value: unknown): CanvasCommandError[] {
-  if (!isRecord(value)) {
+  if (!isPlainRecord(value)) {
     return [{ code: 'invalid_command', message: 'Transaction must be an object.' }];
+  }
+  const unknownField = Object.keys(value).find((key) => ![
+    'id',
+    'origin',
+    'expectedRevision',
+    'commands',
+  ].includes(key));
+  if (unknownField) {
+    return [{ code: 'invalid_command', message: `Unknown transaction field: ${unknownField}.` }];
+  }
+  const missingField = ['id', 'origin', 'expectedRevision', 'commands'].find((key) => (
+    !Object.prototype.hasOwnProperty.call(value, key)
+  ));
+  if (missingField) {
+    return [{ code: 'invalid_command', message: `Missing transaction field: ${missingField}.` }];
   }
   if (typeof value.id !== 'string' || !value.id.trim()) {
     return [{ code: 'invalid_command', message: 'Transaction id is required.' }];

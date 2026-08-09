@@ -122,7 +122,7 @@ function App() {
     }
 
     let cancelled = false;
-    let retryTimer: ReturnType<typeof window.setTimeout> | null = null;
+    let retryTimer: number | null = null;
 
     const notifyFrontendReady = async (attempt = 1) => {
       if (cancelled) {

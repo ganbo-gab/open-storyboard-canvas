@@ -361,7 +361,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
   const [runningAutomation, setRunningAutomation] = useState(false);
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const promptDraftRef = useRef(data.prompt ?? '');
-  const promptCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const promptCommitTimerRef = useRef<number | null>(null);
   const [promptDraft, setPromptDraft] = useState(() => data.prompt ?? '');
 
   const resolvedTitle = resolveNodeDisplayName(CANVAS_NODE_TYPES.aiText, data);

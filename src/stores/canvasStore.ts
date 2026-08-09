@@ -1319,7 +1319,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set((state) => {
       const currentRevision = normalizeCanvasRevision(state.revision);
       if (currentRevision !== expectedRevision) {
-        return {};
+        return state;
       }
       committedRevision = nextCanvasRevision(currentRevision);
       return {

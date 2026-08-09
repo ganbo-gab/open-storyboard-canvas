@@ -189,5 +189,5 @@ export function canCreateCanvasNodeDirectly(
 ): boolean {
   const capability = canvasNodeCapabilityManifest[nodeType];
   return capability.directCreate
-    && (origin !== 'agent' || capability.status === 'supported');
+    && (origin === 'ui' || capability.status === 'supported');
 }

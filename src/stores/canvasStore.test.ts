@@ -154,6 +154,31 @@ describe('canvasStore revision contract', () => {
   });
 });
 
+describe('canvasStore graph transaction CAS', () => {
+  beforeEach(resetCanvasStore);
+
+  it('does not notify subscribers when the expected revision is stale', () => {
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.upload, { x: 0, y: 0 });
+    let mutationCount = 0;
+    const unsubscribe = useCanvasStore.subscribe(() => {
+      mutationCount += 1;
+    });
+    const state = useCanvasStore.getState();
+
+    const result = state.commitGraphTransaction({
+      expectedRevision: 0,
+      nodes: [],
+      edges: [],
+      selectedNodeId: null,
+    });
+    unsubscribe();
+
+    expect(result).toBeNull();
+    expect(mutationCount).toBe(0);
+    expect(useCanvasStore.getState()).toBe(state);
+  });
+});
+
 describe('canvasStore Director Studio persistence', () => {
   beforeEach(resetCanvasStore);
 

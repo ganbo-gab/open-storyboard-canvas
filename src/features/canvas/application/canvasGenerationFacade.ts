@@ -109,25 +109,36 @@ function aggregateSourceStatus(
   sourceNode: CanvasNode,
   resultNodes: CanvasNode[],
 ): CanvasGenerationStatusProjection {
+  const sourceProjection = projectNodeStatus(sourceNode);
   const projections = resultNodes.map(projectNodeStatus);
   const latestProjection = projections[projections.length - 1];
-  const jobIds = Array.from(new Set(projections.flatMap((projection) => projection.jobIds)));
+  const jobIds = Array.from(new Set([
+    ...sourceProjection.jobIds,
+    ...projections.flatMap((projection) => projection.jobIds),
+  ]));
   const resultNodeIds = resultNodes.map((node) => node.id);
-  const error = projections.find((projection) => projection.error)?.error ?? null;
+  const error = sourceProjection.error
+    ?? projections.find((projection) => projection.error)?.error
+    ?? null;
+  const allProjections = [sourceProjection, ...projections];
   let status: CanvasGenerationStatus = 'idle';
-  if (projections.some((projection) => projection.status === 'running')) {
+  if (allProjections.some((projection) => projection.status === 'running')) {
     status = 'running';
-  } else if (projections.some((projection) => projection.status === 'queued')) {
+  } else if (allProjections.some((projection) => projection.status === 'queued')) {
     status = 'queued';
-  } else if (projections.some((projection) => projection.status === 'failed')) {
+  } else if (allProjections.some((projection) => projection.status === 'failed')) {
     status = 'failed';
-  } else if (projections.some((projection) => projection.status === 'succeeded')) {
+  } else if (allProjections.some((projection) => projection.status === 'succeeded')) {
     status = 'succeeded';
   }
 
   return {
     nodeId: sourceNode.id,
-    jobId: latestProjection?.jobId ?? jobIds[jobIds.length - 1] ?? null,
+    jobId: sourceProjection.status === 'running'
+      || sourceProjection.status === 'queued'
+      || sourceProjection.status === 'failed'
+      ? sourceProjection.jobId
+      : latestProjection?.jobId ?? sourceProjection.jobId ?? jobIds[jobIds.length - 1] ?? null,
     jobIds,
     status,
     resultNodeId: latestProjection?.nodeId ?? null,
@@ -165,17 +176,22 @@ export class CanvasGenerationFacade {
     edges: CanvasEdge[],
     input: { nodeId?: string; jobId?: string },
   ): CanvasGenerationStatusProjection | null {
-    const node = input.jobId
-      ? nodes.find((candidate) => (
+    const node = input.nodeId
+      ? nodes.find((candidate) => candidate.id === input.nodeId)
+      : nodes.find((candidate) => (
         readString((candidate.data as GenerationData).generationJobId) === input.jobId
-      ))
-      : nodes.find((candidate) => candidate.id === input.nodeId);
+      ));
     if (!node) {
       return null;
     }
 
-    if (input.nodeId && this.supportsNode(node)) {
+    if (this.supportsNode(node)) {
       const resultNodes = findGenerationResultNodes(nodes, edges, node);
+      if (input.jobId && ![node, ...resultNodes].some((candidate) => (
+        readString((candidate.data as GenerationData).generationJobId) === input.jobId
+      ))) {
+        return null;
+      }
       if (resultNodes.length > 0) {
         return aggregateSourceStatus(node, resultNodes);
       }
