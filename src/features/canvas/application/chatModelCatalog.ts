@@ -17,11 +17,49 @@ export interface ChatCatalogEntry {
   modelId: string;
   modelLabel: string;
   supportsMultimodal: boolean;
+  supportsTools: boolean;
+  supportsStreaming: boolean;
+  supportsReasoningSummary: boolean;
+  supportsToolSearch: boolean;
+  agentProtocol: 'openai-responses' | 'openai-chat-completions' | 'anthropic-messages' | 'google-gemini';
   contextWindow?: number | null;
   maxOutputTokens?: number | null;
   description?: string | null;
   usable: boolean;
   notReadyReason?: string;
+}
+
+function resolveAgentProtocol(
+  provider: CustomProviderConfig,
+  metadata: CustomProviderChatModelMetadata,
+): ChatCatalogEntry['agentProtocol'] {
+  if (metadata.agentProtocol) return metadata.agentProtocol;
+  const providerKind = typeof provider.extraParams?.providerKind === 'string'
+    ? provider.extraParams.providerKind
+    : '';
+  if (providerKind === 'openai-responses') return 'openai-responses';
+  if (providerKind === 'anthropic-messages') return 'anthropic-messages';
+  if (providerKind === 'google-gemini') return 'google-gemini';
+  return 'openai-chat-completions';
+}
+
+function inferSupportsTools(
+  provider: CustomProviderConfig,
+  protocol: ChatCatalogEntry['agentProtocol'],
+): boolean {
+  if (protocol !== 'openai-chat-completions') return true;
+  const endpoint = provider.endpointPath?.toLowerCase() ?? '';
+  return provider.apiStyle === 'openai-compatible'
+    || endpoint.includes('/chat/completions')
+    || provider.extraParams?.providerKind === 'agnes-chat';
+}
+
+function inferSupportsStreaming(protocol: ChatCatalogEntry['agentProtocol']): boolean {
+  return protocol !== 'google-gemini';
+}
+
+function inferSupportsToolSearch(modelId: string, protocol: ChatCatalogEntry['agentProtocol']): boolean {
+  return protocol === 'openai-responses' && /^gpt-5\.6(?:-|$)/i.test(modelId);
 }
 
 function inferSupportsMultimodal(modelId: string): boolean {
@@ -50,6 +88,7 @@ export function buildChatModelCatalog(
     const usable = hasBaseUrl && hasCredential;
     for (const modelId of provider.models) {
       const metadata = metadataFor(provider, modelId);
+      const agentProtocol = resolveAgentProtocol(provider, metadata);
       entries.push({
         id: `custom:${provider.id}:${modelId}`,
         providerId: provider.id,
@@ -57,6 +96,11 @@ export function buildChatModelCatalog(
         modelId,
         modelLabel: metadata.description || modelId,
         supportsMultimodal: Boolean(metadata.supportsMultimodal ?? inferSupportsMultimodal(modelId)),
+        supportsTools: metadata.supportsTools ?? inferSupportsTools(provider, agentProtocol),
+        supportsStreaming: metadata.supportsStreaming ?? inferSupportsStreaming(agentProtocol),
+        supportsReasoningSummary: metadata.supportsReasoningSummary ?? false,
+        supportsToolSearch: metadata.supportsToolSearch ?? inferSupportsToolSearch(modelId, agentProtocol),
+        agentProtocol,
         contextWindow: metadata.contextWindow,
         maxOutputTokens: metadata.maxOutputTokens,
         description: metadata.description,
@@ -80,6 +124,11 @@ export function buildChatModelCatalog(
         modelId,
         modelLabel: label,
         supportsMultimodal: true,
+        supportsTools: true,
+        supportsStreaming: true,
+        supportsReasoningSummary: false,
+        supportsToolSearch: false,
+        agentProtocol: 'openai-chat-completions',
         contextWindow: 256000,
         maxOutputTokens: 65500,
         description: label,

@@ -10,6 +10,11 @@ export type CustomProviderMediaType = 'image' | 'video' | 'chat';
 
 export interface CustomProviderChatModelMetadata {
   supportsMultimodal?: boolean;
+  supportsTools?: boolean;
+  supportsStreaming?: boolean;
+  supportsReasoningSummary?: boolean;
+  supportsToolSearch?: boolean;
+  agentProtocol?: 'openai-responses' | 'openai-chat-completions' | 'anthropic-messages' | 'google-gemini';
   contextWindow?: number | null;
   maxOutputTokens?: number | null;
   description?: string | null;

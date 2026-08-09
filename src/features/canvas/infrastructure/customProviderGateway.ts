@@ -400,7 +400,7 @@ function buildAgnesProviderConfig(mediaType: 'image' | 'video' | 'chat', apiKey:
   };
 }
 
-function resolveProviderAndModel(modelId: string): { cfg: CustomProviderConfig; model: string } | null {
+export function resolveProviderAndModel(modelId: string): { cfg: CustomProviderConfig; model: string } | null {
   if (modelId.startsWith('agnes:image:') || modelId.startsWith('agnes:video:') || modelId.startsWith('agnes:chat:')) {
     const [, mediaType, ...modelParts] = modelId.split(':');
     const model = modelParts.join(':').trim();
@@ -1704,7 +1704,7 @@ function chatProviderKind(cfg: CustomProviderConfig): string {
   return typeof cfg.extraParams?.providerKind === 'string' ? cfg.extraParams.providerKind : '';
 }
 
-function resolveChatRequestTimeoutMs(cfg: CustomProviderConfig): number {
+export function resolveChatRequestTimeoutMs(cfg: CustomProviderConfig): number {
   const raw =
     cfg.extraParams?.chatTimeoutMs
     ?? cfg.extraParams?.textTimeoutMs
@@ -1723,7 +1723,7 @@ function isGoogleChatProvider(cfg: CustomProviderConfig): boolean {
   return isChatCustomProvider(cfg) && chatProviderKind(cfg) === 'google-gemini';
 }
 
-function buildChatRequestHeaders(
+export function buildChatRequestHeaders(
   cfg: CustomProviderConfig,
   method: 'GET' | 'POST' = 'POST',
 ): Record<string, string> {
@@ -5103,7 +5103,7 @@ export async function fetchCustomProviderModels(
   }
 }
 
-function resolveChatEndpointUrl(cfg: CustomProviderConfig, modelName: string): string {
+export function resolveChatEndpointUrl(cfg: CustomProviderConfig, modelName: string): string {
   const kind = chatProviderKind(cfg);
   const fallbackPath =
     kind === 'openai-responses'

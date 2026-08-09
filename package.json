@@ -20,6 +20,7 @@
     "release": "node scripts/release.mjs"
   },
   "dependencies": {
+    "@openai/agents": "0.14.3",
     "@photo-sphere-viewer/core": "^5.14.1",
     "@tanstack/react-query": "^5.75.0",
     "@tauri-apps/api": "^2",
@@ -42,7 +43,8 @@
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "three": "^0.179.1",
-    "uuid": "^11.1.0",
+    "uuid": "11.1.1",
+    "zod": "4.4.3",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
