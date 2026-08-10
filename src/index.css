@@ -37,17 +37,21 @@
   --canvas-rail-button-border: rgba(15, 23, 42, 0.12);
   --canvas-rail-button-text: rgba(51, 65, 85, 0.86);
   --canvas-rail-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
-  --canvas-node-bg: rgba(255, 255, 255, 0.94);
+  --canvas-node-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%);
   --canvas-node-bg-strong: rgba(255, 255, 255, 0.98);
   --canvas-node-subtle-bg: rgba(248, 250, 252, 0.88);
   --canvas-node-field-bg: rgba(241, 245, 249, 0.72);
   --canvas-node-field-border: rgba(15, 23, 42, 0.12);
   --canvas-node-media-bg: #eef2f7;
   --canvas-node-media-overlay: rgba(15, 23, 42, 0.66);
-  --canvas-node-border: rgba(15, 23, 42, 0.16);
-  --canvas-node-border-hover: rgba(15, 23, 42, 0.28);
+  --canvas-node-border: rgba(255, 255, 255, 0.5);
+  --canvas-node-border-hover: rgba(59, 130, 246, 0.5);
   --canvas-node-divider: rgba(15, 23, 42, 0.1);
-  --canvas-node-shadow: 0 12px 30px rgba(15, 23, 42, 0.11);
+  --canvas-node-shadow: 
+    0 8px 16px rgba(0, 0, 0, 0.08),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+  --canvas-node-glow: 0 0 20px rgba(59, 130, 246, 0.3);
   --canvas-node-menu-bg: rgba(255, 255, 255, 0.96);
   --canvas-node-menu-hover: rgba(241, 245, 249, 0.92);
   --canvas-node-menu-active: rgba(219, 234, 254, 0.95);
@@ -57,7 +61,7 @@
   --ui-radius-lg: 12px;
   --ui-radius-xl: 16px;
   --ui-radius-2xl: 20px;
-  --node-radius: 12px;
+  --node-radius: 16px;
   --node-inner-radius: var(--node-radius);
 }
 
@@ -93,17 +97,21 @@
   --canvas-rail-button-border: rgba(255, 255, 255, 0.1);
   --canvas-rail-button-text: rgba(255, 255, 255, 0.78);
   --canvas-rail-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
-  --canvas-node-bg: rgba(18, 18, 18, 0.94);
+  --canvas-node-bg: linear-gradient(135deg, rgba(30, 30, 30, 0.95) 0%, rgba(20, 20, 20, 0.92) 100%);
   --canvas-node-bg-strong: rgba(20, 20, 20, 0.98);
   --canvas-node-subtle-bg: rgba(12, 12, 13, 0.7);
   --canvas-node-field-bg: rgba(8, 8, 10, 0.5);
   --canvas-node-field-border: rgba(255, 255, 255, 0.1);
   --canvas-node-media-bg: #0f0f10;
   --canvas-node-media-overlay: rgba(0, 0, 0, 0.72);
-  --canvas-node-border: rgba(255, 255, 255, 0.18);
-  --canvas-node-border-hover: rgba(255, 255, 255, 0.32);
+  --canvas-node-border: rgba(255, 255, 255, 0.15);
+  --canvas-node-border-hover: rgba(59, 130, 246, 0.4);
   --canvas-node-divider: rgba(255, 255, 255, 0.08);
-  --canvas-node-shadow: 0 16px 34px rgba(0, 0, 0, 0.32);
+  --canvas-node-shadow: 
+    0 8px 16px rgba(0, 0, 0, 0.4),
+    0 2px 4px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  --canvas-node-glow: 0 0 20px rgba(59, 130, 246, 0.4);
   --canvas-node-menu-bg: rgba(26, 26, 26, 0.96);
   --canvas-node-menu-hover: rgba(15, 15, 15, 0.84);
   --canvas-node-menu-active: rgba(30, 64, 175, 0.32);
@@ -113,7 +121,7 @@
   --ui-radius-lg: 12px;
   --ui-radius-xl: 16px;
   --ui-radius-2xl: 20px;
-  --node-radius: 12px;
+  --node-radius: 16px;
   --node-inner-radius: var(--node-radius);
 }
 
@@ -479,6 +487,52 @@ html[data-platform='macos'] #root {
   .canvas-processing-edge__flow {
     animation: none;
   }
+}
+
+/* ============================================
+   连接线光效美化
+   ============================================ */
+
+.react-flow__edge-path {
+  stroke-width: 3px;
+  transition: all 0.2s ease;
+  filter: drop-shadow(0 0 2px rgba(59, 130, 246, 0.3));
+}
+
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke-width: 4px;
+  filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.5));
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #8b5cf6;
+  stroke-width: 4px;
+  filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.7));
+}
+
+.canvas-processing-edge__flow {
+  stroke: url(#gradient-flow);
+  filter: drop-shadow(0 0 4px rgba(139, 92, 246, 0.5));
+}
+
+/* ============================================
+   节点样式增强
+   ============================================ */
+
+.react-flow__node {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.react-flow__node:hover {
+  filter: drop-shadow(var(--canvas-node-glow));
+}
+
+.react-flow__node.selected > div {
+  border-color: var(--accent) !important;
+  box-shadow: 
+    0 0 0 2px rgba(59, 130, 246, 0.2),
+    var(--canvas-node-shadow),
+    var(--canvas-node-glow) !important;
 }
 
 /* ============================================
