@@ -375,7 +375,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
   return (
     <div
       className={`
-        group relative overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-0 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative overflow-visible rounded-xl border bg-[var(--canvas-node-bg)] p-0 shadow-lg transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
           : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
@@ -394,7 +394,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
       />
 
       {data.imageUrl || transientPreviewUrl ? (
-        <div className="relative block h-full w-full overflow-hidden rounded-[var(--node-radius)] bg-[var(--canvas-node-media-bg)]">
+        <div className="relative block h-full w-full overflow-hidden rounded-xl bg-[var(--canvas-node-media-bg)]">
           <CanvasNodeImage
             src={imageSource ?? ''}
             fallbackSrcs={imageFallbackSources}
@@ -406,7 +406,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
           {/* Reupload button on left side */}
           <button
             type="button"
-            className="nodrag absolute left-2 top-2 flex h-7 items-center gap-1 rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2 text-xs text-text-dark shadow-sm backdrop-blur-sm transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+            className="nodrag absolute left-2 top-2 flex h-7 items-center gap-1 rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2 text-xs text-text-dark shadow-sm backdrop-blur-md transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
             onClick={(e) => {
               e.stopPropagation();
               inputRef.current?.click();
@@ -417,7 +417,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
           </button>
         </div>
       ) : uploadError ? (
-        <div className="nodrag flex h-full w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-[var(--node-radius)] bg-[rgba(127,29,29,0.16)] px-4 text-red-200">
+        <div className="nodrag flex h-full w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl bg-[rgba(127,29,29,0.16)] px-4 text-red-200">
           <AlertTriangle className="h-7 w-7 opacity-90" />
           <span className="text-center text-[12px] font-medium leading-5">
             {t('node.upload.uploadFailed')}
@@ -428,7 +428,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
         </div>
       ) : (
         <label
-          className="block h-full w-full overflow-hidden rounded-[var(--node-radius)] bg-[var(--canvas-node-media-bg)]"
+          className="block h-full w-full overflow-hidden rounded-xl bg-[var(--canvas-node-media-bg)]"
         >
           <div className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-2 text-text-muted/85">
             {isUploading ? (

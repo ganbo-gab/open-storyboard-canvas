@@ -318,6 +318,64 @@ html[data-platform='macos'] #root {
   z-index: 0;
 }
 
+/* ============================================
+   统一节点美化样式
+   ============================================ */
+
+/* 通用节点容器 - 玻璃态设计 */
+.react-flow__node > div {
+  @apply backdrop-blur-md transition-all duration-200 ease-out;
+}
+
+/* 选中状态增强光晕 */
+.react-flow__node.selected > div {
+  filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.4));
+}
+
+/* 悬停效果 */
+.react-flow__node:not(.selected) > div:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+}
+
+/* 深色模式下的节点 */
+.dark .react-flow__node > div {
+  backdrop-filter: blur(12px);
+}
+
+/* 节点头部统一样式 */
+.node-header-floating {
+  @apply backdrop-blur-sm bg-gradient-to-r from-white/90 to-gray-50/80 dark:from-gray-800/90 dark:to-gray-900/80;
+}
+
+/* 节点按钮统一样式 */
+.node-control-btn {
+  @apply backdrop-blur-sm transition-all duration-150 hover:scale-105 active:scale-95;
+}
+
+/* 标签胶囊美化 */
+.tag-capsule {
+  @apply backdrop-blur-md bg-gradient-to-r from-white/90 to-gray-50/85 dark:from-gray-800/90 dark:to-gray-900/85;
+}
+
+/* 连接线光效增强 */
+.react-flow__edge-path {
+  stroke-width: 3px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+/* 选中的连接线发光 */
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #8b5cf6;
+  filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.6));
+}
+
+/* 处理中的连接线流动光效 */
+.canvas-processing-edge__flow {
+  stroke: url(#gradient-flow);
+  filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.5));
+}
+
 .dark .canvas-flow {
   background: 
     radial-gradient(circle at 50% 0%, rgba(139, 92, 246, 0.12), transparent 60%),

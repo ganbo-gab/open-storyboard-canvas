@@ -42,7 +42,7 @@ class NodeRenderErrorBoundary extends Component<
     }
 
     return (
-      <div className="w-[360px] rounded-[var(--node-radius)] border border-red-400/30 bg-[var(--canvas-node-bg)] p-3 text-xs leading-5 text-text-dark shadow-[var(--canvas-node-shadow)]">
+      <div className="w-[360px] rounded-xl border border-red-400/30 bg-[var(--canvas-node-bg)] p-3 text-xs leading-5 text-text-dark shadow-lg">
         <div className="mb-1 font-semibold text-red-200">节点渲染失败</div>
         <div className="text-text-muted">这个节点的数据触发了渲染异常，画布已继续加载。</div>
         <pre className="ui-scrollbar mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-words rounded border border-[var(--canvas-node-border)] bg-bg-dark/70 p-2 text-[11px]">

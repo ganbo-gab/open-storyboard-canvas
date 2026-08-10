@@ -535,7 +535,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
   return (
     <div
       className={`
-        group relative overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-0 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative overflow-visible rounded-xl border bg-[var(--canvas-node-bg)] p-0 shadow-lg transition-colors duration-150
         ${hasGenerationError
           ? (selected
             ? 'border-red-400 shadow-[0_0_0_1px_rgba(248,113,113,0.42)]'
@@ -568,7 +568,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
         ) : null}
       />
 
-      <div className={`relative flex h-full w-full flex-col justify-center overflow-hidden rounded-[var(--node-radius)] p-3 ${hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'}`}>
+      <div className={`relative flex h-full w-full flex-col justify-center overflow-hidden rounded-xl p-3 ${hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'}`}>
         {audioSource ? (
           <div className="flex h-full min-h-0 flex-col justify-center gap-2.5">
             <div className="flex items-center gap-3">

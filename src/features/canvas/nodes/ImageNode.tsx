@@ -215,14 +215,14 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
   return (
     <div
       className={`
-        group relative overflow-visible rounded-[var(--node-radius)] border bg-gradient-to-br from-white/95 to-gray-50/90 p-0 shadow-[var(--canvas-node-shadow)] transition-all duration-200 backdrop-blur-sm
+        group relative overflow-visible rounded-xl border bg-gradient-to-br from-white/95 to-gray-50/90 p-0 shadow-lg transition-all duration-200 backdrop-blur-md hover:-translate-y-0.5
         ${hasGenerationError
           ? (selected
             ? 'border-red-400 shadow-[0_0_0_1px_rgba(248,113,113,0.42),0_8px_32px_rgba(248,113,113,0.2)]'
             : 'border-red-500/70 bg-gradient-to-br from-red-50/80 to-red-100/60 hover:border-red-400/80 dark:border-red-500/70 dark:hover:border-red-400/80')
           : selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32),0_8px_32px_rgba(59,130,246,0.15)]'
-          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)] hover:shadow-lg'}
+          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)] hover:shadow-xl'}
       `}
       style={{ width: resolvedWidth, height: resolvedHeight }}
       onClick={() => setSelectedNode(id)}
@@ -264,7 +264,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
       />
 
       <div
-        className={`relative h-full w-full overflow-hidden rounded-[var(--node-radius)] ${hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'}`}
+        className={`relative h-full w-full overflow-hidden rounded-xl ${hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'}`}
       >
         {data.imageUrl ? (
           <>
@@ -311,7 +311,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
 
         {generationWarning && data.imageUrl ? (
           <div
-            className="nodrag pointer-events-auto absolute inset-x-2 bottom-2 z-10 flex max-h-16 items-start gap-1.5 overflow-y-auto rounded-md border border-amber-300/45 bg-amber-950/85 px-2 py-1.5 text-[11px] leading-4 text-amber-100 shadow-lg backdrop-blur-sm"
+            className="nodrag pointer-events-auto absolute inset-x-2 bottom-2 z-10 flex max-h-16 items-start gap-1.5 overflow-y-auto rounded-md border border-amber-300/45 bg-amber-950/85 px-2 py-1.5 text-[11px] leading-4 text-amber-100 shadow-lg backdrop-blur-md"
             role="status"
             title={t('node.imageNode.providerWarning')}
           >

@@ -64,7 +64,7 @@ const PANORAMA_KEY_STEP = 4 * (Math.PI / 180);
 const PANORAMA_CAPTURE_RENDER_TIMEOUT_MS = 600;
 const PANORAMA_CAPTURE_SAMPLE_SIZE = 16;
 const PANORAMA_VIEWER_BUTTON_CLASS =
-  'group relative flex items-center justify-center w-9 h-9 rounded-lg bg-white/95 text-black shadow-lg backdrop-blur-sm hover:bg-white hover:scale-105 active:scale-95 transition-all ring-1 ring-black/25';
+  'group relative flex items-center justify-center w-9 h-9 rounded-lg bg-white/95 text-black shadow-lg backdrop-blur-md hover:bg-white hover:scale-105 active:scale-95 transition-all ring-1 ring-black/25';
 
 function getViewerCanvas(viewer: Viewer | null): HTMLCanvasElement | null {
   if (!viewer) return null;
@@ -388,7 +388,7 @@ const PanoramaViewerSurface = memo(({
           <span className="pointer-events-none absolute top-full mt-2 right-0 whitespace-nowrap rounded-md bg-black/90 px-2 py-1 text-[11px] text-white/95 opacity-0 group-hover:opacity-100 transition-opacity">{closeLabel}</span>
         </button>
       </div>
-      <div className="absolute bottom-2 left-2 text-[10px] text-white/55 bg-black/55 px-2 py-0.5 rounded backdrop-blur-sm pointer-events-none">
+      <div className="absolute bottom-2 left-2 text-[10px] text-white/55 bg-black/55 px-2 py-0.5 rounded backdrop-blur-md pointer-events-none">
         {projection === 'spherical' ? t('node.panoramaViewer.spherical') : t('node.panoramaViewer.cylindrical')} · {t('node.panoramaViewer.controlsHint')}
       </div>
     </div>
@@ -651,7 +651,7 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
     // panorama → panel-like setup" flow the user expects.
     return (
       <div
-        className={`relative w-[1080px] overflow-hidden rounded-xl border bg-[var(--canvas-node-bg)] shadow-[var(--canvas-node-shadow)] ${selected ? 'border-accent' : 'border-[var(--canvas-node-border)]'}`}
+        className={`relative w-[1080px] overflow-hidden rounded-xl border bg-[var(--canvas-node-bg)] shadow-lg ${selected ? 'border-accent' : 'border-[var(--canvas-node-border)]'}`}
         onDoubleClick={(e) => e.stopPropagation()}
       >
         <Handle type="target" id="target" position={Position.Left} className="!bg-accent/70" />
@@ -718,7 +718,7 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
   return (
     <>
       <div
-        className={`h-[340px] w-[560px] overflow-hidden rounded-xl border bg-[var(--canvas-node-bg)] shadow-[var(--canvas-node-shadow)] ${selected ? 'border-accent' : 'border-[var(--canvas-node-border)]'}`}
+        className={`h-[340px] w-[560px] overflow-hidden rounded-xl border bg-[var(--canvas-node-bg)] shadow-lg ${selected ? 'border-accent' : 'border-[var(--canvas-node-border)]'}`}
         onDoubleClick={(e) => {
           e.stopPropagation();
           setIsExpanded(true);
@@ -732,7 +732,7 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
       </div>
       {isExpanded && createPortal(
         <div
-          className="fixed inset-0 z-[1400] flex items-center justify-center bg-black/[0.88] p-5 backdrop-blur-sm"
+          className="fixed inset-0 z-[1400] flex items-center justify-center bg-black/[0.88] p-5 backdrop-blur-md"
           onClick={() => setIsExpanded(false)}
           onDoubleClick={(e) => e.stopPropagation()}
         >

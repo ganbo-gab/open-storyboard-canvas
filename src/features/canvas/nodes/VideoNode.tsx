@@ -234,7 +234,7 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
   return (
     <div
       className={`
-        group relative overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-0 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative overflow-visible rounded-xl border bg-[var(--canvas-node-bg)] p-0 shadow-lg transition-colors duration-150
         ${hasVideoError
           ? (selected
             ? 'border-red-400 shadow-[0_0_0_1px_rgba(248,113,113,0.42)]'
@@ -277,7 +277,7 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
       />
 
       <div
-        className={`relative h-full w-full overflow-hidden rounded-[var(--node-radius)] ${hasVideoError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'}`}
+        className={`relative h-full w-full overflow-hidden rounded-xl ${hasVideoError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'}`}
       >
         {videoSource ? (
           <>
@@ -291,7 +291,7 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
             />
             <button
               type="button"
-              className="nodrag nowheel absolute left-2 top-2 flex h-7 items-center gap-1 rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2 text-xs text-text-dark shadow-sm backdrop-blur-sm transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+              className="nodrag nowheel absolute left-2 top-2 flex h-7 items-center gap-1 rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2 text-xs text-text-dark shadow-sm backdrop-blur-md transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
               title={t('node.videoNode.replace') as string}
               onClick={(event) => {
                 event.stopPropagation();

@@ -1452,7 +1452,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
     <div
       ref={rootRef}
       className={`
-        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-3 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative flex h-full flex-col overflow-visible rounded-xl border bg-[var(--canvas-node-bg)] p-3 shadow-lg transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
           : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'

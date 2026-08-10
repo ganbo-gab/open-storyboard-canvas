@@ -351,7 +351,7 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
 
   return (
     <div
-      className={`overflow-hidden rounded-xl border bg-[var(--canvas-node-bg)] shadow-[var(--canvas-node-shadow)] ${selected ? 'border-accent' : 'border-[var(--canvas-node-border)]'}`}
+      className={`overflow-hidden rounded-xl border bg-[var(--canvas-node-bg)] shadow-lg ${selected ? 'border-accent' : 'border-[var(--canvas-node-border)]'}`}
       style={{ width: BLUEPRINT_NODE_WIDTH }}
       onDoubleClick={(e) => e.stopPropagation()}
     >

@@ -82,7 +82,7 @@ export const TextAnnotationNode = memo(({
     <>
       <div
         className={`
-          group relative h-full w-full overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-2 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+          group relative h-full w-full overflow-visible rounded-xl border bg-[var(--canvas-node-bg)] p-2 shadow-lg transition-colors duration-150
           ${selected
             ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
             : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
