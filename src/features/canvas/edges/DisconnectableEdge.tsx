@@ -128,14 +128,50 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
     targetY,
   ]);
 
+  // 🎨 光效连线样式
+  const baseStrokeWidth = isProcessingEdge
+    ? (selected ? 3 : 2.5)
+    : (selected ? 2.5 : 2);
+  
+  const glowColor = selected 
+    ? 'rgba(139, 92, 246, 0.6)' 
+    : 'rgba(59, 130, 246, 0.4)';
+  
   const processingStroke = 'rgb(var(--accent-rgb) / 0.94)';
   const processingDashStroke = 'rgb(var(--accent-rgb) / 1)';
-  const baseStrokeWidth = isProcessingEdge
-    ? (selected ? 2.7 : 2.2)
-    : (selected ? 2.4 : 1.9);
 
   return (
     <>
+      {/* 🌟 外层光晕 */}
+      {!isProcessingEdge && (
+        <path
+          d={edgePath}
+          fill="none"
+          stroke={glowColor}
+          strokeWidth={baseStrokeWidth + 6}
+          strokeLinecap="round"
+          className="canvas-edge-glow"
+          style={{ 
+            pointerEvents: 'none',
+            filter: 'blur(8px)',
+            opacity: selected ? 0.7 : 0.5,
+          }}
+        />
+      )}
+      
+      {/* 🌟 中间渐变层 */}
+      {!isProcessingEdge && (
+        <path
+          d={edgePath}
+          fill="none"
+          stroke="url(#edge-gradient)"
+          strokeWidth={baseStrokeWidth + 2}
+          strokeLinecap="round"
+          style={{ pointerEvents: 'none' }}
+        />
+      )}
+      
+      {/* 🌟 处理中虚线光效 */}
       {isProcessingEdge && (
         <path
           d={edgePath}
@@ -145,24 +181,40 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
           strokeLinecap="round"
           strokeDasharray="8 10"
           className="canvas-processing-edge__flow"
-          style={{ pointerEvents: 'none' }}
+          style={{ 
+            pointerEvents: 'none',
+            filter: 'drop-shadow(0 0 6px rgba(59, 130, 246, 0.8))',
+          }}
         />
       )}
+      
+      {/* 🌟 核心实线 */}
       <BaseEdge
         id={id}
         path={edgePath}
         markerEnd={markerEnd}
         style={{
-          stroke: isProcessingEdge ? processingStroke : style?.stroke,
+          stroke: isProcessingEdge ? processingStroke : (selected ? '#a78bfa' : '#60a5fa'),
           strokeWidth: baseStrokeWidth,
+          filter: isProcessingEdge ? undefined : 'drop-shadow(0 0 4px rgba(96, 165, 250, 0.6))',
           ...style,
         }}
       />
+      
+      {/* 🌟 SVG 渐变定义（只添加一次） */}
+      <defs>
+        <linearGradient id="edge-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="rgba(139, 92, 246, 0.9)" />
+          <stop offset="50%" stopColor="rgba(59, 130, 246, 0.95)" />
+          <stop offset="100%" stopColor="rgba(236, 72, 153, 0.9)" />
+        </linearGradient>
+      </defs>
+      
       {selected && (
         <EdgeLabelRenderer>
           <button
             type="button"
-            className="nodrag nopan absolute flex h-6 w-6 items-center justify-center text-text-muted transition-colors hover:text-text-dark"
+            className="nodrag nopan absolute flex h-6 w-6 items-center justify-center text-text-muted transition-colors hover:text-text-dark dark:hover:text-text-light"
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               pointerEvents: 'all',

@@ -215,14 +215,14 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
   return (
     <div
       className={`
-        group relative overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-0 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative overflow-visible rounded-[var(--node-radius)] border bg-gradient-to-br from-white/95 to-gray-50/90 p-0 shadow-[var(--canvas-node-shadow)] transition-all duration-200 backdrop-blur-sm
         ${hasGenerationError
           ? (selected
-            ? 'border-red-400 shadow-[0_0_0_1px_rgba(248,113,113,0.42)]'
-            : 'border-red-500/70 bg-[rgba(127,29,29,0.12)] hover:border-red-400/80 dark:border-red-500/70 dark:hover:border-red-400/80')
+            ? 'border-red-400 shadow-[0_0_0_1px_rgba(248,113,113,0.42),0_8px_32px_rgba(248,113,113,0.2)]'
+            : 'border-red-500/70 bg-gradient-to-br from-red-50/80 to-red-100/60 hover:border-red-400/80 dark:border-red-500/70 dark:hover:border-red-400/80')
           : selected
-          ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
+          ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32),0_8px_32px_rgba(59,130,246,0.15)]'
+          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)] hover:shadow-lg'}
       `}
       style={{ width: resolvedWidth, height: resolvedHeight }}
       onClick={() => setSelectedNode(id)}

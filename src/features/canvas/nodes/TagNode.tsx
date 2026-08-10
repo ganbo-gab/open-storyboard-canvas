@@ -309,12 +309,12 @@ export const TagNode = memo((props: any) => {
         {/* 内层胶囊：文字支持自动换行，缩放时会跟着容器宽高实时重排。
             手动缩放到装不下时，用 line-clamp 按整行裁切并显示省略号，不会再露出半行文字 */}
         <div
-          className="flex h-full w-full items-center gap-1 overflow-hidden rounded-lg border bg-white px-1 py-0.5 shadow-sm transition-shadow duration-150 hover:shadow-md dark:bg-gray-800"
+          className="flex h-full w-full items-center gap-1 overflow-hidden rounded-xl border bg-gradient-to-r from-white/90 to-gray-50/85 px-1.5 py-1 shadow-md transition-all duration-200 backdrop-blur-sm hover:shadow-lg dark:from-gray-800/90 dark:to-gray-900/85"
           style={{
             borderColor: selected ? 'var(--accent, #3b82f6)' : palette.border,
             boxShadow: selected
-              ? '0 0 0 3px rgba(59,130,246,0.22)'
-              : `0 0 0 3px ${palette.ring}, 0 1px 2px rgba(0,0,0,0.08)`,
+              ? `0 0 0 3px rgba(59,130,246,0.22), 0 8px 24px rgba(59,130,246,0.15)`
+              : `0 0 0 3px ${palette.ring}, 0 2px 8px rgba(0,0,0,0.08)`,
           }}
         >
           {/* 标签图标：颜色与内容一一对应，内容不同则颜色必然不同 */}

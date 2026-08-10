@@ -298,7 +298,38 @@ html[data-platform='macos'] #root {
 }
 
 .canvas-flow {
-  background: var(--canvas-bg);
+  background: 
+    radial-gradient(circle at 50% 0%, rgba(88, 28, 135, 0.15), transparent 60%),
+    radial-gradient(circle at 100% 50%, rgba(59, 130, 246, 0.1), transparent 50%),
+    radial-gradient(circle at 0% 100%, rgba(236, 72, 153, 0.08), transparent 50%),
+    var(--canvas-bg);
+  position: relative;
+}
+
+.canvas-flow::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(to right, rgba(148, 163, 184, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dark .canvas-flow {
+  background: 
+    radial-gradient(circle at 50% 0%, rgba(139, 92, 246, 0.12), transparent 60%),
+    radial-gradient(circle at 100% 50%, rgba(59, 130, 246, 0.08), transparent 50%),
+    radial-gradient(circle at 0% 100%, rgba(236, 72, 153, 0.06), transparent 50%),
+    var(--canvas-bg);
+}
+
+.dark .canvas-flow::before {
+  background-image: 
+    linear-gradient(to right, rgba(148, 163, 184, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
 }
 
 .ui-panel {
