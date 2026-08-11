@@ -243,6 +243,79 @@ describe('agent model provider gateway', () => {
     await expect(transport(malformed).getResponse(noVision)).rejects.toThrow('不支持图片输入');
   });
 
+  it('encodes approved tool image results for every supported provider protocol', () => {
+    const inlineImage = 'data:image/png;base64,aGVsbG8=';
+    const requestWithToolImage = (protocol: AgentModelProtocol): AgentModelTurnRequest => ({
+      ...request(model(protocol)),
+      input: [
+        {
+          type: 'function_call',
+          callId: 'asset-call',
+          name: 'asset_read',
+          arguments: '{"assetId":"node-1:image"}',
+        },
+        {
+          type: 'function_call_result',
+          callId: 'asset-call',
+          name: 'asset_read',
+          output: '{"assetId":"node-1:image"}',
+          content: [
+            { type: 'text', text: '{"assetId":"node-1:image"}' },
+            { type: 'image', imageUrl: inlineImage, detail: 'auto' },
+          ],
+        },
+      ],
+    });
+
+    const responses = buildAgentProviderBody(requestWithToolImage('openai-responses'), false);
+    expect(responses.input).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'function_call_output', output: '{"assetId":"node-1:image"}' }),
+      expect.objectContaining({
+        type: 'message',
+        role: 'user',
+        content: [expect.objectContaining({ type: 'input_image', image_url: inlineImage })],
+      }),
+    ]));
+
+    const chat = buildAgentProviderBody(requestWithToolImage('openai-chat-completions'), false);
+    expect(chat.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'tool', content: '{"assetId":"node-1:image"}' }),
+      expect.objectContaining({
+        role: 'user',
+        content: [expect.objectContaining({ type: 'image_url', image_url: expect.objectContaining({ url: inlineImage }) })],
+      }),
+    ]));
+
+    const anthropic = buildAgentProviderBody(requestWithToolImage('anthropic-messages'), false);
+    expect(anthropic.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'user',
+        content: [expect.objectContaining({
+          type: 'tool_result',
+          content: expect.arrayContaining([
+            expect.objectContaining({ type: 'text', text: '{"assetId":"node-1:image"}' }),
+            expect.objectContaining({
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' },
+            }),
+          ]),
+        })],
+      }),
+    ]));
+
+    const gemini = buildAgentProviderBody(requestWithToolImage('google-gemini'), false);
+    expect(gemini.contents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'user',
+        parts: [expect.objectContaining({ functionResponse: expect.any(Object) })],
+      }),
+      expect.objectContaining({
+        role: 'user',
+        parts: [{ inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } }],
+      }),
+    ]));
+  });
+
   it('redacts credentials and payloads from transport errors', async () => {
     const secretToken = 'sk-private-agent-token';
     const querySecret = 'query-secret-value';
@@ -344,6 +417,54 @@ describe('agent model provider gateway', () => {
         allowedFunctionNames: ['canvas__create_node'],
       },
     });
+  });
+
+  it('emits Responses tool search, namespaces, and deferred functions only for compatible models', () => {
+    const compatible: AgentModelTurnRequest = {
+      ...request(model('openai-responses', { toolSearch: true })),
+      tools: [{
+        ...request(model('openai-responses')).tools[0],
+        namespaceDescription: 'Canvas tools.',
+        deferLoading: true,
+      }],
+      toolPolicy: {
+        mode: 'responses-tool-search',
+        deferredToolNames: ['canvas.create_node'],
+        deferredNamespaces: ['canvas'],
+      },
+    };
+    expect(buildAgentProviderBody(compatible, false).tools).toEqual([
+      { type: 'tool_search' },
+      {
+        type: 'namespace',
+        name: 'canvas',
+        description: 'Canvas tools.',
+        tools: [expect.objectContaining({
+          type: 'function',
+          name: 'create_node',
+          defer_loading: true,
+        })],
+      },
+    ]);
+
+    const unsupportedResponses = {
+      ...compatible,
+      model: model('openai-responses', { toolSearch: false }),
+    };
+    expect(buildAgentProviderBody(unsupportedResponses, false).tools).toEqual([
+      expect.objectContaining({ type: 'function', name: 'canvas__create_node' }),
+    ]);
+    expect(JSON.stringify(buildAgentProviderBody(unsupportedResponses, false).tools)).not.toContain('defer_loading');
+
+    const chat = { ...compatible, model: model('openai-chat-completions', { toolSearch: true }) };
+    expect(buildAgentProviderBody(chat, false).tools).toEqual([
+      expect.objectContaining({
+        type: 'function',
+        function: expect.objectContaining({ name: 'canvas__create_node' }),
+      }),
+    ]);
+    expect(JSON.stringify(buildAgentProviderBody(chat, false).tools)).not.toContain('tool_search');
+    expect(JSON.stringify(buildAgentProviderBody(chat, false).tools)).not.toContain('defer_loading');
   });
 
   it('normalizes Anthropic and Gemini tools without exposing hidden thinking', async () => {

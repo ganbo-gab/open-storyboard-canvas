@@ -555,7 +555,7 @@ function ActionPresetGrid({ presets, customActions, activeAction, onPick, onRemo
           return (
             <div
               key={action}
-              className={`group relative flex min-h-[44px] items-center justify-center rounded-md border text-xs transition-all ${
+              className={`group relative flex min-h-[44px] items-center justify-center rounded-md border text-xs transition-[background-color,border-color,color,box-shadow] duration-150 ${
                 isActive
                   ? 'border-accent bg-accent text-white shadow-[0_0_0_2px_rgba(255,255,255,0.05)_inset]'
                   : 'border-white/10 bg-white/[0.05] text-white/78 hover:border-white/30 hover:bg-white/12 hover:text-white'

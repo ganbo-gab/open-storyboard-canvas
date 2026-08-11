@@ -46,7 +46,6 @@ import { useCanvasGenerationPolling } from '@/features/canvas/hooks/useCanvasGen
 import { useCanvasShortcuts } from '@/features/canvas/hooks/useCanvasShortcuts';
 import { useCanvasWasdPan } from '@/features/canvas/hooks/useCanvasWasdPan';
 import { CanvasSideToolbar } from '@/features/canvas/CanvasSideToolbar';
-import { CanvasLeftRail } from '@/features/canvas/ui/CanvasLeftRail';
 import {
   CANVAS_NODE_TYPES,
   type CanvasEdge,
@@ -3885,13 +3884,10 @@ export function Canvas() {
 
   const emptyHint = useMemo(
     () => (
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+      <div className="canvas-center-safe pointer-events-none absolute inset-0 flex items-center justify-center">
         <div className="flex max-w-3xl flex-col items-center gap-5 px-6 text-center">
           {!hasConfiguredProvider && <MissingApiKeyHint />}
-          <div>
-            <div className="mb-2 text-2xl text-text-muted">{t('canvas.emptyHintTitle')}</div>
-            <div className="text-sm text-text-muted opacity-60">{t('canvas.emptyHintSubtitle')}</div>
-          </div>
+          <div className="text-xl font-medium text-text-muted sm:text-2xl">{t('canvas.emptyHintTitle')}</div>
         </div>
       </div>
     ),
@@ -4056,7 +4052,6 @@ export function Canvas() {
       )}
 
       <CanvasSideToolbar onOpenAssets={handleOpenAssetPanel} />
-      <CanvasLeftRail />
       <AssetPanel
         isOpen={isAssetPanelOpen}
         assets={assetPanelAssets}
@@ -4071,7 +4066,7 @@ export function Canvas() {
 
       {nodes.length === 0 && emptyHint}
       {nodes.length > 0 && !hasConfiguredProvider && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-6">
+        <div className="canvas-center-safe pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
           <MissingApiKeyHint />
         </div>
       )}

@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, FolderOpen, Pencil, Trash2, Download } from 'lucide-react';
+import { Download, FolderOpen, LoaderCircle, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useProjectStore } from '@/stores/projectStore';
 import { useCustomProvidersStore } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { UI_CONTENT_OVERLAY_INSET_CLASS } from '@/components/ui/motion';
-import { UiButton, UiSelect } from '@/components/ui/primitives';
+import { UiButton, UiModal, UiSelect } from '@/components/ui/primitives';
 import { hasConfiguredImageProvider } from '@/features/canvas/application/providerAvailability';
 import { MissingApiKeyHint } from '@/features/settings/MissingApiKeyHint';
 import { listModelProviders } from '@/features/canvas/models';
@@ -23,6 +23,7 @@ export function ProjectManager() {
   const [sortField, setSortField] = useState<ProjectSortField>('createdAt');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [exportRequest, setExportRequest] = useState<{ projectId: string; projectName: string } | null>(null);
+  const [deleteRequest, setDeleteRequest] = useState<{ projectId: string; projectName: string } | null>(null);
   const providerIds = useMemo(() => listModelProviders().map((provider) => provider.id), []);
   const apiKeys = useSettingsStore((state) => state.apiKeys);
   const dreaminaStatus = useSettingsStore((state) => state.dreaminaStatus);
@@ -62,9 +63,17 @@ export function ProjectManager() {
     setShowRenameDialog(true);
   };
 
-  const handleDeleteClick = (id: string, e: React.MouseEvent) => {
+  const handleDeleteClick = (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    deleteProject(id);
+    setDeleteRequest({ projectId: id, projectName: name });
+  };
+
+  const handleConfirmDelete = () => {
+    if (!deleteRequest) {
+      return;
+    }
+    deleteProject(deleteRequest.projectId);
+    setDeleteRequest(null);
   };
 
   const handleConfirm = (name: string) => {
@@ -97,11 +106,11 @@ export function ProjectManager() {
   }, [projects, sortDirection, sortField]);
 
   return (
-    <div className="ui-scrollbar h-full w-full overflow-auto p-8">
-      <div className="max-w-5xl mx-auto">
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+    <div className="ui-scrollbar h-full w-full overflow-auto px-4 py-5 sm:px-6 sm:py-7 lg:px-8" aria-busy={isOpeningProject}>
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 sm:mb-8">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold text-text-dark">{t('project.title')}</h1>
+            <h1 className="text-xl font-semibold text-text-dark sm:text-2xl">{t('project.title')}</h1>
             <div className="flex items-center gap-2">
               <UiSelect
                 aria-label={t('project.sortBy')}
@@ -124,7 +133,7 @@ export function ProjectManager() {
               </UiSelect>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <ProjectPortabilityControls
               projects={projects}
               exportRequest={exportRequest}
@@ -132,8 +141,8 @@ export function ProjectManager() {
               onImported={refreshProjects}
               onBeforeExport={waitForProjectPersistence}
             />
-            <UiButton type="button" variant="primary" onClick={handleCreateProject} className="gap-2">
-              <Plus className="w-5 h-5" />
+            <UiButton type="button" variant="primary" onClick={handleCreateProject} className="ml-auto gap-2 sm:ml-0">
+              <Plus className="h-4 w-4" />
               {t('project.newProject')}
             </UiButton>
           </div>
@@ -142,69 +151,92 @@ export function ProjectManager() {
         {!hasConfiguredProvider && <MissingApiKeyHint className="mb-8" />}
 
         {projects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-text-muted">
-            <FolderOpen className="w-16 h-16 mb-4 opacity-50" />
-            <p className="text-lg">{t('project.empty')}</p>
-            <p className="text-sm mt-2">{t('project.emptyHint')}</p>
+          <div className="flex flex-col items-center justify-center py-16 text-center text-text-muted sm:py-20">
+            <FolderOpen className="mb-4 h-14 w-14 opacity-45" />
+            <p className="text-base font-medium text-text-dark">{t('project.empty')}</p>
+            <p className="mt-2 max-w-xs text-sm">{t('project.emptyHint')}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {sortedProjects.map((project) => (
-              <div
+              <article
                 key={project.id}
-                onClick={() => openProject(project.id)}
-                className="bg-surface-dark border border-border-dark rounded-lg p-4 cursor-pointer hover:border-primary/50 hover:shadow-lg transition-all group"
+                className="ui-project-card group relative min-h-[136px] overflow-hidden rounded-lg border border-border-dark bg-surface-dark p-4 transition-[border-color,background-color,box-shadow,transform] duration-150 hover:border-accent/45 hover:shadow-[var(--ui-shadow-panel)]"
               >
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-semibold text-text-dark truncate flex-1">
-                    {project.name}
-                  </h3>
-                  <div className="flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setExportRequest({ projectId: project.id, projectName: project.name });
-                      }}
-                      className="p-1 hover:bg-bg-dark rounded"
-                      title={t('portability.project.exportAction')}
-                    >
-                      <Download className="w-4 h-4 text-text-muted hover:text-text-dark" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => handleRenameClick(project.id, project.name, e)}
-                      className="p-1 hover:bg-bg-dark rounded"
-                      title={t('project.rename')}
-                    >
-                      <Pencil className="w-4 h-4 text-text-muted hover:text-text-dark" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteClick(project.id, e)}
-                      className="p-1 hover:bg-bg-dark rounded"
-                      title={t('project.delete')}
-                    >
-                      <Trash2 className="w-4 h-4 text-text-muted hover:text-red-500" />
-                    </button>
+                <button
+                  type="button"
+                  aria-label={`${t('project.open')}: ${project.name}`}
+                  disabled={isOpeningProject}
+                  onClick={() => openProject(project.id)}
+                  className="absolute inset-0 z-0 rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+                >
+                  <span className="sr-only">{`${t('project.open')}: ${project.name}`}</span>
+                </button>
+
+                <div className="pointer-events-none relative z-10 flex h-full flex-col">
+                  <div className="mb-3 flex min-w-0 items-start justify-between gap-2">
+                    <h3 className="min-w-0 flex-1 truncate font-semibold text-text-dark">
+                      {project.name}
+                    </h3>
+                    <div className="ui-project-actions pointer-events-auto flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setExportRequest({ projectId: project.id, projectName: project.name });
+                        }}
+                        className="ui-project-action inline-flex h-9 w-9 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
+                        title={t('portability.project.exportAction')}
+                        aria-label={`${t('portability.project.exportAction')}: ${project.name}`}
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleRenameClick(project.id, project.name, e)}
+                        className="ui-project-action inline-flex h-9 w-9 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
+                        title={t('project.rename')}
+                        aria-label={`${t('project.rename')}: ${project.name}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteClick(project.id, project.name, e)}
+                        className="ui-project-action inline-flex h-9 w-9 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-red-500/10 hover:text-red-500"
+                        title={t('project.delete')}
+                        aria-label={`${t('project.delete')}: ${project.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-auto space-y-1 text-xs text-text-muted">
+                    <p>
+                      {t('project.modified')}: {formatDate(project.updatedAt)}
+                    </p>
+                    <p>
+                      {t('project.nodes')}: {project.nodeCount}
+                    </p>
                   </div>
                 </div>
-                <div className="text-xs text-text-muted">
-                  <p>
-                    {t('project.modified')}: {formatDate(project.updatedAt)}
-                  </p>
-                  <p>
-                    {t('project.created')}: {formatDate(project.createdAt)}
-                  </p>
-                </div>
-              </div>
+              </article>
             ))}
           </div>
         )}
       </div>
 
       {isOpeningProject && (
-        <div className={`pointer-events-none fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} bg-black/10`} />
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-40 flex items-center justify-center bg-black/20 backdrop-blur-[1px]`}
+        >
+          <div className="ui-work-status inline-flex min-w-[180px] items-center justify-center gap-2 rounded-lg border border-border-dark bg-surface-dark/95 px-4 py-3 text-sm font-medium text-text-dark shadow-[var(--ui-shadow-panel)]">
+            <LoaderCircle className="h-4 w-4 animate-spin text-accent" />
+            <span>{t('project.opening')}</span>
+          </div>
+        </div>
       )}
 
       <RenameDialog
@@ -214,6 +246,32 @@ export function ProjectManager() {
         onClose={() => setShowRenameDialog(false)}
         onConfirm={handleConfirm}
       />
+
+      <UiModal
+        isOpen={Boolean(deleteRequest)}
+        title={t('project.deleteConfirmTitle')}
+        onClose={() => setDeleteRequest(null)}
+        widthClassName="w-[min(420px,calc(100vw-1.5rem))]"
+        containerClassName="z-[100]"
+        footer={(
+          <>
+            <UiButton type="button" variant="ghost" onClick={() => setDeleteRequest(null)}>
+              {t('common.cancel')}
+            </UiButton>
+            <UiButton
+              type="button"
+              className="bg-red-600 text-white hover:bg-red-500"
+              onClick={handleConfirmDelete}
+            >
+              {t('project.delete')}
+            </UiButton>
+          </>
+        )}
+      >
+        <p className="text-sm leading-6 text-text-muted">
+          {t('project.deleteConfirmDescription', { name: deleteRequest?.projectName ?? '' })}
+        </p>
+      </UiModal>
     </div>
   );
 }

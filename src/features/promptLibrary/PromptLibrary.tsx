@@ -58,6 +58,18 @@ function filterChipClassName(isActive: boolean): string {
     : '';
 }
 
+export function resolvePromptCardLabels(
+  entry: Pick<PromptLibraryEntry, 'category' | 'tags'>
+): string[] {
+  const seen = new Set<string>();
+  return [entry.category, ...entry.tags].flatMap((value) => {
+    const label = value.trim();
+    if (!label || seen.has(label)) return [];
+    seen.add(label);
+    return [label];
+  }).slice(0, 4);
+}
+
 function formatPromptDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -99,7 +111,7 @@ function PromptCard({
   onToggleFavorite,
 }: PromptCardProps) {
   return (
-    <article className="group flex h-full min-h-[360px] flex-col overflow-hidden rounded-lg border border-border-dark bg-surface-dark text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-accent/55 hover:shadow-xl">
+    <article className="group flex h-full min-h-[360px] flex-col overflow-hidden rounded-lg border border-border-dark bg-surface-dark text-left shadow-sm transition-[transform,border-color,box-shadow] duration-150 hover:-translate-y-0.5 hover:border-accent/55 hover:shadow-xl">
       <div className="relative h-44 w-full overflow-hidden bg-bg-dark">
         <button type="button" className="block h-full w-full text-left" onClick={onOpen}>
           <img
@@ -145,7 +157,7 @@ function PromptCard({
         </button>
 
         <div className="mt-auto flex flex-wrap gap-1.5">
-          {[entry.category, ...entry.tags].filter(Boolean).slice(0, 4).map((label) => (
+          {resolvePromptCardLabels(entry).map((label) => (
             <span
               key={label}
               className="rounded-md bg-[rgba(var(--accent-rgb),0.12)] px-2 py-1 text-[11px] font-medium text-accent"

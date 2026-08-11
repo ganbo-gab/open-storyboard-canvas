@@ -4,6 +4,7 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import {
   CANVAS_COMMAND_VERSION,
   CANVAS_COMMAND_TYPES,
+  type CanvasCommand,
   type CanvasTransaction,
 } from '../domain/canvasCommands';
 import { CANVAS_NODE_TYPES } from '../domain/canvasNodes';
@@ -169,6 +170,30 @@ describe('CanvasCommandRegistry transactions', () => {
     });
     expect(useCanvasStore.getState().nodes).toBe(stateBefore.nodes);
     expect(useCanvasStore.getState().history).toBe(stateBefore.history);
+  });
+
+  it('enforces the approval-bound revision for a single Agent mutation', async () => {
+    useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.upload, { x: 0, y: 0 });
+    const node = useCanvasStore.getState().nodes[0];
+    const command = {
+      type: 'node.rename' as const,
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeId: node.id, displayName: 'Approved name' },
+    };
+
+    const stale = await canvasCommandRegistry.executeApproved(command, 0, 'agent');
+    expect(stale).toMatchObject({
+      ok: false,
+      revisionBefore: 1,
+      revisionAfter: 1,
+      error: { code: 'revision_conflict' },
+      retryPreview: { baseRevision: 1, valid: true },
+    });
+    expect(useCanvasStore.getState().nodes[0].data.displayName).not.toBe('Approved name');
+
+    const current = await canvasCommandRegistry.executeApproved(command, 1, 'agent');
+    expect(current).toMatchObject({ ok: true, revisionBefore: 1, revisionAfter: 2 });
+    expect(useCanvasStore.getState().nodes[0].data.displayName).toBe('Approved name');
   });
 
   it('rejects a revision change at commit and rebuilds the retry preview', () => {
@@ -507,6 +532,47 @@ describe('CanvasCommandRegistry transactions', () => {
           extraParams: { mode: 'frames' },
         },
       });
+  });
+
+  it('creates a Director Studio node in the requested mode through the shared command boundary', async () => {
+    const result = await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: CANVAS_NODE_TYPES.blueprint,
+        nodeId: 'panorama-director-node',
+        position: { x: 120, y: 80 },
+        configuration: {
+          openDirectorStudio: true,
+          directorStudioMode: 'panorama',
+        },
+      },
+    }, 'ui');
+
+    expect(result.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'panorama-director-node')?.data)
+      .toMatchObject({
+        mode: 'panorama',
+        openDirectorStudioOnCreate: true,
+      });
+
+    const invalidMode = await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: CANVAS_NODE_TYPES.blueprint,
+        position: { x: 0, y: 0 },
+        configuration: { directorStudioMode: 'invalid' },
+      },
+    } as never, 'ui');
+
+    expect(invalidMode).toMatchObject({
+      ok: false,
+      error: {
+        code: 'invalid_command',
+        message: 'configuration.directorStudioMode must be flat or panorama.',
+      },
+    });
   });
 
   it('rejects node-inapplicable model fields instead of silently dropping them', async () => {
@@ -870,6 +936,59 @@ describe('CanvasCommandRegistry read and generation facades', () => {
     ]));
     expect(JSON.stringify(assets)).not.toContain('https://example.com');
     expect(JSON.stringify(assets)).not.toContain('director-snapshot');
+  });
+
+  it('filters assets by query, node, selection, direct relationship, and region', async () => {
+    const seedId = useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.upload, { x: 0, y: 0 }, {
+      displayName: 'Seed reference',
+      imageUrl: 'https://example.com/seed.png',
+    });
+    const neighborId = useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.upload, { x: 300, y: 0 }, {
+      displayName: 'Direct neighbor',
+      imageUrl: 'https://example.com/neighbor.png',
+    });
+    const transitiveId = useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.upload, { x: 600, y: 0 }, {
+      displayName: 'Transitive reference',
+      imageUrl: 'https://example.com/transitive.png',
+    });
+    useCanvasStore.setState((state) => ({
+      nodes: state.nodes.map((node) => ({ ...node, selected: node.id === seedId })),
+      edges: [
+        { id: 'seed-neighbor', source: seedId, target: neighborId },
+        { id: 'neighbor-transitive', source: neighborId, target: transitiveId },
+      ],
+    }));
+
+    const list = async (input: Extract<CanvasCommand, { type: 'asset.list' }>['input']) => {
+      const result = await canvasCommandRegistry.execute({
+        type: 'asset.list',
+        version: CANVAS_COMMAND_VERSION,
+        input,
+      });
+      expect(result.ok).toBe(true);
+      return result.ok ? result.output.references.assetIds ?? [] : [];
+    };
+
+    await expect(list({ query: 'DIRECT NEIGHBOR' })).resolves.toEqual([`${neighborId}:image`]);
+    await expect(list({ nodeIds: [transitiveId] })).resolves.toEqual([`${transitiveId}:image`]);
+    await expect(list({ selectedOnly: true })).resolves.toEqual([`${seedId}:image`]);
+    await expect(list({ relatedToNodeIds: [seedId] })).resolves.toEqual([
+      `${seedId}:image`,
+      `${neighborId}:image`,
+    ]);
+    await expect(list({ region: { x: 250, y: -10, width: 100, height: 20 } })).resolves.toEqual([
+      `${neighborId}:image`,
+    ]);
+
+    const invalidRegion = await canvasCommandRegistry.execute({
+      type: 'asset.list',
+      version: CANVAS_COMMAND_VERSION,
+      input: { region: { x: 0, y: 0, width: 0, height: 10 } },
+    });
+    expect(invalidRegion).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: expect.stringContaining('positive width') },
+    });
   });
 
   it('reports generation dispatch as accepted without presenting a stale job id as a new receipt', async () => {

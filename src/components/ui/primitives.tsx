@@ -3,6 +3,7 @@ import {
   forwardRef,
   isValidElement,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -18,12 +19,14 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import {
   UI_CONTENT_OVERLAY_INSET_CLASS,
   UI_DIALOG_TRANSITION_MS,
   UI_POPOVER_TRANSITION_MS,
 } from './motion';
 import { useDialogTransition } from './useDialogTransition';
+import { useModalFocus } from './useModalFocus';
 
 type ButtonVariant = 'primary' | 'muted' | 'ghost';
 
@@ -120,14 +123,17 @@ export const UiChipButton = forwardRef<HTMLButtonElement, UiChipButtonProps>(
 
 UiChipButton.displayName = 'UiChipButton';
 
-export function UiPanel({ className = '', ...props }: HTMLAttributes<HTMLDivElement>) {
-  return (
+export const UiPanel = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
+  ({ className = '', ...props }, ref) => (
     <div
+      ref={ref}
       className={`border ui-panel ${className}`}
       {...props}
     />
-  );
-}
+  )
+);
+
+UiPanel.displayName = 'UiPanel';
 
 export function UiTextArea({ className = '', ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
@@ -473,7 +479,10 @@ export function UiModal({
   widthClassName = 'w-[460px]',
   containerClassName = '',
 }: UiModalProps) {
+  const { t } = useTranslation();
+  const titleId = useId();
   const { shouldRender, isVisible } = useDialogTransition(isOpen, UI_DIALOG_TRANSITION_MS);
+  const { dialogRef, onKeyDown } = useModalFocus({ isOpen: isOpen && shouldRender, onClose });
 
   if (!shouldRender) {
     return null;
@@ -486,23 +495,34 @@ export function UiModal({
       onTouchMoveCapture={(event) => event.stopPropagation()}
     >
       <div
-        className={`absolute inset-0 bg-black/55 transition-opacity duration-200 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 bg-black/55 transition-opacity duration-[180ms] ${isVisible ? 'opacity-100' : 'opacity-0'}`}
         onClick={onClose}
       />
       <UiPanel
-        className={`relative transition-opacity duration-200 ${isVisible ? 'opacity-100' : 'opacity-0'} ${widthClassName}`}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
+        className={`relative flex max-h-[calc(100dvh-4rem)] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden transition-[opacity,transform] duration-[180ms] ease-out ${isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-1 scale-[0.99] opacity-0'} ${widthClassName}`}
       >
-        <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.1)] px-4 py-3">
-          <h2 className="text-sm font-medium text-text-dark">{title}</h2>
-          <UiIconButton className="h-8 w-8" onClick={onClose}>
+        <div className="flex shrink-0 items-center justify-between border-b border-[rgba(255,255,255,0.1)] px-4 py-3">
+          <h2 id={titleId} className="min-w-0 truncate text-sm font-medium text-text-dark">{title}</h2>
+          <UiIconButton
+            className="h-9 w-9 shrink-0"
+            onClick={onClose}
+            aria-label={t('common.close')}
+            title={t('common.close')}
+          >
             <X className="h-4 w-4" />
           </UiIconButton>
         </div>
 
-        <div className="px-4 py-4">{children}</div>
+        <div className="ui-scrollbar min-h-0 overflow-y-auto px-4 py-4">{children}</div>
 
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-[rgba(255,255,255,0.1)] px-4 py-3">
+          <div className="flex shrink-0 justify-end gap-2 border-t border-[rgba(255,255,255,0.1)] px-4 py-3">
             {footer}
           </div>
         )}

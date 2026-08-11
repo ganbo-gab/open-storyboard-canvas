@@ -16,6 +16,7 @@ import {
   UI_DIALOG_TRANSITION_MS,
 } from '@/components/ui/motion';
 import { useDialogTransition } from '@/components/ui/useDialogTransition';
+import { useModalFocus } from '@/components/ui/useModalFocus';
 import {
   PROMPT_IMPORT_MAX_NODES,
   PROMPT_IMPORT_PREVIEW_ROWS,
@@ -48,15 +49,6 @@ interface MappingDefaults {
   rangeStart: number;
   rangeEnd: number;
 }
-
-const FOCUSABLE_SELECTOR = [
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[href]',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',');
 
 function isTxtFile(file: File | null): boolean {
   return file?.name.toLowerCase().endsWith('.txt') ?? false;
@@ -91,9 +83,6 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
   const { t } = useTranslation();
   const titleId = useId();
   const descriptionId = useId();
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const { shouldRender, isVisible } = useDialogTransition(isOpen, UI_DIALOG_TRANSITION_MS);
 
@@ -135,79 +124,26 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
     abortControllerRef.current?.abort();
     onClose();
   }, [onClose]);
+  const { dialogRef, onKeyDown } = useModalFocus({
+    isOpen: isOpen && shouldRender,
+    onClose: requestClose,
+  });
 
   useEffect(() => {
     if (!isOpen) {
       reset();
-      return;
     }
-
-    previousFocusRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        const expandedSelect = dialogRef.current?.querySelector(
-          '[aria-haspopup="listbox"][aria-expanded="true"]',
-        );
-        if (expandedSelect) {
-          return;
-        }
-        event.preventDefault();
-        requestClose();
-        return;
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) {
-        return;
-      }
-
-      const focusable = Array.from(
-        dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      ).filter((element) => element.tabIndex >= 0 && !element.hasAttribute('aria-hidden'));
-      if (focusable.length === 0) {
-        event.preventDefault();
-        dialogRef.current.focus();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (document.activeElement === dialogRef.current || !dialogRef.current.contains(document.activeElement)) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus();
-      } else if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      previousFocusRef.current?.focus({ preventScroll: true });
-      previousFocusRef.current = null;
-    };
-  }, [isOpen, requestClose, reset]);
+  }, [isOpen, reset]);
 
   useEffect(() => {
-    if (!isOpen || !shouldRender) {
+    if (!isOpen || !shouldRender || stage === 'select') {
       return;
     }
-    let secondFrame: number | null = null;
-    const firstFrame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(() => {
-        const focusTarget = stage === 'select' ? fileInputRef.current : dialogRef.current;
-        focusTarget?.focus({ preventScroll: true });
-      });
-    });
-    return () => {
-      cancelAnimationFrame(firstFrame);
-      if (secondFrame !== null) {
-        cancelAnimationFrame(secondFrame);
-      }
-    };
+
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.contains(document.activeElement)) {
+      dialog.focus({ preventScroll: true });
+    }
   }, [isOpen, shouldRender, stage]);
 
   const selectedSheet = workbook?.sheets[sheetIndex] ?? null;
@@ -343,7 +279,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
         type="button"
         tabIndex={-1}
         aria-hidden="true"
-        className={`absolute inset-0 bg-black/55 transition-opacity duration-200 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 bg-black/55 transition-opacity duration-[180ms] ${isVisible ? 'opacity-100' : 'opacity-0'}`}
         onClick={requestClose}
       />
       <div
@@ -353,7 +289,8 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
         tabIndex={-1}
-        className={`relative flex max-h-[calc(100vh-64px)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-[var(--ui-border-soft)] bg-[var(--ui-surface-panel)] text-text-dark shadow-[var(--ui-shadow-panel)] transition-[opacity,transform] duration-200 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'}`}
+        onKeyDown={onKeyDown}
+        className={`relative flex max-h-[calc(100vh-64px)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-[var(--ui-border-soft)] bg-[var(--ui-surface-panel)] text-text-dark shadow-[var(--ui-shadow-panel)] transition-[opacity,transform] duration-[180ms] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'}`}
       >
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--ui-border-soft)] px-4 py-3 sm:px-5">
           <div className="min-w-0">
@@ -367,7 +304,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
             onClick={requestClose}
             aria-label={t('common.close')}
             title={t('common.close')}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-[var(--canvas-node-menu-hover)] hover:text-text-dark"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-[var(--canvas-node-menu-hover)] hover:text-text-dark"
           >
             <X className="h-4 w-4" />
           </button>
@@ -379,7 +316,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
               <label className="block space-y-1.5 text-sm font-medium">
                 <span>{t('promptImport.fileLabel')}</span>
                 <UiInput
-                  ref={fileInputRef}
+                  data-autofocus="true"
                   type="file"
                   accept=".txt,.csv,.tsv,.xlsx"
                   disabled={isParsing}
@@ -404,7 +341,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
                         type="button"
                         aria-pressed={txtMode === mode}
                         onClick={() => setTxtMode(mode)}
-                        className={`rounded px-3 py-1.5 text-xs transition-colors ${txtMode === mode ? 'bg-accent text-white' : 'text-text-muted hover:text-text-dark'}`}
+                        className={`min-h-9 rounded px-3 py-1.5 text-xs transition-colors ${txtMode === mode ? 'bg-accent text-white' : 'text-text-muted hover:text-text-dark'}`}
                       >
                         {t(`promptImport.txtMode.${mode}`)}
                       </button>
@@ -427,7 +364,10 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
                     aria-valuenow={Math.round(progress * 100)}
                     className="h-1.5 overflow-hidden rounded bg-[var(--canvas-node-field-bg)]"
                   >
-                    <div className="h-full bg-accent transition-[width]" style={{ width: `${Math.round(progress * 100)}%` }} />
+                    <div
+                      className="h-full w-full origin-left bg-accent transition-transform"
+                      style={{ transform: `scaleX(${Math.max(0, Math.min(1, progress))})` }}
+                    />
                   </div>
                 </div>
               )}

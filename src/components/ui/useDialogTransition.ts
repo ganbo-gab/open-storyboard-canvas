@@ -6,6 +6,12 @@ interface DialogTransitionState {
   isVisible: boolean;
 }
 
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 export function useDialogTransition(
   isOpen: boolean,
   durationMs: number = UI_DIALOG_TRANSITION_MS
@@ -17,10 +23,14 @@ export function useDialogTransition(
     let frameId1 = 0;
     let frameId2 = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    const reduceMotion = prefersReducedMotion();
 
     if (isOpen) {
       setShouldRender(true);
-      setIsVisible(false);
+      setIsVisible(reduceMotion);
+      if (reduceMotion) {
+        return undefined;
+      }
       frameId1 = requestAnimationFrame(() => {
         frameId2 = requestAnimationFrame(() => {
           setIsVisible(true);
@@ -38,7 +48,7 @@ export function useDialogTransition(
     setIsVisible(false);
     timer = setTimeout(() => {
       setShouldRender(false);
-    }, durationMs);
+    }, reduceMotion ? 0 : durationMs);
 
     return () => {
       if (timer) {

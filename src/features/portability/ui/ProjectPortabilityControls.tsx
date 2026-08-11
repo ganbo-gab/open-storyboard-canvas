@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { AlertTriangle, Download, Loader2, Upload, XCircle } from 'lucide-react';
+import { AlertTriangle, Download, Loader2, Upload, X, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   exportTauriProjectBundle,
@@ -282,27 +282,49 @@ export function ProjectPortabilityControls({
             <div>
               <div className="flex items-center gap-2 text-sm text-text-dark">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span>{operation.label}</span>
-                <span className="ml-auto text-xs text-text-muted">{percent}%</span>
+                <span className="min-w-0 flex-1 break-words">{operation.label}</span>
+                <span className="shrink-0 text-xs text-text-muted">{percent}%</span>
                 <button
                   type="button"
                   onClick={() => operation.controller.abort()}
-                  className="text-xs text-text-muted hover:text-text-dark"
+                  className="inline-flex min-h-9 shrink-0 items-center rounded px-2 text-xs text-text-muted hover:bg-bg-dark hover:text-text-dark"
                 >
                   {t('common.cancel')}
                 </button>
               </div>
-              <div className="mt-2 h-1 overflow-hidden rounded bg-bg-dark">
-                <div className="h-full bg-accent transition-[width]" style={{ width: `${percent}%` }} />
+              <div
+                role="progressbar"
+                aria-label={operation.label}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={percent}
+                className="mt-2 h-1 overflow-hidden rounded bg-bg-dark"
+              >
+                <div
+                  className="h-full w-full origin-left bg-accent transition-transform"
+                  style={{ transform: `scaleX(${Math.max(0, Math.min(1, percent / 100))})` }}
+                />
               </div>
             </div>
           ) : (
-            <div className="flex items-start gap-2 text-sm text-text-dark">
+            <div
+              role={feedback?.kind === 'error' ? 'alert' : 'status'}
+              aria-live={feedback?.kind === 'error' ? 'assertive' : 'polite'}
+              className="flex items-start gap-2 text-sm text-text-dark"
+            >
               {feedback?.kind === 'error'
                 ? <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
                 : <Download className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />}
               <span className="min-w-0 flex-1 break-words">{feedback?.message}</span>
-              <button type="button" onClick={() => setFeedback(null)} className="text-text-muted hover:text-text-dark">×</button>
+              <button
+                type="button"
+                onClick={() => setFeedback(null)}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-dark hover:text-text-dark"
+                aria-label={t('common.close')}
+                title={t('common.close')}
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
           )}
         </div>

@@ -209,6 +209,11 @@ body {
   color: var(--text);
 }
 
+:where(button, a[href], input, textarea, select, [role='button'], [role='tab'], [tabindex]:not([tabindex='-1'])):focus-visible {
+  outline: 2px solid rgb(var(--accent-rgb) / 0.78);
+  outline-offset: 2px;
+}
+
 #boot-screen {
   font-family: var(--font-family-ui-default);
 }
@@ -336,6 +341,160 @@ html[data-platform='macos'] #root {
   transition: opacity 130ms ease, transform 150ms ease;
 }
 
+.ui-workspace-enter {
+  animation: ui-workspace-enter 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.ui-branch-enter {
+  animation: ui-branch-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.ui-work-status {
+  animation: ui-work-status-enter 160ms ease-out both;
+}
+
+.ui-director-timeline-enter {
+  animation: ui-director-timeline-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.director-studio-tool-dock {
+  animation: ui-director-tool-dock-enter 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.canvas-center-safe {
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+.ui-project-card:has(> button:active) {
+  transform: translateY(1px);
+}
+
+@keyframes ui-workspace-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ui-branch-enter {
+  from {
+    opacity: 0;
+    transform: translateX(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes ui-work-status-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ui-director-timeline-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ui-director-tool-dock-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.agent-dock-shell {
+  padding-right: env(safe-area-inset-right, 0px);
+  transition:
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 160ms ease-out,
+    border-color 160ms ease-out;
+}
+
+.agent-dock-slot {
+  transition: width 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.agent-composer {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+}
+
+.agent-feed-enter {
+  animation: agent-feed-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.agent-view-enter {
+  animation: agent-view-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.agent-disclosure-enter {
+  animation: agent-disclosure-enter 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: top;
+}
+
+@keyframes agent-feed-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes agent-view-enter {
+  from {
+    opacity: 0;
+    transform: translateX(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes agent-disclosure-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scaleY(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}
+
 .canvas-minimap {
   border: 1px solid var(--canvas-minimap-border);
   background: var(--canvas-minimap-bg) !important;
@@ -387,7 +546,86 @@ html[data-platform='macos'] #root {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+
   .canvas-processing-edge__flow {
     animation: none;
+  }
+
+  .agent-dock-shell {
+    transition-duration: 1ms;
+  }
+
+  .agent-dock-slot {
+    transition-duration: 1ms;
+  }
+
+  .agent-feed-enter,
+  .agent-view-enter,
+  .agent-disclosure-enter {
+    animation: none;
+  }
+
+  .agent-dock-shell *,
+  .agent-dock-shell *::before,
+  .agent-dock-shell *::after {
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (pointer: coarse) {
+  .ui-project-action {
+    height: 44px;
+    width: 44px;
+  }
+}
+
+@media (max-width: 880px) {
+  .canvas-center-safe {
+    padding-left: 7rem;
+    padding-right: 0.75rem;
+  }
+}
+
+@media (max-height: 520px) {
+  .canvas-minimap {
+    display: none;
+  }
+
+  .canvas-side-toolbar {
+    top: 12px;
+    display: grid;
+    grid-template-columns: repeat(2, 44px);
+    gap: 4px;
+    padding: 4px;
+    transform: none;
+  }
+
+  .canvas-side-toolbar__button {
+    min-height: 44px;
+    width: 44px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .canvas-side-toolbar__label {
+    display: none;
+  }
+
+  .canvas-center-safe {
+    padding-left: 7.75rem;
+  }
+
+  .director-studio-tool-dock {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
   }
 }

@@ -448,13 +448,35 @@ export function createPersonMeshGroup(
   heightM: number,
   presetId?: string,
   bodyControls?: BlueprintBodyControls,
-  options: { role?: BlueprintItem['directorStudioRole'] } = {},
+  options: { role?: BlueprintItem['directorStudioRole']; detail?: 'full' | 'preview' } = {},
 ): any {
+  const isPreview = options.detail === 'preview';
   const isPedestrian = options.role === 'pedestrian';
   const p = proportionsForPreset(presetId, heightM * (isPedestrian ? 0.94 : 1), bodyControls);
   const traits = traitsForPreset(presetId);
   const controls = normalizeBlueprintBodyControls(bodyControls);
-  const showIdentityDetails = !isPedestrian;
+  const showIdentityDetails = !isPedestrian && !isPreview;
+  const makeSphere = (
+    radius: number,
+    widthSegments: number,
+    heightSegments: number,
+    phiStart?: number,
+    phiLength?: number,
+    thetaStart?: number,
+    thetaLength?: number,
+  ) => new THREE.SphereGeometry(
+    radius,
+    isPreview ? Math.min(widthSegments, 8) : widthSegments,
+    isPreview ? Math.min(heightSegments, 6) : heightSegments,
+    phiStart,
+    phiLength,
+    thetaStart,
+    thetaLength,
+  );
+  const makeCapsule = (radius: number, length: number, capSegments: number, radialSegments: number) =>
+    new THREE.CapsuleGeometry(radius, length, isPreview ? Math.min(capSegments, 3) : capSegments, isPreview ? Math.min(radialSegments, 6) : radialSegments);
+  const makeCylinder = (radiusTop: number, radiusBottom: number, height: number, radialSegments: number, heightSegments = 1, openEnded = false) =>
+    new THREE.CylinderGeometry(radiusTop, radiusBottom, height, isPreview ? Math.min(radialSegments, 8) : radialSegments, heightSegments, openEnded);
 
   // Single material for the whole figure. The body color comes from the
   // user; we lift emissive slightly so the silhouette stays legible
@@ -495,7 +517,7 @@ export function createPersonMeshGroup(
   //    height matches torsoH exactly and whose bottom rests at hipY.
   const torsoMesh = new THREE.Group();
   const torsoCapsule = new THREE.Mesh(
-    new THREE.CapsuleGeometry(p.torsoR, Math.max(0.01, p.torsoH - 2 * p.torsoR), 8, 18),
+    makeCapsule(p.torsoR, Math.max(0.01, p.torsoH - 2 * p.torsoR), 8, 18),
     bodyMat,
   );
   torsoMesh.add(torsoCapsule);
@@ -505,7 +527,7 @@ export function createPersonMeshGroup(
   //    follows torso lean during run/squat poses.
   if (traits.bellyBulge || controls.style === 'heavy') {
     const belly = new THREE.Mesh(
-      new THREE.SphereGeometry(p.torsoR * 0.95, 18, 14),
+      makeSphere(p.torsoR * 0.95, 18, 14),
       bodyMat,
     );
     // Slightly forward-protruding, biased to lower torso (where a
@@ -551,57 +573,69 @@ export function createPersonMeshGroup(
     // bulges past the limb silhouette. The capsule's hemispherical end
     // still seals the seam against the torso; the ball is just insurance
     // against gaps when the limb rotates away.
-    const hipBall = new THREE.Mesh(new THREE.SphereGeometry(p.legR * 0.95, 12, 10), bodyMat);
-    hipGroup.add(hipBall);
+    if (!isPreview) {
+      const hipBall = new THREE.Mesh(makeSphere(p.legR * 0.95, 12, 10), bodyMat);
+      hipGroup.add(hipBall);
+    }
     // Thigh — capsule that extends downward into the leg's resting
     // direction. The capsule's top hemisphere overlaps the hip ball so
     // the seam between them disappears.
     const thighMesh = new THREE.Mesh(
-      new THREE.CapsuleGeometry(p.legR, p.thighH * 0.78, 8, 14),
+      makeCapsule(p.legR, (isPreview ? p.legH : p.thighH) * 0.78, 8, 14),
       bodyMat,
     );
-    thighMesh.position.y = -p.thighH / 2;
+    thighMesh.position.y = -(isPreview ? p.legH : p.thighH) / 2;
     hipGroup.add(thighMesh);
 
     const kneeGroup = new THREE.Group();
     kneeGroup.position.y = -p.thighH;
     hipGroup.add(kneeGroup);
     // Knee ball — same flush-with-limb sizing rule as the hip.
-    const kneeBall = new THREE.Mesh(new THREE.SphereGeometry(p.legR * 0.92, 10, 8), bodyMat);
-    kneeGroup.add(kneeBall);
+    if (!isPreview) {
+      const kneeBall = new THREE.Mesh(makeSphere(p.legR * 0.92, 10, 8), bodyMat);
+      kneeGroup.add(kneeBall);
+    }
     // Shin — slightly thinner.
-    const shinMesh = new THREE.Mesh(
-      new THREE.CapsuleGeometry(p.legR * 0.9, p.shinH * 0.78, 8, 14),
-      bodyMat,
-    );
-    shinMesh.position.y = -p.shinH / 2;
-    kneeGroup.add(shinMesh);
+    if (!isPreview) {
+      const shinMesh = new THREE.Mesh(
+        makeCapsule(p.legR * 0.9, p.shinH * 0.78, 8, 14),
+        bodyMat,
+      );
+      shinMesh.position.y = -p.shinH / 2;
+      kneeGroup.add(shinMesh);
+    }
     // Ankle ball — small sphere where shin meets foot. Adds anatomical
     // detail so the leg doesn't end abruptly in the foot blob, and gives
     // a visible pivot point for the toe-to-heel direction.
-    const ankleBall = new THREE.Mesh(
-      new THREE.SphereGeometry(p.legR * 0.85, 10, 8),
-      bodyMat,
-    );
-    ankleBall.position.y = -p.shinH;
-    kneeGroup.add(ankleBall);
+    if (!isPreview) {
+      const ankleBall = new THREE.Mesh(
+        makeSphere(p.legR * 0.85, 10, 8),
+        bodyMat,
+      );
+      ankleBall.position.y = -p.shinH;
+      kneeGroup.add(ankleBall);
+    }
     // Foot — shoe-shaped: tapered front (toe) wider back (heel), the
     // body slightly above ground level so shoes read as having sole
     // thickness rather than being half-buried in the floor.
-    const foot = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), bodyMat);
-    foot.scale.set(p.footHalfW, p.footHalfH, p.footHalfL);
-    foot.position.set(0, -p.shinH - p.footHalfH * 0.3, p.footHalfL * 0.35);
-    kneeGroup.add(foot);
+    if (!isPreview) {
+      const foot = new THREE.Mesh(makeSphere(1, 16, 12), bodyMat);
+      foot.scale.set(p.footHalfW, p.footHalfH, p.footHalfL);
+      foot.position.set(0, -p.shinH - p.footHalfH * 0.3, p.footHalfL * 0.35);
+      kneeGroup.add(foot);
+    }
     // Toe nub — small forward sphere making the toe direction
     // unambiguous from any camera angle (otherwise the foot ellipsoid
     // looks like a featureless blob from above).
-    const toe = new THREE.Mesh(
-      new THREE.SphereGeometry(p.footHalfH * 1.4, 10, 8),
-      bodyMat,
-    );
-    toe.position.set(0, -p.shinH - p.footHalfH * 0.6, p.footHalfL * 0.95);
-    toe.scale.set(0.7, 0.7, 0.85);
-    kneeGroup.add(toe);
+    if (!isPreview) {
+      const toe = new THREE.Mesh(
+        makeSphere(p.footHalfH * 1.4, 10, 8),
+        bodyMat,
+      );
+      toe.position.set(0, -p.shinH - p.footHalfH * 0.6, p.footHalfL * 0.95);
+      toe.scale.set(0.7, 0.7, 0.85);
+      kneeGroup.add(toe);
+    }
 
     if (showIdentityDetails || isPedestrian) {
       const sole = new THREE.Mesh(
@@ -636,46 +670,56 @@ export function createPersonMeshGroup(
     // as a bulky pad. Earlier iterations at 1.5× and 1.1× both still
     // looked like the figure had shoulder armor; flush-with-limb sizing
     // bridges the seam without drawing the eye.
-    const shoulderBall = new THREE.Mesh(new THREE.SphereGeometry(p.armR * 0.95, 12, 10), bodyMat);
-    shoulderGroup.add(shoulderBall);
+    if (!isPreview) {
+      const shoulderBall = new THREE.Mesh(makeSphere(p.armR * 0.95, 12, 10), bodyMat);
+      shoulderGroup.add(shoulderBall);
+    }
     // Upper arm
     const upperMesh = new THREE.Mesh(
-      new THREE.CapsuleGeometry(p.armR, p.upperArmH * 0.78, 8, 14),
+      makeCapsule(p.armR, (isPreview ? p.armH : p.upperArmH) * 0.78, 8, 14),
       bodyMat,
     );
-    upperMesh.position.y = -p.upperArmH / 2;
+    upperMesh.position.y = -(isPreview ? p.armH : p.upperArmH) / 2;
     shoulderGroup.add(upperMesh);
 
     const elbowGroup = new THREE.Group();
     elbowGroup.position.y = -p.upperArmH;
     shoulderGroup.add(elbowGroup);
     // Elbow ball — flush with forearm.
-    const elbowBall = new THREE.Mesh(new THREE.SphereGeometry(p.armR * 0.92, 10, 8), bodyMat);
-    elbowGroup.add(elbowBall);
+    if (!isPreview) {
+      const elbowBall = new THREE.Mesh(makeSphere(p.armR * 0.92, 10, 8), bodyMat);
+      elbowGroup.add(elbowBall);
+    }
     // Forearm
-    const forearmMesh = new THREE.Mesh(
-      new THREE.CapsuleGeometry(p.armR * 0.9, p.forearmH * 0.78, 8, 14),
-      bodyMat,
-    );
-    forearmMesh.position.y = -p.forearmH / 2;
-    elbowGroup.add(forearmMesh);
+    if (!isPreview) {
+      const forearmMesh = new THREE.Mesh(
+        makeCapsule(p.armR * 0.9, p.forearmH * 0.78, 8, 14),
+        bodyMat,
+      );
+      forearmMesh.position.y = -p.forearmH / 2;
+      elbowGroup.add(forearmMesh);
+    }
     // Wrist ball — small joint between forearm and hand. Makes the
     // arm read as having a wrist articulation even though we don't
     // expose wrist rotation in the action-pose schema yet.
-    const wristBall = new THREE.Mesh(
-      new THREE.SphereGeometry(p.armR * 0.78, 10, 8),
-      bodyMat,
-    );
-    wristBall.position.y = -p.forearmH;
-    elbowGroup.add(wristBall);
+    if (!isPreview) {
+      const wristBall = new THREE.Mesh(
+        makeSphere(p.armR * 0.78, 10, 8),
+        bodyMat,
+      );
+      wristBall.position.y = -p.forearmH;
+      elbowGroup.add(wristBall);
+    }
     // Hand — sphere clearly larger than the forearm tip so the
     // silhouette reads "this is where the arm ends with a fist". Sits
     // a bit further past the wrist than before so the hand visibly
     // protrudes instead of getting hidden by the elbow bone.
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(p.handR, 14, 10), bodyMat);
-    hand.scale.set(0.92, 0.84, 1.05);
-    hand.position.set(splaySign * p.handR * 0.72, -p.forearmH - p.handR * 0.72, 0);
-    elbowGroup.add(hand);
+    if (!isPreview) {
+      const hand = new THREE.Mesh(makeSphere(p.handR, 14, 10), bodyMat);
+      hand.scale.set(0.92, 0.84, 1.05);
+      hand.position.set(splaySign * p.handR * 0.72, -p.forearmH - p.handR * 0.72, 0);
+      elbowGroup.add(hand);
+    }
 
     return { shoulder: shoulderGroup, elbow: elbowGroup };
   };
@@ -691,14 +735,16 @@ export function createPersonMeshGroup(
   const headGroup = new THREE.Group();
   headGroup.position.set(0, headCenterY, 0);
 
-  const neckMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(p.neckR * 0.95, p.neckR * 1.05, p.neckR * 1.6, 12),
-    bodyMat,
-  );
-  neckMesh.position.y = -(p.headR * 0.85);
-  headGroup.add(neckMesh);
+  if (!isPreview) {
+    const neckMesh = new THREE.Mesh(
+      makeCylinder(p.neckR * 0.95, p.neckR * 1.05, p.neckR * 1.6, 12),
+      bodyMat,
+    );
+    neckMesh.position.y = -(p.headR * 0.85);
+    headGroup.add(neckMesh);
+  }
 
-  const skull = new THREE.Mesh(new THREE.SphereGeometry(p.headR, 28, 22), bodyMat);
+  const skull = new THREE.Mesh(makeSphere(p.headR, 28, 22), bodyMat);
   skull.scale.y = p.headStretchY;
   headGroup.add(skull);
 
@@ -716,7 +762,7 @@ export function createPersonMeshGroup(
     preserveMaterialColor(hairMat);
 
     const hairCap = new THREE.Mesh(
-      new THREE.SphereGeometry(
+      makeSphere(
         p.headR * 1.018,
         isPedestrian ? 18 : 28,
         isPedestrian ? 8 : 12,
@@ -733,7 +779,7 @@ export function createPersonMeshGroup(
 
     if (showIdentityDetails && (traits.hairStyle === 'shortBob' || traits.hairStyle === 'longHair')) {
       const isLongHair = traits.hairStyle === 'longHair';
-      const sideLockGeometry = new THREE.CapsuleGeometry(
+      const sideLockGeometry = makeCapsule(
         p.headR * (isLongHair ? 0.13 : 0.105),
         p.headR * (isLongHair ? 0.62 : 0.24),
         6,
@@ -751,7 +797,7 @@ export function createPersonMeshGroup(
       }
       if (isLongHair) {
         const backHair = new THREE.Mesh(
-          new THREE.CapsuleGeometry(p.headR * 0.34, p.headR * 0.78, 8, 14),
+          makeCapsule(p.headR * 0.34, p.headR * 0.78, 8, 14),
           hairMat,
         );
         backHair.position.set(0, -p.headR * 0.48, -p.headR * 0.32);
@@ -761,7 +807,7 @@ export function createPersonMeshGroup(
     }
 
     if (showIdentityDetails && traits.hairStyle === 'pigtails') {
-      const tailGeometry = new THREE.CapsuleGeometry(p.headR * 0.16, p.headR * 0.42, 7, 10);
+      const tailGeometry = makeCapsule(p.headR * 0.16, p.headR * 0.42, 7, 10);
       for (const sx of [-1, 1]) {
         const tail = new THREE.Mesh(tailGeometry, hairMat);
         tail.position.set(sx * p.headR * 0.94, -p.headR * 0.18, -p.headR * 0.08);
@@ -779,7 +825,7 @@ export function createPersonMeshGroup(
   if (showIdentityDetails && traits.ageCue === 'cane') {
     const caneMat = createPreservedMaterial('#3f3f46', { roughness: 0.6, metalness: 0.12 });
     const cane = new THREE.Mesh(
-      new THREE.CylinderGeometry(p.armR * 0.34, p.armR * 0.34, p.legH * 0.72, 8),
+      makeCylinder(p.armR * 0.34, p.armR * 0.34, p.legH * 0.72, 8),
       caneMat,
     );
     cane.position.set(p.shoulderHalfWidth * 1.45, p.legH * 0.38, p.torsoR * 0.58);

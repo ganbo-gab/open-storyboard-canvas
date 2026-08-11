@@ -219,6 +219,9 @@ function createNodeData(command: Extract<CanvasCommand, { type: 'node.create' }>
   if (configuration.openDirectorStudio && command.input.nodeType === CANVAS_NODE_TYPES.blueprint) {
     data.openDirectorStudioOnCreate = true;
   }
+  if (configuration.directorStudioMode !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.blueprint) {
+    data.mode = configuration.directorStudioMode;
+  }
   return data as Partial<CanvasNodeData>;
 }
 

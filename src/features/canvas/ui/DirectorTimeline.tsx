@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   Camera,
   Clapperboard,
@@ -27,10 +27,17 @@ import {
 } from './DirectorMotionInspector';
 
 type Props = {
+  height: number;
   project: DirectorMotionProjectV1;
   items: BlueprintItem[];
-  currentTime: number;
-  isPlaying: boolean;
+  timeSource: {
+    subscribe: (listener: () => void) => () => void;
+    getSnapshot: () => number;
+  };
+  playbackSource: {
+    subscribe: (listener: () => void) => () => void;
+    getSnapshot: () => boolean;
+  };
   selection: DirectorKeyframeSelection | null;
   showRoutes: boolean;
   previewMode: 'route' | 'shot';
@@ -57,6 +64,32 @@ type Props = {
   onClose: () => void;
 };
 
+const DirectorPlaybackButton = memo(function DirectorPlaybackButton({
+  playbackSource,
+  onToggle,
+}: {
+  playbackSource: Props['playbackSource'];
+  onToggle: () => void;
+}) {
+  const { t } = useTranslation();
+  const isPlaying = useSyncExternalStore(
+    playbackSource.subscribe,
+    playbackSource.getSnapshot,
+    playbackSource.getSnapshot,
+  );
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex h-8 w-8 items-center justify-center rounded bg-white text-black hover:bg-white/88 focus:outline-none focus:ring-2 focus:ring-accent/70"
+      title={isPlaying ? t('directorStudio.motion.timeline.pause') : t('directorStudio.motion.timeline.play')}
+      aria-label={isPlaying ? t('directorStudio.motion.timeline.pause') : t('directorStudio.motion.timeline.play')}
+    >
+      {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+    </button>
+  );
+});
+
 type TrackRow = {
   key: string;
   kind: 'camera' | 'object' | 'action';
@@ -77,10 +110,11 @@ function clampTime(time: number, duration: number): number {
 }
 
 export const DirectorTimeline = memo(function DirectorTimeline({
+  height,
   project,
   items,
-  currentTime,
-  isPlaying,
+  timeSource,
+  playbackSource,
   selection,
   showRoutes,
   previewMode,
@@ -107,6 +141,8 @@ export const DirectorTimeline = memo(function DirectorTimeline({
   onClose,
 }: Props) {
   const { t } = useTranslation();
+  const timelineRef = useRef<HTMLElement | null>(null);
+  const currentTimeInputRef = useRef<HTMLInputElement | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   dragStateRef.current = dragState;
@@ -181,9 +217,26 @@ export const DirectorTimeline = memo(function DirectorTimeline({
     setDragState({ selection: nextSelection, rect: lane.getBoundingClientRect(), time });
   }, [onSelectionChange]);
 
+  useEffect(() => {
+    const syncPlaybackTime = () => {
+      const time = clampTime(timeSource.getSnapshot(), project.durationSeconds);
+      timelineRef.current?.style.setProperty(
+        '--director-motion-playhead',
+        `${(time / project.durationSeconds) * 100}%`,
+      );
+      if (currentTimeInputRef.current && document.activeElement !== currentTimeInputRef.current) {
+        currentTimeInputRef.current.value = time.toFixed(2);
+      }
+    };
+    syncPlaybackTime();
+    return timeSource.subscribe(syncPlaybackTime);
+  }, [project.durationSeconds, timeSource]);
+
   return (
     <section
-      className="absolute inset-x-0 bottom-0 z-[64] flex h-[232px] flex-col border-t border-white/12 bg-[#0a0e10]/98 shadow-[0_-14px_40px_rgba(0,0,0,0.34)] backdrop-blur-xl"
+      ref={timelineRef}
+      className="ui-director-timeline-enter absolute inset-x-0 bottom-0 z-[64] flex flex-col border-t border-white/12 bg-[#0a0e10]/98 shadow-[0_-14px_40px_rgba(0,0,0,0.34)] backdrop-blur-xl"
+      style={{ height }}
       aria-label={t('directorStudio.motion.timeline.title')}
       onKeyDown={(event) => event.stopPropagation()}
       onKeyUp={(event) => event.stopPropagation()}
@@ -198,15 +251,7 @@ export const DirectorTimeline = memo(function DirectorTimeline({
         >
           <Rewind className="h-4 w-4" />
         </button>
-        <button
-          type="button"
-          onClick={onTogglePlayback}
-          className="flex h-8 w-8 items-center justify-center rounded bg-white text-black hover:bg-white/88 focus:outline-none focus:ring-2 focus:ring-accent/70"
-          title={isPlaying ? t('directorStudio.motion.timeline.pause') : t('directorStudio.motion.timeline.play')}
-          aria-label={isPlaying ? t('directorStudio.motion.timeline.pause') : t('directorStudio.motion.timeline.play')}
-        >
-          {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-        </button>
+        <DirectorPlaybackButton playbackSource={playbackSource} onToggle={onTogglePlayback} />
         <button
           type="button"
           onClick={() => onLoopChange(!project.loop)}
@@ -221,11 +266,12 @@ export const DirectorTimeline = memo(function DirectorTimeline({
         </button>
         <div className="ml-1 flex items-center gap-1 font-mono text-[11px] text-white/68" aria-live="polite">
           <input
+            ref={currentTimeInputRef}
             type="number"
             min={0}
             max={project.durationSeconds}
             step={0.05}
-            value={Number(currentTime.toFixed(2))}
+            defaultValue={Number(timeSource.getSnapshot().toFixed(2))}
             onChange={(event) => onTimeChange(clampTime(Number(event.target.value) || 0, project.durationSeconds))}
             className="h-8 w-[62px] rounded border border-white/12 bg-black/22 px-2 text-right outline-none focus:border-accent/70 focus:ring-1 focus:ring-accent/30"
             aria-label={t('directorStudio.motion.timeline.currentTime')}
@@ -244,8 +290,8 @@ export const DirectorTimeline = memo(function DirectorTimeline({
           <span className="text-white/38">s</span>
         </div>
 
-        <div className="mx-1 hidden h-5 w-px bg-white/10 sm:block" />
-        <div className="hidden h-8 items-center rounded border border-white/10 bg-white/5 p-0.5 sm:flex">
+        <div className="mx-1 hidden h-5 w-px bg-white/10 md:block" />
+        <div className="hidden h-8 items-center rounded border border-white/10 bg-white/5 p-0.5 md:flex">
           <button
             type="button"
             onClick={() => onPreviewModeChange('route')}
@@ -264,21 +310,21 @@ export const DirectorTimeline = memo(function DirectorTimeline({
         <button
           type="button"
           onClick={() => onShowRoutesChange(!showRoutes)}
-          className={`hidden h-8 w-8 items-center justify-center rounded focus:outline-none focus:ring-2 focus:ring-accent/60 sm:flex ${showRoutes ? 'text-accent' : 'text-white/48 hover:bg-white/10 hover:text-white'}`}
+          className={`hidden h-8 w-8 items-center justify-center rounded focus:outline-none focus:ring-2 focus:ring-accent/60 md:flex ${showRoutes ? 'text-accent' : 'text-white/48 hover:bg-white/10 hover:text-white'}`}
           title={showRoutes ? t('directorStudio.motion.timeline.hideRoutes') : t('directorStudio.motion.timeline.showRoutes')}
           aria-label={showRoutes ? t('directorStudio.motion.timeline.hideRoutes') : t('directorStudio.motion.timeline.showRoutes')}
         >{showRoutes ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}</button>
         <button
           type="button"
           onClick={onOpenActionLibrary}
-          className="hidden h-8 w-8 items-center justify-center rounded text-white/58 hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-accent/60 sm:flex"
+          className="hidden h-8 w-8 items-center justify-center rounded text-white/58 hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-accent/60 md:flex"
           title={t('directorStudio.motion.library.title')}
           aria-label={t('directorStudio.motion.library.title')}
         ><UserRound className="h-4 w-4" /></button>
         <button
           type="button"
           onClick={onTogglePilot}
-          className={`hidden h-8 w-8 items-center justify-center rounded focus:outline-none focus:ring-2 focus:ring-accent/60 sm:flex ${pilotActive ? 'bg-red-500/20 text-red-100' : 'text-white/58 hover:bg-white/10 hover:text-white'}`}
+          className={`hidden h-8 w-8 items-center justify-center rounded focus:outline-none focus:ring-2 focus:ring-accent/60 md:flex ${pilotActive ? 'bg-red-500/20 text-red-100' : 'text-white/58 hover:bg-white/10 hover:text-white'}`}
           title={pilotActive ? t('directorStudio.motion.pilot.exit') : t('directorStudio.motion.pilot.enter')}
           aria-label={pilotActive ? t('directorStudio.motion.pilot.exit') : t('directorStudio.motion.pilot.enter')}
         ><Crosshair className="h-4 w-4" /></button>
@@ -289,7 +335,7 @@ export const DirectorTimeline = memo(function DirectorTimeline({
             onApplyCameraPreset(event.target.value as DirectorCameraPresetId);
             event.target.value = '';
           }}
-          className="hidden h-8 min-w-0 max-w-[148px] rounded border border-white/12 bg-[#111719] px-2 text-[10px] text-white/68 outline-none focus:border-accent/70 focus:ring-1 focus:ring-accent/30 sm:block"
+          className="hidden h-8 min-w-0 max-w-[148px] rounded border border-white/12 bg-[#111719] px-2 text-[10px] text-white/68 outline-none focus:border-accent/70 focus:ring-1 focus:ring-accent/30 md:block"
           aria-label={t('directorStudio.motion.cameraPresets.title')}
         >
           <option value="">{t('directorStudio.motion.cameraPresets.title')}</option>
@@ -302,7 +348,7 @@ export const DirectorTimeline = memo(function DirectorTimeline({
             type="button"
             onClick={onOpenExport}
             disabled={project.cameraTrack.length < 2}
-            className="hidden h-8 items-center gap-1.5 rounded border border-white/12 bg-white/7 px-2.5 text-[10px] text-white/72 hover:bg-white/12 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 focus:outline-none focus:ring-2 focus:ring-accent/60 sm:inline-flex"
+            className="hidden h-8 items-center gap-1.5 rounded border border-white/12 bg-white/7 px-2.5 text-[10px] text-white/72 hover:bg-white/12 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 focus:outline-none focus:ring-2 focus:ring-accent/60 md:inline-flex"
             title={project.cameraTrack.length < 2 ? t('directorStudio.motion.export.needsCamera') : t('directorStudio.motion.export.title')}
           >
             <Video className="h-3.5 w-3.5" />
@@ -321,10 +367,10 @@ export const DirectorTimeline = memo(function DirectorTimeline({
       <div className="flex min-h-0 flex-1">
         <div className="ui-scrollbar min-w-0 flex-1 overflow-y-auto">
           <div className="sticky top-0 z-10 flex h-6 border-b border-white/8 bg-[#0b1012]">
-            <div className="w-[128px] shrink-0 border-r border-white/8 px-2 text-[9px] leading-6 text-white/32 sm:w-[176px]">
+            <div className="w-[128px] shrink-0 border-r border-white/8 px-2 text-[9px] leading-6 text-white/32 md:w-[176px]">
               {t('directorStudio.motion.timeline.tracks')}
             </div>
-            <div className="relative min-w-[260px] flex-1 sm:min-w-[420px]">
+            <div className="relative min-w-[260px] flex-1 md:min-w-[420px]">
               {Array.from({ length: Math.floor(project.durationSeconds) + 1 }, (_, second) => (
                 <span
                   key={second}
@@ -336,7 +382,7 @@ export const DirectorTimeline = memo(function DirectorTimeline({
           </div>
           {rows.map((row) => (
             <div key={row.key} className="flex h-7 border-b border-white/[0.055]">
-              <div className="flex w-[128px] shrink-0 items-center gap-1 border-r border-white/8 px-2 sm:w-[176px]">
+              <div className="flex w-[128px] shrink-0 items-center gap-1 border-r border-white/8 px-2 md:w-[176px]">
                 {row.kind === 'camera' ? <Camera className="h-3 w-3 text-sky-300/72" /> : row.kind === 'action' ? <Sparkles className="h-3 w-3 text-amber-300/72" /> : <UserRound className="h-3 w-3 text-white/42" />}
                 <span className="min-w-0 flex-1 truncate text-[9px] text-white/58" title={row.label}>{row.label}</span>
                 <button
@@ -349,7 +395,7 @@ export const DirectorTimeline = memo(function DirectorTimeline({
               </div>
               <div
                 data-timeline-lane
-                className="relative min-w-[260px] flex-1 cursor-crosshair bg-[repeating-linear-gradient(to_right,transparent_0,transparent_calc(10%-1px),rgba(255,255,255,0.035)_calc(10%-1px),rgba(255,255,255,0.035)_10%)] sm:min-w-[420px]"
+                className="relative min-w-[260px] flex-1 cursor-crosshair bg-[repeating-linear-gradient(to_right,transparent_0,transparent_calc(10%-1px),rgba(255,255,255,0.035)_calc(10%-1px),rgba(255,255,255,0.035)_10%)] md:min-w-[420px]"
                 onPointerDown={(event) => {
                   const rect = event.currentTarget.getBoundingClientRect();
                   onSelectionChange(null);
@@ -377,7 +423,7 @@ export const DirectorTimeline = memo(function DirectorTimeline({
                 })}
                 <div
                   className="pointer-events-none absolute inset-y-0 z-20 w-px bg-red-400"
-                  style={{ left: `${(currentTime / project.durationSeconds) * 100}%` }}
+                  style={{ left: 'var(--director-motion-playhead, 0%)' }}
                 />
               </div>
             </div>

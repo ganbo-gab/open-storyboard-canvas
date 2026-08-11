@@ -11,8 +11,8 @@ export function MissingApiKeyHint({ className = '' }: MissingApiKeyHintProps) {
 
   return (
     <div className={`flex w-full justify-center ${className}`}>
-      <div className="pointer-events-auto inline-flex max-w-[680px] items-center gap-3 rounded-2xl border border-accent/20 bg-surface-dark/88 px-5 py-4 text-center shadow-[0_18px_60px_rgba(0,0,0,0.22)] backdrop-blur">
-        <p className="text-sm leading-7 text-text-muted sm:text-[15px]">
+      <div className="pointer-events-auto inline-flex w-full max-w-[680px] flex-col items-center gap-3 rounded-lg border border-accent/20 bg-surface-dark/92 px-4 py-3 text-center shadow-[var(--ui-shadow-panel)] sm:w-auto sm:flex-row sm:px-5">
+        <p className="text-sm leading-6 text-text-muted sm:text-[15px]">
           {t('settings.missingAnyApiKeyMessage')}
         </p>
         <UiButton

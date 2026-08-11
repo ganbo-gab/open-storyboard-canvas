@@ -78,9 +78,10 @@ function parseResponsesOutput(
     if (!record) continue;
     if (record.type === 'function_call') {
       const wireName = stringValue(record.name) ?? '';
+      const namespace = stringValue(record.namespace);
       toolCalls.push(validateToolCall({
         callId: stringValue(record.call_id) ?? stringValue(record.id) ?? '',
-        ...decodeToolName(wireName, tools),
+        ...(namespace ? { name: wireName, namespace } : decodeToolName(wireName, tools)),
         arguments: stringValue(record.arguments) ?? '{}',
       }));
       continue;
@@ -233,6 +234,7 @@ export function parseAgentProviderResponse(
 interface PartialToolCall {
   callId: string;
   name: string;
+  namespace?: string;
   arguments: string;
 }
 
@@ -259,7 +261,9 @@ export class AgentProviderStreamAccumulator {
   complete(): AgentModelTurnResponse {
     if (this.finalResponse) return this.finalResponse;
     const toolCalls = Array.from(this.toolCalls.values()).map((call) => {
-      const decoded = decodeToolName(call.name, this.request.tools);
+      const decoded = call.namespace
+        ? { name: call.name, namespace: call.namespace }
+        : decodeToolName(call.name, this.request.tools);
       return validateToolCall({
         callId: call.callId,
         ...decoded,
@@ -322,6 +326,7 @@ export class AgentProviderStreamAccumulator {
     const current = this.toolCalls.get(key) ?? { callId: key, name: '', arguments: '' };
     current.callId = stringValue(record.call_id) ?? current.callId;
     current.name = stringValue(record.name) ?? current.name;
+    current.namespace = stringValue(record.namespace) ?? current.namespace;
     const args = stringValue(record.arguments);
     if (args !== undefined) current.arguments = args;
     this.toolCalls.set(key, current);

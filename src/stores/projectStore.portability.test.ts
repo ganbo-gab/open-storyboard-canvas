@@ -64,4 +64,56 @@ describe('project persistence media codec', () => {
     expect(JSON.stringify(decoded.nodes)).toContain('/tmp/reference.png');
     expect(JSON.stringify(decoded.history)).toContain('/tmp/video.mp4');
   });
+
+  it('round-trips retired text Agent associations without exposing them in new UI', () => {
+    const nodes = [
+      {
+        id: 'legacy-text-node',
+        type: 'aiTextNode',
+        position: { x: 0, y: 0 },
+        data: {
+          prompt: 'Preserved user prompt',
+          model: 'custom:chat:model-a',
+          agentId: 'legacy-agent-a',
+          resultNodeId: 'legacy-result-node',
+        },
+      },
+      {
+        id: 'legacy-result-node',
+        type: 'jsonCardNode',
+        position: { x: 400, y: 0 },
+        data: {
+          rawContent: '{"shot":1}',
+          parsedJson: { shot: 1 },
+          displayFields: [{ path: '$.shot', label: 'Shot', value: '1' }],
+          sourceAiNodeId: 'legacy-text-node',
+          sourceAgentId: 'legacy-agent-a',
+        },
+      },
+    ] as unknown as CanvasNode[];
+    const project: Project = {
+      id: 'legacy-agent-project',
+      name: 'Legacy text Agent',
+      createdAt: 1,
+      updatedAt: 2,
+      nodeCount: nodes.length,
+      nodes,
+      edges: [{ id: 'legacy-edge', source: 'legacy-text-node', target: 'legacy-result-node' }],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      history: { past: [{ nodes, edges: [] }], future: [] },
+    };
+
+    const decoded = decodeProject(encodeProject(project));
+    expect(decoded.nodes[0].data).toMatchObject({
+      agentId: 'legacy-agent-a',
+      prompt: 'Preserved user prompt',
+      resultNodeId: 'legacy-result-node',
+    });
+    expect(decoded.nodes[1].data).toMatchObject({
+      sourceAgentId: 'legacy-agent-a',
+      rawContent: '{"shot":1}',
+      parsedJson: { shot: 1 },
+    });
+    expect(decoded.history.past[0].nodes[0].data.agentId).toBe('legacy-agent-a');
+  });
 });

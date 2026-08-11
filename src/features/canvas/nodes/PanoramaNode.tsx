@@ -64,7 +64,7 @@ const PANORAMA_KEY_STEP = 4 * (Math.PI / 180);
 const PANORAMA_CAPTURE_RENDER_TIMEOUT_MS = 600;
 const PANORAMA_CAPTURE_SAMPLE_SIZE = 16;
 const PANORAMA_VIEWER_BUTTON_CLASS =
-  'group relative flex items-center justify-center w-9 h-9 rounded-lg bg-white/95 text-black shadow-lg backdrop-blur-sm hover:bg-white hover:scale-105 active:scale-95 transition-all ring-1 ring-black/25';
+  'group relative flex h-11 w-11 items-center justify-center rounded-lg bg-white/95 text-black shadow-lg backdrop-blur-sm transition-[background-color,transform,box-shadow] duration-150 hover:bg-white hover:scale-105 active:scale-95 ring-1 ring-black/25';
 
 function getViewerCanvas(viewer: Viewer | null): HTMLCanvasElement | null {
   if (!viewer) return null;

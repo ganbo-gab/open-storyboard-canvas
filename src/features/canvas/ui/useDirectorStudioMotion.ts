@@ -62,8 +62,6 @@ export function useDirectorStudioMotion({
 }: Options) {
   const { t } = useTranslation();
   const [timelineOpen, setTimelineOpen] = useState(true);
-  const [motionTime, setMotionTime] = useState(0);
-  const [motionPlaying, setMotionPlaying] = useState(false);
   const [motionSelection, setMotionSelection] = useState<DirectorKeyframeSelection | null>(null);
   const [motionShowRoutes, setMotionShowRoutes] = useState(true);
   const [motionPreviewMode, setMotionPreviewMode] = useState<'route' | 'shot'>('shot');
@@ -82,11 +80,38 @@ export function useDirectorStudioMotion({
   latestDataRef.current = data;
 
   const motionProject = useMemo(() => normalizeDirectorMotionProject(data.motionProject), [data.motionProject]);
+  const motionProjectRef = useRef(motionProject);
+  motionProjectRef.current = motionProject;
+  const motionTimeRef = useRef(0);
+  const motionTimeListenersRef = useRef(new Set<() => void>());
+  const motionTimeSource = useMemo(() => ({
+    subscribe: (listener: () => void) => {
+      motionTimeListenersRef.current.add(listener);
+      return () => motionTimeListenersRef.current.delete(listener);
+    },
+    getSnapshot: () => motionTimeRef.current,
+  }), []);
+  const publishMotionTime = useCallback((time: number) => {
+    motionTimeRef.current = time;
+    motionTimeListenersRef.current.forEach((listener) => listener());
+  }, []);
+  const motionPlayingRef = useRef(false);
+  const playbackRafRef = useRef(0);
+  const playbackListenersRef = useRef(new Set<() => void>());
+  const playbackSource = useMemo(() => ({
+    subscribe: (listener: () => void) => {
+      playbackListenersRef.current.add(listener);
+      return () => playbackListenersRef.current.delete(listener);
+    },
+    getSnapshot: () => motionPlayingRef.current,
+  }), []);
+  const motionPreviewModeRef = useRef(motionPreviewMode);
+  motionPreviewModeRef.current = motionPreviewMode;
   const availableVideoFormat = useMemo(() => selectDirectorVideoFormat(), []);
 
   useEffect(() => {
-    setMotionTime((value) => Math.min(value, motionProject.durationSeconds));
-  }, [motionProject.durationSeconds]);
+    publishMotionTime(Math.min(motionTimeRef.current, motionProject.durationSeconds));
+  }, [motionProject.durationSeconds, publishMotionTime]);
 
   const updateMotionProject = useCallback((updater: (project: DirectorMotionProjectV1) => DirectorMotionProjectV1) => {
     const nextProject = updater(normalizeDirectorMotionProject(latestDataRef.current.motionProject));
@@ -131,13 +156,14 @@ export function useDirectorStudioMotion({
   }, [updateMotionProject]);
 
   const saveCameraKeyframe = useCallback((snapshot: DirectorSceneCameraSnapshot) => {
+    const time = motionTimeRef.current;
     updateMotionProject((project) => {
-      const existing = project.cameraTrack.find((keyframe) => Math.abs(keyframe.time - motionTime) <= 0.025);
+      const existing = project.cameraTrack.find((keyframe) => Math.abs(keyframe.time - time) <= 0.025);
       return {
         ...project,
         cameraTrack: upsertDirectorKeyframe(project.cameraTrack, {
           id: existing?.id ?? createDirectorMotionId('camera'),
-          time: motionTime,
+          time,
           easing: existing?.easing ?? 'smooth',
           position: snapshot.position,
           target: snapshot.target,
@@ -147,7 +173,7 @@ export function useDirectorStudioMotion({
         }),
       };
     });
-  }, [motionTime, pilotTargetId, updateMotionProject]);
+  }, [pilotTargetId, updateMotionProject]);
 
   const addCameraMotionKeyframe = useCallback(() => {
     const snapshot = editorRef.current?.getCameraSnapshot();
@@ -157,8 +183,8 @@ export function useDirectorStudioMotion({
   const addObjectMotionKeyframe = useCallback((itemId: string) => {
     const item = latestDataRef.current.items.find((candidate) => candidate.id === itemId);
     if (!item) return;
-    updateMotionProject((project) => ({ ...project, objectTracks: { ...project.objectTracks, [itemId]: upsertDirectorKeyframe(project.objectTracks[itemId] ?? [], createObjectKeyframeFromItem(item, motionTime)) } }));
-  }, [motionTime, updateMotionProject]);
+    updateMotionProject((project) => ({ ...project, objectTracks: { ...project.objectTracks, [itemId]: upsertDirectorKeyframe(project.objectTracks[itemId] ?? [], createObjectKeyframeFromItem(item, motionTimeRef.current)) } }));
+  }, [updateMotionProject]);
 
   const addActionMotionKeyframe = useCallback((itemId: string, state?: { poseId?: string; actionId?: string; clipId?: string; pose?: BlueprintActionPose; bodyControls?: BlueprintBodyControls }) => {
     const item = latestDataRef.current.items.find((candidate) => candidate.id === itemId);
@@ -172,9 +198,9 @@ export function useDirectorStudioMotion({
     };
     updateMotionProject((project) => ({
       ...project,
-      actionTracks: { ...project.actionTracks, [itemId]: upsertDirectorKeyframe(project.actionTracks[itemId] ?? [], { id: createDirectorMotionId('action'), time: motionTime, easing: 'smooth', ...action }) },
+      actionTracks: { ...project.actionTracks, [itemId]: upsertDirectorKeyframe(project.actionTracks[itemId] ?? [], { id: createDirectorMotionId('action'), time: motionTimeRef.current, easing: 'smooth', ...action }) },
     }));
-  }, [motionTime, updateMotionProject]);
+  }, [updateMotionProject]);
 
   const updateMotionDuration = useCallback((duration: number) => {
     const nextDuration = Math.min(30, Math.max(0.5, duration));
@@ -185,8 +211,8 @@ export function useDirectorStudioMotion({
       objectTracks: Object.fromEntries(Object.entries(project.objectTracks).map(([id, track]) => [id, track.map((keyframe) => ({ ...keyframe, time: Math.min(nextDuration, keyframe.time) }))])),
       actionTracks: Object.fromEntries(Object.entries(project.actionTracks).map(([id, track]) => [id, track.map((keyframe) => ({ ...keyframe, time: Math.min(nextDuration, keyframe.time) }))])),
     }));
-    setMotionTime((time) => Math.min(time, nextDuration));
-  }, [updateMotionProject]);
+    publishMotionTime(Math.min(motionTimeRef.current, nextDuration));
+  }, [publishMotionTime, updateMotionProject]);
 
   const applyMotionActionState = useCallback((state: { poseId?: string; actionId?: string; clipId?: string; pose?: BlueprintActionPose; bodyControls?: BlueprintBodyControls }) => {
     if (!selectedItem || selectedItem.category !== 'person') return;
@@ -230,9 +256,9 @@ export function useDirectorStudioMotion({
 
   const setMotionTimeAndApply = useCallback((time: number) => {
     const nextTime = Math.min(motionProject.durationSeconds, Math.max(0, time));
-    setMotionTime(nextTime);
+    publishMotionTime(nextTime);
     editorRef.current?.applyMotionFrame(sampleNormalizedDirectorMotion(motionProject, nextTime, latestDataRef.current.items), motionPreviewMode);
-  }, [editorRef, motionPreviewMode, motionProject]);
+  }, [editorRef, motionPreviewMode, motionProject, publishMotionTime]);
 
   const selectMotionRouteKeyframe = useCallback((selection: DirectorMotionRouteSelection, time: number) => {
     setMotionSelection(selection);
@@ -293,39 +319,74 @@ export function useDirectorStudioMotion({
       };
     });
     setMotionSelection({ kind, trackId, keyframeId });
-    setMotionTime(Math.min(motionProject.durationSeconds, Math.max(0, time)));
-  }, [editorRef, motionProject.durationSeconds, updateMotionProject]);
+    const nextTime = Math.min(motionProject.durationSeconds, Math.max(0, time));
+    publishMotionTime(nextTime);
+  }, [editorRef, motionProject.durationSeconds, publishMotionTime, updateMotionProject]);
 
   const setPreviewModeAndApply = useCallback((mode: 'route' | 'shot') => {
     setMotionPreviewMode(mode);
-    editorRef.current?.applyMotionFrame(sampleNormalizedDirectorMotion(motionProject, motionTime, latestDataRef.current.items), mode);
-  }, [editorRef, motionProject, motionTime]);
+    motionPreviewModeRef.current = mode;
+    editorRef.current?.applyMotionFrame(sampleNormalizedDirectorMotion(motionProject, motionTimeRef.current, latestDataRef.current.items), mode);
+  }, [editorRef, motionProject]);
 
   useEffect(() => {
-    editorRef.current?.applyMotionFrame(sampleNormalizedDirectorMotion(motionProject, motionTime, latestDataRef.current.items), motionPreviewMode);
-  }, [editorRef, motionPreviewMode, motionProject, motionTime]);
+    editorRef.current?.applyMotionFrame(
+      sampleNormalizedDirectorMotion(motionProject, motionTimeRef.current, latestDataRef.current.items),
+      motionPreviewMode,
+    );
+  }, [editorRef, motionPreviewMode, motionProject]);
 
-  useEffect(() => {
-    if (!motionPlaying) return;
-    let raf = 0;
+  const setMotionPlaying = useCallback((update: boolean | ((playing: boolean) => boolean)) => {
+    const nextPlaying = typeof update === 'function' ? update(motionPlayingRef.current) : update;
+    if (nextPlaying === motionPlayingRef.current) return;
+    motionPlayingRef.current = nextPlaying;
+    playbackListenersRef.current.forEach((listener) => listener());
+    cancelAnimationFrame(playbackRafRef.current);
+    editorRef.current?.setMotionPlaybackActive(nextPlaying);
+    if (!nextPlaying) {
+      motionTimeListenersRef.current.forEach((listener) => listener());
+      return;
+    }
+
     let previous = performance.now();
+    let lastUiUpdate = previous;
     const tick = (now: number) => {
+      if (!motionPlayingRef.current) return;
+      const project = motionProjectRef.current;
       const delta = Math.max(0, Math.min(0.1, (now - previous) / 1000));
       previous = now;
-      setMotionTime((value) => {
-        const next = value + delta;
-        if (next >= motionProject.durationSeconds) {
-          if (motionProject.loop) return next % motionProject.durationSeconds;
-          setMotionPlaying(false);
-          return motionProject.durationSeconds;
-        }
-        return next;
-      });
-      raf = requestAnimationFrame(tick);
+      let next = motionTimeRef.current + delta;
+      const reachedEnd = next >= project.durationSeconds;
+      if (reachedEnd) {
+        if (project.loop) next %= project.durationSeconds;
+        else next = project.durationSeconds;
+      }
+      motionTimeRef.current = next;
+      editorRef.current?.applyMotionFrame(
+        sampleNormalizedDirectorMotion(project, next, latestDataRef.current.items),
+        motionPreviewModeRef.current,
+      );
+      if (reachedEnd && !project.loop) {
+        motionPlayingRef.current = false;
+        motionTimeListenersRef.current.forEach((listener) => listener());
+        playbackListenersRef.current.forEach((listener) => listener());
+        editorRef.current?.setMotionPlaybackActive(false);
+        return;
+      }
+      if (now - lastUiUpdate >= 33) {
+        lastUiUpdate = now;
+        motionTimeListenersRef.current.forEach((listener) => listener());
+      }
+      playbackRafRef.current = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [motionPlaying, motionProject.durationSeconds, motionProject.loop]);
+    playbackRafRef.current = requestAnimationFrame(tick);
+  }, [editorRef]);
+
+  useEffect(() => () => {
+    cancelAnimationFrame(playbackRafRef.current);
+    motionPlayingRef.current = false;
+    editorRef.current?.setMotionPlaybackActive(false);
+  }, [editorRef]);
 
   const toggleCameraPilot = useCallback(() => {
     if (pilotActive) editorRef.current?.exitPilot();
@@ -372,12 +433,12 @@ export function useDirectorStudioMotion({
       videoExportAbortRef.current = null;
       setVideoExportRecording(false);
       editorRef.current?.applyMotionFrame(
-        sampleNormalizedDirectorMotion(motionProject, motionTime, latestDataRef.current.items),
+        sampleNormalizedDirectorMotion(motionProject, motionTimeRef.current, latestDataRef.current.items),
         motionPreviewMode,
       );
       editorRef.current?.renderFrame();
     }
-  }, [availableVideoFormat, editorRef, motionPreviewMode, motionProject, motionTime, t, videoExportFps, videoExportResolution]);
+  }, [availableVideoFormat, editorRef, motionPreviewMode, motionProject, t, videoExportFps, videoExportResolution]);
 
   const addVideoExportToCanvas = useCallback(async () => {
     if (!videoExportResult || !onAddVideoToCanvas) return;
@@ -389,13 +450,14 @@ export function useDirectorStudioMotion({
     setMotionPlaying(false);
     videoExportAbortRef.current?.abort();
     editorRef.current?.exitPilot();
-  }, [editorRef]);
+  }, [editorRef, setMotionPlaying]);
 
   return {
     motionProject,
+    motionTimeSource,
+    playbackSource,
     timelineOpen, setTimelineOpen,
-    motionTime,
-    motionPlaying, setMotionPlaying,
+    setMotionPlaying,
     motionSelection, setMotionSelection,
     motionShowRoutes, setMotionShowRoutes,
     motionPreviewMode,

@@ -48,6 +48,7 @@ export interface CanvasNodeCreateConfiguration {
   providerId?: string | null;
   aspectRatio?: string;
   openDirectorStudio?: boolean;
+  directorStudioMode?: 'flat' | 'panorama';
 }
 
 export type CanvasQueryCommand = CanvasCommandBase<'canvas.query', {
@@ -132,6 +133,11 @@ export type FocusViewportCommand = CanvasCommandBase<'viewport.focus', {
 
 export type ListAssetsCommand = CanvasCommandBase<'asset.list', {
   kind?: 'image' | 'video' | 'audio';
+  query?: string;
+  nodeIds?: string[];
+  relatedToNodeIds?: string[];
+  selectedOnly?: boolean;
+  region?: { x: number; y: number; width: number; height: number };
   limit?: number;
 }>;
 

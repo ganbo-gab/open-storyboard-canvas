@@ -29,6 +29,34 @@ describe('AgentSessionRepository', () => {
     });
   });
 
+  it('persists stable media metadata without persisting media bodies', () => {
+    const storage = new MemoryStorage();
+    const repository = new AgentSessionRepository(storage, () => 100, () => 'session-1');
+    repository.createSession({ projectId: 'project-1', modelRef: 'custom:p:m' });
+    repository.recordMediaReferences('session-1', [{
+      referenceId: 'run-1:node-1:image',
+      runId: 'run-1',
+      assetId: 'node-1:image',
+      nodeId: 'node-1',
+      title: 'Hero reference',
+      origin: 'canvas-asset',
+      mimeType: 'image/png',
+      createdAt: 100,
+    }]);
+
+    const restored = new AgentSessionRepository(storage).getMediaReferences('session-1');
+    expect(restored).toEqual([expect.objectContaining({
+      referenceId: 'run-1:node-1:image',
+      assetId: 'node-1:image',
+      nodeId: 'node-1',
+    })]);
+    expect(JSON.stringify(Array.from(storage.values.values()))).not.toContain('data:image');
+    expect(() => repository.recordMediaReferences('session-1', [{
+      ...restored[0],
+      title: 'x'.repeat(241),
+    }])).toThrow(/metadata/i);
+  });
+
   it('keeps idempotent history transactions atomic', async () => {
     const repository = new AgentSessionRepository(null, () => 1, () => 'session-1');
     repository.createSession({ projectId: 'project-1', modelRef: 'custom:p:m' });
@@ -106,6 +134,22 @@ describe('AgentSessionRepository', () => {
       .toThrow(AgentRunStateCompatibilityError);
   });
 
+  it('does not resume cancelled or failed RunState as approval authority', () => {
+    const repository = new AgentSessionRepository(null, () => 10, () => 'session-1');
+    repository.createSession({ projectId: 'project-1', modelRef: 'custom:p:m' });
+    for (const status of ['cancelled', 'failed'] as const) {
+      repository.saveRunState({
+        id: `run-${status}`,
+        sessionId: 'session-1',
+        projectId: 'project-1',
+        status,
+        serializedState: '{}',
+      });
+      expect(() => repository.getRunStateForResume(`run-${status}`))
+        .toThrow(AgentRunStateCompatibilityError);
+    }
+  });
+
   it('rejects credentials, inline media, base64, and local paths before persistence', () => {
     const repository = new AgentSessionRepository(null, () => 1, () => 'session-1');
     repository.createSession({ projectId: 'project-1', modelRef: 'custom:p:m' });
@@ -119,6 +163,8 @@ describe('AgentSessionRepository', () => {
       { path: '~/Desktop/shot.png' },
       { path: '\\\\studio-server\\shots\\shot.png' },
       { body: 'a'.repeat(600) },
+      { body: `base64:${'b'.repeat(600)}` },
+      { url: 'https://example.test/result?api_key=secret-value&X-Amz-Signature=signed-value' },
     ];
     for (const value of unsafeValues) {
       expect(() => repository.replaceItems('session-1', [{

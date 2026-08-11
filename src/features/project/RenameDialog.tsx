@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { UI_CONTENT_OVERLAY_INSET_CLASS, UI_DIALOG_TRANSITION_MS } from '@/components/ui/motion';
-import { useDialogTransition } from '@/components/ui/useDialogTransition';
+import { UiButton, UiInput, UiModal } from '@/components/ui';
 
 interface RenameDialogProps {
   isOpen: boolean;
@@ -20,7 +19,6 @@ export function RenameDialog({
 }: RenameDialogProps) {
   const { t } = useTranslation();
   const [name, setName] = useState(defaultValue);
-  const { shouldRender, isVisible } = useDialogTransition(isOpen, UI_DIALOG_TRANSITION_MS);
 
   useEffect(() => {
     if (isOpen) {
@@ -37,57 +35,49 @@ export function RenameDialog({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
       handleConfirm();
-    } else if (e.key === 'Escape') {
-      onClose();
     }
   };
 
   const canConfirm = Boolean(name.trim());
 
-  if (!shouldRender) return null;
-
   return (
-    <div className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-[100] flex items-center justify-center`}>
-      <div
-        className={`absolute inset-0 bg-black/50 transition-opacity duration-200 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
-        onClick={onClose}
-      />
-      <div
-        className={`relative w-80 rounded-lg border border-border-dark bg-surface-dark p-6 shadow-xl transition-opacity duration-200 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
-      >
-        <h2 className="text-lg font-semibold text-text-dark mb-4">{title}</h2>
-        <input
+    <UiModal
+      isOpen={isOpen}
+      title={title}
+      onClose={onClose}
+      widthClassName="w-[min(360px,calc(100vw-1.5rem))]"
+      containerClassName="z-[100]"
+      footer={(
+        <>
+          <UiButton type="button" variant="ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </UiButton>
+          <UiButton
+            type="button"
+            variant="primary"
+            onClick={handleConfirm}
+            disabled={!canConfirm}
+          >
+            {t('common.confirm')}
+          </UiButton>
+        </>
+      )}
+    >
+      <label className="block text-sm font-medium text-text-dark">
+        <span>{t('project.name')}</span>
+        <UiInput
+          data-autofocus="true"
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={t('project.namePlaceholder')}
-          className="w-full px-3 py-2 bg-bg-dark border border-border-dark rounded text-text-dark placeholder-text-muted focus:outline-none focus:border-primary"
-          autoFocus
+          className="mt-2 h-10"
+          maxLength={120}
         />
-        <div className="flex justify-end gap-2 mt-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-text-muted hover:text-text-dark transition-colors"
-          >
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            onClick={handleConfirm}
-            disabled={!canConfirm}
-            className={`px-4 py-2 rounded transition-colors ${
-              canConfirm
-                ? 'bg-accent text-white hover:bg-accent/85'
-                : 'bg-bg-dark text-text-muted cursor-not-allowed'
-            }`}
-          >
-            {t('common.confirm')}
-          </button>
-        </div>
-      </div>
-    </div>
+      </label>
+    </UiModal>
   );
 }

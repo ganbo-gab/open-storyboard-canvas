@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, RotateCcw, X } from 'lucide-react';
-import { UI_CONTENT_OVERLAY_INSET_CLASS } from '@/components/ui/motion';
+import { UI_CONTENT_OVERLAY_INSET_CLASS, UI_DIALOG_TRANSITION_MS } from '@/components/ui/motion';
+import { useDialogTransition } from '@/components/ui/useDialogTransition';
+import { useModalFocus } from '@/components/ui/useModalFocus';
 import { useImageViewerTransform } from '../hooks/useImageViewerTransform';
 
 export interface ImageViewerModalProps {
@@ -24,10 +26,12 @@ export function ImageViewerModal({
   const { t } = useTranslation();
   const viewerControlClass =
     'inline-flex h-10 items-center justify-center rounded-full border border-white/20 bg-black/60 px-4 text-sm text-white backdrop-blur-xl';
-  const [isVisible, setIsVisible] = useState(false);
-  const [overlayOpacity, setOverlayOpacity] = useState(0);
+  const { shouldRender, isVisible } = useDialogTransition(open, UI_DIALOG_TRANSITION_MS);
   const [displayImageUrl, setDisplayImageUrl] = useState(imageUrl);
-  const closeTimerRef = useRef<number | null>(null);
+  const { dialogRef, onKeyDown: onModalKeyDown } = useModalFocus({
+    isOpen: open && shouldRender,
+    onClose,
+  });
 
   const {
     containerRef,
@@ -41,90 +45,58 @@ export function ImageViewerModal({
     handleImageMouseMove,
     handleImageLoad,
     isPointOnImageContent,
-  } = useImageViewerTransform(open && isVisible);
+  } = useImageViewerTransform(open && shouldRender);
 
   useEffect(() => {
-    if (!isVisible) return;
+    if (!shouldRender) return;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = '';
     };
-  }, [isVisible]);
+  }, [shouldRender]);
 
   useEffect(() => {
-    if (open) {
+    if (open && imageUrl) {
       setDisplayImageUrl(imageUrl);
-      setIsVisible(true);
-      if (closeTimerRef.current) {
-        clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
-      }
-      setOverlayOpacity(0);
-      requestAnimationFrame(() => {
-        setOverlayOpacity(1);
-      });
-      return;
     }
-    if (!isVisible) return;
-    setOverlayOpacity(0);
-    closeTimerRef.current = window.setTimeout(() => {
-      setIsVisible(false);
-      setDisplayImageUrl('');
-    }, 400);
-    return () => {
-      if (closeTimerRef.current) {
-        clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
-      }
-    };
-  }, [open, isVisible]);
-
-  useEffect(() => {
-    if (!open || !imageUrl) {
-      return;
-    }
-    setDisplayImageUrl(imageUrl);
   }, [open, imageUrl]);
-
-  useEffect(() => {
-    return () => {
-      if (closeTimerRef.current) {
-        clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (!open) return;
     resetView();
   }, [open, imageUrl, resetView]);
 
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') {
+  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (currentIndex > 0) {
         onNavigate('prev');
-      } else if (e.key === 'ArrowRight') {
-        onNavigate('next');
-      } else if (e.key === 'Escape') {
-        onClose();
       }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, onNavigate, onClose]);
+      return;
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (currentIndex < imageList.length - 1) {
+        onNavigate('next');
+      }
+      return;
+    }
+    onModalKeyDown(event);
+  }, [currentIndex, imageList.length, onModalKeyDown, onNavigate]);
 
-  if (!isVisible) return null;
+  if (!shouldRender) return null;
 
   return (
     <div
-      className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-[100] overflow-hidden bg-black/90 backdrop-blur-lg`}
-      style={{
-        opacity: overlayOpacity,
-        transition: 'opacity 400ms ease',
-        pointerEvents: open ? 'auto' : 'none',
-      }}
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('viewer.imageAlt')}
+      tabIndex={-1}
+      className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-[100] overflow-hidden bg-black/90 backdrop-blur-lg transition-opacity duration-[180ms] ${isVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+      onKeyDown={handleKeyDown}
     >
       <div
         ref={containerRef}
@@ -142,9 +114,9 @@ export function ImageViewerModal({
             ref={imageRef}
             src={displayImageUrl}
             alt={t('viewer.imageAlt', '图片')}
-            className="select-none transition-opacity duration-300"
+            className="select-none transition-opacity duration-[180ms]"
             style={{
-              opacity: viewerOpacity * overlayOpacity,
+              opacity: viewerOpacity,
               transformOrigin: 'center',
               width: '95vw',
               height: '95vh',
@@ -168,17 +140,21 @@ export function ImageViewerModal({
           {imageList.length > 1 && (
             <div className="flex items-center gap-3">
               <button
+                type="button"
                 onClick={() => onNavigate('prev')}
                 disabled={currentIndex <= 0}
-                className="rounded-full bg-zinc-800/80 p-2 text-white backdrop-blur-sm transition-all duration-200 hover:bg-zinc-700/80 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800/80 text-white backdrop-blur-sm transition-[background-color,opacity] duration-200 hover:bg-zinc-700/80 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={t('viewer.prev', '上一张')}
                 title={t('viewer.prev', '上一张')}
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
               <button
+                type="button"
                 onClick={() => onNavigate('next')}
                 disabled={currentIndex >= imageList.length - 1}
-                className="rounded-full bg-zinc-800/80 p-2 text-white backdrop-blur-sm transition-all duration-200 hover:bg-zinc-700/80 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800/80 text-white backdrop-blur-sm transition-[background-color,opacity] duration-200 hover:bg-zinc-700/80 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={t('viewer.next', '下一张')}
                 title={t('viewer.next', '下一张')}
               >
                 <ChevronRight className="h-5 w-5" />
@@ -199,15 +175,19 @@ export function ImageViewerModal({
               100%
             </div>
             <button
+              type="button"
               onClick={resetView}
               className={`${viewerControlClass} transition-colors hover:bg-white/10`}
+              aria-label={t('viewer.reset', '重置视图')}
               title={t('viewer.reset', '重置视图')}
             >
               <RotateCcw className="h-4 w-4" />
             </button>
             <button
+              type="button"
               onClick={onClose}
               className={`${viewerControlClass} transition-colors hover:bg-white/10`}
+              aria-label={t('common.close', '关闭')}
               title={t('common.close', '关闭')}
             >
               <X className="h-4 w-4" />

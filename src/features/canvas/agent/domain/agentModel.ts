@@ -26,6 +26,38 @@ export interface AgentModelReference {
   capabilities: AgentModelCapabilities;
 }
 
+export type AgentMediaOrigin = 'canvas-asset' | 'upload';
+
+/**
+ * Transient media prepared for one Agent turn. `source` must never be persisted;
+ * session history stores only the stable identifiers and bounded metadata below.
+ */
+export interface AgentTurnMediaInput {
+  assetId: string;
+  nodeId?: string;
+  title: string;
+  origin: AgentMediaOrigin;
+  mimeType?: string;
+  source: string;
+}
+
+export interface AgentSessionMediaReference {
+  referenceId: string;
+  runId: string;
+  assetId: string;
+  nodeId?: string;
+  title: string;
+  origin: AgentMediaOrigin;
+  mimeType?: string;
+  createdAt: number;
+}
+
+export type AgentSessionMediaAvailability = 'available' | 'missing';
+
+export interface AgentSessionMediaReferenceView extends AgentSessionMediaReference {
+  availability: AgentSessionMediaAvailability;
+}
+
 export type AgentModelContentPart =
   | { type: 'text'; text: string }
   | { type: 'image'; imageUrl: string; detail?: string };
@@ -49,14 +81,23 @@ export type AgentModelInputItem =
       name: string;
       namespace?: string;
       output: string;
+      content?: AgentModelContentPart[];
     };
 
 export interface AgentModelToolDefinition {
   name: string;
   namespace?: string;
+  namespaceDescription?: string;
   description: string;
   parameters: Record<string, unknown>;
   strict: boolean;
+  deferLoading?: boolean;
+}
+
+export interface AgentModelToolPolicy {
+  mode: 'local-pruned' | 'responses-tool-search';
+  deferredToolNames: string[];
+  deferredNamespaces: string[];
 }
 
 export interface AgentModelTurnRequest {
@@ -64,6 +105,7 @@ export interface AgentModelTurnRequest {
   systemInstructions?: string;
   input: AgentModelInputItem[];
   tools: AgentModelToolDefinition[];
+  toolPolicy?: AgentModelToolPolicy;
   toolChoice?: 'auto' | 'required' | 'none' | string;
   parallelToolCalls?: boolean;
   temperature?: number;

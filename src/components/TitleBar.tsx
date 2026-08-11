@@ -73,7 +73,7 @@ export function TitleBar({ onSettingsClick, showBackButton, onBackClick }: Title
   }, [toggleTheme]);
 
   return (
-    <div className="h-10 flex items-center justify-between bg-surface-dark border-b border-border-dark select-none z-50 relative">
+    <div className="relative z-50 flex h-10 items-center justify-between border-b border-border-dark bg-surface-dark select-none">
       {isDesktopRuntime && isMac ? (
         <div className="group flex items-center h-full pl-3 pr-2 gap-2" data-no-drag="true">
           <button
@@ -113,7 +113,7 @@ export function TitleBar({ onSettingsClick, showBackButton, onBackClick }: Title
       ) : null}
 
       <div
-        className={`flex-1 h-full flex items-center px-4 ${isDesktopRuntime ? 'cursor-move' : 'cursor-default'}`}
+        className={`flex h-full min-w-0 flex-1 items-center px-2 sm:px-4 ${isDesktopRuntime ? 'cursor-move' : 'cursor-default'}`}
         onMouseDown={isDesktopRuntime ? handleDragStart : undefined}
       >
         {showBackButton && onBackClick && (
@@ -125,17 +125,18 @@ export function TitleBar({ onSettingsClick, showBackButton, onBackClick }: Title
               event.stopPropagation();
               onBackClick();
             }}
-            className="mr-3 p-1 hover:bg-bg-dark rounded transition-colors"
+            className="mr-2 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark sm:mr-3"
             title={t('titleBar.back')}
+            aria-label={t('titleBar.back')}
           >
-            <ArrowLeft className="w-4 h-4 text-text-muted hover:text-text-dark" />
+            <ArrowLeft className="h-4 w-4" />
           </button>
         )}
-        <span className="text-sm font-semibold text-text-dark">
+        <span className="min-w-0 truncate text-sm font-semibold text-text-dark">
           {titleText}
         </span>
         {!isZh && !currentProjectName ? (
-          <span className="text-xs text-text-muted ml-2">{t('app.subtitle')}</span>
+          <span className="ml-2 hidden shrink-0 text-xs text-text-muted lg:inline">{t('app.subtitle')}</span>
         ) : null}
       </div>
 
@@ -144,32 +145,35 @@ export function TitleBar({ onSettingsClick, showBackButton, onBackClick }: Title
         <button
           type="button"
           onClick={handleLanguageClick}
-          className="h-full px-3 hover:bg-bg-dark transition-colors"
+          className="inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
           title={i18n.language.startsWith('zh') ? t('titleBar.switchToEnglish') : t('titleBar.switchToChinese')}
+          aria-label={i18n.language.startsWith('zh') ? t('titleBar.switchToEnglish') : t('titleBar.switchToChinese')}
         >
-          <Languages className="w-4 h-4 text-text-muted" />
+          <Languages className="h-4 w-4" />
         </button>
 
         <button
           type="button"
           onClick={handleThemeClick}
-          className="h-full px-3 hover:bg-bg-dark transition-colors"
+          className="inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
           title={theme === 'dark' ? t('theme.light') : t('theme.dark')}
+          aria-label={theme === 'dark' ? t('theme.light') : t('theme.dark')}
         >
           {theme === 'dark' ? (
-            <Sun className="w-4 h-4 text-text-muted" />
+            <Sun className="h-4 w-4" />
           ) : (
-            <Moon className="w-4 h-4 text-text-muted" />
+            <Moon className="h-4 w-4" />
           )}
         </button>
 
         <button
           type="button"
           onClick={onSettingsClick}
-          className="h-full px-3 hover:bg-bg-dark transition-colors"
+          className="inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
           title={t('settings.title')}
+          aria-label={t('settings.title')}
         >
-          <Settings className="w-4 h-4 text-text-muted" />
+          <Settings className="h-4 w-4" />
         </button>
 
         {isDesktopRuntime && !isMac ? (
@@ -179,8 +183,9 @@ export function TitleBar({ onSettingsClick, showBackButton, onBackClick }: Title
             <button
               type="button"
               onClick={handleMinimize}
-              className="h-full px-3 hover:bg-bg-dark transition-colors"
+              className="inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
               title={t('titleBar.minimize')}
+              aria-label={t('titleBar.minimize')}
             >
               <Minus className="w-4 h-4 text-text-muted hover:text-text-dark" />
             </button>
@@ -188,8 +193,9 @@ export function TitleBar({ onSettingsClick, showBackButton, onBackClick }: Title
             <button
               type="button"
               onClick={handleMaximize}
-              className="h-full px-3 hover:bg-bg-dark transition-colors"
+              className="inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
               title={t('titleBar.maximize')}
+              aria-label={t('titleBar.maximize')}
             >
               <Maximize2 className="w-4 h-4 text-text-muted hover:text-text-dark" />
             </button>
@@ -197,8 +203,9 @@ export function TitleBar({ onSettingsClick, showBackButton, onBackClick }: Title
             <button
               type="button"
               onClick={handleClose}
-              className="h-full px-3 hover:bg-red-500 transition-colors group"
+              className="group inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-red-500 hover:text-white"
               title={t('titleBar.close')}
+              aria-label={t('titleBar.close')}
             >
               <X className="w-4 h-4 text-text-muted group-hover:text-white" />
             </button>

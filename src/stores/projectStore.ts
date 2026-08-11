@@ -64,6 +64,7 @@ interface QueuedProjectUpsert {
 const queuedProjectUpserts = new Map<string, QueuedProjectUpsert>();
 const projectUpsertTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const projectUpsertsInFlight = new Set<string>();
+const projectUpsertFailures = new Map<string, unknown>();
 const queuedViewportUpserts = new Map<string, string>();
 const viewportUpsertTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const viewportUpsertsInFlight = new Set<string>();
@@ -610,7 +611,11 @@ function flushProjectUpsert(projectId: string, options?: FlushProjectUpsertOptio
 
     const record = toProjectRecord(queued.project);
     void upsertProjectRecord(record)
+      .then(() => {
+        projectUpsertFailures.delete(projectId);
+      })
       .catch((error) => {
+        projectUpsertFailures.set(projectId, error);
         console.error('Failed to persist project record', { projectId, error });
       })
       .finally(settle);
@@ -687,13 +692,18 @@ async function awaitProjectPersistDrain(projectId: string): Promise<void> {
     projectUpsertTimers.has(projectId)
   ) {
     if (waited >= MAX_WAIT_MS) {
-      console.warn(
-        `[projectStore] persist drain for ${projectId} exceeded ${MAX_WAIT_MS}ms — proceeding anyway`,
-      );
-      break;
+      throw new Error(`Project persistence timed out after ${MAX_WAIT_MS}ms for ${projectId}.`);
     }
     await new Promise<void>((resolve) => setTimeout(resolve, POLL_MS));
     waited += POLL_MS;
+  }
+
+  const failure = projectUpsertFailures.get(projectId);
+  if (failure !== undefined) {
+    projectUpsertFailures.delete(projectId);
+    throw failure instanceof Error
+      ? failure
+      : new Error(`Failed to persist project ${projectId}.`);
   }
 }
 

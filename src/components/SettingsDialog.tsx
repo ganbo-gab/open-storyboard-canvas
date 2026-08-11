@@ -22,6 +22,7 @@ import {
 import { UiCheckbox, UiSelect } from '@/components/ui';
 import { UI_CONTENT_OVERLAY_INSET_CLASS, UI_DIALOG_TRANSITION_MS } from '@/components/ui/motion';
 import { useDialogTransition } from '@/components/ui/useDialogTransition';
+import { useModalFocus } from '@/components/ui/useModalFocus';
 import { listModelProviders } from '@/features/canvas/models';
 import type { SettingsCategory } from '@/features/settings/settingsEvents';
 import { CustomProvidersSection } from '@/components/settings/CustomProvidersSection';
@@ -30,7 +31,6 @@ import { AgnesSettingsSection } from '@/components/settings/AgnesSettingsSection
 import { DreaminaSection } from '@/components/settings/DreaminaSection';
 import { PromptManagementSection } from '@/components/settings/PromptManagementSection';
 import { PromptPresetsSection } from '@/components/settings/PromptPresetsSection';
-import { TextAgentsSection } from '@/components/settings/TextAgentsSection';
 import { AudioModelsSection } from '@/components/settings/AudioModelsSection';
 import { SettingsPortabilitySection } from '@/components/settings/SettingsPortabilitySection';
 
@@ -90,6 +90,9 @@ function normalizeSettingsCategory(category: SettingsCategory): SettingsCategory
   if (category === 'providers' || category === 'providersNew' || category === 'providersOld' || category === 'providersChat') {
     return 'providersAdd';
   }
+  if (category === 'textAgents') {
+    return 'providersAdd';
+  }
   return category;
 }
 
@@ -97,7 +100,7 @@ function providerTabFromSettingsCategory(category: SettingsCategory): AddProvide
   if (category === 'providersOld') {
     return 'imageOld';
   }
-  if (category === 'providersChat') {
+  if (category === 'providersChat' || category === 'textAgents') {
     return 'chat';
   }
   return 'imageNew';
@@ -352,6 +355,12 @@ export function SettingsDialog({
   const [checkUpdateStatus, setCheckUpdateStatus] = useState<'' | 'checking' | 'has-update' | 'up-to-date' | 'failed'>('');
   const [settingsSaved, setSettingsSaved] = useState(false);
   const { shouldRender, isVisible } = useDialogTransition(isOpen, UI_DIALOG_TRANSITION_MS);
+  const requestClose = useCallback(() => {
+    if (!isSavingSettings) {
+      onClose();
+    }
+  }, [isSavingSettings, onClose]);
+  const { dialogRef, onKeyDown } = useModalFocus({ isOpen: isOpen && shouldRender, onClose: requestClose });
 
   useEffect(() => {
     let mounted = true;
@@ -679,19 +688,28 @@ export function SettingsDialog({
   return (
     <div className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-50 flex items-center justify-center`}>
       <div
-        className={`absolute inset-0 bg-black/90 transition-opacity duration-200 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
-        onClick={onClose}
+        className={`absolute inset-0 bg-black/90 transition-opacity duration-[180ms] ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+        onClick={requestClose}
       />
       <div className="relative w-[min(96vw,1120px)]">
         <div
-          className={`relative mx-auto flex h-[min(86vh,760px)] w-full flex-col overflow-hidden rounded-lg border border-border-dark bg-surface-dark shadow-xl transition-opacity duration-200 sm:flex-row ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('settings.title')}
+          tabIndex={-1}
+          onKeyDown={onKeyDown}
+          className={`relative mx-auto flex h-[min(86dvh,760px)] w-full flex-col overflow-hidden rounded-lg border border-border-dark bg-surface-dark shadow-xl transition-[opacity,transform] duration-[180ms] ease-out sm:flex-row ${isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-1 scale-[0.99] opacity-0'}`}
         >
           {/* Close button */}
           <button
-            onClick={onClose}
-            className="absolute top-3 right-3 p-1 hover:bg-bg-dark rounded transition-colors z-10"
+            type="button"
+            onClick={requestClose}
+            className="absolute right-2 top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark sm:right-3 sm:top-3"
+            aria-label={t('common.close')}
+            title={t('common.close')}
           >
-            <X className="w-5 h-5 text-text-muted" />
+            <X className="h-4 w-4" />
           </button>
 
           {/* Sidebar */}
@@ -844,20 +862,6 @@ export function SettingsDialog({
               </button>
 
               <button
-                onClick={() => setActiveCategory('textAgents')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'textAgents'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.textAgentsNav')}</span>
-              </button>
-
-              <button
                 onClick={() => setActiveCategory('appearance')}
                 className={`
                 w-full flex items-center gap-3 px-4 py-2.5 text-left
@@ -932,8 +936,6 @@ export function SettingsDialog({
 
             {activeCategory === 'promptPresets' && <PromptPresetsSection />}
 
-            {activeCategory === 'textAgents' && <TextAgentsSection />}
-
             {activeCategory === 'audioModels' && <AudioModelsSection />}
 
             {activeCategory === 'providersAdd' && (
@@ -947,7 +949,7 @@ export function SettingsDialog({
 
                 <div className="shrink-0 flex justify-end border-t border-border-dark px-6 py-4">
                   <button
-                    onClick={onClose}
+                    onClick={requestClose}
                     className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
                   >
                     {t('common.close')}
@@ -964,7 +966,7 @@ export function SettingsDialog({
 
                 <div className="shrink-0 flex justify-end border-t border-border-dark px-6 py-4">
                   <button
-                    onClick={onClose}
+                    onClick={requestClose}
                     className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
                   >
                     {t('common.close')}
@@ -1208,16 +1210,16 @@ export function SettingsDialog({
                   </div>
 
                   {settingsSaveError && (
-                    <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-200">
+                    <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-200">
                       {settingsSaveError}
                     </div>
                   )}
                 </div>
 
                 <div className="flex justify-end gap-2 border-t border-border-dark px-6 py-4">
-                  {settingsSaved && <span className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
+                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
                   <button
-                    onClick={onClose}
+                    onClick={requestClose}
                     className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
                     disabled={isSavingSettings}
                   >
@@ -1348,18 +1350,20 @@ export function SettingsDialog({
                 </div>
 
                 <div className="flex justify-end gap-2 border-t border-border-dark px-6 py-4">
-                  {settingsSaved && <span className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
+                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
                   <button
-                    onClick={onClose}
-                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
+                    onClick={requestClose}
+                    disabled={isSavingSettings}
+                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('common.close')}
                   </button>
                   <button
                     onClick={handleSave}
-                    className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80"
+                    disabled={isSavingSettings}
+                    className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {t('common.save')}
+                    {isSavingSettings ? t('common.saving') : t('common.save')}
                   </button>
                 </div>
               </>
@@ -1487,18 +1491,20 @@ export function SettingsDialog({
                 </div>
 
                 <div className="flex justify-end gap-2 border-t border-border-dark px-6 py-4">
-                  {settingsSaved && <span className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
+                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
                   <button
-                    onClick={onClose}
-                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
+                    onClick={requestClose}
+                    disabled={isSavingSettings}
+                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('common.close')}
                   </button>
                   <button
                     onClick={handleSave}
-                    className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80"
+                    disabled={isSavingSettings}
+                    className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {t('common.save')}
+                    {isSavingSettings ? t('common.saving') : t('common.save')}
                   </button>
                 </div>
               </>
@@ -1687,18 +1693,20 @@ export function SettingsDialog({
                 </div>
 
                 <div className="flex justify-end gap-2 border-t border-border-dark px-6 py-4">
-                  {settingsSaved && <span className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
+                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
                   <button
-                    onClick={onClose}
-                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
+                    onClick={requestClose}
+                    disabled={isSavingSettings}
+                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('common.close')}
                   </button>
                   <button
                     onClick={handleSave}
-                    className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80"
+                    disabled={isSavingSettings}
+                    className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {t('common.save')}
+                    {isSavingSettings ? t('common.saving') : t('common.save')}
                   </button>
                 </div>
               </>
@@ -1810,19 +1818,21 @@ export function SettingsDialog({
                 </div>
 
                 <div className="flex justify-end border-t border-border-dark px-6 py-4">
-                  {settingsSaved && <span className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
+                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
                   <div className="flex gap-2">
                     <button
-                      onClick={onClose}
-                      className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
+                      onClick={requestClose}
+                      disabled={isSavingSettings}
+                      className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {t('common.close')}
                     </button>
                     <button
                       onClick={handleSave}
-                      className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80"
+                      disabled={isSavingSettings}
+                      className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {t('common.save')}
+                      {isSavingSettings ? t('common.saving') : t('common.save')}
                     </button>
                   </div>
                 </div>

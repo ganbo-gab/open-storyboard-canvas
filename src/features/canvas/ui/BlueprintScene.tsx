@@ -75,6 +75,7 @@ export interface BlueprintSceneHandle {
   getCameraSnapshot: () => DirectorSceneCameraSnapshot | null;
   getCanvas: () => HTMLCanvasElement | null;
   applyMotionFrame: (frame: SampledDirectorMotionFrame, previewMode?: 'route' | 'shot') => void;
+  setMotionPlaybackActive: (active: boolean) => void;
   renderFrame: () => void;
   setExportMode: (enabled: boolean, size?: { width: number; height: number }) => void;
   enterPilot: () => void;
@@ -177,10 +178,29 @@ function normalizeItemScale(item: BlueprintItem): { x: number; y: number; z: num
   };
 }
 
+function getMotionPoseKey(
+  actionId: string | undefined,
+  pose: BlueprintActionPose | undefined,
+): string {
+  if (!pose) return actionId ?? '';
+  const read = (value: { x?: number; y?: number; z?: number } | undefined) =>
+    `${value?.x ?? ''},${value?.y ?? ''},${value?.z ?? ''}`;
+  return [
+    actionId ?? '',
+    read(pose.leftShoulder), read(pose.rightShoulder),
+    read(pose.leftElbow), read(pose.rightElbow),
+    read(pose.leftHip), read(pose.rightHip),
+    read(pose.leftKnee), read(pose.rightKnee),
+    read(pose.head), read(pose.torso),
+    pose.scaleY ?? '', pose.groupY ?? '', pose.groupRotX ?? '',
+  ].join('|');
+}
+
 function getItemMeshCacheKey(
   item: BlueprintItem,
   gltfReady: boolean,
   bodyControls: BlueprintBodyControls | undefined = item.bodyControls,
+  detail: 'full' | 'preview' = 'full',
 ): string {
   const useGltf = item.category === 'person'
     && (globalThis as any).__BLUEPRINT_USE_GLTF__ === true
@@ -188,7 +208,7 @@ function getItemMeshCacheKey(
   const personVariant = item.category === 'person' ? (useGltf ? 'gltf' : 'proc') : 'na';
   const bodyControlsKey = item.category === 'person' ? JSON.stringify(bodyControls ?? {}) : '';
   const roleKey = item.category === 'person' ? (item.directorStudioRole ?? 'main') : 'na';
-  return `${item.category}|${item.presetId ?? ''}|${item.action ?? ''}|${personVariant}|${roleKey}|${bodyControlsKey}`;
+  return `${item.category}|${item.presetId ?? ''}|${item.action ?? ''}|${personVariant}|${roleKey}|${bodyControlsKey}|${detail}`;
 }
 
 function createBlueprintItemMesh(
@@ -196,6 +216,7 @@ function createBlueprintItemMesh(
   gltfReady: boolean,
   customActionPoses: Record<string, BlueprintActionPose> | undefined,
   bodyControls: BlueprintBodyControls | undefined = item.bodyControls,
+  detail: 'full' | 'preview' = 'full',
 ): any {
   const color = new THREE.Color(item.color);
   const heightM = getItemHeight(item);
@@ -211,6 +232,7 @@ function createBlueprintItemMesh(
     } else {
       mesh = createPersonMeshGroup(color, heightM, item.presetId, bodyControls, {
         role: item.directorStudioRole,
+        detail,
       });
       applyPersonActionTransform(mesh, item.action, {
         customPoses: { ...DIRECTOR_STATIC_POSE_MAP, ...(customActionPoses ?? {}) },
@@ -221,7 +243,7 @@ function createBlueprintItemMesh(
   }
   mesh.traverse((object: any) => { if (object.isMesh) object.name = `item:${item.id}`; });
   mesh.userData.itemId = item.id;
-  mesh.userData.cacheKey = getItemMeshCacheKey(item, gltfReady, bodyControls);
+  mesh.userData.cacheKey = getItemMeshCacheKey(item, gltfReady, bodyControls, detail);
   mesh.userData.baseRotation = {
     x: mesh.rotation.x,
     y: mesh.rotation.y,
@@ -553,6 +575,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   const cameraRef = useRef<any>(null);
   const itemsGroupRef = useRef<any>(null);
   const meshByIdRef = useRef<Map<string, any>>(new Map());
+  const itemsByIdRef = useRef<Map<string, BlueprintItem>>(new Map());
   const panoMeshRef = useRef<any>(null);
   const hoverRingRef = useRef<any>(null);
   const selectionRingRef = useRef<any>(null);
@@ -561,6 +584,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   const ambientLightRef = useRef<any>(null);
   const mainLightRef = useRef<any>(null);
   const motionRoutesRef = useRef<any>(null);
+  const motionPlaybackActiveRef = useRef(false);
   const exportModeRef = useRef(false);
   const exportSizeRef = useRef<{ width: number; height: number } | null>(null);
   const exportVisibilityRef = useRef<{
@@ -583,6 +607,17 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
 
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  const motionRoutesVisibleRef = useRef(motionRoutesVisible);
+  motionRoutesVisibleRef.current = motionRoutesVisible;
+  itemsByIdRef.current = useMemo(
+    () => new Map(items.map((item) => [item.id, item])),
+    [items],
+  );
+  const customActionPosesRef = useRef<Record<string, BlueprintActionPose>>({});
+  customActionPosesRef.current = useMemo(
+    () => ({ ...DIRECTOR_STATIC_POSE_MAP, ...(customActionPoses ?? {}) }),
+    [customActionPoses],
+  );
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const getPanoramaModeControlMultiplier = useCallback(
@@ -651,6 +686,9 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
 
   const effectiveWidth = isFullscreen ? Math.max(320, (fsSize.w || window.innerWidth) - 24) : width;
   const effectiveHeight = isFullscreen ? Math.max(240, (fsSize.h || window.innerHeight) - 180) : height;
+  // Dense director scenes use a lighter procedural silhouette so opening the
+  // studio remains interactive while the camera and timeline settle.
+  const meshDetail: 'full' | 'preview' = fullBleed && items.length > 24 ? 'preview' : 'full';
 
   const hint = pointerMode === 'position'
     ? t('directorStudio.scene.positionHint')
@@ -1062,14 +1100,14 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       // The `gltf` segment also flips when the GLTF template finishes
       // loading so existing procedural-fallback person meshes are rebuilt
       // with the higher-fidelity model.
-      const cacheKey = getItemMeshCacheKey(it, gltfReady);
+      const cacheKey = getItemMeshCacheKey(it, gltfReady, it.bodyControls, meshDetail);
       if (mesh && (mesh as any).userData.cacheKey !== cacheKey) {
         group.remove(mesh);
         meshByIdRef.current.delete(it.id);
         mesh = undefined;
       }
       if (!mesh) {
-        mesh = createBlueprintItemMesh(it, gltfReady, customActionPoses);
+        mesh = createBlueprintItemMesh(it, gltfReady, customActionPoses, it.bodyControls, meshDetail);
         group.add(mesh);
         meshByIdRef.current.set(it.id, mesh);
       } else {
@@ -1114,7 +1152,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       mesh.position.set(p.x, p.y + poseYOffset, p.z);
     });
     requestRender();
-  }, [items, customActionPoses, gltfReady, requestRender]);
+  }, [items, customActionPoses, gltfReady, meshDetail, requestRender]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -1181,7 +1219,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       addRoute('object', itemId, track, itemsRef.current.find((item) => item.id === itemId)?.category === 'person' ? 0xf59e0b : 0x60a5fa, true);
     });
     addRoute('camera', 'camera', motionProject?.cameraTrack ?? [], 0x67e8f9);
-    routes.visible = motionRoutesVisible && !exportModeRef.current;
+    routes.visible = motionRoutesVisible && !exportModeRef.current && !motionPlaybackActiveRef.current;
     scene.add(routes);
     motionRoutesRef.current = routes;
     requestRender();
@@ -2109,6 +2147,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     const overlay = overlayRef.current;
     const camera = cameraRef.current;
     if (!overlay || !camera) return;
+    if (motionPlaybackActiveRef.current) return;
     const children = overlay.children;
     for (let i = 0; i < children.length; i++) {
       const el = children[i] as HTMLDivElement;
@@ -2241,19 +2280,19 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   const getCanvas = useCallback(() => rendererRef.current?.domElement as HTMLCanvasElement | null, []);
 
   const applyMotionFrame = useCallback((frame: SampledDirectorMotionFrame, previewMode: 'route' | 'shot' = 'shot') => {
-    const itemsById = new Map(itemsRef.current.map((item) => [item.id, item]));
     Object.entries(frame.objects).forEach(([itemId, sampled]) => {
-      const item = itemsById.get(itemId);
+      const item = itemsByIdRef.current.get(itemId);
       let mesh = meshByIdRef.current.get(itemId);
       if (!mesh || !item) return;
       const sampledAction = frame.actions[itemId];
       const pose = sampledAction?.pose;
       if (item.category === 'person') {
         const bodyControls = sampledAction?.bodyControls ?? item.bodyControls;
-        const cacheKey = getItemMeshCacheKey(item, gltfReady, bodyControls);
+        const bodyControlsKey = JSON.stringify(bodyControls ?? {});
+        const cacheKey = getItemMeshCacheKey(item, gltfReady, bodyControls, meshDetail);
         if (mesh.userData?.cacheKey !== cacheKey && itemsGroupRef.current) {
           const previousMesh = mesh;
-          mesh = createBlueprintItemMesh(item, gltfReady, customActionPoses, bodyControls);
+          mesh = createBlueprintItemMesh(item, gltfReady, customActionPosesRef.current, bodyControls, meshDetail);
           itemsGroupRef.current.remove(previousMesh);
           itemsGroupRef.current.add(mesh);
           meshByIdRef.current.set(itemId, mesh);
@@ -2267,13 +2306,15 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
           ?? sampledAction?.actionId
           ?? sampledAction?.clipId
           ?? item.action;
-        const customPoses = {
-          ...DIRECTOR_STATIC_POSE_MAP,
-          ...(customActionPoses ?? {}),
-          ...(actionId && pose ? { [actionId]: pose } : {}),
-        };
-        if ((globalThis as any).__BLUEPRINT_USE_GLTF__ === true && gltfReady) applyGltfPersonAction(mesh, actionId, { customPoses });
-        else applyPersonActionTransform(mesh, actionId, { customPoses });
+        const poseKey = `${bodyControlsKey}|${getMotionPoseKey(actionId, pose)}`;
+        if (mesh.userData?.motionPoseKey !== poseKey) {
+          const customPoses = actionId && pose
+            ? { ...customActionPosesRef.current, [actionId]: pose }
+            : customActionPosesRef.current;
+          if ((globalThis as any).__BLUEPRINT_USE_GLTF__ === true && gltfReady) applyGltfPersonAction(mesh, actionId, { customPoses });
+          else applyPersonActionTransform(mesh, actionId, { customPoses });
+          mesh.userData.motionPoseKey = poseKey;
+        }
       }
       const poseYOffset = mesh.userData?.poseYOffset ?? 0;
       const baseRotation = mesh.userData?.baseRotation ?? { x: 0, y: 0, z: 0 };
@@ -2322,7 +2363,24 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     }
     motionPreviewModeRef.current = previewMode;
     requestRender();
-  }, [customActionPoses, gltfReady, requestRender]);
+  }, [gltfReady, meshDetail, requestRender]);
+
+  const setMotionPlaybackActive = useCallback((active: boolean) => {
+    motionPlaybackActiveRef.current = active;
+    const renderer = rendererRef.current;
+    if (renderer) {
+      renderer.setPixelRatio(active ? 0.8 : Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(effectiveWidth, effectiveHeight, false);
+    }
+    if (motionRoutesRef.current) {
+      motionRoutesRef.current.visible = !active
+        && !exportModeRef.current
+        && motionRoutesVisibleRef.current;
+    }
+    if (overlayRef.current) overlayRef.current.style.visibility = active ? 'hidden' : '';
+    if (!active) updateOverlayLabelsRef.current();
+    requestRender();
+  }, [effectiveHeight, effectiveWidth, requestRender]);
 
   const setExportMode = useCallback((enabled: boolean, size?: { width: number; height: number }) => {
     if (enabled && !exportModeRef.current) {
@@ -2353,7 +2411,9 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     if (selectionRingRef.current) selectionRingRef.current.visible = enabled ? false : previousVisibility?.selectionRing ?? false;
     if (hoverRingRef.current) hoverRingRef.current.visible = enabled ? false : previousVisibility?.hoverRing ?? false;
     if (transformHelperRef.current) transformHelperRef.current.visible = enabled ? false : previousVisibility?.transformHelper ?? false;
-    if (motionRoutesRef.current) motionRoutesRef.current.visible = enabled ? false : previousVisibility?.motionRoutes ?? motionRoutesVisible;
+    if (motionRoutesRef.current) motionRoutesRef.current.visible = enabled
+      ? false
+      : !motionPlaybackActiveRef.current && (previousVisibility?.motionRoutes ?? motionRoutesVisible);
     if (!enabled) exportVisibilityRef.current = null;
     requestRender();
   }, [effectiveHeight, effectiveWidth, grid.visible, motionRoutesVisible, requestRender]);
@@ -2417,6 +2477,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       getCameraSnapshot={getCameraSnapshot}
       getCanvas={getCanvas}
       applyMotionFrame={applyMotionFrame}
+      setMotionPlaybackActive={setMotionPlaybackActive}
       renderFrame={renderFrame}
       setExportMode={setExportMode}
       enterPilot={enterPilot}
@@ -2470,6 +2531,7 @@ interface InternalsProps {
   getCameraSnapshot: () => DirectorSceneCameraSnapshot | null;
   getCanvas: () => HTMLCanvasElement | null;
   applyMotionFrame: (frame: SampledDirectorMotionFrame, previewMode?: 'route' | 'shot') => void;
+  setMotionPlaybackActive: (active: boolean) => void;
   renderFrame: () => void;
   setExportMode: (enabled: boolean, size?: { width: number; height: number }) => void;
   enterPilot: () => void;
@@ -2490,7 +2552,7 @@ function BlueprintSceneInternals({
   pointerMode, onPointerModeChange,
   hint, mode, referenceImages, fullBleed,
   handleResetCamera, handleFitCamera, handleFocusItem, exportPng, getSuggestedInsertPosition,
-  getCameraSnapshot, getCanvas, applyMotionFrame, renderFrame, setExportMode, enterPilot, exitPilot,
+  getCameraSnapshot, getCanvas, applyMotionFrame, setMotionPlaybackActive, renderFrame, setExportMode, enterPilot, exitPilot,
   t,
   forwardRef,
 }: InternalsProps) {
@@ -2503,11 +2565,12 @@ function BlueprintSceneInternals({
     getCameraSnapshot,
     getCanvas,
     applyMotionFrame,
+    setMotionPlaybackActive,
     renderFrame,
     setExportMode,
     enterPilot,
     exitPilot,
-  }), [applyMotionFrame, enterPilot, exitPilot, exportPng, getCameraSnapshot, getCanvas, getSuggestedInsertPosition, handleFitCamera, handleFocusItem, handleResetCamera, renderFrame, setExportMode]);
+  }), [applyMotionFrame, enterPilot, exitPilot, exportPng, getCameraSnapshot, getCanvas, getSuggestedInsertPosition, handleFitCamera, handleFocusItem, handleResetCamera, renderFrame, setExportMode, setMotionPlaybackActive]);
 
   const tree = (
     <div

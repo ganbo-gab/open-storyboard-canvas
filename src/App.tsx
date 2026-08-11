@@ -3,6 +3,7 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
 import { Canvas } from './features/canvas/Canvas';
+import { CanvasAgentDock } from './features/canvas/agent/ui/CanvasAgentDock';
 import { TitleBar } from './components/TitleBar';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -255,7 +256,21 @@ function App() {
           ) : null}
 
           <main className="relative min-h-0 flex-1 overflow-hidden">
-            {currentProjectId ? <Canvas /> : <ProjectHome />}
+            {currentProjectId ? (
+              <div
+                key={`canvas-${currentProjectId}`}
+                className="ui-workspace-enter relative flex h-full min-h-0 min-w-0 overflow-hidden"
+              >
+                <div className="relative min-h-0 min-w-0 flex-1">
+                  <Canvas />
+                </div>
+                <CanvasAgentDock projectId={currentProjectId} />
+              </div>
+            ) : (
+              <div key="project-home" className="ui-workspace-enter h-full min-h-0">
+                <ProjectHome />
+              </div>
+            )}
           </main>
 
           <SettingsDialog

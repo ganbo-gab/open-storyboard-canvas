@@ -303,8 +303,8 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="absolute inset-0 bg-bg-dark/55" />
             <div
-              className="absolute left-0 top-0 h-full bg-gradient-to-r from-[rgba(255,255,255,0.4)] to-[rgba(255,255,255,0.06)] transition-[width] duration-100 ease-linear"
-              style={{ width: `${simulatedProgress * 100}%` }}
+              className="absolute left-0 top-0 h-full w-full origin-left bg-gradient-to-r from-[rgba(255,255,255,0.4)] to-[rgba(255,255,255,0.06)] transition-transform duration-100 ease-linear"
+              style={{ transform: `scaleX(${simulatedProgress})` }}
             />
           </div>
         )}

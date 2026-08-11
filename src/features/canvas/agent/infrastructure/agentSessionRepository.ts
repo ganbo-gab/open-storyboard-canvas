@@ -9,6 +9,7 @@ import type {
 import {
   CANVAS_AGENT_DEFINITION_VERSION,
   CANVAS_AGENT_RUNTIME_VERSION,
+  type AgentSessionMediaReference,
 } from '../domain/agentModel';
 import { CANVAS_COMMAND_VERSION } from '../../domain/canvasCommands';
 
@@ -17,6 +18,7 @@ const RUN_STATE_STORAGE_KEY = 'storyboard-copilot:canvas-agent:run-states:v1';
 const MAX_SESSION_ITEMS = 2_000;
 const MAX_SERIALIZED_BYTES = 8 * 1024 * 1024;
 const MAX_COMPACTED_SUMMARY_CHARACTERS = 100_000;
+const MAX_SESSION_MEDIA_REFERENCES = 256;
 
 interface StorageLike {
   getItem(key: string): string | null;
@@ -32,6 +34,7 @@ export interface AgentSessionRecord {
   createdAt: number;
   updatedAt: number;
   items: AgentInputItem[];
+  mediaReferences?: AgentSessionMediaReference[];
   compactedSummary?: string;
   appliedTransactions: Record<string, string>;
 }
@@ -102,7 +105,8 @@ function unsafeStringReason(value: string): string | null {
   ) return 'absolute local path';
   if (/\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/i.test(value)) return 'Bearer credential';
   if (/(?:api[-_ ]?key|token|secret|password)\s*[:=]\s*[^\s,;]{8,}/i.test(value)) return 'credential assignment';
-  if (/^[A-Za-z0-9+/_-]{512,}={0,2}$/.test(trimmed)) return 'long base64 payload';
+  if (/[?&](?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|signature|sig|auth|authorization|credential|x-amz-signature)=[^&#]+/i.test(value)) return 'credential query value';
+  if (/(?:^|[^A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{512,}={0,2}(?:$|[^A-Za-z0-9+/_=-])/.test(trimmed)) return 'long base64 payload';
   return null;
 }
 
@@ -136,6 +140,19 @@ function serializeBounded(value: unknown): string {
     throw new Error('Agent persistence payload exceeds the 8 MB safety limit.');
   }
   return serialized;
+}
+
+export function assertAgentSerializedRunStateSafe(serializedState: string): void {
+  if (new TextEncoder().encode(serializedState).byteLength > MAX_SERIALIZED_BYTES) {
+    throw new Error('Agent RunState exceeds the 8 MB safety limit.');
+  }
+  let parsedState: unknown;
+  try {
+    parsedState = JSON.parse(serializedState);
+  } catch {
+    throw new Error('Agent RunState must be valid serialized JSON.');
+  }
+  assertPersistenceSafe(parsedState, '$.serializedState');
 }
 
 function parseSessionEnvelope(raw: string | null): SessionEnvelope {
@@ -181,9 +198,33 @@ function isAgentSessionRecord(value: unknown): value is AgentSessionRecord {
     && isFiniteTimestamp(record.updatedAt)
     && Array.isArray(record.items)
     && record.items.length <= MAX_SESSION_ITEMS
+    && (record.mediaReferences === undefined
+      || (Array.isArray(record.mediaReferences)
+        && record.mediaReferences.length <= MAX_SESSION_MEDIA_REFERENCES
+        && record.mediaReferences.every(isAgentSessionMediaReference)))
     && Boolean(record.appliedTransactions)
     && typeof record.appliedTransactions === 'object'
     && !Array.isArray(record.appliedTransactions);
+}
+
+function isAgentSessionMediaReference(value: unknown): value is AgentSessionMediaReference {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Partial<AgentSessionMediaReference>;
+  return typeof record.referenceId === 'string'
+    && record.referenceId.length > 0
+    && record.referenceId.length <= 512
+    && typeof record.runId === 'string'
+    && record.runId.length > 0
+    && record.runId.length <= 256
+    && typeof record.assetId === 'string'
+    && record.assetId.length > 0
+    && record.assetId.length <= 512
+    && (record.nodeId === undefined || (typeof record.nodeId === 'string' && record.nodeId.length <= 512))
+    && typeof record.title === 'string'
+    && record.title.length <= 240
+    && (record.origin === 'canvas-asset' || record.origin === 'upload')
+    && (record.mimeType === undefined || (typeof record.mimeType === 'string' && record.mimeType.length <= 120))
+    && isFiniteTimestamp(record.createdAt);
 }
 
 function isAgentRunStateRecord(value: unknown): value is AgentRunStateRecord {
@@ -246,6 +287,7 @@ export class AgentSessionRepository {
       createdAt: now,
       updatedAt: now,
       items: [],
+      mediaReferences: [],
       appliedTransactions: {},
     };
     const envelope = this.readSessions();
@@ -285,6 +327,32 @@ export class AgentSessionRepository {
     this.mutateSession(sessionId, (session) => ({ ...session, items: cloneJson(items) }));
   }
 
+  recordMediaReferences(
+    sessionId: string,
+    references: AgentSessionMediaReference[],
+  ): AgentSessionRecord {
+    if (!references.length) {
+      const session = this.getSession(sessionId);
+      if (!session) throw new Error(`Agent session ${sessionId} does not exist.`);
+      return session;
+    }
+    if (!references.every(isAgentSessionMediaReference)) {
+      throw new Error('Agent session media metadata is invalid or exceeds its field limits.');
+    }
+    return this.mutateSession(sessionId, (session) => {
+      const byId = new Map((session.mediaReferences ?? []).map((reference) => [reference.referenceId, reference]));
+      for (const reference of references) byId.set(reference.referenceId, cloneJson(reference));
+      const mediaReferences = Array.from(byId.values())
+        .sort((left, right) => left.createdAt - right.createdAt || left.referenceId.localeCompare(right.referenceId))
+        .slice(-MAX_SESSION_MEDIA_REFERENCES);
+      return { ...session, mediaReferences };
+    });
+  }
+
+  getMediaReferences(sessionId: string): AgentSessionMediaReference[] {
+    return this.getSession(sessionId)?.mediaReferences?.map(cloneJson) ?? [];
+  }
+
   compactSession(
     sessionId: string,
     input: { summary: string; replacementItems: AgentInputItem[] },
@@ -322,13 +390,7 @@ export class AgentSessionRepository {
     if (session.projectId !== input.projectId) {
       throw new Error('Agent RunState project does not match its session project.');
     }
-    let parsedState: unknown;
-    try {
-      parsedState = JSON.parse(input.serializedState);
-    } catch {
-      throw new Error('Agent RunState must be valid serialized JSON.');
-    }
-    assertPersistenceSafe(parsedState, '$.serializedState');
+    assertAgentSerializedRunStateSafe(input.serializedState);
     const envelope = this.readRunStates();
     const existingIndex = envelope.runStates.findIndex((record) => record.id === input.id);
     const now = this.now();
@@ -355,6 +417,9 @@ export class AgentSessionRepository {
     const record = this.getRunState(runStateId);
     if (!record) throw new Error(`Agent RunState ${runStateId} does not exist.`);
     const reasons: string[] = [];
+    if (record.status !== 'awaiting_approval') {
+      reasons.push(`run status ${record.status} is not resumable`);
+    }
     if (record.runtimeVersion !== CANVAS_AGENT_RUNTIME_VERSION) {
       reasons.push(`runtime version ${record.runtimeVersion} is not supported`);
     }

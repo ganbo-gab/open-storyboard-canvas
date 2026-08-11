@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -84,15 +84,18 @@ import { showErrorDialog } from '@/features/canvas/application/errorDialog';
 import { BlueprintCustomActionModal } from '@/features/canvas/ui/BlueprintCustomActionModal';
 import { DirectorActionLibrary } from '@/features/canvas/ui/DirectorActionLibrary';
 import { DirectorCameraPilotHud } from '@/features/canvas/ui/DirectorCameraPilotHud';
+import {
+  DirectorSceneErrorBoundary,
+  isDirectorSceneModuleLoadError,
+} from '@/features/canvas/ui/DirectorSceneErrorBoundary';
 import { DirectorTimeline } from '@/features/canvas/ui/DirectorTimeline';
 import { DirectorVideoExportDialog } from '@/features/canvas/ui/DirectorVideoExportDialog';
 import { useDirectorStudioMotion } from '@/features/canvas/ui/useDirectorStudioMotion';
 import { ensurePos3d, genBlueprintItemId, pos3dToLegacy } from '@/features/canvas/ui/blueprintCoordinates';
 import { useCanvasStore } from '@/stores/canvasStore';
 
-const BlueprintScene = lazy(() =>
-  import('@/features/canvas/ui/BlueprintScene').then((m) => ({ default: m.BlueprintScene })),
-);
+const loadBlueprintScene = () =>
+  import('@/features/canvas/ui/BlueprintScene').then((m) => ({ default: m.BlueprintScene }));
 
 type PanelMode = 'projects' | 'elements';
 type ToolFloatingPanel = 'camera' | 'lighting' | 'grid' | 'frame' | 'resolution' | 'prompt';
@@ -1043,7 +1046,17 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   }));
   const compactLayout = viewportSize.width < 1100;
   const mobileLayout = viewportSize.width < 640;
+  const lowHeightLayout = viewportSize.height < 520;
   const [toolbarLayoutVersion, setToolbarLayoutVersion] = useState(0);
+  const [sceneLoadAttempt, setSceneLoadAttempt] = useState(0);
+  const BlueprintSceneComponent = useMemo(() => lazy(loadBlueprintScene), [sceneLoadAttempt]);
+  const retryBlueprintScene = useCallback((error: Error) => {
+    if (isDirectorSceneModuleLoadError(error)) {
+      window.location.reload();
+      return;
+    }
+    setSceneLoadAttempt((attempt) => attempt + 1);
+  }, []);
   const [basePromptDraft, setBasePromptDraft] = useState(data.basePrompt ?? '');
   const [inspectorTextDraft, setInspectorTextDraft] = useState<InspectorTextDraft>(() =>
     createInspectorTextDraft(data.items.find((item) => item.id === selectedItemId) ?? null)
@@ -1175,10 +1188,10 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
 
   const {
     motionProject,
+    motionTimeSource,
+    playbackSource,
     timelineOpen,
     setTimelineOpen,
-    motionTime,
-    motionPlaying,
     setMotionPlaying,
     motionSelection,
     setMotionSelection,
@@ -1430,6 +1443,14 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   useEffect(() => {
     if (compactLayout && sidePanel) setPanelOpen(false);
   }, [compactLayout, sidePanel]);
+
+  useEffect(() => {
+    if (compactLayout) setPanelOpen(false);
+  }, [compactLayout]);
+
+  useLayoutEffect(() => {
+    if (lowHeightLayout) setTimelineOpen(false);
+  }, [lowHeightLayout, setTimelineOpen]);
 
   const selectItemForEditing = useCallback((itemId: string | null) => {
     commitPendingTextDrafts();
@@ -2372,7 +2393,11 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   }, [importPanorama, t]);
 
   const sceneWidth = Math.max(320, viewportSize.width);
-  const motionTimelineHeight = timelineOpen ? 232 : 0;
+  const motionTimelineHeight = timelineOpen
+    ? lowHeightLayout
+      ? Math.max(168, Math.min(200, Math.round(viewportSize.height * 0.45)))
+      : 232
+    : 0;
   const motionToolbarHeight = mobileLayout ? 168 : compactLayout ? 120 : 96;
   const sceneHeight = Math.max(320, viewportSize.height - motionTimelineHeight);
   const rawPanoramaUrl = data.backgroundPanoramaUrl ?? data.backgroundImageUrl ?? null;
@@ -2659,7 +2684,20 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       onClick: () => setActiveTransformMode((value) => value ? null : 'move'),
     },
     { key: 'params', label: t('directorStudio.toolbar.params'), title: t('directorStudio.toolbar.params'), icon: SlidersHorizontal, active: sidePanel === 'inspector', onClick: () => toggleSidePanel('inspector') },
-    { key: 'timeline', label: t('directorStudio.motion.timeline.title'), title: t('directorStudio.motion.timeline.title'), icon: PanelBottom, active: timelineOpen, onClick: () => setTimelineOpen((value) => !value) },
+    {
+      key: 'timeline',
+      label: t('directorStudio.motion.timeline.title'),
+      title: t('directorStudio.motion.timeline.title'),
+      icon: PanelBottom,
+      active: timelineOpen,
+      onClick: () => {
+        if (lowHeightLayout && !timelineOpen) {
+          setFloatingPanel(null);
+          setSidePanel(null);
+        }
+        setTimelineOpen((value) => !value);
+      },
+    },
     { key: 'pilot', label: t('directorStudio.motion.pilot.enter'), title: t('directorStudio.motion.pilot.enter'), icon: Crosshair, active: pilotActive, onClick: toggleCameraPilot },
     { key: 'exportVideo', label: t('directorStudio.motion.export.title'), title: motionProject.cameraTrack.length < 2 ? t('directorStudio.motion.export.needsCamera') : t('directorStudio.motion.export.title'), icon: Video, disabled: motionProject.cameraTrack.length < 2, onClick: openVideoExport },
     { key: 'cameraPreset', label: t('directorStudio.toolbar.cameraPreset'), title: t('directorStudio.toolbar.cameraPreset'), icon: Camera, active: floatingPanel === 'camera', onClick: () => openFloatingPanel('camera') },
@@ -2680,6 +2718,12 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     { key: 'screenshot', label: t('directorStudio.toolbar.screenshot'), title: t('directorStudio.toolbar.screenshot'), icon: Aperture, active: sidePanel === 'snapshot', onClick: () => { void captureScreenshot(); } },
     { key: 'shortcuts', label: t('directorStudio.toolbar.shortcuts'), title: t('directorStudio.shortcuts.title'), icon: Keyboard, active: activeDialog === 'shortcuts', onClick: () => setActiveDialog('shortcuts') },
   ];
+  const orderedToolbarButtons = lowHeightLayout
+    ? [
+        ...toolbarButtons.filter((button) => button.key === 'timeline'),
+        ...toolbarButtons.filter((button) => button.key !== 'timeline'),
+      ]
+    : toolbarButtons;
 
   const content = (
     <div
@@ -3038,52 +3082,62 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         )}
 
         <main className="absolute inset-0 z-0 h-full min-h-0 overflow-hidden bg-[#071012]">
-          <Suspense
-            fallback={
-              <div className="flex h-full items-center justify-center text-sm text-white/45">
-                {t('directorStudio.loadingScene')}
-              </div>
-            }
+          <DirectorSceneErrorBoundary
+            key={sceneLoadAttempt}
+            title={t('directorStudio.sceneError.title')}
+            description={t('directorStudio.sceneError.description')}
+            retryLabel={t('directorStudio.sceneError.retry')}
+            closeLabel={t('common.close')}
+            onRetry={retryBlueprintScene}
+            onClose={onClose}
           >
-            <BlueprintScene
-              ref={editorRef}
-              items={data.items}
-              onItemsChange={onItemsChange}
-              referenceImages={referenceImages}
-              mode={data.mode === 'panorama' ? 'panorama' : 'flat'}
-              panoramaUrl={panoramaUrl}
-              width={sceneWidth}
-              height={sceneHeight}
-              fullBleed
-              selectedItemId={selectedItemId}
-              followSelectedItem={followSelectedItem}
-              transformMode={selectedItem ? activeTransformMode : null}
-              onSelectedItemChange={selectItemForEditing}
-              customActionPoses={data.customActionPoses}
-              cameraFov={camera.fov}
-              cameraDistance={camera.lensDistance}
-              lighting={lighting}
-              grid={grid}
-              viewSettings={viewSettings}
-              keyboardShortcutsEnabled={activeDialog !== 'shortcuts'}
-              motionProject={motionProject}
-              motionRoutesVisible={motionShowRoutes}
-              motionRouteSelection={motionSelection && motionSelection.kind !== 'action'
-                ? {
-                    kind: motionSelection.kind,
-                    trackId: motionSelection.trackId,
-                    keyframeId: motionSelection.keyframeId,
-                  }
-                : null}
-              onMotionRoutePointSelect={selectMotionRouteKeyframe}
-              onMotionRoutePointMove={moveMotionRouteKeyframe}
-              onMotionRoutePointInsert={insertMotionRouteKeyframe}
-              pilotActive={pilotActive}
-              onPilotActiveChange={setPilotActive}
-              onPilotRecordCamera={recordPilotCamera}
-              onPilotTargetChange={setPilotTargetId}
-            />
-          </Suspense>
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-sm text-white/45">
+                  {t('directorStudio.loadingScene')}
+                </div>
+              }
+            >
+              <BlueprintSceneComponent
+                ref={editorRef}
+                items={data.items}
+                onItemsChange={onItemsChange}
+                referenceImages={referenceImages}
+                mode={data.mode === 'panorama' ? 'panorama' : 'flat'}
+                panoramaUrl={panoramaUrl}
+                width={sceneWidth}
+                height={sceneHeight}
+                fullBleed
+                selectedItemId={selectedItemId}
+                followSelectedItem={followSelectedItem}
+                transformMode={selectedItem ? activeTransformMode : null}
+                onSelectedItemChange={selectItemForEditing}
+                customActionPoses={data.customActionPoses}
+                cameraFov={camera.fov}
+                cameraDistance={camera.lensDistance}
+                lighting={lighting}
+                grid={grid}
+                viewSettings={viewSettings}
+                keyboardShortcutsEnabled={activeDialog !== 'shortcuts'}
+                motionProject={motionProject}
+                motionRoutesVisible={motionShowRoutes}
+                motionRouteSelection={motionSelection && motionSelection.kind !== 'action'
+                  ? {
+                      kind: motionSelection.kind,
+                      trackId: motionSelection.trackId,
+                      keyframeId: motionSelection.keyframeId,
+                    }
+                  : null}
+                onMotionRoutePointSelect={selectMotionRouteKeyframe}
+                onMotionRoutePointMove={moveMotionRouteKeyframe}
+                onMotionRoutePointInsert={insertMotionRouteKeyframe}
+                pilotActive={pilotActive}
+                onPilotActiveChange={setPilotActive}
+                onPilotRecordCamera={recordPilotCamera}
+                onPilotTargetChange={setPilotTargetId}
+              />
+            </Suspense>
+          </DirectorSceneErrorBoundary>
 
           {safeFrameStyle ? (
             <div
@@ -3948,112 +4002,120 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
             </div>
           ) : null}
 
-          <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center" style={{ bottom: motionTimelineHeight + 20 }}>
-            <div className="pointer-events-auto flex max-w-[calc(100%-24px)] flex-wrap items-center justify-center gap-1 rounded-lg border border-white/12 bg-[#151618]/92 p-1.5 shadow-2xl">
-              {toolbarButtons.map((button) => {
-                const Icon = button.icon;
-                if (button.key === 'transform') {
+          {!lowHeightLayout || !timelineOpen ? (
+            <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center" style={{ bottom: motionTimelineHeight + 20 }}>
+              <div className="director-studio-tool-dock ui-scrollbar pointer-events-auto flex max-w-[calc(100%-24px)] flex-wrap items-center justify-center gap-1 rounded-lg border border-white/12 bg-[#151618]/92 p-1.5 shadow-2xl">
+                {orderedToolbarButtons.map((button) => {
+                  const Icon = button.icon;
+                  if (button.key === 'transform') {
+                    return (
+                      <div
+                        key={button.key}
+                        ref={(node) => {
+                          toolbarAnchorRefs.current[button.key] = node;
+                        }}
+                        className={`flex h-10 shrink-0 items-center gap-1 rounded-md border px-1 transition-colors ${
+                          button.active
+                            ? 'border-accent/45 bg-accent/14'
+                            : button.disabled
+                              ? 'border-transparent text-white/28'
+                              : 'border-transparent text-white/72 hover:bg-white/8'
+                        }`}
+                        title={button.title}
+                      >
+                        <button
+                          type="button"
+                          disabled={button.disabled}
+                          onClick={button.onClick}
+                          aria-label={button.title}
+                          className={`flex h-8 w-9 items-center justify-center gap-1 rounded px-1 text-[10px] min-[1700px]:w-auto min-[1700px]:min-w-[58px] min-[1700px]:px-1.5 ${
+                            button.active
+                              ? 'text-accent'
+                              : button.disabled
+                                ? 'text-white/28'
+                                : 'text-white/72 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          <Icon className="h-4 w-4" />
+                          <span className="hidden max-w-[42px] truncate min-[1700px]:block">{button.label}</span>
+                        </button>
+                        <div className="flex items-center gap-0.5">
+                          {TRANSFORM_MODE_OPTIONS.map((option) => {
+                            const ModeIcon = option.icon;
+                            const isActive = activeTransformMode === option.mode;
+                            const shortcut = shortcuts[option.shortcutId];
+                            return (
+                              <button
+                                key={option.mode}
+                                type="button"
+                                disabled={!selectedItem}
+                                onClick={() => setActiveTransformMode(option.mode)}
+                                title={selectedItem ? `${t(option.titleKey)} · ${shortcut}` : t('directorStudio.selectElementFirst')}
+                                aria-label={selectedItem ? `${t(option.titleKey)} · ${shortcut}` : t('directorStudio.selectElementFirst')}
+                                className={`relative flex h-8 w-8 items-center justify-center rounded text-[10px] transition-colors ${
+                                  isActive
+                                    ? 'bg-accent/28 text-accent'
+                                    : selectedItem
+                                      ? 'text-white/68 hover:bg-white/10 hover:text-white'
+                                      : 'text-white/24'
+                                }`}
+                              >
+                                <ModeIcon className="h-4 w-4" />
+                                <span className="absolute bottom-0.5 right-1 font-mono text-[8px] opacity-70">
+                                  {shortcut}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  }
                   return (
-                    <div
+                    <button
                       key={button.key}
                       ref={(node) => {
                         toolbarAnchorRefs.current[button.key] = node;
                       }}
-                      className={`flex h-10 shrink-0 items-center gap-1 rounded-md border px-1 transition-colors ${
-                        button.active
-                          ? 'border-accent/45 bg-accent/14'
-                          : button.disabled
-                            ? 'border-transparent text-white/28'
-                            : 'border-transparent text-white/72 hover:bg-white/8'
-                      }`}
+                      type="button"
+                      disabled={button.disabled}
+                      onClick={button.onClick}
                       title={button.title}
+                      aria-label={button.title}
+                      aria-pressed={button.active ?? undefined}
+                      className={`flex h-10 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-[10px] transition-colors min-[1700px]:w-auto min-[1700px]:min-w-[74px] min-[1700px]:px-2 ${
+                        button.active
+                          ? 'bg-accent/25 text-accent'
+                          : button.disabled
+                            ? 'text-white/28'
+                            : 'text-white/72 hover:bg-white/10 hover:text-white'
+                      }`}
                     >
-                      <button
-                        type="button"
-                        disabled={button.disabled}
-                        onClick={button.onClick}
-                      className={`flex h-8 w-9 items-center justify-center gap-1 rounded px-1 text-[10px] min-[1700px]:w-auto min-[1700px]:min-w-[58px] min-[1700px]:px-1.5 ${
-                          button.active
-                            ? 'text-accent'
-                            : button.disabled
-                              ? 'text-white/28'
-                              : 'text-white/72 hover:bg-white/10 hover:text-white'
-                        }`}
-                      >
-                        <Icon className="h-4 w-4" />
-                        <span className="hidden max-w-[42px] truncate min-[1700px]:block">{button.label}</span>
-                      </button>
-                      <div className="flex items-center gap-0.5">
-                        {TRANSFORM_MODE_OPTIONS.map((option) => {
-                          const ModeIcon = option.icon;
-                          const isActive = activeTransformMode === option.mode;
-                          const shortcut = shortcuts[option.shortcutId];
-                          return (
-                            <button
-                              key={option.mode}
-                              type="button"
-                              disabled={!selectedItem}
-                              onClick={() => setActiveTransformMode(option.mode)}
-                              title={selectedItem ? `${t(option.titleKey)} · ${shortcut}` : t('directorStudio.selectElementFirst')}
-                              className={`relative flex h-8 w-8 items-center justify-center rounded text-[10px] transition-colors ${
-                                isActive
-                                  ? 'bg-accent/28 text-accent'
-                                  : selectedItem
-                                    ? 'text-white/68 hover:bg-white/10 hover:text-white'
-                                    : 'text-white/24'
-                              }`}
-                            >
-                              <ModeIcon className="h-4 w-4" />
-                              <span className="absolute bottom-0.5 right-1 font-mono text-[8px] opacity-70">
-                                {shortcut}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                      <Icon className="h-4 w-4" />
+                      <span className="hidden max-w-full truncate min-[1700px]:block">{button.label}</span>
+                    </button>
                   );
-                }
-                return (
-                  <button
-                    key={button.key}
-                    ref={(node) => {
-                      toolbarAnchorRefs.current[button.key] = node;
-                    }}
-                    type="button"
-                    disabled={button.disabled}
-                    onClick={button.onClick}
-                    title={button.title}
-                    className={`flex h-10 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-[10px] transition-colors min-[1700px]:w-auto min-[1700px]:min-w-[74px] min-[1700px]:px-2 ${
-                      button.active
-                        ? 'bg-accent/25 text-accent'
-                        : button.disabled
-                          ? 'text-white/28'
-                          : 'text-white/72 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    <span className="hidden max-w-full truncate min-[1700px]:block">{button.label}</span>
-                  </button>
-                );
-              })}
+                })}
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <DirectorCameraPilotHud
             active={pilotActive}
             recording={false}
-            currentTime={motionTime}
+            currentTime={motionTimeSource.getSnapshot()}
+            timeSource={motionTimeSource}
             targetLabel={data.items.find((item) => item.id === pilotTargetId)?.label ?? null}
             onExit={() => editorRef.current?.exitPilot()}
           />
 
           {timelineOpen ? (
             <DirectorTimeline
+              height={motionTimelineHeight}
               project={motionProject}
               items={data.items}
-              currentTime={motionTime}
-              isPlaying={motionPlaying}
+              timeSource={motionTimeSource}
+              playbackSource={playbackSource}
               selection={motionSelection}
               showRoutes={motionShowRoutes}
               previewMode={motionPreviewMode}
@@ -4292,7 +4354,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         isOpen={actionLibraryOpen}
         selectedItem={selectedItem}
         project={motionProject}
-        currentTime={motionTime}
+        currentTime={motionTimeSource.getSnapshot()}
         customActionPoses={data.customActionPoses ?? {}}
         onClose={() => setActionLibraryOpen(false)}
         onApplyStaticPose={(poseId, pose) => applyMotionActionState({ poseId, pose })}

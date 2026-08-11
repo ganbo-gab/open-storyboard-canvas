@@ -54,7 +54,7 @@ export const DirectorMotionInspector = memo(function DirectorMotionInspector({
   const keyframe = getSelectedDirectorKeyframe(project, selection);
 
   return (
-    <aside className="hidden w-[180px] shrink-0 border-l border-white/10 bg-[#0d1113] p-3 sm:block lg:w-[218px]">
+    <aside className="hidden w-[180px] shrink-0 border-l border-white/10 bg-[#0d1113] p-3 md:block lg:w-[218px]">
       <div className="mb-3 text-[11px] font-medium text-white/72">
         {t('directorStudio.motion.inspector.title')}
       </div>

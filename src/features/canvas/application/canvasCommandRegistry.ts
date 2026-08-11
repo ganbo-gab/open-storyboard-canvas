@@ -152,6 +152,11 @@ const INPUT_SCHEMAS: Record<CanvasCommandType, CanvasJsonSchema> = {
   }),
   'asset.list': objectSchema([], {
     kind: stringField('Optional image, video, or audio filter.'),
+    query: stringField('Optional case-insensitive title, source, or asset id search.'),
+    nodeIds: arrayField('Optional exact owning node ids.'),
+    relatedToNodeIds: arrayField('Optional node ids whose direct graph neighbors should be searched.'),
+    selectedOnly: booleanField('Only return assets owned by selected nodes.'),
+    region: objectField('Optional finite canvas rectangle with x, y, width, and height.'),
     limit: numberField('Maximum number of assets.'),
   }),
   'asset.locate': objectSchema(['assetId'], {
@@ -331,7 +336,7 @@ function allowedCreateConfigurationKeys(nodeType: CanvasNodeType): Set<string> {
     case CANVAS_NODE_TYPES.panorama:
       return new Set([...common, 'aspectRatio']);
     case CANVAS_NODE_TYPES.blueprint:
-      return new Set([...common, 'aspectRatio', 'openDirectorStudio']);
+      return new Set([...common, 'aspectRatio', 'openDirectorStudio', 'directorStudioMode']);
     default:
       return new Set(common);
   }
@@ -376,6 +381,13 @@ function validateCreateConfiguration(
   if ('aspectRatio' in value) validateString(value.aspectRatio, 'configuration.aspectRatio', errors);
   if ('openDirectorStudio' in value && typeof value.openDirectorStudio !== 'boolean') {
     errors.push('configuration.openDirectorStudio must be a boolean.');
+  }
+  if (
+    'directorStudioMode' in value
+    && value.directorStudioMode !== 'flat'
+    && value.directorStudioMode !== 'panorama'
+  ) {
+    errors.push('configuration.directorStudioMode must be flat or panorama.');
   }
   if (nodeType === CANVAS_NODE_TYPES.aiVideo && 'aspectRatio' in value && !('modelId' in value)) {
     errors.push('AI video create configuration requires modelId when aspectRatio is provided.');
@@ -524,6 +536,26 @@ function validateCommandInput(
       break;
     case 'asset.list':
       if (command.input.kind !== undefined && !['image', 'video', 'audio'].includes(command.input.kind)) errors.push('Invalid asset kind.');
+      if (command.input.query !== undefined) {
+        validateString(command.input.query, 'query', errors);
+        if (typeof command.input.query === 'string' && command.input.query.length > 200) errors.push('query cannot exceed 200 characters.');
+      }
+      if (command.input.nodeIds !== undefined) validateStringArray(command.input.nodeIds, 'nodeIds', errors);
+      if (command.input.relatedToNodeIds !== undefined) validateStringArray(command.input.relatedToNodeIds, 'relatedToNodeIds', errors);
+      if (command.input.selectedOnly !== undefined && typeof command.input.selectedOnly !== 'boolean') errors.push('selectedOnly must be a boolean.');
+      if (command.input.region !== undefined) {
+        const region = command.input.region as unknown;
+        if (!isPlainRecord(region)
+          || !hasOnlyKeys(region, ['x', 'y', 'width', 'height'])
+          || !Number.isFinite(region.x)
+          || !Number.isFinite(region.y)
+          || !Number.isFinite(region.width)
+          || Number(region.width) <= 0
+          || !Number.isFinite(region.height)
+          || Number(region.height) <= 0) {
+          errors.push('region must contain only finite x, y and positive width, height values.');
+        }
+      }
       break;
     case 'asset.locate':
       validateString(command.input.assetId, 'assetId', errors);
@@ -677,6 +709,65 @@ export class CanvasCommandRegistry {
 
   executeTransaction(transaction: CanvasTransaction): CanvasTransactionResult {
     return this.coordinator.execute(transaction);
+  }
+
+  async executeApproved(
+    command: CanvasCommand,
+    expectedRevision: number,
+    origin: CanvasTransaction['origin'] = 'agent',
+  ): Promise<CanvasCommandExecutionResult> {
+    const revisionBefore = this.getRevision();
+    const errors = this.validate(command, origin);
+    if (errors.length > 0) {
+      return {
+        ok: false,
+        commandType: command.type,
+        revisionBefore,
+        revisionAfter: revisionBefore,
+        error: errors[0],
+      };
+    }
+    const effect = this.getDefinition(command.type).effect;
+    if ((effect === 'graph' || effect === 'generation') && revisionBefore !== expectedRevision) {
+      return {
+        ok: false,
+        commandType: command.type,
+        revisionBefore,
+        revisionAfter: revisionBefore,
+        error: {
+          code: 'revision_conflict',
+          message: `Canvas revision changed from ${expectedRevision} to ${revisionBefore} after approval.`,
+        },
+        retryPreview: this.inspect(command, origin),
+      };
+    }
+    if (!CANVAS_GRAPH_COMMAND_TYPES.has(command.type)) {
+      return this.execute(command, origin);
+    }
+    const transactionResult = this.coordinator.execute({
+      id: this.nextTransactionId(),
+      origin,
+      expectedRevision,
+      commands: [command],
+    });
+    if (!transactionResult.ok) {
+      return {
+        ok: false,
+        commandType: command.type,
+        revisionBefore: transactionResult.revisionBefore,
+        revisionAfter: transactionResult.revisionAfter,
+        error: transactionResult.error,
+        retryPreview: transactionResult.retryPreview,
+      };
+    }
+    return {
+      ok: true,
+      commandType: command.type,
+      revisionBefore: transactionResult.revisionBefore,
+      revisionAfter: transactionResult.revisionAfter,
+      impact: transactionResult.impacts[0],
+      output: transactionResult.outputs[0],
+    };
   }
 
   async execute(command: CanvasCommand, origin: CanvasTransaction['origin'] = 'agent'): Promise<CanvasCommandExecutionResult> {
@@ -894,8 +985,42 @@ export class CanvasCommandRegistry {
         return { references: { nodeIds: command.input.nodeIds }, value: { focused } };
       }
       case 'asset.list': {
+        const explicitNodeIds = command.input.nodeIds ? new Set(command.input.nodeIds) : null;
+        const selectedNodeIds = command.input.selectedOnly
+          ? new Set(snapshot.nodes.filter((node) => node.selected).map((node) => node.id))
+          : null;
+        const relatedSeedNodeIds = command.input.relatedToNodeIds
+          ? new Set(command.input.relatedToNodeIds)
+          : null;
+        const relatedNodeIds = relatedSeedNodeIds ? new Set(relatedSeedNodeIds) : null;
+        if (relatedNodeIds && relatedSeedNodeIds) {
+          for (const edge of snapshot.edges) {
+            if (relatedSeedNodeIds.has(edge.source)) relatedNodeIds.add(edge.target);
+            if (relatedSeedNodeIds.has(edge.target)) relatedNodeIds.add(edge.source);
+          }
+        }
+        const regionNodeIds = command.input.region
+          ? new Set(snapshot.nodes.filter((node) => {
+              const width = node.measured?.width ?? node.width ?? 1;
+              const height = node.measured?.height ?? node.height ?? 1;
+              const right = node.position.x + width;
+              const bottom = node.position.y + height;
+              const regionRight = command.input.region!.x + command.input.region!.width;
+              const regionBottom = command.input.region!.y + command.input.region!.height;
+              return node.position.x <= regionRight
+                && right >= command.input.region!.x
+                && node.position.y <= regionBottom
+                && bottom >= command.input.region!.y;
+            }).map((node) => node.id))
+          : null;
+        const query = command.input.query?.trim().toLocaleLowerCase();
         const assets = buildCanvasAssetCatalog(snapshot.nodes)
           .filter((asset) => !command.input.kind || asset.kind === command.input.kind)
+          .filter((asset) => !explicitNodeIds || explicitNodeIds.has(asset.nodeId))
+          .filter((asset) => !selectedNodeIds || selectedNodeIds.has(asset.nodeId))
+          .filter((asset) => !relatedNodeIds || relatedNodeIds.has(asset.nodeId))
+          .filter((asset) => !regionNodeIds || regionNodeIds.has(asset.nodeId))
+          .filter((asset) => !query || `${asset.id} ${asset.title} ${asset.sourceLabel}`.toLocaleLowerCase().includes(query))
           .slice(0, command.input.limit ?? 100)
           .map(projectCanvasAssetCatalogItem);
         return {

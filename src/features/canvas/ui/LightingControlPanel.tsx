@@ -397,7 +397,7 @@ export const LightingControlPanel = memo(
                 <button
                   key={preset.id}
                   onClick={() => setStylePreset(stylePreset === preset.id ? '' : preset.id)}
-                  className={`relative overflow-hidden rounded-lg h-[60px] text-left transition-all ${
+                  className={`relative overflow-hidden rounded-lg h-[60px] text-left transition-[box-shadow,filter,border-color,background-color] duration-150 ${
                     stylePreset === preset.id
                       ? 'ring-2 ring-white/60 shadow-[0_0_0_1px_rgba(255,255,255,0.15)]'
                       : 'hover:ring-1 hover:ring-white/30'

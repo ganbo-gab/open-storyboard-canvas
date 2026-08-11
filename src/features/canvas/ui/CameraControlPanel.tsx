@@ -464,7 +464,7 @@ export const CameraControlPanel = memo(({ isOpen, onClose, cameraControl, onAppl
           <button
             type="button"
             onClick={handleApply}
-            className="rounded-md bg-white px-4 py-1.5 text-xs font-medium text-black hover:bg-white/95 active:scale-95 transition-all"
+            className="rounded-md bg-white px-4 py-1.5 text-xs font-medium text-black transition-[background-color,transform] duration-150 hover:bg-white/95 active:scale-95"
           >
             <CameraIcon className="mr-1 inline h-3 w-3" />
             {t('cameraControl.apply')}

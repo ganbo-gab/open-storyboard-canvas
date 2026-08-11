@@ -128,6 +128,35 @@ describe('settings portability security', () => {
     ]);
   });
 
+  it('round-trips retired text Agent settings as compatibility data', () => {
+    const legacyAgent = {
+      id: 'legacy-agent-a',
+      name: 'Legacy formatter',
+      enabled: true,
+      prompt: 'Return structured storyboard JSON.',
+      defaultModel: 'custom:chat:model-a',
+      inputSources: [{
+        id: 'legacy-source-a',
+        type: 'json' as const,
+        label: 'Previous result',
+        sourceAgentId: 'legacy-agent-b',
+        jsonPath: '$.shots',
+        enabled: true,
+      }],
+      jsonExample: '{"shots":[]}',
+      jsonFields: [{ id: 'field-a', path: '$.shots', label: 'Shots', enabled: true }],
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    useSettingsStore.setState({ textAgents: [legacyAgent] });
+    const bundle = buildSettingsBundle(false);
+    expect(bundle.categories.prompts.textAgents).toEqual([legacyAgent]);
+
+    useSettingsStore.setState({ textAgents: [] });
+    applySettingsBundle(bundle, new Set(['prompts']));
+    expect(useSettingsStore.getState().textAgents).toEqual([legacyAgent]);
+  });
+
   it('rejects oversized settings text before JSON parsing', () => {
     expect(() => assertSettingsBundleSize('x'.repeat(SETTINGS_BUNDLE_MAX_BYTES + 1))).toThrow(/16 MB/i);
   });

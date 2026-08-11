@@ -17,6 +17,15 @@ function textFromParts(parts: readonly AgentModelContentPart[]): string {
     .join('\n');
 }
 
+function imageParts(parts: readonly AgentModelContentPart[] | undefined): Extract<AgentModelContentPart, { type: 'image' }>[] {
+  return parts?.filter((part): part is Extract<AgentModelContentPart, { type: 'image' }> => part.type === 'image') ?? [];
+}
+
+function dataImage(value: string): { mediaType: string; data: string } | null {
+  const match = value.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=_-]+)$/i);
+  return match ? { mediaType: match[1], data: match[2] } : null;
+}
+
 function systemInstructions(request: AgentModelTurnRequest): string | undefined {
   const systemMessages = request.input
     .filter((item): item is Extract<AgentModelInputItem, { type: 'message' }> => (
@@ -29,6 +38,9 @@ function systemInstructions(request: AgentModelTurnRequest): string | undefined 
 }
 
 function openAiResponsesInput(request: AgentModelTurnRequest): unknown[] {
+  const nativeToolSearch = request.model.capabilities.protocol === 'openai-responses'
+    && request.model.capabilities.toolSearch
+    && request.toolPolicy?.mode === 'responses-tool-search';
   const input: unknown[] = [];
   for (const item of request.input) {
     if (item.type === 'message') {
@@ -53,7 +65,8 @@ function openAiResponsesInput(request: AgentModelTurnRequest): unknown[] {
       input.push({
         type: 'function_call',
         call_id: item.callId,
-        name: wireToolName(item),
+        name: nativeToolSearch ? item.name : wireToolName(item),
+        ...(nativeToolSearch && item.namespace ? { namespace: item.namespace } : {}),
         arguments: item.arguments,
       });
       continue;
@@ -63,6 +76,18 @@ function openAiResponsesInput(request: AgentModelTurnRequest): unknown[] {
       call_id: item.callId,
       output: item.output,
     });
+    const images = imageParts(item.content);
+    if (images.length) {
+      input.push({
+        type: 'message',
+        role: 'user',
+        content: images.map((part) => ({
+          type: 'input_image',
+          image_url: part.imageUrl,
+          ...(part.detail ? { detail: part.detail } : {}),
+        })),
+      });
+    }
   }
   return input;
 }
@@ -118,14 +143,25 @@ function openAiChatMessages(request: AgentModelTurnRequest): JsonRecord[] {
       name: wireToolName(item),
       content: item.output,
     });
+    const images = imageParts(item.content);
+    if (images.length) {
+      messages.push({ role: 'user', content: chatContent(images) });
+    }
   }
   return messages;
 }
 
 function anthropicContent(parts: readonly AgentModelContentPart[]): unknown[] {
-  return parts.map((part) => part.type === 'text'
-    ? { type: 'text', text: part.text }
-    : { type: 'image', source: { type: 'url', url: part.imageUrl } });
+  return parts.map((part) => {
+    if (part.type === 'text') return { type: 'text', text: part.text };
+    const inline = dataImage(part.imageUrl);
+    return {
+      type: 'image',
+      source: inline
+        ? { type: 'base64', media_type: inline.mediaType, data: inline.data }
+        : { type: 'url', url: part.imageUrl },
+    };
+  });
 }
 
 function anthropicMessages(request: AgentModelTurnRequest): JsonRecord[] {
@@ -151,18 +187,23 @@ function anthropicMessages(request: AgentModelTurnRequest): JsonRecord[] {
       });
       continue;
     }
+    const content = item.content?.length ? anthropicContent(item.content) : item.output;
     messages.push({
       role: 'user',
-      content: [{ type: 'tool_result', tool_use_id: item.callId, content: item.output }],
+      content: [{ type: 'tool_result', tool_use_id: item.callId, content }],
     });
   }
   return messages;
 }
 
 function geminiParts(parts: readonly AgentModelContentPart[]): unknown[] {
-  return parts.map((part) => part.type === 'text'
-    ? { text: part.text }
-    : { fileData: { fileUri: part.imageUrl, mimeType: 'image/*' } });
+  return parts.map((part) => {
+    if (part.type === 'text') return { text: part.text };
+    const inline = dataImage(part.imageUrl);
+    return inline
+      ? { inlineData: { mimeType: inline.mediaType, data: inline.data } }
+      : { fileData: { fileUri: part.imageUrl, mimeType: 'image/*' } };
+  });
 }
 
 function parseToolResult(value: string): unknown {
@@ -195,6 +236,8 @@ function geminiContents(request: AgentModelTurnRequest): JsonRecord[] {
       role: 'user',
       parts: [{ functionResponse: { name: wireToolName(item), response: parseToolResult(item.output) } }],
     });
+    const images = imageParts(item.content);
+    if (images.length) contents.push({ role: 'user', parts: geminiParts(images) });
   }
   return contents;
 }
@@ -227,6 +270,44 @@ function providerTools(request: AgentModelTurnRequest): unknown[] {
       strict: tool.strict,
     };
   });
+}
+
+function openAiResponsesTools(request: AgentModelTurnRequest): unknown[] {
+  const supportsNativeToolSearch = request.model.capabilities.protocol === 'openai-responses'
+    && request.model.capabilities.toolSearch
+    && request.toolPolicy?.mode === 'responses-tool-search';
+  if (!supportsNativeToolSearch) return providerTools(request);
+
+  const topLevel: unknown[] = [];
+  const namespaces = new Map<string, { description: string; tools: unknown[] }>();
+  for (const tool of request.tools) {
+    const definition = {
+      type: 'function',
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+      strict: tool.strict,
+      ...(tool.deferLoading ? { defer_loading: true } : {}),
+    };
+    if (!tool.namespace) {
+      topLevel.push(definition);
+      continue;
+    }
+    const description = tool.namespaceDescription?.trim() || tool.namespace;
+    const current = namespaces.get(tool.namespace) ?? { description, tools: [] };
+    current.tools.push(definition);
+    namespaces.set(tool.namespace, current);
+  }
+  return [
+    { type: 'tool_search' },
+    ...topLevel,
+    ...Array.from(namespaces, ([name, namespace]) => ({
+      type: 'namespace',
+      name,
+      description: namespace.description,
+      tools: namespace.tools,
+    })),
+  ];
 }
 
 function selectedWireToolName(
@@ -284,7 +365,9 @@ export function buildAgentProviderBody(
   stream: boolean,
 ): JsonRecord {
   const { protocol } = request.model.capabilities;
-  const tools = providerTools(request);
+  const tools = protocol === 'openai-responses'
+    ? openAiResponsesTools(request)
+    : providerTools(request);
   if (protocol === 'openai-responses') {
     return {
       model: request.model.modelId,

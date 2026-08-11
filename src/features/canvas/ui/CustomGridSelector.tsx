@@ -60,7 +60,7 @@ export const CustomGridSelector = memo(({ rows, cols, onChange }: CustomGridSele
                 return (
                   <div
                     key={`cell-${rowIndex}-${colIndex}`}
-                    className={`h-6 w-6 cursor-pointer rounded transition-all duration-75 ${isSelected ? 'bg-accent' : 'bg-white/10 hover:bg-white/20'} ${isHovered && !isSelected ? 'bg-accent/40' : ''}`}
+                    className={`h-6 w-6 cursor-pointer rounded transition-[background-color,box-shadow] duration-150 ${isSelected ? 'bg-accent' : 'bg-white/10 hover:bg-white/20'} ${isHovered && !isSelected ? 'bg-accent/40' : ''}`}
                     onMouseEnter={() => handleCellEnter(rowIndex + 1, colIndex + 1)}
                     onClick={() => handleCellClick(rowIndex + 1, colIndex + 1)}
                   />
