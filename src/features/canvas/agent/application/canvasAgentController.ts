@@ -20,7 +20,7 @@ import {
   validateAgentTurnMediaInputs,
 } from './agentMediaResolver';
 import { buildSkillContext, resolveAgentToolPolicy } from './agentSkills';
-import { getAgentProviderRevision } from './agentConfigPatch';
+import { getAgentGenerationNetworkRevision, getAgentProviderRevision } from './agentConfigPatch';
 import { canvasAgentBudgetLedger } from './agentBudget';
 import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
 import { buildCanvasAssetCatalog } from '@/features/canvas/application/canvasAssetCatalog';
@@ -188,19 +188,22 @@ function buildApprovalImpact(toolName: string, args: unknown): {
     ? args as Record<string, unknown>
     : undefined;
   const providerId = typeof configArgs?.providerId === 'string' ? configArgs.providerId : undefined;
+  const generationNetworkTarget = configArgs?.settingsTarget === 'generation-network';
   const requestedConfigRevision = typeof configArgs?.baseRevision === 'string'
     ? configArgs.baseRevision
     : undefined;
   return {
     baseRevision: canvasCommandRegistry.getRevision(),
-    baseConfigRevision: providerId
-      ? requestedConfigRevision ?? getAgentProviderRevision(providerId) ?? undefined
-      : undefined,
+    baseConfigRevision: generationNetworkTarget
+      ? requestedConfigRevision ?? getAgentGenerationNetworkRevision()
+      : providerId
+        ? requestedConfigRevision ?? getAgentProviderRevision(providerId) ?? undefined
+        : undefined,
     impact: {
       effect,
       title: toolName,
       summary: toolName === 'config_patch'
-        ? '预览、应用或回滚已列出的非敏感供应商配置字段。'
+        ? '预览、应用或回滚已列出的非敏感供应商或网络路线配置字段。'
         : toolName === 'asset_read'
           ? asset
             ? `读取画布图片“${asset.title}”并仅发送给当前多模态模型。`

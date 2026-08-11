@@ -28,6 +28,12 @@ export const NodeDeleteToolbar = memo(({ nodeId, node }: NodeDeleteToolbarProps)
   const ungroupNode = useCanvasStore((state) => state.ungroupNode);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const canRetryGeneration = canRetryGenerationFetch(node);
+  const generationJobState = node
+    ? String((node.data as Record<string, unknown>).generationJobState ?? '')
+    : '';
+  const retryLabelKey = generationJobState === 'recoverable_wait' || generationJobState === 'unknown'
+    ? 'nodeToolbar.safeRecover'
+    : 'nodeToolbar.retryFetch';
   const canUngroup = node?.type === CANVAS_NODE_TYPES.group;
 
   return (
@@ -47,10 +53,10 @@ export const NodeDeleteToolbar = memo(({ nodeId, node }: NodeDeleteToolbarProps)
               event.stopPropagation();
               updateNodeData(nodeId, buildRetryGenerationFetchPatch(node));
             }}
-            title={t('nodeToolbar.retryFetch')}
+            title={t(retryLabelKey)}
           >
             <RotateCcw className="h-3.5 w-3.5" />
-            {t('nodeToolbar.retryFetch')}
+            {t(retryLabelKey)}
           </UiChipButton>
         )}
         {canUngroup && (

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { X, FolderOpen, Plus, Trash2, CheckCircle2, ExternalLink, RotateCcw } from 'lucide-react';
+import { X, FolderOpen, Plus, Trash2, CheckCircle2, ExternalLink, RotateCcw, LoaderCircle, Network } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
 import { isTauri } from '@tauri-apps/api/core';
@@ -17,6 +17,7 @@ import {
   type CanvasMouseBindings,
   type ImageHostProvider,
   type ImageHostSettings,
+  type GenerationNetworkRoute,
   type PanoramaControlSensitivity,
 } from '@/stores/settingsStore';
 import { UiCheckbox, UiSelect } from '@/components/ui';
@@ -237,6 +238,7 @@ export function SettingsDialog({
     appendParameterConstraintsToPrompt,
     collapseNodeActionToolbarByDefault,
     showNodePayloadPreview,
+    generationNetworkSettings,
     enableAiTextStreaming,
     enableStoryboardGenGridPreviewShortcut,
     showStoryboardGenAdvancedRatioControls,
@@ -264,6 +266,7 @@ export function SettingsDialog({
     setAppendParameterConstraintsToPrompt,
     setCollapseNodeActionToolbarByDefault,
     setShowNodePayloadPreview,
+    setGenerationNetworkSettings,
     setEnableAiTextStreaming,
     setEnableStoryboardGenGridPreviewShortcut,
     setShowStoryboardGenAdvancedRatioControls,
@@ -320,6 +323,11 @@ export function SettingsDialog({
     useState(collapseNodeActionToolbarByDefault);
   const [localShowNodePayloadPreview, setLocalShowNodePayloadPreview] =
     useState(showNodePayloadPreview);
+  const [localGenerationNetworkRoute, setLocalGenerationNetworkRoute] =
+    useState<GenerationNetworkRoute>(generationNetworkSettings.route);
+  const [localCustomProxyUrl, setLocalCustomProxyUrl] =
+    useState(generationNetworkSettings.customProxyUrl);
+  const [networkTestStatus, setNetworkTestStatus] = useState<'' | 'testing' | 'success' | 'failed'>('');
   const [localEnableAiTextStreaming, setLocalEnableAiTextStreaming] =
     useState(enableAiTextStreaming);
   const [localEnableStoryboardGenGridPreviewShortcut, setLocalEnableStoryboardGenGridPreviewShortcut] =
@@ -403,6 +411,9 @@ export function SettingsDialog({
     setLocalAppendParameterConstraintsToPrompt(appendParameterConstraintsToPrompt);
     setLocalCollapseNodeActionToolbarByDefault(collapseNodeActionToolbarByDefault);
     setLocalShowNodePayloadPreview(showNodePayloadPreview);
+    setLocalGenerationNetworkRoute(generationNetworkSettings.route);
+    setLocalCustomProxyUrl(generationNetworkSettings.customProxyUrl);
+    setNetworkTestStatus('');
     setLocalEnableAiTextStreaming(enableAiTextStreaming);
     setLocalEnableStoryboardGenGridPreviewShortcut(enableStoryboardGenGridPreviewShortcut);
     setLocalShowStoryboardGenAdvancedRatioControls(showStoryboardGenAdvancedRatioControls);
@@ -427,6 +438,24 @@ export function SettingsDialog({
   }, [
     isOpen,
   ]);
+
+  const handleTestGenerationNetwork = useCallback(async () => {
+    setNetworkTestStatus('testing');
+    try {
+      const response = await customHttpRequest({
+        url: 'https://www.gstatic.com/generate_204',
+        method: 'GET',
+        timeoutMs: 12_000,
+        networkRoute: localGenerationNetworkRoute,
+        customProxyUrl: localGenerationNetworkRoute === 'custom-proxy'
+          ? localCustomProxyUrl.trim()
+          : undefined,
+      });
+      setNetworkTestStatus(response.status >= 200 && response.status < 400 ? 'success' : 'failed');
+    } catch {
+      setNetworkTestStatus('failed');
+    }
+  }, [localCustomProxyUrl, localGenerationNetworkRoute]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -468,6 +497,16 @@ export function SettingsDialog({
       ) {
         throw new Error('settings.imageHosting.errors.missingSeedvaultCredentials');
       }
+      if (localGenerationNetworkRoute === 'custom-proxy') {
+        try {
+          const proxyUrl = new URL(localCustomProxyUrl.trim());
+          if (!/^https?:$/.test(proxyUrl.protocol) || !proxyUrl.hostname) {
+            throw new Error('invalid proxy');
+          }
+        } catch {
+          throw new Error('settings.generationNetworkInvalidProxy');
+        }
+      }
 
       providers.forEach((provider) => {
         setProviderApiKey(provider.id, localApiKeys[provider.id] ?? '');
@@ -482,6 +521,10 @@ export function SettingsDialog({
       setAppendParameterConstraintsToPrompt(localAppendParameterConstraintsToPrompt);
       setCollapseNodeActionToolbarByDefault(localCollapseNodeActionToolbarByDefault);
       setShowNodePayloadPreview(localShowNodePayloadPreview);
+      setGenerationNetworkSettings({
+        route: localGenerationNetworkRoute,
+        customProxyUrl: localCustomProxyUrl,
+      });
       setEnableAiTextStreaming(localEnableAiTextStreaming);
       setEnableStoryboardGenGridPreviewShortcut(localEnableStoryboardGenGridPreviewShortcut);
       setShowStoryboardGenAdvancedRatioControls(localShowStoryboardGenAdvancedRatioControls);
@@ -529,6 +572,8 @@ export function SettingsDialog({
     localAppendParameterConstraintsToPrompt,
     localCollapseNodeActionToolbarByDefault,
     localShowNodePayloadPreview,
+    localGenerationNetworkRoute,
+    localCustomProxyUrl,
     localEnableAiTextStreaming,
     localEnableStoryboardGenGridPreviewShortcut,
     localShowStoryboardGenAdvancedRatioControls,
@@ -560,6 +605,7 @@ export function SettingsDialog({
     setAppendParameterConstraintsToPrompt,
     setCollapseNodeActionToolbarByDefault,
     setShowNodePayloadPreview,
+    setGenerationNetworkSettings,
     setEnableAiTextStreaming,
     setEnableStoryboardGenGridPreviewShortcut,
     setShowStoryboardGenAdvancedRatioControls,
@@ -1556,6 +1602,68 @@ export function SettingsDialog({
                     title={t('settings.showNodePayloadPreview')}
                     description={t('settings.showNodePayloadPreviewDesc')}
                   />
+
+                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
+                    <div className="mb-3 flex items-start gap-3">
+                      <Network className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                      <div>
+                        <h3 className="text-sm font-medium text-text-dark">
+                          {t('settings.generationNetworkRoute')}
+                        </h3>
+                        <p className="mt-1 text-xs text-text-muted">
+                          {t('settings.generationNetworkRouteDesc')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                      <UiSelect
+                        value={localGenerationNetworkRoute}
+                        onChange={(event) => {
+                          setLocalGenerationNetworkRoute(event.target.value as GenerationNetworkRoute);
+                          setNetworkTestStatus('');
+                        }}
+                        aria-label={t('settings.generationNetworkRoute')}
+                      >
+                        <option value="system">{t('settings.generationNetworkSystem')}</option>
+                        <option value="direct">{t('settings.generationNetworkDirect')}</option>
+                        <option value="custom-proxy">{t('settings.generationNetworkCustomProxy')}</option>
+                      </UiSelect>
+                      <button
+                        type="button"
+                        onClick={() => void handleTestGenerationNetwork()}
+                        disabled={networkTestStatus === 'testing'}
+                        className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-border-dark px-3 text-xs font-medium text-text-dark transition-colors hover:bg-bg-hover disabled:cursor-wait disabled:opacity-60"
+                      >
+                        {networkTestStatus === 'testing'
+                          ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                          : <Network className="h-3.5 w-3.5" aria-hidden="true" />}
+                        {t('settings.generationNetworkTest')}
+                      </button>
+                    </div>
+                    {localGenerationNetworkRoute === 'custom-proxy' && (
+                      <input
+                        value={localCustomProxyUrl}
+                        onChange={(event) => {
+                          setLocalCustomProxyUrl(event.target.value);
+                          setNetworkTestStatus('');
+                        }}
+                        placeholder="http://127.0.0.1:7890"
+                        className="mt-3 w-full rounded border border-border-dark bg-bg-darker px-3 py-2 text-sm text-text-dark outline-none transition-colors placeholder:text-text-muted focus:border-accent"
+                        aria-label={t('settings.generationNetworkProxyUrl')}
+                        spellCheck={false}
+                      />
+                    )}
+                    {networkTestStatus === 'success' && (
+                      <p role="status" className="mt-2 text-xs text-emerald-400">
+                        {t('settings.generationNetworkTestSuccess')}
+                      </p>
+                    )}
+                    {networkTestStatus === 'failed' && (
+                      <p role="alert" className="mt-2 text-xs text-red-400">
+                        {t('settings.generationNetworkTestFailed')}
+                      </p>
+                    )}
+                  </div>
 
                   <SettingsCheckboxCard
                     checked={localEnableAiTextStreaming}

@@ -6,6 +6,7 @@ import {
   resolveProviderAndModel,
 } from '@/features/canvas/infrastructure/customProviderGateway';
 import { isChatCustomProvider } from '@/stores/customProvidersStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 import {
   AgentModelProtocolError,
@@ -152,6 +153,7 @@ export class TauriAgentProviderHttpClient implements AgentProviderHttpClient {
     signal?: AbortSignal,
   ): Promise<AgentProviderHttpResponse> {
     throwIfAborted(signal);
+    const network = useSettingsStore.getState().generationNetworkSettings;
     const pending = customHttpRequest({
       url: request.url,
       method: 'POST',
@@ -159,6 +161,8 @@ export class TauriAgentProviderHttpClient implements AgentProviderHttpClient {
       bodyMode: 'json',
       body: request.body,
       timeoutMs: request.timeoutMs,
+      networkRoute: network.route,
+      customProxyUrl: network.route === 'custom-proxy' ? network.customProxyUrl : undefined,
     });
     if (!signal) return pending;
     return new Promise((resolve, reject) => {
@@ -177,6 +181,7 @@ export class TauriAgentProviderHttpClient implements AgentProviderHttpClient {
     // already-submitted native request may continue upstream. We never claim
     // that an external generation side effect was cancelled from this path.
     throwIfAborted(signal);
+    const network = useSettingsStore.getState().generationNetworkSettings;
     const queue = new AsyncChunkQueue();
     let status: number | undefined;
     let emittedChunks = 0;
@@ -194,6 +199,8 @@ export class TauriAgentProviderHttpClient implements AgentProviderHttpClient {
       bodyMode: 'json',
       body: request.body,
       timeoutMs: request.timeoutMs,
+      networkRoute: network.route,
+      customProxyUrl: network.route === 'custom-proxy' ? network.customProxyUrl : undefined,
     }, {
       onStatus: (nextStatus) => {
         status = nextStatus;

@@ -31,6 +31,7 @@ import { CanvasAgentAttachmentPicker } from './CanvasAgentAttachmentPicker';
 import { CanvasAgentComposer } from './CanvasAgentComposer';
 import { CanvasAgentContextPanel } from './CanvasAgentContextPanel';
 import { CanvasAgentHeader } from './CanvasAgentHeader';
+import { GenerationTasksPanel } from './GenerationTasksPanel';
 import { nextAgentFeedId, useCanvasAgentPanelStore, type AgentFeedItem } from './agentPanelStore';
 
 type Props = { projectId: string };
@@ -824,9 +825,16 @@ export function CanvasAgentDock({ projectId }: Props) {
 
         <div
           ref={feedScrollRef}
-          className="ui-scrollbar relative min-h-0 flex-1 overflow-y-auto p-3"
+          className={`ui-scrollbar relative min-h-0 flex-1 ${
+            activeView === 'tasks' ? 'overflow-hidden' : 'overflow-y-auto p-3'
+          }`}
           onScroll={onFeedScroll}
         >
+          {activeView === 'tasks' ? (
+            <div key={activeView} className="agent-view-enter flex h-full min-h-0 flex-col">
+              <GenerationTasksPanel nodes={canvasNodes} />
+            </div>
+          ) : (
           <div key={activeView} className="agent-view-enter">
             {activeView === 'history' ? (
               <div className="space-y-2">
@@ -885,8 +893,9 @@ export function CanvasAgentDock({ projectId }: Props) {
               </div>
             )}
           </div>
+          )}
 
-          {showNewItems ? (
+          {activeView !== 'tasks' && showNewItems ? (
             <button
               type="button"
               className="sticky bottom-2 left-1/2 z-10 mx-auto flex min-h-11 -translate-x-1/2 items-center rounded-full border border-accent/[0.35] bg-bg-dark px-3 text-xs text-accent shadow-lg transition-[background-color,transform] duration-150 hover:bg-accent/[0.10] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-10"
@@ -904,6 +913,7 @@ export function CanvasAgentDock({ projectId }: Props) {
           ) : null}
         </div>
 
+        {activeView !== 'tasks' ? (
         <div className="relative shrink-0">
           {attachmentPickerOpen ? (
             <CanvasAgentAttachmentPicker
@@ -950,6 +960,7 @@ export function CanvasAgentDock({ projectId }: Props) {
             onSettings={openModelSettings}
           />
         </div>
+        ) : null}
         </aside>
       </div>
     </>

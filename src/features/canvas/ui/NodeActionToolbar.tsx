@@ -245,6 +245,12 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
   const canHandleVideo = Boolean(rawVideoSource && videoSource);
   const canHandleAudio = Boolean(rawAudioSource && audioSource);
   const canRetryGeneration = canRetryGenerationFetch(node);
+  const generationJobState = String(
+    (node.data as Record<string, unknown>).generationJobState ?? '',
+  );
+  const retryLabelKey = generationJobState === 'recoverable_wait' || generationJobState === 'unknown'
+    ? 'nodeToolbar.safeRecover'
+    : 'nodeToolbar.retryFetch';
   const suggestedImageSavePath = useMemo(() => {
     if (isExportImageNode(node)) {
       return resolveGeneratedImageSaveFileName(node.data);
@@ -1055,10 +1061,10 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
           <UiChipButton
             className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS}`}
             onClick={handleRetryGenerationFetch}
-            title={t('nodeToolbar.retryFetch') as string}
+            title={t(retryLabelKey) as string}
           >
             <RotateCcw className="h-3.5 w-3.5" />
-            {t('nodeToolbar.retryFetch')}
+            {t(retryLabelKey)}
           </UiChipButton>
         )}
 

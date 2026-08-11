@@ -15,6 +15,7 @@ import {
   inspectRedactedApplicationConfig,
   inspectRedactedProviderConfig,
   preflightGeneration,
+  projectSafeGenerationJobDiagnostic,
   serializeSafeDiagnosticBundlePreview,
 } from './agentDiagnostics';
 
@@ -50,6 +51,9 @@ describe('agent diagnostics', () => {
     ['tools capability', { capability: 'tools', message: 'model does not support tools' }, 'configuration', 'capability-tools-unsupported'],
     ['rate limit', { status: 429, message: 'Too many requests' }, 'upstream', 'upstream-rate-limit'],
     ['server fault', { status: 503, message: 'Service unavailable' }, 'upstream', 'upstream-server-error'],
+    ['proxy failure', { message: 'proxy tunnel failed' }, 'network', 'network-proxy-failure'],
+    ['dns failure', { message: 'DNS resolve failed' }, 'network', 'network-dns-failure'],
+    ['tls failure', { message: 'TLS certificate invalid' }, 'network', 'network-tls-failure'],
     ['timeout', { code: 'ETIMEDOUT', message: 'Request timed out' }, 'network', 'network-timeout-unknown-result'],
     ['malformed response', { phase: 'response', message: 'Unexpected token < in JSON' }, 'upstream', 'provider-response-malformed'],
   ])('deterministically classifies %s', (_name, error, expectedClass, expectedCode) => {
@@ -63,6 +67,41 @@ describe('agent diagnostics', () => {
     expect(report.summary).toContain('阻断');
     expect(report.evidence[0]).toMatchObject({ code: 'pixel-limit', severity: 'blocking' });
     expect(report.evidence[0].message).toContain('12,582,912');
+  });
+
+  it('projects persistent generation jobs without leaking result URLs or poll descriptors', () => {
+    const projected = projectSafeGenerationJobDiagnostic({
+      job_id: 'job-1',
+      status: 'recoverable_wait',
+      media_type: 'image',
+      provider_id: 'provider-1',
+      model_id: 'model-1',
+      phase: 'polling',
+      external_task_id: 'task-123',
+      result_url: 'https://cdn.example/result.png?signature=secret-signature',
+      poll_descriptor: {
+        authorization: 'Bearer private-token',
+        pathTemplate: '/tasks/{taskId}',
+      },
+      error_category: 'timeout',
+      network_route: 'custom-proxy',
+      submit_attempts: 1,
+      consecutive_network_errors: 3,
+    });
+
+    expect(projected).toMatchObject({
+      jobId: 'job-1',
+      status: 'recoverable_wait',
+      externalTaskId: 'task-123',
+      hasResultUrl: true,
+      safeRecoveryAvailable: true,
+      automaticResubmitAllowed: false,
+      submitAttempts: 1,
+    });
+    const serialized = JSON.stringify(projected);
+    expect(serialized).not.toContain('secret-signature');
+    expect(serialized).not.toContain('private-token');
+    expect(serialized).not.toContain('pathTemplate');
   });
 
   it('reports missing media, invalid params, duplicate ids, dangling edges, and stalled jobs with locations', () => {
@@ -121,6 +160,10 @@ describe('agent diagnostics', () => {
     useSettingsStore.setState({
       apiKeys: { grsai: 'secret-built-in-key', empty: '' },
       agnesApiKey: 'secret-agnes-key',
+      generationNetworkSettings: {
+        route: 'custom-proxy',
+        customProxyUrl: 'http://user:secret-proxy-password@127.0.0.1:7890',
+      },
       downloadPresetPaths: ['/Users/alice/exports'],
       dreaminaStatus: {
         installed: true,
@@ -145,10 +188,12 @@ describe('agent diagnostics', () => {
     expect(application).toMatchObject({
       access: { providers: { grsai: 'configured', empty: 'missing' }, agnes: 'configured' },
       dreamina: { installed: true, loginState: 'logged_in', accountErrorState: 'present' },
+      generation: { networkRoute: 'custom-proxy', customProxyState: 'configured' },
     });
     expect(serialized).not.toContain('secret-built-in-key');
     expect(serialized).not.toContain('secret-agnes-key');
     expect(serialized).not.toContain('secret-account');
+    expect(serialized).not.toContain('secret-proxy-password');
     expect(serialized).not.toContain('/Users/alice');
     expect(serialized).not.toContain('resolvedPath');
     expect(serialized).not.toContain('downloadPresetPaths');

@@ -23,7 +23,7 @@ export type AgentFeedItem =
 interface CanvasAgentPanelState {
   isOpen: boolean;
   projectId: string | null;
-  activeView: 'conversation' | 'history' | 'activity';
+  activeView: 'conversation' | 'history' | 'activity' | 'tasks';
   selectedModelId: string | null;
   activeSessionId: string | null;
   feed: AgentFeedItem[];

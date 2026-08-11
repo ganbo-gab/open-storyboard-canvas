@@ -42,6 +42,15 @@ export type ImageHostProvider = 'pixhost' | 'seedvault';
 export type AudioOutputMode = 'server' | 'segmented';
 export type AudioProviderKind = 'local-doubao-tts' | 'gradio-voxcpm';
 export type ProviderApiKeys = Record<string, string>;
+export type GenerationNetworkRoute = 'system' | 'direct' | 'custom-proxy';
+export interface GenerationNetworkSettings {
+  route: GenerationNetworkRoute;
+  customProxyUrl: string;
+}
+export const DEFAULT_GENERATION_NETWORK_SETTINGS: GenerationNetworkSettings = {
+  route: 'system',
+  customProxyUrl: '',
+};
 export const DEFAULT_GRSAI_NANO_BANANA_PRO_MODEL = 'nano-banana-pro';
 export {
   DEFAULT_LIGHTING_PROMPT_TEMPLATE,
@@ -235,6 +244,7 @@ interface SettingsState {
   appendParameterConstraintsToPrompt: boolean;
   collapseNodeActionToolbarByDefault: boolean;
   showNodePayloadPreview: boolean;
+  generationNetworkSettings: GenerationNetworkSettings;
   enableAiTextStreaming: boolean;
   enableStoryboardGenGridPreviewShortcut: boolean;
   showStoryboardGenAdvancedRatioControls: boolean;
@@ -277,6 +287,7 @@ interface SettingsState {
   setAppendParameterConstraintsToPrompt: (enabled: boolean) => void;
   setCollapseNodeActionToolbarByDefault: (enabled: boolean) => void;
   setShowNodePayloadPreview: (enabled: boolean) => void;
+  setGenerationNetworkSettings: (settings: GenerationNetworkSettings) => void;
   setEnableAiTextStreaming: (enabled: boolean) => void;
   setEnableStoryboardGenGridPreviewShortcut: (enabled: boolean) => void;
   setShowStoryboardGenAdvancedRatioControls: (enabled: boolean) => void;
@@ -678,6 +689,21 @@ function normalizeCanvasEdgeRoutingMode(
   return 'spline';
 }
 
+export function normalizeGenerationNetworkSettings(input: unknown): GenerationNetworkSettings {
+  const record = input && typeof input === 'object' && !Array.isArray(input)
+    ? input as Partial<GenerationNetworkSettings>
+    : {};
+  const route = record.route === 'direct' || record.route === 'custom-proxy'
+    ? record.route
+    : 'system';
+  return {
+    route,
+    customProxyUrl: typeof record.customProxyUrl === 'string'
+      ? record.customProxyUrl.trim()
+      : '',
+  };
+}
+
 function normalizePanoramaControlSensitivity(
   input: PanoramaControlSensitivity | string | null | undefined
 ): PanoramaControlSensitivity {
@@ -974,6 +1000,7 @@ export const useSettingsStore = create<SettingsState>()(
       appendParameterConstraintsToPrompt: false,
       collapseNodeActionToolbarByDefault: false,
       showNodePayloadPreview: false,
+      generationNetworkSettings: { ...DEFAULT_GENERATION_NETWORK_SETTINGS },
       enableAiTextStreaming: true,
       enableStoryboardGenGridPreviewShortcut: false,
       showStoryboardGenAdvancedRatioControls: false,
@@ -1034,6 +1061,13 @@ export const useSettingsStore = create<SettingsState>()(
         set({ collapseNodeActionToolbarByDefault: enabled }),
       setShowNodePayloadPreview: (enabled) =>
         set({ showNodePayloadPreview: enabled }),
+      setGenerationNetworkSettings: (settings) =>
+        set({
+          generationNetworkSettings: {
+            route: settings.route,
+            customProxyUrl: settings.customProxyUrl.trim(),
+          },
+        }),
       setEnableAiTextStreaming: (enabled) =>
         set({ enableAiTextStreaming: enabled }),
       setEnableStoryboardGenGridPreviewShortcut: (enabled) =>
@@ -1326,6 +1360,7 @@ export const useSettingsStore = create<SettingsState>()(
           appendParameterConstraintsToPrompt?: boolean;
           collapseNodeActionToolbarByDefault?: boolean;
           showNodePayloadPreview?: boolean;
+          generationNetworkSettings?: GenerationNetworkSettings;
           enableAiTextStreaming?: boolean;
           grsaiNanoBananaProModel?: string;
           hideProviderGuidePopover?: boolean;
@@ -1366,6 +1401,9 @@ export const useSettingsStore = create<SettingsState>()(
         const collapseNodeActionToolbarByDefault =
           state.collapseNodeActionToolbarByDefault ?? false;
         const showNodePayloadPreview = state.showNodePayloadPreview ?? false;
+        const generationNetworkSettings = normalizeGenerationNetworkSettings(
+          state.generationNetworkSettings
+        );
         const enableAiTextStreaming = state.enableAiTextStreaming ?? true;
         const migratedLightingTemplate = (() => {
           const trimmed = state.lightingPromptTemplate?.trim() ?? '';
@@ -1403,6 +1441,7 @@ export const useSettingsStore = create<SettingsState>()(
             appendParameterConstraintsToPrompt,
             collapseNodeActionToolbarByDefault,
             showNodePayloadPreview,
+            generationNetworkSettings,
             enableAiTextStreaming,
             grsaiNanoBananaProModel: normalizeGrsaiNanoBananaProModel(
               state.grsaiNanoBananaProModel
@@ -1449,6 +1488,7 @@ export const useSettingsStore = create<SettingsState>()(
           appendParameterConstraintsToPrompt,
           collapseNodeActionToolbarByDefault,
           showNodePayloadPreview,
+          generationNetworkSettings,
           enableAiTextStreaming,
           grsaiNanoBananaProModel: normalizeGrsaiNanoBananaProModel(
             state.grsaiNanoBananaProModel

@@ -1,7 +1,15 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-const { customHttpRequestMock } = vi.hoisted(() => ({
+const {
+  customHttpRequestMock,
+  createGenerationJobMock,
+  getGenerationJobRecordMock,
+  updateGenerationJobMock,
+} = vi.hoisted(() => ({
   customHttpRequestMock: vi.fn(),
+  createGenerationJobMock: vi.fn(),
+  getGenerationJobRecordMock: vi.fn(),
+  updateGenerationJobMock: vi.fn(),
 }));
 
 vi.mock('@/commands/ai', async (importOriginal) => {
@@ -9,20 +17,30 @@ vi.mock('@/commands/ai', async (importOriginal) => {
   return {
     ...actual,
     customHttpRequest: customHttpRequestMock,
+    createGenerationJob: createGenerationJobMock,
+    getGenerationJobRecord: getGenerationJobRecordMock,
+    updateGenerationJob: updateGenerationJobMock,
   };
 });
 
 import { useCustomProvidersStore, type CustomProviderConfig } from '@/stores/customProvidersStore';
+import {
+  DEFAULT_GENERATION_NETWORK_SETTINGS,
+  useSettingsStore,
+} from '@/stores/settingsStore';
 import {
   customImageProviderConfigToDraft,
   customImageProviderDraftToConfig,
 } from '@/features/canvas/application/customImageProviderConfig';
 import {
   buildCustomProviderRequestDebugPreview,
+  classifyGenerationError,
   detectInlineImageAspectRatio,
   getCustomProviderJob,
+  getCustomProviderJobAsync,
   summarizeMaterializedSourceForLog,
   submitCustomProviderJob,
+  submitCustomVideoJob,
 } from './customProviderGateway';
 
 const storageValues = new Map<string, string>();
@@ -58,9 +76,16 @@ beforeAll(() => {
 });
 
 afterEach(() => {
+  delete (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri;
   useCustomProvidersStore.getState().replaceAll([]);
+  useSettingsStore.getState().setGenerationNetworkSettings(DEFAULT_GENERATION_NETWORK_SETTINGS);
   storageValues.clear();
   customHttpRequestMock.mockReset();
+  createGenerationJobMock.mockReset();
+  createGenerationJobMock.mockResolvedValue(undefined);
+  getGenerationJobRecordMock.mockReset();
+  updateGenerationJobMock.mockReset();
+  updateGenerationJobMock.mockResolvedValue(undefined);
 });
 
 function imageEditRequest(providerId = 'provider-1', modelName = 'gpt-image-2') {
@@ -79,10 +104,246 @@ function response(status: number, payload: unknown) {
 
 async function waitForTerminalJob(jobId: string) {
   await vi.waitFor(() => {
-    expect(getCustomProviderJob(jobId).status).not.toBe('running');
+    expect(['queued', 'submitting', 'running', 'recoverable_wait', 'materializing'])
+      .not.toContain(getCustomProviderJob(jobId).status);
   });
   return getCustomProviderJob(jobId);
 }
+
+describe('custom provider submission safety', () => {
+  it.each([
+    ['proxy tunnel failed', 'proxy'],
+    ['dns resolve failed', 'dns'],
+    ['TLS certificate invalid', 'tls'],
+    ['request timed out', 'timeout'],
+    ['HTTP 429', 'http'],
+    ['response JSON parse failed', 'response-parse'],
+    ['download failed', 'download'],
+  ])('classifies %s diagnostics', (message, category) => {
+    expect(classifyGenerationError(new Error(message))).toBe(category);
+  });
+
+  it('does not replay an ambiguous video POST', async () => {
+    useCustomProvidersStore.getState().replaceAll([provider({
+      mediaType: 'video',
+      endpointPath: '/videos',
+      models: ['video-model'],
+      extraParams: { requestBodyMode: 'json' },
+    })]);
+    customHttpRequestMock.mockRejectedValueOnce(new Error('connection reset while reading response'));
+
+    const job = await waitForTerminalJob(await submitCustomVideoJob({
+      prompt: 'animate',
+      model: 'custom:provider-1:video-model',
+      size: '1280x720',
+      aspect_ratio: '16:9',
+    }));
+
+    expect(customHttpRequestMock).toHaveBeenCalledTimes(1);
+    expect(job.status).toBe('unknown');
+    expect(job.error).toContain('为避免重复计费未自动重试');
+  });
+
+  it.each(['image', 'video'] as const)(
+    'blocks a paid %s submission when the desktop job record cannot be created',
+    async (mediaType) => {
+      (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
+      useCustomProvidersStore.getState().replaceAll([provider({
+        mediaType,
+        endpointPath: mediaType === 'video' ? '/videos' : '/images/generations',
+        models: [mediaType === 'video' ? 'video-model' : 'gpt-image-2'],
+        extraParams: { requestBodyMode: 'json' },
+      })]);
+      createGenerationJobMock.mockRejectedValueOnce(new Error('database is locked'));
+
+      const jobId = mediaType === 'video'
+        ? await submitCustomVideoJob({
+            prompt: 'animate',
+            model: 'custom:provider-1:video-model',
+            size: '1280x720',
+            aspect_ratio: '16:9',
+          })
+        : await submitCustomProviderJob({
+            prompt: 'draw',
+            model: 'custom:provider-1:gpt-image-2',
+            size: '1024x1024',
+            aspect_ratio: '1:1',
+          });
+      const job = await waitForTerminalJob(jobId);
+
+      expect(job.status).toBe('failed');
+      expect(job.error_category).toBe('storage');
+      expect(job.error).toContain('生成请求未发送');
+      expect(customHttpRequestMock).not.toHaveBeenCalled();
+      expect(updateGenerationJobMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('resumes a persisted image task by polling its external task id', async () => {
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
+    useCustomProvidersStore.getState().replaceAll([provider({
+      extraParams: {
+        asyncTask: {
+          resultEndpointPath: '/jobs/{taskId}',
+          resultMethod: 'GET',
+          imagePath: 'output',
+          statusPath: 'status',
+          successValues: ['succeeded'],
+          intervalMs: 500,
+          timeoutMs: 5000,
+        },
+      },
+    })]);
+    getGenerationJobRecordMock.mockResolvedValueOnce({
+      job_id: 'custom-local-restored-image',
+      status: 'running',
+      result: null,
+      error: null,
+      media_type: 'image',
+      provider_id: 'provider-1',
+      model_id: 'gpt-image-2',
+      external_task_id: 'task-restored-1',
+      network_route: 'system',
+    });
+    customHttpRequestMock.mockImplementationOnce(() => response(200, {
+      status: 'succeeded',
+      output: 'a'.repeat(400),
+    }));
+
+    const initial = await getCustomProviderJobAsync('custom-local-restored-image');
+    expect(initial.status).toBe('running');
+    const job = await waitForTerminalJob('custom-local-restored-image');
+
+    expect(job.status).toBe('succeeded');
+    expect(customHttpRequestMock).toHaveBeenCalledTimes(1);
+    expect(customHttpRequestMock.mock.calls[0][0].url).toContain('/jobs/task-restored-1');
+    expect(updateGenerationJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      jobId: 'custom-local-restored-image',
+      status: 'succeeded',
+    }));
+  });
+
+  it('does not publish recovered success before critical state is persisted', async () => {
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
+    useCustomProvidersStore.getState().replaceAll([provider({
+      extraParams: {
+        asyncTask: {
+          resultEndpointPath: '/jobs/{taskId}',
+          resultMethod: 'GET',
+          imagePath: 'output',
+          statusPath: 'status',
+          successValues: ['succeeded'],
+          intervalMs: 500,
+          timeoutMs: 5000,
+        },
+      },
+    })]);
+    getGenerationJobRecordMock.mockResolvedValueOnce({
+      job_id: 'custom-local-persist-before-success',
+      status: 'running',
+      result: null,
+      error: null,
+      media_type: 'image',
+      provider_id: 'provider-1',
+      model_id: 'gpt-image-2',
+      external_task_id: 'task-persist-first',
+      network_route: 'system',
+    });
+    customHttpRequestMock.mockImplementationOnce(() => response(200, {
+      status: 'succeeded',
+      output: 'a'.repeat(400),
+    }));
+    let releaseMaterializing!: () => void;
+    updateGenerationJobMock
+      .mockImplementationOnce(() => new Promise<void>((resolve) => {
+        releaseMaterializing = resolve;
+      }))
+      .mockResolvedValue(undefined);
+
+    await getCustomProviderJobAsync('custom-local-persist-before-success');
+    await vi.waitFor(() => {
+      expect(updateGenerationJobMock).toHaveBeenCalledWith(expect.objectContaining({
+        status: 'materializing',
+      }));
+    });
+    expect(getCustomProviderJob('custom-local-persist-before-success').status).toBe('running');
+
+    releaseMaterializing();
+    const job = await waitForTerminalJob('custom-local-persist-before-success');
+    expect(job.status).toBe('succeeded');
+    expect(updateGenerationJobMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: 'succeeded',
+    }));
+  });
+
+  it('converts an interrupted submitting job to unknown without replaying POST', async () => {
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
+    getGenerationJobRecordMock.mockResolvedValueOnce({
+      job_id: 'custom-local-interrupted-submit',
+      status: 'submitting',
+      result: null,
+      error: null,
+      media_type: 'image',
+      provider_id: 'provider-1',
+      model_id: 'gpt-image-2',
+      network_route: 'system',
+    });
+
+    await getCustomProviderJobAsync('custom-local-interrupted-submit');
+    const job = await waitForTerminalJob('custom-local-interrupted-submit');
+
+    expect(job.status).toBe('unknown');
+    expect(customHttpRequestMock).not.toHaveBeenCalled();
+    expect(updateGenerationJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'unknown',
+      errorCategory: 'submission-unknown',
+    }));
+  });
+
+  it('keeps the submitted network route for polling when settings change mid-job', async () => {
+    useSettingsStore.getState().setGenerationNetworkSettings({
+      ...DEFAULT_GENERATION_NETWORK_SETTINGS,
+      route: 'system',
+    });
+    useCustomProvidersStore.getState().replaceAll([provider({
+      extraParams: {
+        asyncTask: {
+          resultEndpointPath: '/jobs/{taskId}',
+          resultMethod: 'GET',
+          imagePath: 'output',
+          statusPath: 'status',
+          successValues: ['succeeded'],
+          intervalMs: 500,
+          timeoutMs: 5000,
+        },
+      },
+    })]);
+    customHttpRequestMock
+      .mockImplementationOnce(() => {
+        useSettingsStore.getState().setGenerationNetworkSettings({
+          ...DEFAULT_GENERATION_NETWORK_SETTINGS,
+          route: 'direct',
+        });
+        return response(200, { id: 'task-route-1' });
+      })
+      .mockImplementationOnce(() => response(200, {
+        status: 'succeeded',
+        output: 'a'.repeat(400),
+      }));
+
+    const job = await waitForTerminalJob(await submitCustomProviderJob({
+      prompt: 'draw',
+      model: 'custom:provider-1:gpt-image-2',
+      size: '1024x1024',
+      aspect_ratio: '1:1',
+    }));
+
+    expect(job.status).toBe('succeeded');
+    expect(customHttpRequestMock).toHaveBeenCalledTimes(2);
+    expect(customHttpRequestMock.mock.calls[0][0].networkRoute).toBe('system');
+    expect(customHttpRequestMock.mock.calls[1][0].networkRoute).toBe('system');
+  });
+});
 
 describe('custom provider image request contracts', () => {
   it('sends an API key through a configured custom header without Bearer auth', async () => {
@@ -1075,18 +1336,18 @@ describe('custom provider image edit compatibility negotiation', () => {
   });
 
   it.each([
-    ['network failure', () => Promise.reject(new Error('connection timed out'))],
-    ['HTTP 408', () => response(408, { error: 'timeout' })],
-    ['HTTP 429', () => response(429, { error: 'rate limited' })],
-    ['HTTP 500', () => response(500, { error: 'upstream error' })],
-    ['unrecognized HTTP 400', () => response(400, { error: 'generation rejected' })],
+    ['network failure', () => Promise.reject(new Error('connection timed out')), 'unknown'],
+    ['HTTP 408', () => response(408, { error: 'timeout' }), 'unknown'],
+    ['HTTP 429', () => response(429, { error: 'rate limited' }), 'failed'],
+    ['HTTP 500', () => response(500, { error: 'upstream error' }), 'failed'],
+    ['unrecognized HTTP 400', () => response(400, { error: 'generation rejected' }), 'failed'],
     ['response content-type HTTP 400', () => response(400, {
       error: 'upstream response content-type text/html after processing',
-    })],
+    }), 'failed'],
     ['no generated image HTTP 400', () => response(400, {
       error: 'no image was generated by the upstream service',
-    })],
-  ])('never negotiates after %s', async (_label, implementation) => {
+    }), 'failed'],
+  ] as const)('never negotiates after %s', async (_label, implementation, expectedStatus) => {
     useCustomProvidersStore.getState().replaceAll([provider({
       endpointPath: '/images/edits',
       extraParams: {
@@ -1098,7 +1359,7 @@ describe('custom provider image edit compatibility negotiation', () => {
 
     const job = await waitForTerminalJob(await submitCustomProviderJob(imageEditRequest()));
 
-    expect(job.status).toBe('failed');
+    expect(job.status).toBe(expectedStatus);
     expect(customHttpRequestMock).toHaveBeenCalledTimes(1);
   });
 

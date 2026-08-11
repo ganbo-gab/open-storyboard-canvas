@@ -1,8 +1,10 @@
 import { useCustomProvidersStore, type CustomProviderChatModelMetadata, type CustomProviderConfig } from '@/stores/customProvidersStore';
+import { useSettingsStore, type GenerationNetworkRoute } from '@/stores/settingsStore';
 import { redactSensitiveValue } from './agentRedaction';
 
 const CONFIG_ROLLBACK_STORAGE_KEY = 'storyboard-copilot:canvas-agent:config-rollbacks:v1';
 const MAX_CONFIG_ROLLBACKS = 200;
+const GENERATION_NETWORK_CONFIG_ID = '__application_generation_network__';
 
 export interface AgentProviderPatchV1 {
   version: 1;
@@ -35,6 +37,7 @@ export interface AgentConfigRollbackSnapshot {
     endpointPath?: string | null;
     apiStyle?: string;
     modelMetadata?: CustomProviderConfig['modelMetadata'] | null;
+    generationNetworkRoute?: GenerationNetworkRoute;
   };
   createdAt: number;
 }
@@ -70,11 +73,15 @@ function isRollbackSnapshot(value: unknown): value is AgentConfigRollbackSnapsho
     || typeof value.providerId !== 'string' || !value.providerId
     || typeof value.appliedRevision !== 'string' || !value.appliedRevision
     || typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt) || value.createdAt < 0) return false;
-  const allowed = new Set(['baseUrl', 'endpointPath', 'apiStyle', 'modelMetadata']);
+  const allowed = new Set(['baseUrl', 'endpointPath', 'apiStyle', 'modelMetadata', 'generationNetworkRoute']);
   if (Object.keys(value.previous).some((key) => !allowed.has(key))) return false;
   if (value.previous.baseUrl !== undefined && typeof value.previous.baseUrl !== 'string') return false;
   if (value.previous.endpointPath !== undefined && value.previous.endpointPath !== null && typeof value.previous.endpointPath !== 'string') return false;
   if (value.previous.apiStyle !== undefined && typeof value.previous.apiStyle !== 'string') return false;
+  if (
+    value.previous.generationNetworkRoute !== undefined
+    && !['system', 'direct', 'custom-proxy'].includes(value.previous.generationNetworkRoute as string)
+  ) return false;
   return value.previous.modelMetadata === undefined
     || value.previous.modelMetadata === null
     || isPlainRecord(value.previous.modelMetadata);
@@ -158,6 +165,65 @@ export function getAgentProviderRevision(providerId: string): string | null {
   return provider ? fingerprint(provider) : null;
 }
 
+export function getAgentGenerationNetworkRevision(): string {
+  const network = useSettingsStore.getState().generationNetworkSettings;
+  const value = `${network.route}|${network.customProxyUrl.trim() ? 'configured' : 'missing'}`;
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  return `generation-network-v1-${(hash >>> 0).toString(16)}`;
+}
+
+export function previewAgentGenerationNetworkPatch(input: {
+  baseRevision: string;
+  route: GenerationNetworkRoute;
+}): AgentConfigPatchPreview {
+  const network = useSettingsStore.getState().generationNetworkSettings;
+  const issues: string[] = [];
+  if (input.baseRevision !== getAgentGenerationNetworkRevision()) {
+    issues.push('配置在预览后已变化，需要重新生成补丁。');
+  }
+  if (input.route === 'custom-proxy' && !network.customProxyUrl.trim()) {
+    issues.push('自定义代理地址尚未由用户配置；Agent 不能读取或代填代理凭据。');
+  }
+  const diff = input.route === network.route
+    ? []
+    : [{ field: 'generationNetworkSettings.route', before: network.route, after: input.route }];
+  if (!diff.length) issues.push('补丁没有产生任何变化。');
+  return {
+    ok: issues.length === 0,
+    providerId: GENERATION_NETWORK_CONFIG_ID,
+    baseRevision: getAgentGenerationNetworkRevision(),
+    diff,
+    issues,
+    credential: network.customProxyUrl.trim() ? 'configured' : 'missing',
+  };
+}
+
+export function applyAgentGenerationNetworkPatch(
+  input: { baseRevision: string; route: GenerationNetworkRoute },
+  rollbackStore: PersistentAgentConfigRollbackStore = agentConfigRollbackStore,
+): { ok: true; rollbackToken: string; revision: string; diff: AgentConfigPatchPreview['diff'] } | { ok: false; issues: string[] } {
+  const preview = previewAgentGenerationNetworkPatch(input);
+  if (!preview.ok) return { ok: false, issues: preview.issues };
+  const network = useSettingsStore.getState().generationNetworkSettings;
+  const rollbackToken = globalThis.crypto?.randomUUID?.() ?? `config-rollback-${Date.now().toString(36)}`;
+  useSettingsStore.getState().setGenerationNetworkSettings({ ...network, route: input.route });
+  const revision = getAgentGenerationNetworkRevision();
+  try {
+    rollbackStore.put({
+      token: rollbackToken,
+      providerId: GENERATION_NETWORK_CONFIG_ID,
+      appliedRevision: revision,
+      previous: { generationNetworkRoute: network.route },
+      createdAt: Date.now(),
+    });
+  } catch (error) {
+    useSettingsStore.getState().setGenerationNetworkSettings(network);
+    throw error;
+  }
+  return { ok: true, rollbackToken, revision, diff: preview.diff };
+}
+
 function normalizedMetadata(value: CustomProviderChatModelMetadata | undefined): CustomProviderChatModelMetadata | undefined {
   if (!value) return undefined;
   return {
@@ -235,6 +301,17 @@ export function rollbackAgentProviderPatch(
 ): { ok: boolean; providerId?: string; error?: string } {
   const snapshot = rollbackStore.get(rollbackToken);
   if (!snapshot) return { ok: false, error: '回滚快照不存在或已过期。' };
+  if (snapshot.providerId === GENERATION_NETWORK_CONFIG_ID) {
+    if (getAgentGenerationNetworkRevision() !== snapshot.appliedRevision) {
+      return { ok: false, providerId: snapshot.providerId, error: '配置在应用后已变化，不能覆盖当前值；请重新预览回滚。' };
+    }
+    const route = snapshot.previous.generationNetworkRoute;
+    if (!route) return { ok: false, providerId: snapshot.providerId, error: '回滚快照缺少网络路线。' };
+    const network = useSettingsStore.getState().generationNetworkSettings;
+    useSettingsStore.getState().setGenerationNetworkSettings({ ...network, route });
+    rollbackStore.delete(rollbackToken);
+    return { ok: true, providerId: snapshot.providerId };
+  }
   if (getAgentProviderRevision(snapshot.providerId) !== snapshot.appliedRevision) {
     return { ok: false, providerId: snapshot.providerId, error: '配置在应用后已变化，不能覆盖当前值；请重新预览回滚。' };
   }

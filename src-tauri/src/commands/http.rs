@@ -20,6 +20,8 @@ pub struct HttpRequestDto {
     pub body: Option<Value>,
     pub multipart: Option<MultipartBodyDto>,
     pub timeout_ms: Option<u64>,
+    pub network_route: Option<String>,
+    pub custom_proxy_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +75,7 @@ pub struct HttpStreamEventDto {
 }
 
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static DIRECT_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn shared_http_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(|| {
@@ -82,6 +85,49 @@ fn shared_http_client() -> &'static reqwest::Client {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new())
     })
+}
+
+fn direct_http_client() -> &'static reqwest::Client {
+    DIRECT_HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .no_proxy()
+            .pool_idle_timeout(Duration::from_secs(90))
+            .tcp_keepalive(Duration::from_secs(60))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+fn client_for_route(
+    route: Option<&str>,
+    custom_proxy_url: Option<&str>,
+) -> Result<reqwest::Client, String> {
+    match route.unwrap_or("system").trim() {
+        "" | "system" => Ok(shared_http_client().clone()),
+        "direct" => Ok(direct_http_client().clone()),
+        "custom-proxy" => {
+            let raw_url = custom_proxy_url
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "custom-proxy route requires customProxyUrl".to_string())?;
+            let parsed = reqwest::Url::parse(raw_url)
+                .map_err(|_| "customProxyUrl must be a valid HTTP or HTTPS URL".to_string())?;
+            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+                return Err(
+                    "customProxyUrl must use http:// or https:// and include a host".to_string(),
+                );
+            }
+            let proxy = reqwest::Proxy::all(parsed)
+                .map_err(|_| "customProxyUrl could not be configured".to_string())?;
+            reqwest::Client::builder()
+                .proxy(proxy)
+                .pool_idle_timeout(Duration::from_secs(90))
+                .tcp_keepalive(Duration::from_secs(60))
+                .build()
+                .map_err(|err| format!("Failed to build custom proxy client: {err}"))
+        }
+        other => Err(format!("Unsupported network route: {other}")),
+    }
 }
 
 fn parse_data_url(value: &str) -> Result<(Vec<u8>, Option<String>), String> {
@@ -333,8 +379,11 @@ fn take_decodable_utf8(pending: &mut Vec<u8>, flush: bool) -> Option<String> {
 
 #[tauri::command]
 pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponseDto, String> {
-    let client = shared_http_client();
-    let response = build_http_request(client, request)?
+    let client = client_for_route(
+        request.network_route.as_deref(),
+        request.custom_proxy_url.as_deref(),
+    )?;
+    let response = build_http_request(&client, request)?
         .send()
         .await
         .map_err(|err| format!("HTTP request failed: {err}"))?;
@@ -358,8 +407,11 @@ pub async fn custom_http_stream_request(
         return Err("streamId is required".to_string());
     }
 
-    let client = shared_http_client();
-    let mut response = build_http_request(client, request)?
+    let client = client_for_route(
+        request.network_route.as_deref(),
+        request.custom_proxy_url.as_deref(),
+    )?;
+    let mut response = build_http_request(&client, request)?
         .send()
         .await
         .map_err(|err| {
@@ -477,4 +529,24 @@ pub async fn custom_http_stream_request(
         byte_length,
         chunk_count,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn route_clients_accept_supported_modes() {
+        assert!(client_for_route(Some("system"), None).is_ok());
+        assert!(client_for_route(Some("direct"), None).is_ok());
+        assert!(client_for_route(Some("custom-proxy"), Some("http://127.0.0.1:7890")).is_ok());
+    }
+
+    #[test]
+    fn custom_proxy_rejects_missing_or_unsafe_urls() {
+        assert!(client_for_route(Some("custom-proxy"), None).is_err());
+        assert!(client_for_route(Some("custom-proxy"), Some("socks5://127.0.0.1:7890")).is_err());
+        assert!(client_for_route(Some("custom-proxy"), Some("not a url")).is_err());
+        assert!(client_for_route(Some("unexpected"), None).is_err());
+    }
 }

@@ -13,7 +13,7 @@ import type { AiGateway, GenerateImagePayload } from '../application/ports';
 import { submitDreaminaJob, submitDreaminaVideoJob, getDreaminaJob } from './dreaminaGateway';
 import {
   submitCustomProviderJob,
-  getCustomProviderJob,
+  getCustomProviderJobAsync,
   retryCustomProviderJob,
   submitCustomVideoJob,
   buildCustomProviderRequestDebugPreview,
@@ -239,7 +239,7 @@ export const tauriAiGateway: AiGateway = {
   },
   getGenerateImageJob: async (jobId: string) => {
     if (isDreaminaJob(jobId)) return getDreaminaJob(jobId);
-    if (isCustomJob(jobId)) return getCustomProviderJob(jobId);
+    if (isCustomJob(jobId)) return await getCustomProviderJobAsync(jobId);
     return await getGenerateImageJob(jobId);
   },
   submitGenerateVideoJob: async (payload: GenerateVideoPayload) => {
@@ -269,10 +269,16 @@ export const tauriAiGateway: AiGateway = {
   },
   getGenerateVideoJob: async (jobId: string) => {
     if (isDreaminaJob(jobId)) return getDreaminaJob(jobId);
-    if (isCustomJob(jobId)) return getCustomProviderJob(jobId);
+    if (isCustomJob(jobId)) return await getCustomProviderJobAsync(jobId);
     return { job_id: jobId, status: 'not_found', result: null, error: 'video job id not found' };
   },
   retryGenerateVideoJob: async (jobId: string) => {
+    if (isCustomJob(jobId)) {
+      return retryCustomProviderJob(jobId);
+    }
+    return false;
+  },
+  retryGenerationJob: async (jobId: string) => {
     if (isCustomJob(jobId)) {
       return retryCustomProviderJob(jobId);
     }

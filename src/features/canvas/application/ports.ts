@@ -53,25 +53,40 @@ export interface GenerateVideoPayload {
   extraParams?: Record<string, unknown>;
 }
 
+export interface GenerationJobPollStatus {
+  job_id: string;
+  status:
+    | 'queued'
+    | 'submitting'
+    | 'running'
+    | 'recoverable_wait'
+    | 'materializing'
+    | 'succeeded'
+    | 'failed'
+    | 'not_found'
+    | 'unknown'
+    | 'canceled';
+  result?: string | null;
+  error?: string | null;
+  warning?: string | null;
+  phase?: string;
+  external_task_id?: string | null;
+  result_url?: string | null;
+  error_category?: string | null;
+  network_route?: 'system' | 'direct' | 'custom-proxy';
+  resumable?: boolean;
+  created_at?: number;
+  updated_at?: number;
+}
+
 export interface AiGateway {
   setApiKey: (provider: string, apiKey: string) => Promise<void>;
   generateImage: (payload: GenerateImagePayload) => Promise<string>;
   submitGenerateImageJob: (payload: GenerateImagePayload) => Promise<string>;
-  getGenerateImageJob: (jobId: string) => Promise<{
-    job_id: string;
-    status: 'queued' | 'running' | 'succeeded' | 'failed' | 'not_found';
-    result?: string | null;
-    error?: string | null;
-    warning?: string | null;
-  }>;
+  getGenerateImageJob: (jobId: string) => Promise<GenerationJobPollStatus>;
   submitGenerateVideoJob: (payload: GenerateVideoPayload) => Promise<string>;
-  getGenerateVideoJob: (jobId: string) => Promise<{
-    job_id: string;
-    status: 'queued' | 'running' | 'succeeded' | 'failed' | 'not_found';
-    result?: string | null;
-    error?: string | null;
-    warning?: string | null;
-  }>;
+  getGenerateVideoJob: (jobId: string) => Promise<GenerationJobPollStatus>;
+  retryGenerationJob?: (jobId: string) => Promise<boolean>;
   retryGenerateVideoJob?: (jobId: string) => Promise<boolean>;
 }
 

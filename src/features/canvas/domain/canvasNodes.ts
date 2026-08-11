@@ -42,6 +42,18 @@ export const IMAGE_ASPECT_RATIOS = [
 
 export type ImageSize = (typeof IMAGE_SIZES)[number];
 
+export type CanvasGenerationJobState =
+  | 'queued'
+  | 'submitting'
+  | 'running'
+  | 'recoverable_wait'
+  | 'materializing'
+  | 'succeeded'
+  | 'failed'
+  | 'not_found'
+  | 'unknown'
+  | 'canceled';
+
 export interface NodeDisplayData {
   displayName?: string;
   [key: string]: unknown;
@@ -82,6 +94,12 @@ export interface ExportImageNodeData extends NodeImageData {
   generationDurationMs?: number;
   generationElapsedMs?: number | null;
   generationJobId?: string | null;
+  generationLastJobId?: string | null;
+  generationJobState?: CanvasGenerationJobState;
+  generationJobPhase?: string | null;
+  generationNetworkRoute?: 'system' | 'direct' | 'custom-proxy' | null;
+  generationSafeRecoveryAvailable?: boolean;
+  generationJobUpdatedAt?: number | null;
   generationProviderId?: string | null;
   generationClientSessionId?: string | null;
   generationError?: string | null;
@@ -239,6 +257,12 @@ export interface VideoNodeData extends NodeDisplayData {
   generationDurationMs?: number;
   generationElapsedMs?: number | null;
   generationJobId?: string | null;
+  generationLastJobId?: string | null;
+  generationJobState?: CanvasGenerationJobState;
+  generationJobPhase?: string | null;
+  generationNetworkRoute?: 'system' | 'direct' | 'custom-proxy' | null;
+  generationSafeRecoveryAvailable?: boolean;
+  generationJobUpdatedAt?: number | null;
   generationProviderId?: string | null;
   generationClientSessionId?: string | null;
   generationError?: string | null;

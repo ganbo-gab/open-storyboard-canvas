@@ -6,7 +6,7 @@ import {
   useViewport,
   type NodeProps,
 } from '@xyflow/react';
-import { AlertTriangle, Image as ImageIcon, Sparkles } from 'lucide-react';
+import { AlertTriangle, CircleHelp, Image as ImageIcon, PauseCircle, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -15,6 +15,7 @@ import {
   EXPORT_RESULT_NODE_MIN_WIDTH,
   EXPORT_RESULT_NODE_MIN_HEIGHT,
   type CanvasNodeType,
+  type CanvasGenerationJobState,
   type ExportImageNodeData,
   type ImageEditNodeData,
 } from '@/features/canvas/domain/canvasNodes';
@@ -37,6 +38,7 @@ import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canv
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
 import { CanvasNodeImage } from '@/features/canvas/ui/CanvasNodeImage';
 import { formatGenerationElapsedMs } from '@/features/canvas/ui/generationElapsed';
+import { GenerationJobStatus } from '@/features/canvas/ui/GenerationJobStatus';
 import { useCanvasStore } from '@/stores/canvasStore';
 
 type ImageNodeProps = NodeProps & {
@@ -69,8 +71,28 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
     typeof (data as { generationWarning?: unknown }).generationWarning === 'string'
       ? ((data as { generationWarning?: string }).generationWarning ?? '').trim()
       : '';
+  const generationJobState = typeof data.generationJobState === 'string'
+    ? data.generationJobState as CanvasGenerationJobState
+    : null;
+  const generationJobPhase = typeof data.generationJobPhase === 'string'
+    ? data.generationJobPhase
+    : null;
+  const generationNetworkRoute = data.generationNetworkRoute === 'system'
+    || data.generationNetworkRoute === 'direct'
+    || data.generationNetworkRoute === 'custom-proxy'
+    ? data.generationNetworkRoute
+    : null;
+  const hasUnknownSubmission =
+    isExportResultNode && !isGenerating && !data.imageUrl && generationJobState === 'unknown';
+  const hasRecoverableWait =
+    isExportResultNode && !isGenerating && !data.imageUrl && generationJobState === 'recoverable_wait';
+  const hasGenerationAttention = hasUnknownSubmission || hasRecoverableWait;
   const hasGenerationError =
-    isExportResultNode && !isGenerating && !data.imageUrl && generationError.length > 0;
+    isExportResultNode
+    && !isGenerating
+    && !data.imageUrl
+    && generationError.length > 0
+    && !hasGenerationAttention;
   const generationStartedAt =
     typeof data.generationStartedAt === 'number' ? data.generationStartedAt : null;
   const generationDurationMs =
@@ -216,7 +238,11 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
     <div
       className={`
         group relative overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-0 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
-        ${hasGenerationError
+        ${hasGenerationAttention
+          ? (selected
+            ? 'border-amber-300 shadow-[0_0_0_1px_rgba(252,211,77,0.34)]'
+            : 'border-amber-400/65 bg-amber-950/10 hover:border-amber-300/80')
+          : hasGenerationError
           ? (selected
             ? 'border-red-400 shadow-[0_0_0_1px_rgba(248,113,113,0.42)]'
             : 'border-red-500/70 bg-[rgba(127,29,29,0.12)] hover:border-red-400/80 dark:border-red-500/70 dark:hover:border-red-400/80')
@@ -264,7 +290,11 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
       />
 
       <div
-        className={`relative h-full w-full overflow-hidden rounded-[var(--node-radius)] ${hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'}`}
+        className={`relative h-full w-full overflow-hidden rounded-[var(--node-radius)] ${
+          hasGenerationAttention
+            ? 'bg-amber-950/25'
+            : hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'
+        }`}
       >
         {data.imageUrl ? (
           <>
@@ -276,6 +306,29 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
               className="h-full w-full object-contain"
             />
           </>
+        ) : hasGenerationAttention ? (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-amber-100">
+            {hasUnknownSubmission ? (
+              <CircleHelp className="h-7 w-7 text-amber-300" aria-hidden="true" />
+            ) : (
+              <PauseCircle className="h-7 w-7 text-amber-300" aria-hidden="true" />
+            )}
+            <span className="text-center text-[12px] font-semibold leading-5">
+              {t(hasUnknownSubmission
+                ? 'generationJob.unknownTitle'
+                : 'generationJob.recoverableTitle')}
+            </span>
+            <span className="max-h-[64px] overflow-y-auto break-words text-center text-[12px] leading-5 text-amber-100/85">
+              {generationError || t('generationJob.recoverableDescription')}
+            </span>
+            <span className="text-center text-[11px] leading-4 text-amber-200/70">
+              {hasUnknownSubmission
+                ? t(data.generationSafeRecoveryAvailable
+                  ? 'generationJob.unknownSafeHint'
+                  : 'generationJob.unknownBlockedHint')
+                : t('generationJob.recoverableHint')}
+            </span>
+          </div>
         ) : hasGenerationError ? (
           <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-red-300">
             <AlertTriangle className="h-7 w-7 opacity-90" />
@@ -308,6 +361,12 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
             />
           </div>
         )}
+
+        <GenerationJobStatus
+          state={isGenerating ? generationJobState : null}
+          phase={generationJobPhase}
+          networkRoute={generationNetworkRoute}
+        />
 
         {generationWarning && data.imageUrl ? (
           <div

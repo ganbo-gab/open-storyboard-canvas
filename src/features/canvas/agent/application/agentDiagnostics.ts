@@ -8,6 +8,11 @@ import {
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useCustomProvidersStore } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import {
+  getGenerationJobRecord,
+  listGenerationJobs,
+  type GenerationJobStatus,
+} from '@/commands/ai';
 import { redactSensitiveValue, scanForSensitiveOutput } from './agentRedaction';
 
 export type DiagnosisClass = 'input' | 'configuration' | 'upstream' | 'network' | 'application-bug' | 'unknown';
@@ -110,6 +115,27 @@ export interface DiagnosticBundlePreview {
   };
 }
 
+export interface SafeGenerationJobDiagnostic {
+  jobId: string;
+  status: GenerationJobStatus['status'];
+  mediaType: GenerationJobStatus['media_type'];
+  providerId: string | null;
+  modelId: string | null;
+  phase: string | null;
+  errorCategory: string | null;
+  error: string | null;
+  networkRoute: GenerationJobStatus['network_route'] | null;
+  externalTaskId: string | null;
+  hasResultUrl: boolean;
+  safeRecoveryAvailable: boolean;
+  automaticResubmitAllowed: false;
+  billingRisk: 'possible' | 'not-indicated';
+  submitAttempts: number;
+  consecutiveNetworkErrors: number;
+  createdAt: number | null;
+  updatedAt: number | null;
+}
+
 const DEFAULT_STALLED_JOB_MS = 30 * 60_000;
 const MAX_SAFE_COLLECTION_ITEMS = 100;
 const SENSITIVE_FIELD = /(?:api.?key|authorization|cookie|token|secret|password|credential|private.?key)/i;
@@ -130,6 +156,63 @@ function safeText(value: unknown, fallback = ''): string {
 function safeLocationId(value: string): string {
   const safe = safeText(value);
   return safe && !safe.startsWith('[redacted') ? safe.slice(0, 160) : '[redacted-id]';
+}
+
+export function projectSafeGenerationJobDiagnostic(
+  job: GenerationJobStatus,
+): SafeGenerationJobDiagnostic {
+  const externalTaskId = typeof job.external_task_id === 'string' && job.external_task_id.trim()
+    ? safeLocationId(job.external_task_id.trim())
+    : null;
+  const hasResultUrl = typeof job.result_url === 'string' && job.result_url.trim().length > 0;
+  return {
+    jobId: safeLocationId(job.job_id),
+    status: job.status,
+    mediaType: job.media_type ?? 'unknown',
+    providerId: job.provider_id ? safeLocationId(job.provider_id) : null,
+    modelId: job.model_id ? safeLocationId(job.model_id) : null,
+    phase: job.phase ? safeText(job.phase) : null,
+    errorCategory: job.error_category ? safeText(job.error_category) : null,
+    error: job.error ? safeText(job.error) : null,
+    networkRoute: job.network_route ?? null,
+    externalTaskId,
+    hasResultUrl,
+    safeRecoveryAvailable: Boolean(externalTaskId || hasResultUrl),
+    automaticResubmitAllowed: false,
+    billingRisk: job.status === 'unknown' ? 'possible' : 'not-indicated',
+    submitAttempts: Math.max(0, Math.min(1, job.submit_attempts ?? 0)),
+    consecutiveNetworkErrors: Math.max(0, job.consecutive_network_errors ?? 0),
+    createdAt: typeof job.created_at === 'number' ? job.created_at : null,
+    updatedAt: typeof job.updated_at === 'number' ? job.updated_at : null,
+  };
+}
+
+export async function inspectPersistedGenerationJobs(input: {
+  jobId?: string;
+  limit?: number;
+} = {}): Promise<{
+  desktopPersistenceAvailable: boolean;
+  jobs: SafeGenerationJobDiagnostic[];
+  recoveryPolicy: string;
+}> {
+  const jobId = typeof input.jobId === 'string' ? input.jobId.trim() : '';
+  const limit = Math.max(1, Math.min(50, Math.round(input.limit ?? 20)));
+  try {
+    const jobs = jobId
+      ? [await getGenerationJobRecord(jobId)]
+      : await listGenerationJobs(limit);
+    return {
+      desktopPersistenceAvailable: true,
+      jobs: jobs.map(projectSafeGenerationJobDiagnostic),
+      recoveryPolicy: 'unknown 不会自动重提；只有已保存上游 task id 或结果 URL 的任务才能安全恢复。',
+    };
+  } catch (error) {
+    return {
+      desktopPersistenceAvailable: false,
+      jobs: [],
+      recoveryPolicy: safeText(error instanceof Error ? error.message : String(error)),
+    };
+  }
 }
 
 export function sanitizeDiagnosticValue(value: unknown, depth = 0): unknown {
@@ -273,6 +356,31 @@ export function classifyAgentError(error: unknown): DiagnosisReport {
       classification: ['upstream'], confidence: 'high', summary: '供应商服务端发生暂时性故障。',
       evidence: [evidence('upstream-server-error', `供应商返回 ${status ?? '5xx'} 服务端错误。`, 'provider')],
       unknowns: ['无法从服务端错误确定付费请求是否已被受理；禁止自动重提。'],
+    });
+  }
+
+  if (/proxy|代理|tunnel/.test(normalized)) {
+    return report({
+      classification: ['network', 'configuration'], confidence: 'high', summary: '代理路线或代理服务连接失败。',
+      evidence: [evidence('network-proxy-failure', '错误发生在代理解析、连接或隧道阶段。', 'runtime')],
+      configFix: { kind: 'settings', description: '检查生成网络路线与 HTTP/HTTPS 代理地址，或切换回系统代理后测试连接。', patch: { action: 'review-generation-network-route' } },
+      unknowns: ['代理失败时无法仅凭本机错误判断付费提交是否已经到达上游。'],
+    });
+  }
+
+  if (/dns|enotfound|name or service|域名.{0,12}(?:失败|解析)|解析.{0,12}域名/.test(normalized)) {
+    return report({
+      classification: ['network'], confidence: 'high', summary: '域名解析失败，当前路线无法定位供应商主机。',
+      evidence: [evidence('network-dns-failure', '网络层报告 DNS 或主机名解析错误。', 'runtime')],
+      unknowns: [],
+    });
+  }
+
+  if (/tls|ssl|certificate|证书/.test(normalized)) {
+    return report({
+      classification: ['network', 'configuration'], confidence: 'high', summary: 'TLS 或证书校验失败。',
+      evidence: [evidence('network-tls-failure', '安全连接在证书或 TLS 握手阶段失败。', 'runtime')],
+      unknowns: ['需要核对系统时间、证书链、代理中间证书和供应商域名。'],
     });
   }
 
@@ -508,6 +616,8 @@ export function inspectRedactedApplicationConfig(): unknown {
       aiTextStreaming: settings.enableAiTextStreaming,
       storyboardGridPreviewShortcut: settings.enableStoryboardGenGridPreviewShortcut,
       storyboardAdvancedRatioControls: settings.showStoryboardGenAdvancedRatioControls,
+      networkRoute: settings.generationNetworkSettings.route,
+      customProxyState: settings.generationNetworkSettings.customProxyUrl ? 'configured' : 'missing',
     },
     canvas: {
       collapseNodeActionToolbarByDefault: settings.collapseNodeActionToolbarByDefault,

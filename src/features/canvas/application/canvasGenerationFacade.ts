@@ -6,7 +6,17 @@ import {
 import type { CanvasEventBus } from './ports';
 import { supportsCanvasGenerationTrigger } from './canvasGenerationTriggers';
 
-export type CanvasGenerationStatus = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed';
+export type CanvasGenerationStatus =
+  | 'idle'
+  | 'queued'
+  | 'submitting'
+  | 'running'
+  | 'recoverable_wait'
+  | 'materializing'
+  | 'succeeded'
+  | 'failed'
+  | 'unknown'
+  | 'canceled';
 
 export interface CanvasGenerationStatusProjection {
   nodeId: string;
@@ -27,6 +37,8 @@ export interface CanvasGenerationSubmitResult {
 type GenerationData = {
   isGenerating?: unknown;
   generationJobId?: unknown;
+  generationLastJobId?: unknown;
+  generationJobState?: unknown;
   generationError?: unknown;
   lastError?: unknown;
   resultNodeId?: unknown;
@@ -51,9 +63,22 @@ function projectNodeStatus(node: CanvasNode): CanvasGenerationStatusProjection {
   const error = readString(data.generationError) ?? readString(data.lastError);
   const explicitResultNodeId = readString(data.resultNodeId);
   const hasResult = Boolean(explicitResultNodeId) || hasGenerationResult(data);
-  const jobId = readString(data.generationJobId);
+  const jobId = readString(data.generationJobId) ?? readString(data.generationLastJobId);
+  const explicitJobState = readString(data.generationJobState);
   let status: CanvasGenerationStatus = 'idle';
-  if (error) {
+  if (
+    explicitJobState === 'queued'
+    || explicitJobState === 'submitting'
+    || explicitJobState === 'running'
+    || explicitJobState === 'recoverable_wait'
+    || explicitJobState === 'materializing'
+    || explicitJobState === 'succeeded'
+    || explicitJobState === 'failed'
+    || explicitJobState === 'unknown'
+    || explicitJobState === 'canceled'
+  ) {
+    status = explicitJobState;
+  } else if (error) {
     status = 'failed';
   } else if (data.isGenerating === true) {
     status = jobId ? 'running' : 'queued';
@@ -122,8 +147,16 @@ function aggregateSourceStatus(
     ?? null;
   const allProjections = [sourceProjection, ...projections];
   let status: CanvasGenerationStatus = 'idle';
-  if (allProjections.some((projection) => projection.status === 'running')) {
+  if (allProjections.some((projection) => projection.status === 'unknown')) {
+    status = 'unknown';
+  } else if (allProjections.some((projection) => projection.status === 'running')) {
     status = 'running';
+  } else if (allProjections.some((projection) => projection.status === 'submitting')) {
+    status = 'submitting';
+  } else if (allProjections.some((projection) => projection.status === 'recoverable_wait')) {
+    status = 'recoverable_wait';
+  } else if (allProjections.some((projection) => projection.status === 'materializing')) {
+    status = 'materializing';
   } else if (allProjections.some((projection) => projection.status === 'queued')) {
     status = 'queued';
   } else if (allProjections.some((projection) => projection.status === 'failed')) {
@@ -134,9 +167,7 @@ function aggregateSourceStatus(
 
   return {
     nodeId: sourceNode.id,
-    jobId: sourceProjection.status === 'running'
-      || sourceProjection.status === 'queued'
-      || sourceProjection.status === 'failed'
+    jobId: sourceProjection.status !== 'idle' && sourceProjection.status !== 'succeeded'
       ? sourceProjection.jobId
       : latestProjection?.jobId ?? sourceProjection.jobId ?? jobIds[jobIds.length - 1] ?? null,
     jobIds,
@@ -178,18 +209,22 @@ export class CanvasGenerationFacade {
   ): CanvasGenerationStatusProjection | null {
     const node = input.nodeId
       ? nodes.find((candidate) => candidate.id === input.nodeId)
-      : nodes.find((candidate) => (
-        readString((candidate.data as GenerationData).generationJobId) === input.jobId
-      ));
+      : nodes.find((candidate) => {
+        const data = candidate.data as GenerationData;
+        return readString(data.generationJobId) === input.jobId
+          || readString(data.generationLastJobId) === input.jobId;
+      });
     if (!node) {
       return null;
     }
 
     if (this.supportsNode(node)) {
       const resultNodes = findGenerationResultNodes(nodes, edges, node);
-      if (input.jobId && ![node, ...resultNodes].some((candidate) => (
-        readString((candidate.data as GenerationData).generationJobId) === input.jobId
-      ))) {
+      if (input.jobId && ![node, ...resultNodes].some((candidate) => {
+        const data = candidate.data as GenerationData;
+        return readString(data.generationJobId) === input.jobId
+          || readString(data.generationLastJobId) === input.jobId;
+      })) {
         return null;
       }
       if (resultNodes.length > 0) {

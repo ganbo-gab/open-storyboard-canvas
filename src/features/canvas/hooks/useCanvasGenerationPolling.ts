@@ -397,8 +397,10 @@ async function prepareCompletedImageResult(
     generatedDateStamp: dateStamp,
     sourcePrompt,
     isGenerating: false,
+    generationJobState: 'succeeded',
     generationStartedAt: null,
     generationElapsedMs: resolveGenerationElapsedMs(currentData),
+    generationLastJobId: currentData.generationJobId ?? null,
     generationJobId: null,
     generationProviderId: null,
     generationClientSessionId: null,
@@ -533,8 +535,10 @@ async function prepareCompletedVideoResult(
     generatedDateStamp: dateStamp,
     sourcePrompt,
     isGenerating: false,
+    generationJobState: 'succeeded',
     generationStartedAt: null,
     generationElapsedMs: resolveGenerationElapsedMs(currentData),
+    generationLastJobId: currentData.generationJobId ?? null,
     generationJobId: null,
     generationProviderId: null,
     generationClientSessionId: null,
@@ -633,15 +637,20 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
           && Number.isFinite(currentData.generationRetryRequestedAt)
           ? currentData.generationRetryRequestedAt
           : null;
+      const generationJobState = typeof currentData.generationJobState === 'string'
+        ? currentData.generationJobState
+        : '';
+      const retryGenerationJob = canvasAiGateway.retryGenerationJob
+        ?? (isVideoNode ? canvasVideoGateway.retryGenerateVideoJob : undefined);
       if (
-        isVideoNode
+        (generationJobState === 'recoverable_wait' || generationJobState === 'unknown')
         && generationRetryRequestedAt !== null
         && generationRetryRequestedAt !== handledRetryRequestedAt
-        && typeof canvasVideoGateway.retryGenerateVideoJob === 'function'
+        && typeof retryGenerationJob === 'function'
       ) {
         handledRetryRequestedAt = generationRetryRequestedAt;
-        const restarted = await canvasVideoGateway.retryGenerateVideoJob(jobId).catch((error) => {
-          console.warn('[GenerationJob] video retry restart failed', {
+        const restarted = await retryGenerationJob(jobId).catch((error) => {
+          console.warn('[GenerationJob] safe recovery restart failed', {
             nodeId,
             jobId,
             error: formatGenerationErrorForLog(error),
@@ -656,7 +665,10 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
             message,
             null,
             updateNodeData,
-            undefined,
+            {
+              preserveRetryMetadata: true,
+              jobState: generationJobState === 'unknown' ? 'unknown' : 'recoverable_wait',
+            },
           );
           return;
         }
@@ -720,10 +732,51 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
       if (currentStatusWarning) {
         latestGenerationWarning = currentStatusWarning;
       }
+      const metadataPatch: Partial<CanvasNodeData> = {};
+      if (currentData.generationJobState !== status.status) {
+        metadataPatch.generationJobState = status.status;
+      }
+      if (currentData.generationJobPhase !== status.phase) {
+        metadataPatch.generationJobPhase = status.phase ?? null;
+      }
+      if (currentData.generationNetworkRoute !== status.network_route) {
+        metadataPatch.generationNetworkRoute = status.network_route ?? null;
+      }
+      const safeRecoveryAvailable = status.resumable === true && Boolean(
+        (typeof status.external_task_id === 'string' && status.external_task_id.trim())
+        || (typeof status.result_url === 'string'
+          && isLightweightGenerationRetryResultUrl(status.result_url)),
+      );
+      if (currentData.generationSafeRecoveryAvailable !== safeRecoveryAvailable) {
+        metadataPatch.generationSafeRecoveryAvailable = safeRecoveryAvailable;
+      }
+      if (
+        typeof status.updated_at === 'number'
+        && currentData.generationJobUpdatedAt !== status.updated_at
+      ) {
+        metadataPatch.generationJobUpdatedAt = status.updated_at;
+      }
+      if (Object.keys(metadataPatch).length > 0) updateNodeData(nodeId, metadataPatch);
 
-      if (status.status === 'queued' || status.status === 'running') {
+      if (
+        status.status === 'queued'
+        || status.status === 'submitting'
+        || status.status === 'running'
+        || status.status === 'materializing'
+      ) {
         await sleep(GENERATION_JOB_POLL_INTERVAL_MS);
         continue;
+      }
+
+      if (status.status === 'recoverable_wait') {
+        const message = sanitizeGenerationDiagnosticText(
+          status.error ?? '任务已暂停，可使用已保存的上游任务信息安全恢复。',
+        );
+        markGenerationFailed(nodeId, message, status.error ? message : null, updateNodeData, {
+          preserveRetryMetadata: true,
+          jobState: 'recoverable_wait',
+        });
+        return;
       }
 
       if (status.status === 'succeeded' && typeof status.result === 'string' && status.result.trim()) {
@@ -784,7 +837,12 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
 
       // Failure / not_found / canceled / unknown.
       const errorMessage = sanitizeGenerationDiagnosticText(
-        status.error ?? (status.status === 'not_found' ? 'generation job not found' : 'generation failed'),
+        status.error
+          ?? (status.status === 'not_found'
+            ? 'generation job not found'
+            : status.status === 'unknown'
+              ? '提交结果未知：上游可能已经开始计费，系统不会自动重复提交。'
+              : 'generation failed'),
       );
       const errorDetails = status.error
         ? sanitizeGenerationDiagnosticText(status.error)
@@ -818,6 +876,8 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
         updateNodeData,
         statusRetryResultUrl
           ? { preserveRetryMetadata: true, retryResultUrl: statusRetryResultUrl, clearJobMetadata: true }
+          : status.status === 'unknown'
+            ? { preserveRetryMetadata: true, jobState: 'unknown' }
           : isVideoNode && isRetriableVideoPollingError(errorMessage)
             ? { preserveRetryMetadata: true }
           : undefined,
@@ -838,6 +898,7 @@ function markGenerationFailed(
     preserveRetryMetadata?: boolean;
     retryResultUrl?: string | null;
     clearJobMetadata?: boolean;
+    jobState?: 'recoverable_wait' | 'unknown';
   },
 ): void {
   const currentNode = useCanvasStore.getState().nodes.find((node) => node.id === nodeId);
@@ -849,6 +910,8 @@ function markGenerationFailed(
     generationStoryboardMetadata: undefined,
     generationError: errorMessage,
     generationErrorDetails: errorDetails,
+    generationJobState: options?.jobState
+      ?? (options?.preserveRetryMetadata ? currentData.generationJobState : 'failed'),
   };
 
   if (options?.preserveRetryMetadata) {

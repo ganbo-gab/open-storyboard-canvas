@@ -1,11 +1,15 @@
 import {
   customHttpRequest,
   customHttpStreamRequest,
+  createGenerationJob,
+  getGenerationJobRecord,
+  updateGenerationJob,
   type CustomHttpMultipartBody,
   type CustomHttpStreamResponse,
   type GenerateRequest,
   type GenerationJobStatus,
 } from '@/commands/ai';
+import { isTauri } from '@tauri-apps/api/core';
 import {
   prepareNodeImageSource,
   prepareNodeImageSourceWithHeaders,
@@ -18,7 +22,10 @@ import {
   useCustomProvidersStore,
   type CustomProviderConfig,
 } from '@/stores/customProvidersStore';
-import { useSettingsStore } from '@/stores/settingsStore';
+import {
+  useSettingsStore,
+  type GenerationNetworkSettings,
+} from '@/stores/settingsStore';
 import { hasCustomProviderCredential } from '@/features/canvas/application/providerAvailability';
 import { isLocalFilesystemResultSource } from '@/features/canvas/application/generationRetry';
 import {
@@ -89,11 +96,13 @@ import {
 interface VideoPollRetryContext {
   cfg: CustomProviderConfig;
   taskId: string;
+  network: Readonly<GenerationNetworkSettings>;
 }
 
 interface CachedJob extends GenerationJobStatus {
   videoPollRetry?: VideoPollRetryContext;
   warning?: string | null;
+  networkSnapshot?: Readonly<GenerationNetworkSettings>;
 }
 
 class VideoPollTimeoutError extends Error {
@@ -106,7 +115,16 @@ class VideoPollTimeoutError extends Error {
   }
 }
 
+class RemoteGenerationFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RemoteGenerationFailedError';
+  }
+}
+
 const cache = new Map<string, CachedJob>();
+const persistenceQueues = new Map<string, Promise<void>>();
+const recoveryJobs = new Set<string>();
 const POLL_TIMEOUT_MS = 120000;
 const VIDEO_POLL_TIMEOUT_MS = 15 * 60 * 1000;
 const CONNECTIVITY_TEST_POLL_TIMEOUT_MS = 180000;
@@ -114,7 +132,9 @@ const GENERATION_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 const MODERN_IMAGE_GENERATION_REQUEST_TIMEOUT_MS = 9 * 60 * 1000;
 const MAX_IMAGE_GENERATION_REQUEST_TIMEOUT_MS = 9 * 60 * 1000;
 const CHAT_COMPLETION_REQUEST_TIMEOUT_MS = 30 * 60 * 1000;
-const VIDEO_SUBMIT_NETWORK_RETRY_ATTEMPTS = 2;
+// A generation POST is non-idempotent. If the response is ambiguous, the
+// coordinator must surface `unknown` instead of charging the user twice.
+const VIDEO_SUBMIT_NETWORK_RETRY_ATTEMPTS = 0;
 const VIDEO_SUBMIT_NETWORK_RETRY_DELAY_MS = 700;
 const GENERATION_SUBMIT_NETWORK_ERROR_PREFIX = '提交结果未知，上游可能已接受请求；为避免重复计费未自动重试';
 const RESULT_POLL_INTERVAL_MS = 1000;
@@ -126,6 +146,147 @@ const DEFAULT_OPENAI_VIDEO_ENDPOINT_PATH = '/v1/videos';
 const DEFAULT_ANTHROPIC_CHAT_MAX_TOKENS = 8192;
 const DEFAULT_AGNES_CHAT_MAX_COMPLETION_TOKENS = 65500;
 const IMAGE_EDIT_COMPATIBILITY_STORAGE_KEY = 'custom-provider-image-edit-compatibility:v1';
+
+function updateCachedJob(
+  jobId: string,
+  patch: Partial<Omit<CachedJob, 'job_id'>>,
+): CachedJob {
+  const now = Date.now();
+  const next: CachedJob = {
+    job_id: jobId,
+    status: 'queued',
+    result: null,
+    error: null,
+    created_at: now,
+    ...cache.get(jobId),
+    ...patch,
+    updated_at: now,
+  };
+  cache.set(jobId, next);
+  return next;
+}
+
+function cachedJobContext(
+  cfg: CustomProviderConfig,
+  model: string,
+  mediaType: 'image' | 'video',
+  network: Readonly<GenerationNetworkSettings> = useSettingsStore.getState().generationNetworkSettings,
+): Partial<CachedJob> {
+  return {
+    media_type: mediaType,
+    provider_id: cfg.id,
+    model_id: model,
+    config_fingerprint: generationConfigFingerprint(cfg, model),
+    phase: 'submit',
+    network_route: network.route,
+    networkSnapshot: { ...network },
+    resumable: false,
+  };
+}
+
+function generationConfigFingerprint(cfg: CustomProviderConfig, model: string): string {
+  const basis = [cfg.id, model, cfg.baseUrl, cfg.endpointPath ?? '', cfg.apiStyle].join('|');
+  let hash = 2166136261;
+  for (let index = 0; index < basis.length; index += 1) {
+    hash ^= basis.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function isAmbiguousSubmissionError(error: unknown): boolean {
+  const message = formatUnknownError(error);
+  return message.includes(GENERATION_SUBMIT_NETWORK_ERROR_PREFIX)
+    || error instanceof NetworkRequestError
+    || /(?:timeout|timed out|connection reset|network|load failed|body read|response read)/i.test(message);
+}
+
+export function classifyGenerationError(error: unknown): string {
+  const message = formatUnknownError(error).toLowerCase();
+  if (/proxy|代理/.test(message)) return 'proxy';
+  if (/dns|resolve|name or service|域名|解析/.test(message)) return 'dns';
+  if (/tls|ssl|certificate|证书/.test(message)) return 'tls';
+  if (/timeout|timed out|超时/.test(message)) return 'timeout';
+  if (/http\s*\d{3}|status code|状态码/.test(message)) return 'http';
+  if (/parse|json|response shape|响应.*(?:格式|解析)/.test(message)) return 'response-parse';
+  if (/download|materializ|下载|落盘/.test(message)) return 'download';
+  if (/network|connect|connection|load failed|网络|连接/.test(message)) return 'network';
+  if (/config|配置|尺寸|分辨率|比例/.test(message)) return 'configuration';
+  return 'provider';
+}
+
+async function persistCustomJobCreate(
+  jobId: string,
+  cfg: CustomProviderConfig,
+  model: string,
+  mediaType: 'image' | 'video',
+  network: Readonly<GenerationNetworkSettings> = useSettingsStore.getState().generationNetworkSettings,
+): Promise<void> {
+  if (!isTauri()) return;
+  await createGenerationJob({
+    jobId,
+    mediaType,
+    providerId: cfg.id,
+    modelId: model,
+    configFingerprint: generationConfigFingerprint(cfg, model),
+    status: 'queued',
+    phase: 'submit',
+    networkRoute: network.route,
+    resumable: false,
+  });
+}
+
+function enqueueCustomJobUpdate(
+  jobId: string,
+  update: Omit<Parameters<typeof updateGenerationJob>[0], 'jobId'>,
+): Promise<void> {
+  const previous = persistenceQueues.get(jobId) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      await updateGenerationJob({ ...update, jobId });
+    });
+  persistenceQueues.set(jobId, next);
+  void next.finally(() => {
+    if (persistenceQueues.get(jobId) === next) persistenceQueues.delete(jobId);
+  });
+  return next;
+}
+
+function persistCustomJobUpdate(
+  jobId: string,
+  update: Omit<Parameters<typeof updateGenerationJob>[0], 'jobId'>,
+): void {
+  if (!isTauri()) return;
+  void enqueueCustomJobUpdate(jobId, update).catch(() => undefined);
+}
+
+async function persistCustomJobUpdateRequired(
+  jobId: string,
+  update: Omit<Parameters<typeof updateGenerationJob>[0], 'jobId'>,
+): Promise<void> {
+  if (!isTauri()) return;
+  await enqueueCustomJobUpdate(jobId, update);
+}
+
+async function persistRecoveryJobUpdate(
+  jobId: string,
+  update: Omit<Parameters<typeof updateGenerationJob>[0], 'jobId'>,
+): Promise<boolean> {
+  try {
+    await persistCustomJobUpdateRequired(jobId, update);
+    return true;
+  } catch (error) {
+    const detail = formatUnknownError(error);
+    updateCachedJob(jobId, {
+      status: 'recoverable_wait',
+      phase: update.phase ?? 'storage',
+      error: `本机任务状态保存失败，未继续恢复流程：${detail}`,
+      error_category: 'storage',
+    });
+    return false;
+  }
+}
 
 type ImageEditCompatibilityProfileId = 'configured' | 'openai-array' | 'legacy-minimal';
 
@@ -2548,6 +2709,7 @@ async function requestJson(
     networkRetryAttempts?: number;
     networkRetryDelayMs?: number;
     retryHttpStatuses?: number[];
+    network?: Readonly<GenerationNetworkSettings>;
   },
 ): Promise<{ status: number; parsed: unknown; text: string }> {
   const retryAttempts = Math.max(0, Math.floor(options.networkRetryAttempts ?? 0));
@@ -2557,6 +2719,7 @@ async function requestJson(
   let lastRetryableHttpError: HttpStatusError | null = null;
   for (let attempt = 0; attempt <= retryAttempts; attempt += 1) {
     try {
+      const network = options.network ?? useSettingsStore.getState().generationNetworkSettings;
       const response = await customHttpRequest({
         url,
         method: options.method,
@@ -2565,6 +2728,8 @@ async function requestJson(
         body: options.body,
         multipart: options.multipart,
         timeoutMs: options.timeoutMs,
+        networkRoute: network.route,
+        customProxyUrl: network.route === 'custom-proxy' ? network.customProxyUrl : undefined,
       });
       const parsed = parseResponseText(response.text);
       if (response.status < 200 || response.status >= 300) {
@@ -2925,12 +3090,18 @@ export async function submitCustomProviderJob(request: GenerateRequest): Promise
     return jobId;
   }
   const { cfg, model } = resolved;
+  const network = { ...useSettingsStore.getState().generationNetworkSettings };
   if (!hasCustomProviderCredential(cfg)) {
     cache.set(jobId, { job_id: jobId, status: 'failed', result: null, error: `${cfg.label} 未填写 API Key` });
     return jobId;
   }
-  cache.set(jobId, { job_id: jobId, status: 'running', result: null, error: null });
-  void runCustomProviderJob(jobId, cfg, model, request);
+  updateCachedJob(jobId, {
+    ...cachedJobContext(cfg, model, 'image', network),
+    status: 'queued',
+    result: null,
+    error: null,
+  });
+  void runCustomProviderJob(jobId, cfg, model, request, network);
   return jobId;
 }
 
@@ -2939,9 +3110,32 @@ async function runCustomProviderJob(
   cfg: CustomProviderConfig,
   model: string,
   request: GenerateRequest,
+  network: Readonly<GenerationNetworkSettings>,
 ): Promise<void> {
   const jobStartedAt = Date.now();
   try {
+    await persistCustomJobCreate(jobId, cfg, model, 'image', network);
+  } catch (error) {
+    updateCachedJob(jobId, {
+      ...cachedJobContext(cfg, model, 'image', network),
+      status: 'failed',
+      phase: 'persistence',
+      result: null,
+      resumable: false,
+      error: `无法创建本机任务记录，生成请求未发送：${formatUnknownError(error)}`,
+      error_category: 'storage',
+    });
+    return;
+  }
+  try {
+    updateCachedJob(jobId, {
+      ...cachedJobContext(cfg, model, 'image', network),
+      status: 'submitting',
+      phase: 'submit',
+      result: null,
+      error: null,
+    });
+    await persistCustomJobUpdateRequired(jobId, { status: 'submitting', phase: 'submit' });
     logCustomProviderPhase('info', 'submit:start', {
       jobId,
       ...providerLogContext(cfg, model),
@@ -2949,7 +3143,33 @@ async function runCustomProviderJob(
     });
     const explicitContract = resolveExplicitCustomImageContract(cfg, model, request);
     const responseImagePaths = explicitContract?.variant?.responseImagePaths ?? [];
-    const parsed = await sendGenerationRequest(cfg, model, request);
+    const parsed = await sendGenerationRequest(cfg, model, request, undefined, network);
+    const asyncConfig = resolveAsyncTaskConfig(
+      cfg,
+      explicitContract?.variant?.asyncTask,
+      Boolean(explicitContract),
+    );
+    const externalTaskId = extractTaskId(parsed);
+    updateCachedJob(jobId, {
+      status: externalTaskId ? 'running' : 'materializing',
+      phase: externalTaskId ? 'polling' : 'materialize',
+      external_task_id: externalTaskId || null,
+      resumable: Boolean(externalTaskId),
+    });
+    await persistCustomJobUpdateRequired(jobId, {
+      status: externalTaskId ? 'running' : 'materializing',
+      phase: externalTaskId ? 'polling' : 'materialize',
+      resumable: Boolean(externalTaskId),
+      ...(externalTaskId
+        ? {
+            externalTaskId,
+            pollDescriptor: {
+              method: asyncConfig?.resultMethod ?? (isGrsaiLikeProvider(cfg) ? 'POST' : 'GET'),
+              pathTemplate: asyncConfig?.resultEndpointPath ?? (isGrsaiLikeProvider(cfg) ? '/v1/draw/result' : ''),
+            },
+          }
+        : {}),
+    });
     logCustomProviderPhase('info', 'submit:success', {
       jobId,
       ...providerLogContext(cfg, model),
@@ -2964,6 +3184,7 @@ async function runCustomProviderJob(
       responseImagePaths,
       explicitContract?.variant?.asyncTask,
       Boolean(explicitContract),
+      network,
     );
     if (!imageUrl) {
       logCustomProviderPhase('warn', 'parse:no-image', {
@@ -2972,11 +3193,18 @@ async function runCustomProviderJob(
         elapsedMs: Date.now() - parseStartedAt,
         responseShape: summarizeResponseShape(parsed),
       });
-      cache.set(jobId, {
-        job_id: jobId,
+      updateCachedJob(jobId, {
         status: 'failed',
+        phase: 'polling',
         result: null,
         error: buildImageNotFoundMessage(cfg, parsed, responseImagePaths),
+        error_category: 'response-parse',
+      });
+      persistCustomJobUpdate(jobId, {
+        status: 'failed',
+        phase: 'polling',
+        error: buildImageNotFoundMessage(cfg, parsed, responseImagePaths),
+        errorCategory: 'response-parse',
       });
       return;
     }
@@ -3014,26 +3242,44 @@ async function runCustomProviderJob(
         });
       }
     } catch (materializeError) {
+      const retrySource = asLightweightRetryResultSource(imageUrl);
       logCustomProviderPhase('warn', 'materialize:failed', {
         jobId,
         ...providerLogContext(cfg, model),
         sourceKind: resolveSourceKind(imageUrl),
         error: formatUnknownError(materializeError),
       });
-      cache.set(jobId, {
-        job_id: jobId,
-        status: 'failed',
-        result: asLightweightRetryResultSource(imageUrl),
+      updateCachedJob(jobId, {
+        status: retrySource ? 'recoverable_wait' : 'failed',
+        phase: 'materialize',
+        result: retrySource,
+        result_url: retrySource,
+        resumable: Boolean(retrySource),
         error: formatUnknownError(materializeError),
+        error_category: 'download',
+      });
+      persistCustomJobUpdate(jobId, {
+        status: retrySource ? 'recoverable_wait' : 'failed',
+        phase: 'materialize',
+        resultUrl: retrySource ?? undefined,
+        resumable: Boolean(retrySource),
+        error: formatUnknownError(materializeError),
+        errorCategory: 'download',
       });
       return;
     }
-    cache.set(jobId, {
-      job_id: jobId,
+    updateCachedJob(jobId, {
       status: 'succeeded',
+      phase: 'materialize',
       result: preparedImageSource,
       error: null,
       warning: aspectWarning,
+    });
+    persistCustomJobUpdate(jobId, {
+      status: 'succeeded',
+      phase: 'materialize',
+      result: preparedImageSource,
+      resultUrl: asLightweightRetryResultSource(imageUrl) ?? undefined,
     });
   } catch (err) {
     logCustomProviderPhase('warn', 'submit:failed', {
@@ -3042,11 +3288,39 @@ async function runCustomProviderJob(
       elapsedMs: Date.now() - jobStartedAt,
       error: formatUnknownError(err),
     });
-    cache.set(jobId, {
-      job_id: jobId,
-      status: 'failed',
+    const cachedExternalTaskId = cache.get(jobId)?.external_task_id;
+    const safeHandle = Boolean(cachedExternalTaskId);
+    const upstreamTerminal = err instanceof RemoteGenerationFailedError;
+    const ambiguous = isAmbiguousSubmissionError(err);
+    const error = formatUnknownError(err);
+    const status = upstreamTerminal
+      ? 'failed'
+      : safeHandle
+        ? 'recoverable_wait'
+        : ambiguous
+          ? 'unknown'
+          : 'failed';
+    const errorCategory = upstreamTerminal
+      ? 'provider'
+      : safeHandle
+        ? 'poll-timeout'
+        : ambiguous
+          ? 'submission-unknown'
+          : classifyGenerationError(err);
+    updateCachedJob(jobId, {
+      status,
+      phase: 'submit',
       result: null,
-      error: formatUnknownError(err),
+      error,
+      error_category: errorCategory,
+      resumable: safeHandle && !upstreamTerminal,
+    });
+    persistCustomJobUpdate(jobId, {
+      status,
+      phase: 'submit',
+      error,
+      errorCategory,
+      resumable: safeHandle && !upstreamTerminal,
     });
   }
 }
@@ -4041,6 +4315,7 @@ async function sendVideoGenerationRequest(
   cfg: CustomProviderConfig,
   model: string,
   request: GenerateRequest,
+  network?: Readonly<GenerationNetworkSettings>,
 ): Promise<unknown> {
   const method = cfg.httpMethod ?? 'POST';
   if (cfg.extraParams?.requiresDedicatedVideoGateway === true) {
@@ -4066,6 +4341,7 @@ async function sendVideoGenerationRequest(
     networkErrorPrefix: GENERATION_SUBMIT_NETWORK_ERROR_PREFIX,
     networkRetryAttempts: method === 'POST' ? VIDEO_SUBMIT_NETWORK_RETRY_ATTEMPTS : 2,
     networkRetryDelayMs: VIDEO_SUBMIT_NETWORK_RETRY_DELAY_MS,
+    network,
   });
   return parsed;
 }
@@ -4105,6 +4381,7 @@ function resolveVideoStatusQueryParams(cfg: CustomProviderConfig, taskId: string
 async function resolveGeneratedVideoSource(
   cfg: CustomProviderConfig,
   parsed: unknown,
+  network?: Readonly<GenerationNetworkSettings>,
 ): Promise<string | null> {
   const unwrappedParsed = unwrapProviderPayload(parsed);
   const direct =
@@ -4121,12 +4398,13 @@ async function resolveGeneratedVideoSource(
     : (typeof taskIdRaw === 'number' && Number.isFinite(taskIdRaw) ? String(taskIdRaw) : null);
   if (!taskId) return null;
 
-  return await pollGeneratedVideoTask(cfg, taskId);
+  return await pollGeneratedVideoTask(cfg, taskId, network);
 }
 
 async function pollGeneratedVideoTask(
   cfg: CustomProviderConfig,
   taskId: string,
+  network?: Readonly<GenerationNetworkSettings>,
 ): Promise<string> {
   const statusPath = typeof cfg.extraParams?.videoStatusPath === 'string' ? cfg.extraParams.videoStatusPath : 'status';
   const errorPath = typeof cfg.extraParams?.videoErrorPath === 'string' ? cfg.extraParams.videoErrorPath : 'error';
@@ -4177,6 +4455,7 @@ async function pollGeneratedVideoTask(
         networkRetryAttempts: RESULT_POLL_NETWORK_RETRY_ATTEMPTS,
         networkRetryDelayMs: 700,
         retryHttpStatuses: RESULT_POLL_RETRY_HTTP_STATUSES,
+        network,
         }
       );
       payload = response.parsed;
@@ -4206,7 +4485,9 @@ async function pollGeneratedVideoTask(
       const messageRaw =
         getValueByPath(payload, errorPath)
         ?? getValueByPath(unwrapped, errorPath);
-      throw new Error(formatAsyncErrorValue(messageRaw) ?? `视频任务失败：${status}`);
+      throw new RemoteGenerationFailedError(
+        formatAsyncErrorValue(messageRaw) ?? `视频任务失败：${status}`,
+      );
     }
     if (status && successValues.includes(status)) {
       const providerKind = modernProviderKind(cfg);
@@ -4225,7 +4506,7 @@ async function pollGeneratedVideoTask(
     lastSuccessWithoutVideo
       ? `视频任务状态为 ${lastSuccessWithoutVideo}，但超时前仍未按 responseVideoPath/videoUrlPath 找到视频 URL。请检查响应路径配置，或把轮询超时调大。`
       : '视频任务轮询超时，未获取到结果',
-    { cfg, taskId },
+    { cfg, taskId, network: network ?? { ...useSettingsStore.getState().generationNetworkSettings } },
   );
 }
 
@@ -4268,12 +4549,18 @@ export async function submitCustomVideoJob(request: GenerateRequest): Promise<st
     return jobId;
   }
   const { cfg, model } = resolved;
+  const network = { ...useSettingsStore.getState().generationNetworkSettings };
   if (!hasCustomProviderCredential(cfg)) {
     cache.set(jobId, { job_id: jobId, status: 'failed', result: null, error: `${cfg.label} 未填写 API Key` });
     return jobId;
   }
-  cache.set(jobId, { job_id: jobId, status: 'running', result: null, error: null });
-  void runCustomVideoJob(jobId, cfg, model, request);
+  updateCachedJob(jobId, {
+    ...cachedJobContext(cfg, model, 'video', network),
+    status: 'queued',
+    result: null,
+    error: null,
+  });
+  void runCustomVideoJob(jobId, cfg, model, request, network);
   return jobId;
 }
 
@@ -4282,16 +4569,67 @@ async function runCustomVideoJob(
   cfg: CustomProviderConfig,
   model: string,
   request: GenerateRequest,
+  network: Readonly<GenerationNetworkSettings>,
 ): Promise<void> {
   try {
-    const parsed = await sendVideoGenerationRequest(cfg, model, request);
-    const videoSource = await resolveGeneratedVideoSource(cfg, parsed);
+    await persistCustomJobCreate(jobId, cfg, model, 'video', network);
+  } catch (error) {
+    updateCachedJob(jobId, {
+      ...cachedJobContext(cfg, model, 'video', network),
+      status: 'failed',
+      phase: 'persistence',
+      result: null,
+      resumable: false,
+      error: `无法创建本机任务记录，生成请求未发送：${formatUnknownError(error)}`,
+      error_category: 'storage',
+    });
+    return;
+  }
+  try {
+    updateCachedJob(jobId, {
+      ...cachedJobContext(cfg, model, 'video', network),
+      status: 'submitting',
+      phase: 'submit',
+      result: null,
+      error: null,
+    });
+    await persistCustomJobUpdateRequired(jobId, { status: 'submitting', phase: 'submit' });
+    const parsed = await sendVideoGenerationRequest(cfg, model, request, network);
+    const externalTaskId = extractTaskId(parsed);
+    updateCachedJob(jobId, {
+      status: externalTaskId ? 'running' : 'materializing',
+      phase: externalTaskId ? 'polling' : 'materialize',
+      external_task_id: externalTaskId || null,
+      resumable: Boolean(externalTaskId),
+    });
+    await persistCustomJobUpdateRequired(jobId, {
+      status: externalTaskId ? 'running' : 'materializing',
+      phase: externalTaskId ? 'polling' : 'materialize',
+      resumable: Boolean(externalTaskId),
+      ...(externalTaskId
+        ? {
+            externalTaskId,
+            pollDescriptor: {
+              method: resolveVideoStatusMethod(cfg),
+              pathTemplate: resolveVideoStatusEndpointPath(cfg),
+            },
+          }
+        : {}),
+    });
+    const videoSource = await resolveGeneratedVideoSource(cfg, parsed, network);
     if (!videoSource) {
-      cache.set(jobId, {
-        job_id: jobId,
+      updateCachedJob(jobId, {
         status: 'failed',
+        phase: externalTaskId ? 'polling' : 'submit',
         result: null,
         error: `响应中未找到视频任务或视频 URL。响应预览：${previewPayload(parsed)}`,
+        error_category: 'response-parse',
+      });
+      persistCustomJobUpdate(jobId, {
+        status: 'failed',
+        phase: externalTaskId ? 'polling' : 'submit',
+        error: `响应中未找到视频任务或视频 URL。响应预览：${previewPayload(parsed)}`,
+        errorCategory: 'response-parse',
       });
       return;
     }
@@ -4299,67 +4637,196 @@ async function runCustomVideoJob(
     try {
       preparedVideoSource = await materializeGeneratedVideoSource(cfg, videoSource);
     } catch (materializeError) {
-      cache.set(jobId, {
-        job_id: jobId,
-        status: 'failed',
-        result: asLightweightRetryResultSource(videoSource),
+      const retrySource = asLightweightRetryResultSource(videoSource);
+      updateCachedJob(jobId, {
+        status: retrySource ? 'recoverable_wait' : 'failed',
+        phase: 'materialize',
+        result: retrySource,
+        result_url: retrySource,
+        resumable: Boolean(retrySource),
         error: formatUnknownError(materializeError),
+        error_category: 'download',
+      });
+      persistCustomJobUpdate(jobId, {
+        status: retrySource ? 'recoverable_wait' : 'failed',
+        phase: 'materialize',
+        resultUrl: retrySource ?? undefined,
+        resumable: Boolean(retrySource),
+        error: formatUnknownError(materializeError),
+        errorCategory: 'download',
       });
       return;
     }
-    cache.set(jobId, { job_id: jobId, status: 'succeeded', result: preparedVideoSource, error: null });
+    updateCachedJob(jobId, {
+      status: 'succeeded',
+      phase: 'materialize',
+      result: preparedVideoSource,
+      error: null,
+    });
+    persistCustomJobUpdate(jobId, {
+      status: 'succeeded',
+      phase: 'materialize',
+      result: preparedVideoSource,
+      resultUrl: asLightweightRetryResultSource(videoSource) ?? undefined,
+    });
   } catch (err) {
     if (err instanceof VideoPollTimeoutError) {
-      cache.set(jobId, {
-        job_id: jobId,
-        status: 'failed',
+      updateCachedJob(jobId, {
+        status: 'recoverable_wait',
+        phase: 'polling',
         result: null,
         error: formatUnknownError(err),
+        error_category: 'poll-timeout',
+        external_task_id: err.retryContext.taskId,
+        resumable: true,
         videoPollRetry: err.retryContext,
+      });
+      persistCustomJobUpdate(jobId, {
+        status: 'recoverable_wait',
+        phase: 'polling',
+        error: formatUnknownError(err),
+        errorCategory: 'poll-timeout',
+        resumable: true,
       });
       return;
     }
-    cache.set(jobId, {
-      job_id: jobId,
-      status: 'failed',
+    const cachedExternalTaskId = cache.get(jobId)?.external_task_id;
+    const safeHandle = Boolean(cachedExternalTaskId);
+    const upstreamTerminal = err instanceof RemoteGenerationFailedError;
+    const ambiguous = isAmbiguousSubmissionError(err);
+    const error = formatUnknownError(err);
+    const status = upstreamTerminal
+      ? 'failed'
+      : safeHandle
+        ? 'recoverable_wait'
+        : ambiguous
+          ? 'unknown'
+          : 'failed';
+    const errorCategory = upstreamTerminal
+      ? 'provider'
+      : safeHandle
+        ? 'poll-timeout'
+        : ambiguous
+          ? 'submission-unknown'
+          : classifyGenerationError(err);
+    updateCachedJob(jobId, {
+      status,
+      phase: 'submit',
       result: null,
-      error: formatUnknownError(err),
+      error,
+      error_category: errorCategory,
+      resumable: safeHandle && !upstreamTerminal,
+    });
+    persistCustomJobUpdate(jobId, {
+      status,
+      phase: 'submit',
+      error,
+      errorCategory,
+      resumable: safeHandle && !upstreamTerminal,
     });
   }
 }
 
 async function retryCustomVideoPoll(jobId: string, retryContext: VideoPollRetryContext): Promise<void> {
   try {
-    const videoSource = await pollGeneratedVideoTask(retryContext.cfg, retryContext.taskId);
+    const videoSource = await pollGeneratedVideoTask(
+      retryContext.cfg,
+      retryContext.taskId,
+      retryContext.network,
+    );
     let preparedVideoSource: string;
     try {
       preparedVideoSource = await materializeGeneratedVideoSource(retryContext.cfg, videoSource);
     } catch (materializeError) {
-      cache.set(jobId, {
-        job_id: jobId,
-        status: 'failed',
-        result: asLightweightRetryResultSource(videoSource),
+      const retrySource = asLightweightRetryResultSource(videoSource);
+      updateCachedJob(jobId, {
+        status: retrySource ? 'recoverable_wait' : 'failed',
+        phase: 'materialize',
+        result: retrySource,
+        result_url: retrySource,
         error: formatUnknownError(materializeError),
+        error_category: 'download',
+        resumable: Boolean(retrySource),
+        videoPollRetry: retryContext,
+      });
+      persistCustomJobUpdate(jobId, {
+        status: retrySource ? 'recoverable_wait' : 'failed',
+        phase: 'materialize',
+        resultUrl: retrySource ?? undefined,
+        error: formatUnknownError(materializeError),
+        errorCategory: 'download',
+        resumable: Boolean(retrySource),
       });
       return;
     }
-    cache.set(jobId, { job_id: jobId, status: 'succeeded', result: preparedVideoSource, error: null });
+    updateCachedJob(jobId, {
+      status: 'succeeded',
+      phase: 'materialize',
+      result: preparedVideoSource,
+      result_url: asLightweightRetryResultSource(videoSource),
+      error: null,
+    });
+    persistCustomJobUpdate(jobId, {
+      status: 'succeeded',
+      phase: 'materialize',
+      result: preparedVideoSource,
+      resultUrl: asLightweightRetryResultSource(videoSource) ?? undefined,
+    });
   } catch (err) {
     if (err instanceof VideoPollTimeoutError) {
-      cache.set(jobId, {
-        job_id: jobId,
-        status: 'failed',
+      updateCachedJob(jobId, {
+        status: 'recoverable_wait',
+        phase: 'polling',
         result: null,
         error: formatUnknownError(err),
+        error_category: 'poll-timeout',
+        external_task_id: retryContext.taskId,
+        resumable: true,
         videoPollRetry: err.retryContext,
+      });
+      persistCustomJobUpdate(jobId, {
+        status: 'recoverable_wait',
+        phase: 'polling',
+        error: formatUnknownError(err),
+        errorCategory: 'poll-timeout',
+        resumable: true,
       });
       return;
     }
-    cache.set(jobId, {
-      job_id: jobId,
-      status: 'failed',
+    if (err instanceof RemoteGenerationFailedError) {
+      updateCachedJob(jobId, {
+        status: 'failed',
+        phase: 'polling',
+        result: null,
+        error: formatUnknownError(err),
+        error_category: 'provider',
+        resumable: false,
+      });
+      persistCustomJobUpdate(jobId, {
+        status: 'failed',
+        phase: 'polling',
+        error: formatUnknownError(err),
+        errorCategory: 'provider',
+        resumable: false,
+      });
+      return;
+    }
+    updateCachedJob(jobId, {
+      status: 'recoverable_wait',
+      phase: 'polling',
       result: null,
       error: formatUnknownError(err),
+      error_category: classifyGenerationError(err),
+      external_task_id: retryContext.taskId,
+      resumable: true,
+      videoPollRetry: retryContext,
+    });
+    persistCustomJobUpdate(jobId, {
+      status: 'recoverable_wait',
+      phase: 'polling',
+      error: formatUnknownError(err),
+      errorCategory: classifyGenerationError(err),
+      resumable: true,
     });
   }
 }
@@ -4534,6 +5001,7 @@ async function sendGenerationRequest(
   model: string,
   request: GenerateRequest,
   timeoutMs?: number,
+  network?: Readonly<GenerationNetworkSettings>,
 ): Promise<unknown> {
   const plan = buildImageRequestExecutionPlan(cfg, model, request);
   const { method, bodyMode, body, multipart: configuredMultipart, url, headers, explicitContract } = plan;
@@ -4574,6 +5042,7 @@ async function sendGenerationRequest(
       timeoutMs: resolvedTimeoutMs,
       networkErrorPrefix: GENERATION_SUBMIT_NETWORK_ERROR_PREFIX,
       networkRetryAttempts: resolveGenerationSubmissionRetryAttempts(method),
+      network,
     });
     return parsed;
   };
@@ -4765,6 +5234,8 @@ async function pollAsyncTaskResult(
   submitPayload: unknown,
   config: AsyncTaskConfig,
   explicitPaths: string[] = [],
+  knownTaskId?: string,
+  network?: Readonly<GenerationNetworkSettings>,
 ): Promise<string | null> {
   const payloadAtSubmit = unwrapProviderPayload(submitPayload);
   const immediate = explicitPaths.length > 0
@@ -4779,9 +5250,10 @@ async function pollAsyncTaskResult(
   const taskIdRaw = config.taskIdPath
     ? (getValueByPath(submitPayload, config.taskIdPath) ?? getValueByPath(unwrappedSubmitPayload, config.taskIdPath))
     : extractTaskId(submitPayload);
-  const taskId = typeof taskIdRaw === 'string' && taskIdRaw.trim()
-    ? taskIdRaw.trim()
-    : (typeof taskIdRaw === 'number' && Number.isFinite(taskIdRaw) ? String(taskIdRaw) : null);
+  const taskId = knownTaskId?.trim()
+    || (typeof taskIdRaw === 'string' && taskIdRaw.trim()
+      ? taskIdRaw.trim()
+      : (typeof taskIdRaw === 'number' && Number.isFinite(taskIdRaw) ? String(taskIdRaw) : null));
   if (!taskId) return null;
 
   const startedAt = Date.now();
@@ -4807,6 +5279,7 @@ async function pollAsyncTaskResult(
         networkRetryAttempts: RESULT_POLL_NETWORK_RETRY_ATTEMPTS,
         networkRetryDelayMs: 700,
         retryHttpStatuses: RESULT_POLL_RETRY_HTTP_STATUSES,
+        network,
       });
       parsed = response.parsed;
       consecutiveNetworkFailures = 0;
@@ -4830,7 +5303,9 @@ async function pollAsyncTaskResult(
       const messageRaw = config.errorPath
         ? (getValueByPath(parsed, config.errorPath) ?? getValueByPath(payload, config.errorPath))
         : null;
-      throw new Error(formatAsyncErrorValue(messageRaw) ?? `任务失败：${status}`);
+      throw new RemoteGenerationFailedError(
+        formatAsyncErrorValue(messageRaw) ?? `任务失败：${status}`,
+      );
     }
 
     const imageUrl = explicitPaths.length > 0
@@ -4860,6 +5335,7 @@ async function pollGrsaiLikeResult(
   cfg: CustomProviderConfig,
   submitPayload: unknown,
   timeoutMs: number,
+  network?: Readonly<GenerationNetworkSettings>,
 ): Promise<string | null> {
   const unwrappedSubmitPayload = unwrapProviderPayload(submitPayload);
   const immediate =
@@ -4890,6 +5366,7 @@ async function pollGrsaiLikeResult(
         networkRetryAttempts: RESULT_POLL_NETWORK_RETRY_ATTEMPTS,
         networkRetryDelayMs: 700,
         retryHttpStatuses: RESULT_POLL_RETRY_HTTP_STATUSES,
+        network,
       });
       parsed = response.parsed;
       consecutiveNetworkFailures = 0;
@@ -4916,7 +5393,7 @@ async function pollGrsaiLikeResult(
       const payloadRecord = payload as Record<string, unknown>;
       const status = normalizeAsyncStatusValue(rawRecord?.status ?? payloadRecord.status ?? '');
       if (status === 'failed' || status === 'error') {
-        throw new Error(pickFormattedErrorMessage(
+        throw new RemoteGenerationFailedError(pickFormattedErrorMessage(
           rawRecord?.error,
           rawRecord?.message,
           rawRecord?.detail,
@@ -4939,6 +5416,7 @@ async function resolveGeneratedImageUrl(
   responseImagePaths: string[] = [],
   asyncTaskOverride?: unknown,
   hasExplicitContract = false,
+  network?: Readonly<GenerationNetworkSettings>,
 ): Promise<string | null> {
   const unwrappedParsed = unwrapProviderPayload(parsed);
   const direct =
@@ -4955,7 +5433,7 @@ async function resolveGeneratedImageUrl(
       const imageUrl = await pollAsyncTaskResult(cfg, parsed, {
         ...asyncTask,
         timeoutMs: Math.max(asyncTask.timeoutMs, fallbackTimeoutMs),
-      }, responseImagePaths);
+      }, responseImagePaths, undefined, network);
       if (imageUrl) return imageUrl;
     } catch (err) {
       asyncTaskError = err;
@@ -4963,7 +5441,7 @@ async function resolveGeneratedImageUrl(
   }
 
   if (isGrsaiLikeProvider(cfg)) {
-    const imageUrl = await pollGrsaiLikeResult(cfg, parsed, fallbackTimeoutMs);
+    const imageUrl = await pollGrsaiLikeResult(cfg, parsed, fallbackTimeoutMs, network);
     if (imageUrl) return imageUrl;
   }
 
@@ -4984,15 +5462,170 @@ export function getCustomProviderJob(jobId: string): GenerationJobStatus {
     result: cached.result ?? null,
     error: cached.error ?? null,
     ...(cached.warning ? { warning: cached.warning } : {}),
+    ...(cached.media_type ? { media_type: cached.media_type } : {}),
+    ...(cached.provider_id ? { provider_id: cached.provider_id } : {}),
+    ...(cached.model_id ? { model_id: cached.model_id } : {}),
+    ...(cached.external_task_id ? { external_task_id: cached.external_task_id } : {}),
+    ...(cached.result_url ? { result_url: cached.result_url } : {}),
+    ...(cached.error_category ? { error_category: cached.error_category } : {}),
+    ...(cached.phase ? { phase: cached.phase } : {}),
+    ...(cached.network_route ? { network_route: cached.network_route } : {}),
+    resumable: Boolean(cached.external_task_id || cached.result_url),
+    ...(cached.created_at ? { created_at: cached.created_at } : {}),
+    ...(cached.updated_at ? { updated_at: cached.updated_at } : {}),
   };
+}
+
+function isPersistedRecoveryState(status: GenerationJobStatus['status']): boolean {
+  return status === 'queued'
+    || status === 'submitting'
+    || status === 'running'
+    || status === 'recoverable_wait'
+    || status === 'materializing';
+}
+
+async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<void> {
+  if (recoveryJobs.has(job.job_id) || !isPersistedRecoveryState(job.status)) return;
+  recoveryJobs.add(job.job_id);
+  try {
+    if (job.status === 'submitting' && !job.external_task_id && !job.result_url) {
+      const message = '应用在提交响应确认前关闭；上游可能已经接受请求。为避免重复计费，系统不会自动重新提交。';
+      const persisted = await persistRecoveryJobUpdate(job.job_id, {
+        status: 'unknown',
+        phase: 'submit',
+        error: message,
+        errorCategory: 'submission-unknown',
+      });
+      if (persisted) {
+        cache.set(job.job_id, { ...job, status: 'unknown', error: message });
+      }
+      return;
+    }
+    const cfg = useCustomProvidersStore.getState().providers.find(
+      (provider) => provider.id === job.provider_id
+    );
+    const model = job.model_id?.trim() ?? '';
+    if (!cfg || !model) {
+      throw new Error('恢复任务需要原供应商配置和模型；当前配置已删除或模型标识缺失。');
+    }
+    if (
+      job.config_fingerprint
+      && job.config_fingerprint !== generationConfigFingerprint(cfg, model)
+    ) {
+      throw new Error('供应商配置已变化。为避免使用错误账户或接口继续任务，请确认配置后手动恢复。');
+    }
+    const network = useSettingsStore.getState().generationNetworkSettings;
+    if (job.network_route && job.network_route !== network.route) {
+      throw new Error(`任务创建时使用 ${job.network_route} 路线，当前为 ${network.route}。请切回原路线后恢复。`);
+    }
+
+    let remoteSource = job.result_url?.trim() || '';
+    const taskId = job.external_task_id?.trim() || '';
+    if (!remoteSource && !taskId) {
+      throw new Error('任务没有可恢复的上游 task id 或结果地址，不能安全重发生成请求。');
+    }
+
+    if (!remoteSource) {
+      if (job.media_type === 'video') {
+        remoteSource = await pollGeneratedVideoTask(cfg, taskId, network);
+      } else {
+        const asyncConfig = resolveAsyncTaskConfig(cfg);
+        if (asyncConfig) {
+          remoteSource = await pollAsyncTaskResult(cfg, {}, asyncConfig, [], taskId, network) ?? '';
+        } else if (isGrsaiLikeProvider(cfg)) {
+          remoteSource = await pollGrsaiLikeResult(cfg, { id: taskId }, POLL_TIMEOUT_MS, network) ?? '';
+        } else {
+          throw new Error('当前供应商配置缺少安全轮询契约，不能在重启后自动查询任务。');
+        }
+      }
+    }
+    if (!remoteSource) throw new Error('安全恢复完成轮询，但响应中没有结果地址。');
+
+    if (!(await persistRecoveryJobUpdate(job.job_id, {
+      status: 'materializing',
+      phase: 'materialize',
+      resultUrl: asLightweightRetryResultSource(remoteSource) ?? undefined,
+    }))) return;
+    cache.set(job.job_id, {
+      ...job,
+      status: 'materializing',
+      result: null,
+      error: null,
+    });
+
+    const result = job.media_type === 'video'
+      ? await materializeGeneratedVideoSource(cfg, remoteSource)
+      : (await materializeGeneratedImageSourceDetails(cfg, remoteSource)).imageSource;
+    if (!(await persistRecoveryJobUpdate(job.job_id, {
+      status: 'succeeded',
+      phase: 'materialize',
+      result,
+      resultUrl: asLightweightRetryResultSource(remoteSource) ?? undefined,
+    }))) return;
+    cache.set(job.job_id, {
+      ...job,
+      status: 'succeeded',
+      result,
+      error: null,
+    });
+  } catch (error) {
+    const message = formatUnknownError(error);
+    cache.set(job.job_id, {
+      ...job,
+      status: 'recoverable_wait',
+      result: job.result ?? null,
+      error: message,
+    });
+    await persistRecoveryJobUpdate(job.job_id, {
+      status: 'recoverable_wait',
+      phase: job.result_url ? 'materialize' : 'polling',
+      error: message,
+      errorCategory: classifyGenerationError(error),
+    });
+  } finally {
+    recoveryJobs.delete(job.job_id);
+  }
+}
+
+export async function getCustomProviderJobAsync(jobId: string): Promise<GenerationJobStatus> {
+  const cached = cache.get(jobId);
+  if (cached?.provider_id && cached.network_route) return getCustomProviderJob(jobId);
+  try {
+    const persisted = await getGenerationJobRecord(jobId);
+    cache.set(jobId, cached ? { ...persisted, ...cached } : { ...persisted });
+    if (!cached && isPersistedRecoveryState(persisted.status)) {
+      void recoverPersistedCustomJob(persisted);
+    }
+    return getCustomProviderJob(jobId);
+  } catch {
+    return getCustomProviderJob(jobId);
+  }
 }
 
 export function retryCustomProviderJob(jobId: string): boolean {
   const cached = cache.get(jobId);
+  if (
+    cached?.status === 'recoverable_wait'
+    && (cached.external_task_id || cached.result_url)
+  ) {
+    const restarted = updateCachedJob(jobId, {
+      status: cached.result_url ? 'materializing' : 'running',
+      phase: cached.result_url ? 'materialize' : 'polling',
+      error: null,
+    });
+    void recoverPersistedCustomJob(restarted);
+    return true;
+  }
   if (cached?.status === 'failed' && cached.videoPollRetry) {
     const retryContext = cached.videoPollRetry;
-    const running: CachedJob = { job_id: jobId, status: 'running', result: null, error: null };
-    cache.set(jobId, running);
+    updateCachedJob(jobId, {
+      status: 'running',
+      phase: 'polling',
+      result: null,
+      error: null,
+      external_task_id: retryContext.taskId,
+      resumable: true,
+    });
     void retryCustomVideoPoll(jobId, retryContext);
     return true;
   }

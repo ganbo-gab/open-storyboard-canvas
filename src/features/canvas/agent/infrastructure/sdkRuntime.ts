@@ -48,12 +48,22 @@ import {
   classifyAgentError,
   inspectDiagnosticConfigSnapshot,
   inspectCanvasHealth,
+  inspectPersistedGenerationJobs,
   preflightGeneration,
   type DiagnosticEvidenceInput,
 } from '../application/agentDiagnostics';
 import { redactSensitiveValue } from '../application/agentRedaction';
 import { useCanvasStore } from '@/stores/canvasStore';
-import { applyAgentProviderPatch, getAgentProviderRevision, previewAgentProviderPatch, rollbackAgentProviderPatch, type AgentProviderPatchV1 } from '../application/agentConfigPatch';
+import {
+  applyAgentGenerationNetworkPatch,
+  applyAgentProviderPatch,
+  getAgentGenerationNetworkRevision,
+  getAgentProviderRevision,
+  previewAgentGenerationNetworkPatch,
+  previewAgentProviderPatch,
+  rollbackAgentProviderPatch,
+  type AgentProviderPatchV1,
+} from '../application/agentConfigPatch';
 import {
   createAgentMediaReference,
   resolveAgentMediaReference,
@@ -528,7 +538,7 @@ const canvasCommandParameters = {
 };
 
 const diagnosticsParameters = z.object({
-  operation: z.enum(['health', 'provider-config', 'preflight', 'classify-error', 'bundle-preview']),
+  operation: z.enum(['health', 'provider-config', 'generation-jobs', 'preflight', 'classify-error', 'bundle-preview']),
   error: z.string().optional(),
   width: z.number().optional(),
   height: z.number().optional(),
@@ -545,11 +555,15 @@ const diagnosticsParameters = z.object({
   accessState: z.enum(['configured', 'missing']).optional(),
   endpointValid: z.boolean().optional(),
   reproductionSteps: z.array(z.string()).optional(),
+  jobId: z.string().optional(),
+  limit: z.number().int().min(1).max(50).optional(),
 });
 
 const configPatchParameters = z.object({
   action: z.enum(['preview', 'apply', 'rollback']),
   providerId: z.string().optional(),
+  settingsTarget: z.enum(['generation-network']).optional(),
+  networkRoute: z.enum(['system', 'direct', 'custom-proxy']).optional(),
   baseRevision: z.string().optional(),
   rollbackToken: z.string().optional(),
   baseUrl: z.string().optional(),
@@ -833,6 +847,8 @@ export function createCanvasAgent(options: {
             ? inspectCanvasHealth(input)
             : input.operation === 'provider-config'
               ? inspectDiagnosticConfigSnapshot()
+              : input.operation === 'generation-jobs'
+                ? inspectPersistedGenerationJobs({ jobId: input.jobId, limit: input.limit })
               : input.operation === 'classify-error'
                 ? classifyAgentError(input.error)
                 : input.operation === 'bundle-preview'
@@ -881,10 +897,23 @@ export function createCanvasAgent(options: {
           callId,
           requestFingerprint,
           activeProjectId: context.getActiveProjectId?.(),
-          currentConfigRevision: input.providerId ? getAgentProviderRevision(input.providerId) : null,
+          currentConfigRevision: input.settingsTarget === 'generation-network'
+            ? getAgentGenerationNetworkRevision()
+            : input.providerId ? getAgentProviderRevision(input.providerId) : null,
           execute: async () => {
             if (input.action === 'rollback') {
               return input.rollbackToken ? rollbackAgentProviderPatch(input.rollbackToken) : { ok: false, error: '缺少 rollbackToken。' };
+            }
+            if (input.settingsTarget === 'generation-network') {
+              if (!input.networkRoute) return { ok: false, issues: ['缺少 networkRoute。'] };
+              const patch = {
+                baseRevision: input.baseRevision
+                  ?? (input.action === 'preview' ? getAgentGenerationNetworkRevision() : ''),
+                route: input.networkRoute,
+              };
+              return input.action === 'preview'
+                ? previewAgentGenerationNetworkPatch(patch)
+                : applyAgentGenerationNetworkPatch(patch);
             }
             if (!input.providerId) return { ok: false, issues: ['缺少 providerId。'] };
             const metadata = input.modelId ? {

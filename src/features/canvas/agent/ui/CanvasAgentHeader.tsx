@@ -1,8 +1,8 @@
 import type { RefObject } from 'react';
-import { Activity, Bot, History, MessageSquare, ShieldCheck, X } from 'lucide-react';
+import { Activity, Bot, History, ListChecks, MessageSquare, ShieldCheck, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-export type CanvasAgentView = 'conversation' | 'history' | 'activity';
+export type CanvasAgentView = 'conversation' | 'history' | 'activity' | 'tasks';
 
 interface Props {
   selectedEntry?: { providerLabel: string; modelLabel: string } | null;
@@ -18,6 +18,7 @@ const views: Array<[CanvasAgentView, typeof MessageSquare]> = [
   ['conversation', MessageSquare],
   ['history', History],
   ['activity', Activity],
+  ['tasks', ListChecks],
 ];
 
 export function CanvasAgentHeader({
@@ -73,7 +74,7 @@ export function CanvasAgentHeader({
         </button>
       </header>
 
-      <nav className="grid shrink-0 grid-cols-3 border-b border-border-dark p-1" aria-label={t('canvasAgent.views')}>
+      <nav className="grid shrink-0 grid-cols-4 border-b border-border-dark p-1" aria-label={t('canvasAgent.views')}>
         {views.map(([view, Icon]) => (
           <button
             key={view}

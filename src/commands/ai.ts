@@ -12,7 +12,20 @@ export interface GenerateRequest {
   extra_params?: Record<string, unknown>;
 }
 
-export type GenerationJobState = 'queued' | 'running' | 'succeeded' | 'failed' | 'not_found';
+export type GenerationJobState =
+  | 'queued'
+  | 'submitting'
+  | 'running'
+  | 'recoverable_wait'
+  | 'materializing'
+  | 'succeeded'
+  | 'failed'
+  | 'not_found'
+  | 'unknown'
+  | 'canceled';
+
+export type GenerationMediaType = 'image' | 'video' | 'audio' | 'unknown';
+export type GenerationNetworkRoute = 'system' | 'direct' | 'custom-proxy';
 
 export interface GenerationJobStatus {
   job_id: string;
@@ -21,6 +34,55 @@ export interface GenerationJobStatus {
   error?: string | null;
   /** Non-fatal provider diagnostic, for example an upstream aspect-ratio mismatch. */
   warning?: string | null;
+  media_type?: GenerationMediaType;
+  provider_id?: string;
+  model_id?: string | null;
+  config_fingerprint?: string | null;
+  phase?: string;
+  external_task_id?: string | null;
+  poll_descriptor?: Record<string, unknown> | null;
+  result_url?: string | null;
+  error_category?: string | null;
+  network_route?: GenerationNetworkRoute;
+  submit_attempts?: number;
+  consecutive_network_errors?: number;
+  last_poll_at?: number | null;
+  resumable?: boolean;
+  created_at?: number;
+  updated_at?: number;
+}
+
+export interface CreateGenerationJobRequest {
+  jobId?: string;
+  mediaType: Exclude<GenerationMediaType, 'unknown'>;
+  providerId: string;
+  modelId?: string;
+  configFingerprint?: string;
+  status?: GenerationJobState;
+  phase?: string;
+  externalTaskId?: string;
+  pollDescriptor?: Record<string, unknown>;
+  resultUrl?: string;
+  error?: string;
+  errorCategory?: string;
+  networkRoute?: GenerationNetworkRoute;
+  resumable?: boolean;
+}
+
+export interface UpdateGenerationJobRequest {
+  jobId: string;
+  status?: GenerationJobState;
+  phase?: string;
+  externalTaskId?: string;
+  pollDescriptor?: Record<string, unknown>;
+  result?: string;
+  resultUrl?: string;
+  error?: string;
+  errorCategory?: string;
+  networkRoute?: GenerationNetworkRoute;
+  resumable?: boolean;
+  lastPollAt?: number;
+  consecutiveNetworkErrors?: number;
 }
 
 function truncateText(value: string, max = 200): string {
@@ -216,6 +278,45 @@ export async function getGenerateImageJob(jobId: string): Promise<GenerationJobS
   return result;
 }
 
+export async function createGenerationJob(
+  request: CreateGenerationJobRequest
+): Promise<GenerationJobStatus> {
+  if (!isTauri()) {
+    throw new Error('持久生成任务仅在桌面端可用；Web 模式关闭页面后不可恢复');
+  }
+  return await invoke<GenerationJobStatus>('create_generation_job', { request });
+}
+
+export async function updateGenerationJob(
+  request: UpdateGenerationJobRequest
+): Promise<GenerationJobStatus> {
+  if (!isTauri()) {
+    throw new Error('持久生成任务仅在桌面端可用；Web 模式关闭页面后不可恢复');
+  }
+  return await invoke<GenerationJobStatus>('update_generation_job_record', { request });
+}
+
+export async function listGenerationJobs(limit = 100): Promise<GenerationJobStatus[]> {
+  if (!isTauri()) {
+    return [];
+  }
+  return await invoke<GenerationJobStatus[]>('list_generation_jobs', { limit });
+}
+
+export async function getGenerationJobRecord(jobId: string): Promise<GenerationJobStatus> {
+  if (!isTauri()) {
+    throw new Error('持久生成任务仅在桌面端可用');
+  }
+  return await invoke<GenerationJobStatus>('get_generation_job_record', { jobId });
+}
+
+export async function forgetGenerationJob(jobId: string): Promise<boolean> {
+  if (!isTauri()) {
+    return false;
+  }
+  return await invoke<boolean>('forget_generation_job', { jobId });
+}
+
 export async function listModels(): Promise<string[]> {
   return await invoke('list_models');
 }
@@ -228,6 +329,8 @@ export interface CustomHttpRequest {
   body?: unknown;
   multipart?: CustomHttpMultipartBody;
   timeoutMs?: number;
+  networkRoute?: GenerationNetworkRoute;
+  customProxyUrl?: string;
 }
 
 export interface CustomHttpMultipartField {

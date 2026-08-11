@@ -1,15 +1,141 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useCustomProvidersStore } from '@/stores/customProvidersStore';
 import {
+  DEFAULT_GENERATION_NETWORK_SETTINGS,
+  useSettingsStore,
+} from '@/stores/settingsStore';
+import {
   PersistentAgentConfigRollbackStore,
+  applyAgentGenerationNetworkPatch,
   applyAgentProviderPatch,
+  getAgentGenerationNetworkRevision,
   getAgentProviderRevision,
+  previewAgentGenerationNetworkPatch,
   previewAgentProviderPatch,
   rollbackAgentProviderPatch,
 } from './agentConfigPatch';
 
 describe('agent config patch', () => {
-  beforeEach(() => useCustomProvidersStore.setState({ providers: [{ id: 'chat', label: 'Chat', mediaType: 'chat', baseUrl: 'https://old.example/v1', endpointPath: '/chat/completions', apiKey: 'secret', apiStyle: 'openai-compatible', models: ['model-a'], supportsWebSearch: false }] }));
+  beforeEach(() => {
+    useCustomProvidersStore.setState({ providers: [{ id: 'chat', label: 'Chat', mediaType: 'chat', baseUrl: 'https://old.example/v1', endpointPath: '/chat/completions', apiKey: 'secret', apiStyle: 'openai-compatible', models: ['model-a'], supportsWebSearch: false }] });
+    useSettingsStore.setState({
+      generationNetworkSettings: { ...DEFAULT_GENERATION_NETWORK_SETTINGS },
+    });
+  });
+
+  it('previews, applies and rolls back a system to direct network route patch', () => {
+    const rollbackStore = new PersistentAgentConfigRollbackStore(null);
+    const patch = {
+      baseRevision: getAgentGenerationNetworkRevision(),
+      route: 'direct' as const,
+    };
+
+    expect(previewAgentGenerationNetworkPatch(patch)).toMatchObject({
+      ok: true,
+      credential: 'missing',
+      diff: [{
+        field: 'generationNetworkSettings.route',
+        before: 'system',
+        after: 'direct',
+      }],
+    });
+
+    const applied = applyAgentGenerationNetworkPatch(patch, rollbackStore);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(useSettingsStore.getState().generationNetworkSettings).toEqual({
+      route: 'direct',
+      customProxyUrl: '',
+    });
+
+    expect(rollbackAgentProviderPatch(applied.rollbackToken, rollbackStore)).toMatchObject({
+      ok: true,
+      providerId: '__application_generation_network__',
+    });
+    expect(useSettingsStore.getState().generationNetworkSettings).toEqual(
+      DEFAULT_GENERATION_NETWORK_SETTINGS,
+    );
+  });
+
+  it('fails closed when custom-proxy has no user-configured proxy URL', () => {
+    const patch = {
+      baseRevision: getAgentGenerationNetworkRevision(),
+      route: 'custom-proxy' as const,
+    };
+
+    expect(previewAgentGenerationNetworkPatch(patch)).toMatchObject({
+      ok: false,
+      credential: 'missing',
+      issues: [expect.stringContaining('自定义代理地址')],
+    });
+    expect(applyAgentGenerationNetworkPatch(
+      patch,
+      new PersistentAgentConfigRollbackStore(null),
+    )).toMatchObject({
+      ok: false,
+      issues: [expect.stringContaining('自定义代理地址')],
+    });
+    expect(useSettingsStore.getState().generationNetworkSettings.route).toBe('system');
+  });
+
+  it('does not let network rollback overwrite settings changed after apply', () => {
+    const rollbackStore = new PersistentAgentConfigRollbackStore(null);
+    const applied = applyAgentGenerationNetworkPatch({
+      baseRevision: getAgentGenerationNetworkRevision(),
+      route: 'direct',
+    }, rollbackStore);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+
+    useSettingsStore.getState().setGenerationNetworkSettings({
+      route: 'direct',
+      customProxyUrl: 'http://proxy.example:8080',
+    });
+    expect(rollbackAgentProviderPatch(applied.rollbackToken, rollbackStore)).toMatchObject({
+      ok: false,
+      providerId: '__application_generation_network__',
+      error: expect.stringContaining('变化'),
+    });
+    expect(useSettingsStore.getState().generationNetworkSettings).toEqual({
+      route: 'direct',
+      customProxyUrl: 'http://proxy.example:8080',
+    });
+  });
+
+  it('keeps proxy URL and credentials out of rollback storage and receipt payloads', () => {
+    const proxyUrl = 'http://proxy-user:proxy-password@proxy.example:8080';
+    useSettingsStore.getState().setGenerationNetworkSettings({
+      route: 'system',
+      customProxyUrl: proxyUrl,
+    });
+    const values = new Map<string, string>();
+    const persistedWrites: string[] = [];
+    const rollbackStore = new PersistentAgentConfigRollbackStore({
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+        persistedWrites.push(value);
+      },
+    });
+    const patch = {
+      baseRevision: getAgentGenerationNetworkRevision(),
+      route: 'custom-proxy' as const,
+    };
+    const preview = previewAgentGenerationNetworkPatch(patch);
+    const applied = applyAgentGenerationNetworkPatch(patch, rollbackStore);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+
+    const rollback = rollbackAgentProviderPatch(applied.rollbackToken, rollbackStore);
+    expect(rollback).toMatchObject({ ok: true });
+    const serializedReceipts = JSON.stringify({ preview, applied, rollback });
+    const serializedRollbackStorage = persistedWrites.join('\n');
+    for (const serialized of [serializedReceipts, serializedRollbackStorage]) {
+      expect(serialized).not.toContain(proxyUrl);
+      expect(serialized).not.toContain('proxy-user');
+      expect(serialized).not.toContain('proxy-password');
+    }
+  });
 
   it('previews, applies and rolls back only allowlisted fields', () => {
     const patch = { version: 1 as const, providerId: 'chat', baseRevision: getAgentProviderRevision('chat')!, changes: { baseUrl: 'https://new.example/v1', modelId: 'model-a', modelMetadata: { supportsTools: true } } };
