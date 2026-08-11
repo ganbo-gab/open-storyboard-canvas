@@ -1,19 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Plus } from 'lucide-react';
+import { Bot } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useChatModelCatalog } from '@/features/canvas/application/chatModelCatalog';
 import { buildCanvasAssetCatalog } from '@/features/canvas/application/canvasAssetCatalog';
-import { prepareNodeImageFromFile } from '@/features/canvas/application/imageData';
 import { canvasNavigationFacade } from '@/features/canvas/application/canvasNavigationFacade';
-import { CANVAS_NODE_TYPES } from '@/features/canvas/domain/canvasNodes';
 import { openSettingsDialog } from '@/features/settings/settingsEvents';
 import { useCanvasStore } from '@/stores/canvasStore';
-import { useProjectStore } from '@/stores/projectStore';
-import {
-  createAgentCanvasMediaInput,
-  MAX_AGENT_MEDIA_ATTACHMENTS,
-  validateAgentImageFile,
-} from '../application/agentMediaResolver';
+import { createAgentCanvasMediaInput } from '../application/agentMediaResolver';
 import { buildAgentPlanDraft, compileAgentPlanMessage, type AgentPlanDraft } from '../application/agentPlan';
 import { canvasAgentBudgetLedger } from '../application/agentBudget';
 import { rollbackAgentCanvasReceipt } from '../application/agentCanvasRollback';
@@ -25,47 +18,26 @@ import {
   runCanvasAgentTurn,
 } from '../application/canvasAgentController';
 import type { CanvasAgentToolEvent } from '../infrastructure/sdkRuntime';
-import type { AgentSessionMediaReferenceView, AgentTurnMediaInput } from '../domain/agentModel';
-import { AgentFeedCard } from './AgentFeedCard';
+import type {
+  AgentSessionMediaReferenceView,
+  AgentTurnMediaInput,
+  CanvasAgentRuntimeId,
+} from '../domain/agentModel';
 import { CanvasAgentAttachmentPicker } from './CanvasAgentAttachmentPicker';
 import { CanvasAgentComposer } from './CanvasAgentComposer';
 import { CanvasAgentContextPanel } from './CanvasAgentContextPanel';
+import { CanvasAgentFeedViewport } from './CanvasAgentFeedViewport';
 import { CanvasAgentHeader } from './CanvasAgentHeader';
-import { GenerationTasksPanel } from './GenerationTasksPanel';
+import { CanvasAgentRuntimePicker } from './CanvasAgentRuntimePicker';
+import {
+  executionReceiptFromAgentOutput,
+  nodeIdsFromAgentOutput,
+} from './agentFeedProjection';
 import { nextAgentFeedId, useCanvasAgentPanelStore, type AgentFeedItem } from './agentPanelStore';
+import { useCanvasAgentAttachments } from './useCanvasAgentAttachments';
+import { useExternalAgentRuntime } from './useExternalAgentRuntime';
 
 type Props = { projectId: string };
-
-function nodeIdsFromOutput(output: unknown): string[] {
-  if (!output || typeof output !== 'object' || Array.isArray(output)) return [];
-  const record = output as Record<string, unknown>;
-  const nested = record.output && typeof record.output === 'object' && !Array.isArray(record.output)
-    ? record.output as Record<string, unknown>
-    : record;
-  const refs = nested.references && typeof nested.references === 'object' && !Array.isArray(nested.references)
-    ? nested.references as Record<string, unknown>
-    : undefined;
-  if (!refs) return [];
-  const ids = [
-    ...(Array.isArray(refs.nodeIds) ? refs.nodeIds : []),
-    ...(typeof refs.nodeId === 'string' ? [refs.nodeId] : []),
-  ];
-  return Array.from(new Set(ids.filter(
-    (id): id is string => typeof id === 'string' && id.trim().length > 0,
-  )));
-}
-
-function executionReceiptFromOutput(output: unknown): { receiptId?: string; rollbackToken?: string } {
-  if (!output || typeof output !== 'object' || Array.isArray(output)) return {};
-  const record = output as Record<string, unknown>;
-  const execution = record.execution && typeof record.execution === 'object' && !Array.isArray(record.execution)
-    ? record.execution as Record<string, unknown>
-    : undefined;
-  return {
-    receiptId: typeof execution?.receiptId === 'string' ? execution.receiptId : undefined,
-    rollbackToken: typeof record.rollbackToken === 'string' ? record.rollbackToken : undefined,
-  };
-}
 
 function projectPendingAttachment(
   attachment: AgentTurnMediaInput,
@@ -97,13 +69,16 @@ export function CanvasAgentDock({ projectId }: Props) {
     projectId: storedProjectId,
     activeView,
     selectedModelId,
+    selectedRuntimeId,
     activeSessionId,
+    externalSessions,
     feed,
     projectContexts,
     setOpen,
     setProject,
     setActiveView,
     setSelectedModelId,
+    setSelectedRuntimeId,
     setActiveSessionId,
     addFeedItem,
     updateFeedItem,
@@ -123,6 +98,9 @@ export function CanvasAgentDock({ projectId }: Props) {
     ?? null;
   const visibleFeed = storedProjectId === projectId ? feed : [];
   const projectSessionId = storedProjectId === projectId ? activeSessionId : null;
+  const selectedExternalSession = selectedRuntimeId === 'builtin'
+    ? null
+    : externalSessions[projectId]?.[selectedRuntimeId] ?? null;
   const projectContext = projectContexts[projectId] ?? { brief: '', pinnedNodeIds: [], updatedAt: 0 };
   const displayedFeed = useMemo(
     () => activeView === 'activity'
@@ -143,10 +121,8 @@ export function CanvasAgentDock({ projectId }: Props) {
   const sessions = activeView === 'history' ? listCanvasAgentSessions(projectId) : [];
 
   const [draft, setDraft] = useState('');
-  const [attachments, setAttachments] = useState<AgentTurnMediaInput[]>([]);
-  const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
-  const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const [isUploadingAttachment, setUploadingAttachment] = useState(false);
+  const attachmentState = useCanvasAgentAttachments(projectId);
+  const { attachments, imageAssets, hasMissingAttachments } = attachmentState;
   const [isRunning, setRunning] = useState(false);
   const [showNewItems, setShowNewItems] = useState(false);
   const [budgetVersion, setBudgetVersion] = useState(0);
@@ -164,6 +140,8 @@ export function CanvasAgentDock({ projectId }: Props) {
   const streamReasoningRef = useRef('');
   const streamMessageIdRef = useRef<string | null>(null);
   const streamReasoningIdRef = useRef<string | null>(null);
+  const streamPlanTextRef = useRef('');
+  const streamPlanIdRef = useRef<string | null>(null);
   const toolFeedIdsRef = useRef(new Map<string, string>());
 
   const selectedNode = useCanvasStore((canvas) => (
@@ -172,14 +150,6 @@ export function CanvasAgentDock({ projectId }: Props) {
       : null
   ));
   const canvasNodes = useCanvasStore((canvas) => canvas.nodes);
-  const imageAssets = useMemo(
-    () => buildCanvasAssetCatalog(canvasNodes).filter((asset) => asset.kind === 'image'),
-    [canvasNodes],
-  );
-  const imageAssetIds = useMemo(() => new Set(imageAssets.map((asset) => asset.id)), [imageAssets]);
-  const hasMissingAttachments = attachments.some((attachment) => (
-    attachment.origin === 'canvas-asset' && !imageAssetIds.has(attachment.assetId)
-  ));
   const nodeLabel = (node: typeof selectedNode) => {
     if (!node) return '';
     const data = node.data as Record<string, unknown>;
@@ -196,7 +166,6 @@ export function CanvasAgentDock({ projectId }: Props) {
     [budgetVersion, projectId],
   );
   const reservedBudget = Object.values(projectBudget.reservations).reduce((total, amount) => total + amount, 0);
-
   useEffect(() => canvasAgentBudgetLedger.subscribe(() => {
     setBudgetVersion((version) => version + 1);
   }), []);
@@ -211,9 +180,6 @@ export function CanvasAgentDock({ projectId }: Props) {
 
   useEffect(() => {
     setProject(projectId);
-    setAttachments([]);
-    setAttachmentPickerOpen(false);
-    setAttachmentError(null);
     const store = useCanvasAgentPanelStore.getState();
     const existing = new Set(store.feed.flatMap((item) => (
       item.kind === 'approval' ? [`${item.runId}:${item.approvalId}`] : []
@@ -351,6 +317,27 @@ export function CanvasAgentDock({ projectId }: Props) {
     updateFeedItem(id, { summary, detail });
   };
 
+  const updateStreamingPlan = (delta: string) => {
+    if (!delta) return;
+    streamPlanTextRef.current += delta;
+    const detail = streamPlanTextRef.current;
+    const summary = detail.length > 96 ? `${detail.slice(0, 96).trimEnd()}...` : detail;
+    const id = streamPlanIdRef.current;
+    if (!id) {
+      const newId = nextAgentFeedId('external-plan');
+      streamPlanIdRef.current = newId;
+      pushFeed({
+        id: newId,
+        kind: 'reasoning',
+        summary,
+        detail,
+        createdAt: Date.now(),
+      });
+      return;
+    }
+    updateFeedItem(id, { summary, detail });
+  };
+
   const finishStreaming = (finalText?: string) => {
     const id = streamMessageIdRef.current;
     const text = finalText?.trim() || streamTextRef.current.trim();
@@ -366,8 +353,10 @@ export function CanvasAgentDock({ projectId }: Props) {
     }
     streamMessageIdRef.current = null;
     streamReasoningIdRef.current = null;
+    streamPlanIdRef.current = null;
     streamTextRef.current = '';
     streamReasoningRef.current = '';
+    streamPlanTextRef.current = '';
   };
 
   const handleToolEvent = (event: CanvasAgentToolEvent) => {
@@ -383,7 +372,7 @@ export function CanvasAgentDock({ projectId }: Props) {
 
     if (!toolFeedIdsRef.current.has(key)) {
       toolFeedIdsRef.current.set(key, id);
-      const execution = executionReceiptFromOutput(event.output);
+      const execution = executionReceiptFromAgentOutput(event.output);
       pushFeed({
         id,
         kind: 'tool',
@@ -392,7 +381,7 @@ export function CanvasAgentDock({ projectId }: Props) {
         input: event.input,
         output: event.output,
         error: event.error,
-        nodeIds: nodeIdsFromOutput(event.output),
+        nodeIds: nodeIdsFromAgentOutput(event.output),
         ...execution,
         startedAt: Date.now(),
         createdAt: Date.now(),
@@ -402,17 +391,50 @@ export function CanvasAgentDock({ projectId }: Props) {
 
     const existing = useCanvasAgentPanelStore.getState().feed.find((item) => item.id === id);
     const startedAt = existing?.kind === 'tool' ? existing.startedAt : undefined;
-    const execution = executionReceiptFromOutput(event.output);
+    const execution = executionReceiptFromAgentOutput(event.output);
+    const nodeIds = nodeIdsFromAgentOutput(event.output);
     updateFeedItem(id, {
       status,
-      input: event.input,
-      output: event.output,
-      error: event.error,
-      nodeIds: nodeIdsFromOutput(event.output),
+      ...(event.input !== undefined ? { input: event.input } : {}),
+      ...(event.output !== undefined ? { output: event.output } : {}),
+      ...(event.error !== undefined ? { error: event.error } : {}),
+      ...(nodeIds.length ? { nodeIds } : {}),
       ...execution,
       durationMs: startedAt ? Date.now() - startedAt : undefined,
     });
   };
+
+  const resetStreaming = () => {
+    streamTextRef.current = '';
+    streamReasoningRef.current = '';
+    streamPlanTextRef.current = '';
+  };
+
+  const externalRuntime = useExternalAgentRuntime({
+    projectId,
+    selectedRuntimeId,
+    selectedSession: selectedExternalSession,
+    attachments,
+    projectContext,
+    isRunning,
+    pendingCount,
+    setRunning,
+    resetAttachments: attachmentState.reset,
+    pushFeed,
+    updateFeedItem,
+    updateStreamingMessage,
+    updateStreamingReasoning,
+    updateStreamingPlan,
+    resetStreaming,
+    finishStreaming,
+    handleToolEvent,
+  });
+  const selectedExternalDiagnostic = selectedRuntimeId === 'builtin'
+    ? null
+    : externalRuntime.diagnostics[selectedRuntimeId] ?? null;
+  const runtimeReady = selectedRuntimeId === 'builtin'
+    ? Boolean(selectedEntry)
+    : selectedExternalDiagnostic?.availability === 'ready';
 
   const addResult = (result: Awaited<ReturnType<typeof runCanvasAgentTurn>>) => {
     setActiveSessionId(result.sessionId);
@@ -446,6 +468,10 @@ export function CanvasAgentDock({ projectId }: Props) {
   };
 
   const executeTurn = async (message: string) => {
+    if (selectedRuntimeId !== 'builtin') {
+      await externalRuntime.executeTurn(message, selectedRuntimeId);
+      return;
+    }
     if (!message.trim() || !selectedEntry || isRunning || pendingCount > 0) return;
     const statusId = nextAgentFeedId('status');
     pushFeed({
@@ -491,9 +517,7 @@ export function CanvasAgentDock({ projectId }: Props) {
         onReasoningDelta: updateStreamingReasoning,
         onToolEvent: handleToolEvent,
       });
-      setAttachments([]);
-      setAttachmentPickerOpen(false);
-      setAttachmentError(null);
+      attachmentState.reset();
       updateFeedItem(statusId, {
         status: 'completed',
         text: result.status === 'awaiting-approval'
@@ -519,18 +543,18 @@ export function CanvasAgentDock({ projectId }: Props) {
 
   const send = async () => {
     const message = draft.trim();
-    if (!message || !selectedEntry || isRunning || pendingCount > 0 || hasPendingPlan) return;
-    if (attachments.length && !selectedEntry.supportsMultimodal) {
-      setAttachmentError(t('canvasAgent.switchToVisionModelHint'));
+    if (!message || !runtimeReady || isRunning || pendingCount > 0 || hasPendingPlan) return;
+    if (selectedRuntimeId === 'builtin' && attachments.length && !selectedEntry?.supportsMultimodal) {
+      attachmentState.setError(t('canvasAgent.switchToVisionModelHint'));
       return;
     }
     if (hasMissingAttachments) {
-      setAttachmentError(t('canvasAgent.missingAttachmentBeforeSend'));
+      attachmentState.setError(t('canvasAgent.missingAttachmentBeforeSend'));
       return;
     }
 
     setDraft('');
-    setAttachmentError(null);
+    attachmentState.setError(null);
     stickToBottomRef.current = true;
     toolFeedIdsRef.current.clear();
     pushFeed({
@@ -575,6 +599,7 @@ export function CanvasAgentDock({ projectId }: Props) {
     item: Extract<AgentFeedItem, { kind: 'approval' }>,
     approve: boolean,
   ) => {
+    if (await externalRuntime.resolveApproval(item, approve)) return;
     if (!selectedEntry || item.status !== 'pending' || isRunning) return;
     updateFeedItem(item.id, { status: approve ? 'approving' : 'rejecting' });
     setRunning(true);
@@ -622,24 +647,35 @@ export function CanvasAgentDock({ projectId }: Props) {
       attachments: message.mediaReferences,
       createdAt: message.createdAt,
     })));
-    setAttachments([]);
-    setAttachmentPickerOpen(false);
-    setAttachmentError(null);
+    attachmentState.reset();
     setActiveSessionId(sessionId);
     setActiveView('conversation');
     stickToBottomRef.current = true;
   };
 
   const startConversation = () => {
-    if (isRunning) return;
+    if (isRunning || pendingCount > 0) return;
+    externalRuntime.discardCurrentSession();
     clearFeed();
     setActiveView('conversation');
     setDraft('');
-    setAttachments([]);
-    setAttachmentPickerOpen(false);
-    setAttachmentError(null);
+    attachmentState.reset();
     toolFeedIdsRef.current.clear();
     requestAnimationFrame(() => panelRef.current?.querySelector('textarea')?.focus());
+  };
+
+  const handleRuntimeChange = (runtime: CanvasAgentRuntimeId) => {
+    if (isRunning || pendingCount > 0 || runtime === selectedRuntimeId) return;
+    setSelectedRuntimeId(runtime);
+    attachmentState.closePicker();
+  };
+
+  const cancelCurrentTurn = async () => {
+    if (selectedRuntimeId === 'builtin') {
+      abortRef.current?.abort();
+      return;
+    }
+    await externalRuntime.cancelTurn();
   };
 
   const restoreDraft = (message: string) => {
@@ -677,79 +713,6 @@ export function CanvasAgentDock({ projectId }: Props) {
   };
 
   const openModelSettings = () => openSettingsDialog({ category: 'providersChat' });
-
-  const toggleAttachment = (asset: (typeof imageAssets)[number]) => {
-    setAttachmentError(null);
-    setAttachments((current) => {
-      const exists = current.some((attachment) => attachment.assetId === asset.id);
-      if (exists) return current.filter((attachment) => attachment.assetId !== asset.id);
-      if (current.length >= MAX_AGENT_MEDIA_ATTACHMENTS) return current;
-      return [...current, createAgentCanvasMediaInput(asset)];
-    });
-  };
-
-  const attachSelectedNode = () => {
-    if (!selectedNode) return;
-    const asset = imageAssets
-      .filter((candidate) => candidate.nodeId === selectedNode.id)
-      .sort((left, right) => right.order - left.order)
-      .find((candidate) => !attachments.some((attachment) => attachment.assetId === candidate.id));
-    if (!asset) {
-      setAttachmentError(t('canvasAgent.noImageOnSelection'));
-      return;
-    }
-    toggleAttachment(asset);
-  };
-
-  const uploadAttachments = async (files: File[]) => {
-    const remaining = MAX_AGENT_MEDIA_ATTACHMENTS - attachments.length;
-    if (files.length > remaining) {
-      setAttachmentError(t('canvasAgent.tooManyAttachmentsSelected', { count: files.length, remaining }));
-      return;
-    }
-    setUploadingAttachment(true);
-    setAttachmentError(null);
-    try {
-      for (const [index, file] of files.entries()) {
-        await validateAgentImageFile(file);
-        const prepared = await prepareNodeImageFromFile(file);
-        const canvas = useCanvasStore.getState();
-        const zoom = Math.max(0.01, canvas.currentViewport.zoom);
-        const position = {
-          x: (canvas.canvasViewportSize.width / 2 - canvas.currentViewport.x) / zoom + index * 28,
-          y: (canvas.canvasViewportSize.height / 2 - canvas.currentViewport.y) / zoom + index * 28,
-        };
-        const nodeId = canvas.addNode(CANVAS_NODE_TYPES.upload, position, {
-          imageUrl: prepared.imageUrl,
-          previewImageUrl: prepared.previewImageUrl,
-          aspectRatio: prepared.aspectRatio || '1:1',
-          sourceFileName: file.name,
-          displayName: file.name,
-        });
-        const latestCanvas = useCanvasStore.getState();
-        const projectStore = useProjectStore.getState();
-        if (projectStore.currentProjectId === projectId) {
-          projectStore.saveCurrentProject(
-            latestCanvas.nodes,
-            latestCanvas.edges,
-            latestCanvas.currentViewport,
-            latestCanvas.history,
-          );
-        }
-        const asset = buildCanvasAssetCatalog(useCanvasStore.getState().nodes)
-          .find((candidate) => candidate.id === `${nodeId}:image`);
-        if (!asset) throw new Error(t('canvasAgent.uploadAttachmentFailed'));
-        const attachment = createAgentCanvasMediaInput(asset);
-        setAttachments((current) => current.some((item) => item.assetId === attachment.assetId)
-          ? current
-          : [...current, attachment].slice(0, MAX_AGENT_MEDIA_ATTACHMENTS));
-      }
-    } catch (error) {
-      setAttachmentError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setUploadingAttachment(false);
-    }
-  };
 
   return (
     <>
@@ -801,12 +764,25 @@ export function CanvasAgentDock({ projectId }: Props) {
         >
         <CanvasAgentHeader
           selectedEntry={selectedEntry}
+          runtimeLabel={selectedRuntimeId === 'builtin'
+            ? undefined
+            : t(`canvasAgent.runtime.${selectedRuntimeId}`)}
           activeView={activeView}
           pendingCount={pendingCount}
           isRunning={isRunning}
+          isReady={runtimeReady}
           onViewChange={setActiveView}
           onClose={() => setOpen(false)}
           closeRef={closeRef}
+        />
+
+        <CanvasAgentRuntimePicker
+          value={selectedRuntimeId}
+          diagnostics={externalRuntime.diagnostics}
+          isRefreshing={externalRuntime.isRefreshing}
+          disabled={isRunning || pendingCount > 0}
+          onChange={handleRuntimeChange}
+          onRefresh={() => { void externalRuntime.refresh(); }}
         />
 
         <CanvasAgentContextPanel
@@ -823,99 +799,39 @@ export function CanvasAgentDock({ projectId }: Props) {
           onBudgetReset={() => { canvasAgentBudgetLedger.reset(projectId); }}
         />
 
-        <div
-          ref={feedScrollRef}
-          className={`ui-scrollbar relative min-h-0 flex-1 ${
-            activeView === 'tasks' ? 'overflow-hidden' : 'overflow-y-auto p-3'
-          }`}
+        <CanvasAgentFeedViewport
+          projectId={projectId}
+          activeView={activeView}
+          nodes={canvasNodes}
+          displayedFeed={displayedFeed}
+          sessions={sessions}
+          isRunning={isRunning}
+          pendingCount={pendingCount}
+          showNewItems={showNewItems}
+          scrollRef={feedScrollRef}
           onScroll={onFeedScroll}
-        >
-          {activeView === 'tasks' ? (
-            <div key={activeView} className="agent-view-enter flex h-full min-h-0 flex-col">
-              <GenerationTasksPanel nodes={canvasNodes} />
-            </div>
-          ) : (
-          <div key={activeView} className="agent-view-enter">
-            {activeView === 'history' ? (
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  disabled={isRunning}
-                  className="flex min-h-11 w-full items-center gap-2 rounded-[5px] border border-border-dark px-3 text-xs text-text-dark transition-[background-color,transform] duration-150 hover:bg-text-dark/[0.05] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-                  onClick={startConversation}
-                >
-                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                  {t('canvasAgent.newConversation')}
-                </button>
-                {sessions.length ? sessions.map((session) => (
-                  <button
-                    key={session.id}
-                    type="button"
-                    className="w-full rounded-[5px] border border-border-dark/60 px-3 py-2.5 text-left transition-[background-color,border-color,transform] duration-150 hover:border-border-dark hover:bg-text-dark/[0.04] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-                    onClick={() => loadSession(session.id)}
-                  >
-                    <div className="truncate text-xs text-text-dark">{session.title}</div>
-                    <div className="mt-1 text-[10px] text-text-muted">
-                      {new Date(session.updatedAt).toLocaleString()}
-                    </div>
-                  </button>
-                )) : (
-                  <div className="px-3 py-8 text-center text-xs text-text-muted">
-                    {t('canvasAgent.noHistory')}
-                  </div>
-                )}
-              </div>
-            ) : displayedFeed.length ? (
-              <div className="space-y-3">
-                {displayedFeed.map((item) => (
-                  <AgentFeedCard
-                    key={item.id}
-                    item={item}
-                    onApproval={handleApproval}
-                    onLocate={handleLocate}
-                    onRestoreDraft={restoreDraft}
-                    onPlanChange={handlePlanChange}
-                    onPlanConfirm={(item) => void handlePlanConfirm(item)}
-                    onPlanCancel={handlePlanCancel}
-                    budgetDecision={item.kind === 'approval'
-                      ? canvasAgentBudgetLedger.evaluate(projectId, item.impact)
-                      : undefined}
-                    onBudgetLimitChange={(limit) => { canvasAgentBudgetLedger.setLimit(projectId, limit); }}
-                    onRollback={(tool) => { void handleRollback(tool); }}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="flex min-h-56 flex-col items-center justify-center px-8 text-center">
-                <Bot className="mb-3 h-7 w-7 text-accent" aria-hidden="true" />
-                <div className="text-sm font-medium text-text-dark">{t('canvasAgent.emptyTitle')}</div>
-                <div className="mt-2 text-xs leading-5 text-text-muted">{t('canvasAgent.emptyDescription')}</div>
-              </div>
-            )}
-          </div>
-          )}
-
-          {activeView !== 'tasks' && showNewItems ? (
-            <button
-              type="button"
-              className="sticky bottom-2 left-1/2 z-10 mx-auto flex min-h-11 -translate-x-1/2 items-center rounded-full border border-accent/[0.35] bg-bg-dark px-3 text-xs text-accent shadow-lg transition-[background-color,transform] duration-150 hover:bg-accent/[0.10] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-10"
-              onClick={() => {
-                stickToBottomRef.current = true;
-                setShowNewItems(false);
-                feedScrollRef.current?.scrollTo({
-                  top: feedScrollRef.current.scrollHeight,
-                  behavior: 'smooth',
-                });
-              }}
-            >
-              {t('canvasAgent.newItems')}
-            </button>
-          ) : null}
-        </div>
+          onStartConversation={startConversation}
+          onLoadSession={loadSession}
+          onApproval={(item, approve) => { void handleApproval(item, approve); }}
+          onLocate={handleLocate}
+          onRestoreDraft={restoreDraft}
+          onPlanChange={handlePlanChange}
+          onPlanConfirm={(item) => { void handlePlanConfirm(item); }}
+          onPlanCancel={handlePlanCancel}
+          onRollback={(tool) => { void handleRollback(tool); }}
+          onJumpToLatest={() => {
+            stickToBottomRef.current = true;
+            setShowNewItems(false);
+            feedScrollRef.current?.scrollTo({
+              top: feedScrollRef.current.scrollHeight,
+              behavior: 'smooth',
+            });
+          }}
+        />
 
         {activeView !== 'tasks' ? (
         <div className="relative shrink-0">
-          {attachmentPickerOpen ? (
+          {attachmentState.isPickerOpen ? (
             <CanvasAgentAttachmentPicker
               assets={imageAssets}
               selectedAssetIds={attachments
@@ -923,40 +839,33 @@ export function CanvasAgentDock({ projectId }: Props) {
                 .map((attachment) => attachment.assetId)}
               attachmentCount={attachments.length}
               selectedNodeId={selectedNode?.id ?? null}
-              maxAttachments={MAX_AGENT_MEDIA_ATTACHMENTS}
-              isUploading={isUploadingAttachment}
-              error={attachmentError}
-              onToggle={toggleAttachment}
-              onAttachSelected={attachSelectedNode}
-              onUpload={(files) => { void uploadAttachments(files); }}
-              onClose={() => {
-                setAttachmentPickerOpen(false);
-                setAttachmentError(null);
-              }}
+              maxAttachments={attachmentState.maxAttachments}
+              isUploading={attachmentState.isUploading}
+              error={attachmentState.error}
+              onToggle={attachmentState.toggle}
+              onAttachSelected={() => attachmentState.attachSelectedNode(selectedNode?.id ?? null)}
+              onUpload={(files) => { void attachmentState.upload(files); }}
+              onClose={attachmentState.closePicker}
             />
           ) : null}
           <CanvasAgentComposer
             entries={modelEntries}
             selectedEntry={selectedEntry}
+            runtimeId={selectedRuntimeId}
+            runtimeReady={runtimeReady}
             draft={draft}
             attachments={attachments}
-            maxAttachments={MAX_AGENT_MEDIA_ATTACHMENTS}
+            maxAttachments={attachmentState.maxAttachments}
             hasMissingAttachments={hasMissingAttachments}
             isRunning={isRunning}
             hasPendingApproval={pendingCount > 0}
             hasPendingPlan={hasPendingPlan}
             onModelChange={setSelectedModelId}
             onDraftChange={setDraft}
-            onAttach={() => {
-              setAttachmentError(null);
-              setAttachmentPickerOpen((open) => !open);
-            }}
-            onRemoveAttachment={(assetId) => {
-              setAttachments((current) => current.filter((attachment) => attachment.assetId !== assetId));
-              setAttachmentError(null);
-            }}
+            onAttach={attachmentState.openPicker}
+            onRemoveAttachment={attachmentState.remove}
             onSend={() => void send()}
-            onCancel={() => abortRef.current?.abort()}
+            onCancel={() => { void cancelCurrentTurn(); }}
             onSettings={openModelSettings}
           />
         </div>

@@ -18,7 +18,9 @@ describe('canvas agent panel store', () => {
       projectId: null,
       activeView: 'conversation',
       selectedModelId: null,
+      selectedRuntimeId: 'builtin',
       activeSessionId: null,
+      externalSessions: {},
       feed: [],
       projectContexts: {},
       unread: 0,
@@ -92,5 +94,38 @@ describe('canvas agent panel store', () => {
     useCanvasAgentPanelStore.getState().clearProjectContext('project-a');
     expect(useCanvasAgentPanelStore.getState().projectContexts['project-a']).toBeUndefined();
     expect(useCanvasAgentPanelStore.getState().projectContexts['project-b']?.brief).toContain('documentary');
+  });
+
+  it('keeps bounded external runtime session references without credentials or paths', () => {
+    const state = useCanvasAgentPanelStore.getState();
+    state.setSelectedRuntimeId('codex');
+    state.setExternalSession('project-a', {
+      runtime: 'codex',
+      sessionId: 'session-a',
+      threadId: 'thread-a',
+    });
+
+    expect(useCanvasAgentPanelStore.getState()).toMatchObject({
+      selectedRuntimeId: 'codex',
+      externalSessions: {
+        'project-a': {
+          codex: { runtime: 'codex', sessionId: 'session-a', threadId: 'thread-a' },
+        },
+      },
+    });
+    expect(JSON.stringify(useCanvasAgentPanelStore.getState().externalSessions)).not.toMatch(/token|path|credential/i);
+
+    state.setExternalSession('project-a', {
+      runtime: 'claude',
+      sessionId: `session-${'x'.repeat(300)}`,
+      threadId: `thread-${'y'.repeat(300)}`,
+    });
+    expect(useCanvasAgentPanelStore.getState().externalSessions['project-a']?.claude?.sessionId)
+      .toHaveLength(256);
+
+    state.clearExternalSession('project-a', 'codex');
+    expect(useCanvasAgentPanelStore.getState().externalSessions['project-a']).toEqual({
+      claude: expect.objectContaining({ runtime: 'claude' }),
+    });
   });
 });

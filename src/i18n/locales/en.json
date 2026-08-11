@@ -13,6 +13,23 @@
     "activity": "Activity",
     "tasks": "Tasks",
     "scopeNotice": "Canvas reads, changes, configuration, and external generation require your approval",
+    "runtime": {
+      "title": "Agent runtime",
+      "builtin": "Built-in",
+      "codex": "Codex",
+      "claude": "Claude",
+      "refresh": "Detect local Agents again",
+      "installGuide": "Open the official installation guide",
+      "requiresDesktop": "Codex and Claude Code are available in the desktop app",
+      "unavailableHint": "This runtime is not ready. Detect it again or switch runtimes",
+      "status": {
+        "ready": "Connected and ready",
+        "not-installed": "Not installed on this computer",
+        "login-required": "Sign in from the terminal first",
+        "incompatible": "The installed version is incompatible",
+        "unavailable": "Currently unavailable"
+      }
+    },
     "newConversation": "New conversation",
     "emptyTitle": "Give the Agent a canvas goal",
     "emptyDescription": "It will understand the task and canvas first, then show approval cards for every read or action.",
@@ -141,6 +158,7 @@
       "rejecting": "Rejecting",
       "approved": "Approved and executed",
       "rejected": "Rejected",
+      "failed": "Approval could not be completed",
       "expired": "Approval expired; request it again"
     }
   },

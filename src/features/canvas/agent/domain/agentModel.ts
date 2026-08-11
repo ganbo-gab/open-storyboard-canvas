@@ -1,5 +1,56 @@
 export const CANVAS_AGENT_RUNTIME_VERSION = 1 as const;
 export const CANVAS_AGENT_DEFINITION_VERSION = 1 as const;
+export const EXTERNAL_AGENT_EVENT_VERSION = 1 as const;
+
+export type CanvasAgentRuntimeId = 'builtin' | 'codex' | 'claude';
+export type ExternalAgentRuntimeId = Exclude<CanvasAgentRuntimeId, 'builtin'>;
+
+export type ExternalAgentAvailability =
+  | 'ready'
+  | 'not-installed'
+  | 'login-required'
+  | 'incompatible'
+  | 'unavailable';
+
+export interface ExternalAgentRuntimeDiagnostic {
+  runtime: ExternalAgentRuntimeId;
+  availability: ExternalAgentAvailability;
+  version?: string;
+  executableLabel?: string;
+  detail?: string;
+}
+
+export interface ExternalAgentSessionReference {
+  runtime: ExternalAgentRuntimeId;
+  sessionId: string;
+  threadId?: string;
+}
+
+export interface ExternalAgentToolRequest {
+  version: typeof EXTERNAL_AGENT_EVENT_VERSION;
+  runtime: ExternalAgentRuntimeId;
+  sessionId: string;
+  turnId: string;
+  callId: string;
+  toolName: 'canvas_command' | 'diagnostics' | 'config_patch' | 'asset_read';
+  arguments: unknown;
+}
+
+export type ExternalAgentEventV1 =
+  | { version: 1; kind: 'session'; runtime: ExternalAgentRuntimeId; sessionId: string; threadId?: string }
+  | { version: 1; kind: 'turn_started'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId: string }
+  | { version: 1; kind: 'message_delta'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId: string; delta: string }
+  | { version: 1; kind: 'reasoning_summary_delta'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId: string; delta: string }
+  | { version: 1; kind: 'plan'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId?: string; delta: string; data?: unknown }
+  | { version: 1; kind: 'progress'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId?: string; message?: string; data?: unknown }
+  | { version: 1; kind: 'diagnostic'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId?: string; message?: string; data?: unknown }
+  | { version: 1; kind: 'tool_requested'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId: string; request: ExternalAgentToolRequest }
+  | { version: 1; kind: 'tool_started'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId: string; callId: string; toolName: string; input?: unknown }
+  | { version: 1; kind: 'tool_completed'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId: string; callId: string; toolName: string; output?: unknown }
+  | { version: 1; kind: 'tool_failed'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId: string; callId: string; toolName: string; error: string }
+  | { version: 1; kind: 'completed'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId: string; finalText?: string }
+  | { version: 1; kind: 'cancelled'; runtime: ExternalAgentRuntimeId; sessionId: string; turnId?: string }
+  | { version: 1; kind: 'error'; runtime: ExternalAgentRuntimeId; sessionId?: string; turnId?: string; code: string; message: string };
 
 export type AgentModelProtocol =
   | 'openai-responses'

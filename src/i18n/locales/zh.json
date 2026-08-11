@@ -13,6 +13,23 @@
     "activity": "活动",
     "tasks": "任务",
     "scopeNotice": "读取、修改、配置和外部生成都需要你的确认",
+    "runtime": {
+      "title": "Agent 运行方式",
+      "builtin": "内置",
+      "codex": "Codex",
+      "claude": "Claude",
+      "refresh": "重新检测本机 Agent",
+      "installGuide": "打开官方安装说明",
+      "requiresDesktop": "Codex 和 Claude Code 仅在桌面应用中可用",
+      "unavailableHint": "当前运行方式尚未就绪，请重新检测或切换运行方式",
+      "status": {
+        "ready": "已连接，可以使用",
+        "not-installed": "本机尚未安装",
+        "login-required": "需要先在终端完成登录",
+        "incompatible": "当前版本不兼容",
+        "unavailable": "当前不可用"
+      }
+    },
     "newConversation": "新建对话",
     "emptyTitle": "交给 Agent 一个画布目标",
     "emptyDescription": "它会先理解任务和当前画布，再用审批卡说明需要读取或执行的操作。",
@@ -141,6 +158,7 @@
       "rejecting": "正在拒绝",
       "approved": "已批准并执行",
       "rejected": "已拒绝",
+      "failed": "审批未能执行",
       "expired": "审批已过期，请重新发起"
     }
   },

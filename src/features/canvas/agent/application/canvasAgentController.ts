@@ -216,33 +216,34 @@ function buildApprovalImpact(toolName: string, args: unknown): {
   };
 }
 
-interface PreparedApproval {
+export interface PreparedCanvasAgentApproval {
   view: AgentApprovalView;
   record: AgentApprovalRecord;
 }
 
-async function prepareApproval(item: RunToolApprovalItem, runId: string, projectId: string): Promise<PreparedApproval> {
-  let args: unknown = item.arguments ?? {};
-  if (typeof args === 'string') {
-    try { args = JSON.parse(args); } catch { args = { raw: args }; }
-  }
-  const safe = redactSensitiveValue(args);
-  const rawId = approvalId(item);
-  const toolName = item.name ?? item.toolName ?? 'tool';
-  const id = createApprovalId(runId, toolName, rawId);
+export async function prepareCanvasAgentToolApproval(input: {
+  runId: string;
+  projectId: string;
+  callId: string;
+  toolName: string;
+  arguments: unknown;
+  persist?: boolean;
+}): Promise<PreparedCanvasAgentApproval> {
+  const safe = redactSensitiveValue(input.arguments);
+  const id = createApprovalId(input.runId, input.toolName, input.callId);
   const existing = canvasAgentApprovalStore.get(id);
-  const requestFingerprint = await createAgentRequestFingerprint(toolName, args);
+  const requestFingerprint = await createAgentRequestFingerprint(input.toolName, input.arguments);
   if (existing && existing.requestFingerprint !== requestFingerprint) {
     canvasAgentApprovalStore.update(existing.id, { status: 'conflicted' });
-    throw new Error('SDK callId was reused with different tool arguments; the old approval was invalidated.');
+    throw new Error('Agent callId was reused with different tool arguments; the old approval was invalidated.');
   }
-  const details = buildApprovalImpact(toolName, safe);
+  const details = buildApprovalImpact(input.toolName, safe);
   const record = existing ?? createApprovalRecord({
     id,
-    runId,
-    projectId,
-    interruptionId: rawId,
-    toolName,
+    runId: input.runId,
+    projectId: input.projectId,
+    interruptionId: input.callId,
+    toolName: input.toolName,
     arguments: safe,
     requestFingerprint,
     impact: details.impact,
@@ -251,15 +252,15 @@ async function prepareApproval(item: RunToolApprovalItem, runId: string, project
     ttlMs: 5 * 60_000,
     ...(details.impact.effect === 'read' ? {
       scope: {
-        projectId,
-        runId,
+        projectId: input.projectId,
+        runId: input.runId,
         purpose: details.impact.summary,
-        resourceKinds: [toolName === 'canvas_command'
+        resourceKinds: [input.toolName === 'canvas_command'
           ? 'canvas'
-          : toolName === 'asset_read'
+          : input.toolName === 'asset_read'
             ? 'canvas-assets'
             : 'diagnostics'],
-        nodeIds: toolName === 'asset_read' && safe && typeof safe === 'object' && !Array.isArray(safe)
+        nodeIds: input.toolName === 'asset_read' && safe && typeof safe === 'object' && !Array.isArray(safe)
           ? (() => {
               const assetId = (safe as Record<string, unknown>).assetId;
               return typeof assetId === 'string'
@@ -277,11 +278,12 @@ async function prepareApproval(item: RunToolApprovalItem, runId: string, project
     } : {}),
   });
   const safeRecord = existing ?? record;
+  if (!existing && input.persist !== false) canvasAgentApprovalStore.put(safeRecord);
   return {
     record: safeRecord,
     view: {
-      id: rawId,
-      toolName,
+      id: input.callId,
+      toolName: input.toolName,
       arguments: safe,
       summary: safeRecord.impact.summary,
       impact: safeRecord.impact,
@@ -290,10 +292,31 @@ async function prepareApproval(item: RunToolApprovalItem, runId: string, project
   };
 }
 
+async function prepareApproval(
+  item: RunToolApprovalItem,
+  runId: string,
+  projectId: string,
+): Promise<PreparedCanvasAgentApproval> {
+  let args: unknown = item.arguments ?? {};
+  if (typeof args === 'string') {
+    try { args = JSON.parse(args); } catch { args = { raw: args }; }
+  }
+  const rawId = approvalId(item);
+  const toolName = item.name ?? item.toolName ?? 'tool';
+  return prepareCanvasAgentToolApproval({
+    runId,
+    projectId,
+    callId: rawId,
+    toolName,
+    arguments: args,
+    persist: false,
+  });
+}
+
 function persistRunCheckpoint(
   active: Omit<ActiveRun, 'state'> | ActiveRun,
   state: RunState<any, any>,
-  prepared: PreparedApproval[],
+  prepared: PreparedCanvasAgentApproval[],
 ): void {
   const serializedState = active.runtime.serializeStoryboardRunState(state);
   if (prepared.length > 0) {

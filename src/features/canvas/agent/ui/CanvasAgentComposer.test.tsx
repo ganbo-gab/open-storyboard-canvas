@@ -50,4 +50,27 @@ describe('CanvasAgentComposer', () => {
     expect(markup).toContain('Style');
     expect(markup).toContain('canvasAgent.attachmentCount');
   });
+
+  it('supports a ready external runtime without requiring a configured built-in model', () => {
+    const markup = render({
+      entries: [],
+      selectedEntry: null,
+      runtimeId: 'codex',
+      runtimeReady: true,
+    });
+    expect(markup).not.toContain('canvasAgent.configureModel');
+    expect(markup).not.toContain('<select');
+    expect(markup).toContain('canvasAgent.send');
+  });
+
+  it('disables sending and explains when the selected external runtime is unavailable', () => {
+    const markup = render({
+      entries: [],
+      selectedEntry: null,
+      runtimeId: 'claude',
+      runtimeReady: false,
+    });
+    expect(markup).toContain('canvasAgent.runtime.unavailableHint');
+    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*title="canvasAgent.send"/);
+  });
 });

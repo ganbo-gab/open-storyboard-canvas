@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use commands::ai as ai_commands;
+use commands::external_agent;
 use commands::image;
 use commands::portability;
 use commands::project_state;
@@ -86,9 +87,12 @@ fn frontend_ready(app: tauri::AppHandle) {
 pub fn run() {
     setup_logging();
 
+    let external_agent_state = external_agent::ExternalAgentState::new();
+
     tauri::Builder::default()
         .manage(project_state::ProjectDb::new())
         .manage(portability::PortabilityJobs::new())
+        .manage(external_agent_state)
         .on_page_load(|window, _payload| {
             if window.label() != MAIN_WINDOW_LABEL {
                 return;
@@ -98,6 +102,9 @@ pub fn run() {
             show_main_window(&window.app_handle());
         })
         .setup(|app| {
+            app.state::<external_agent::ExternalAgentState>()
+                .start_broker(app.handle().clone())?;
+
             let window_config = app
                 .config()
                 .app
@@ -185,6 +192,11 @@ pub fn run() {
             commands::dreamina_stage_reference_image,
             commands::dreamina_stage_reference_media,
             commands::dreamina_network_diagnose,
+            external_agent::diagnose_external_agent_runtimes,
+            external_agent::start_external_agent_session,
+            external_agent::send_external_agent_turn,
+            external_agent::cancel_external_agent_session,
+            external_agent::external_agent_resolve_tool_call,
             commands::custom_http_request,
             commands::custom_http_stream_request,
             image::split_image,

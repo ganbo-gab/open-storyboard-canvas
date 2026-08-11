@@ -6,9 +6,11 @@ export type CanvasAgentView = 'conversation' | 'history' | 'activity' | 'tasks';
 
 interface Props {
   selectedEntry?: { providerLabel: string; modelLabel: string } | null;
+  runtimeLabel?: string;
   activeView: CanvasAgentView;
   pendingCount: number;
   isRunning: boolean;
+  isReady?: boolean;
   onViewChange: (view: CanvasAgentView) => void;
   onClose: () => void;
   closeRef: RefObject<HTMLButtonElement>;
@@ -23,9 +25,11 @@ const views: Array<[CanvasAgentView, typeof MessageSquare]> = [
 
 export function CanvasAgentHeader({
   selectedEntry,
+  runtimeLabel,
   activeView,
   pendingCount,
   isRunning,
+  isReady = Boolean(selectedEntry),
   onViewChange,
   onClose,
   closeRef,
@@ -43,14 +47,14 @@ export function CanvasAgentHeader({
           <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-text-muted">
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                isRunning ? 'bg-amber-400' : selectedEntry ? 'bg-emerald-500' : 'bg-text-muted/50'
+                isRunning ? 'bg-amber-400' : isReady ? 'bg-emerald-500' : 'bg-text-muted/50'
               }`}
               aria-hidden="true"
             />
             <span className="truncate">
-              {selectedEntry
+              {runtimeLabel || (selectedEntry
                 ? `${selectedEntry.providerLabel} / ${selectedEntry.modelLabel}`
-                : t('canvasAgent.noModel')}
+                : t('canvasAgent.noModel'))}
             </span>
           </div>
         </div>

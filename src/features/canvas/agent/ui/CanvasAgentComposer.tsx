@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { CircleAlert, CircleStop, ImagePlus, Send, Settings2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
-import type { AgentTurnMediaInput } from '../domain/agentModel';
+import type { AgentTurnMediaInput, CanvasAgentRuntimeId } from '../domain/agentModel';
 
 interface ModelEntry {
   id: string;
@@ -14,6 +14,8 @@ interface ModelEntry {
 interface Props {
   entries: ModelEntry[];
   selectedEntry: ModelEntry | null;
+  runtimeId?: CanvasAgentRuntimeId;
+  runtimeReady?: boolean;
   draft: string;
   attachments: AgentTurnMediaInput[];
   maxAttachments: number;
@@ -33,6 +35,8 @@ interface Props {
 export function CanvasAgentComposer({
   entries,
   selectedEntry,
+  runtimeId = 'builtin',
+  runtimeReady = true,
   draft,
   attachments = [],
   maxAttachments = 8,
@@ -50,11 +54,14 @@ export function CanvasAgentComposer({
 }: Props) {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const isExternalRuntime = runtimeId !== 'builtin';
   const canAttach = Boolean(
-    selectedEntry?.supportsMultimodal
+    (isExternalRuntime ? runtimeReady : selectedEntry?.supportsMultimodal)
     && attachments.length < maxAttachments,
   );
-  const blockedByVision = attachments.length > 0 && !selectedEntry?.supportsMultimodal;
+  const blockedByVision = !isExternalRuntime
+    && attachments.length > 0
+    && !selectedEntry?.supportsMultimodal;
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -63,7 +70,7 @@ export function CanvasAgentComposer({
     textarea.style.height = `${Math.min(128, Math.max(44, textarea.scrollHeight))}px`;
   }, [draft]);
 
-  if (!selectedEntry) {
+  if (!isExternalRuntime && !selectedEntry) {
     return (
       <footer className="agent-composer shrink-0 border-t border-border-dark p-3">
         <button
@@ -80,6 +87,7 @@ export function CanvasAgentComposer({
 
   return (
     <footer className="agent-composer shrink-0 border-t border-border-dark p-3">
+      {!isExternalRuntime && selectedEntry ? (
       <div className="mb-2 flex items-center gap-2">
         <select
           aria-label={t('canvasAgent.modelSelect')}
@@ -103,6 +111,7 @@ export function CanvasAgentComposer({
           <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       </div>
+      ) : null}
 
       {attachments.length ? (
         <div className="agent-feed-enter mb-2 space-y-1.5" aria-label={t('canvasAgent.attachments')}>
@@ -156,12 +165,12 @@ export function CanvasAgentComposer({
           type="button"
           disabled={!canAttach}
           className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[5px] text-text-muted transition-[background-color,color,transform] duration-150 hover:bg-text-dark/[0.05] hover:text-text-dark active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-[0.35] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-          title={selectedEntry.supportsMultimodal
+          title={(isExternalRuntime || selectedEntry?.supportsMultimodal)
             ? attachments.length >= maxAttachments
               ? t('canvasAgent.attachmentLimit', { max: maxAttachments })
               : t('canvasAgent.addAttachment')
             : t('canvasAgent.visionRequired')}
-          aria-label={selectedEntry.supportsMultimodal
+          aria-label={(isExternalRuntime || selectedEntry?.supportsMultimodal)
             ? t('canvasAgent.addAttachment')
             : t('canvasAgent.visionRequired')}
           onClick={onAttach}
@@ -196,7 +205,7 @@ export function CanvasAgentComposer({
         ) : (
           <button
             type="button"
-            disabled={!draft.trim() || hasPendingApproval || hasPendingPlan || blockedByVision || hasMissingAttachments}
+            disabled={!draft.trim() || !runtimeReady || hasPendingApproval || hasPendingPlan || blockedByVision || hasMissingAttachments}
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[5px] bg-accent text-white transition-[background-color,transform] duration-150 hover:bg-accent/[0.85] active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-[0.35] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
             title={t('canvasAgent.send')}
             aria-label={t('canvasAgent.send')}
@@ -207,7 +216,9 @@ export function CanvasAgentComposer({
         )}
       </div>
       <div className="mt-1.5 px-1 text-[10px] text-text-muted">
-        {blockedByVision
+        {!runtimeReady
+          ? t('canvasAgent.runtime.unavailableHint')
+          : blockedByVision
           ? t('canvasAgent.switchToVisionModelHint')
           : hasMissingAttachments
             ? t('canvasAgent.missingAttachmentBeforeSend')
