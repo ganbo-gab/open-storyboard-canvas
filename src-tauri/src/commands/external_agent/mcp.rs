@@ -94,6 +94,21 @@ fn constant_time_equal(left: &str, right: &str) -> bool {
         == 0
 }
 
+fn capability_request_is_valid(
+    expected_session_id: &str,
+    requested_session_id: &str,
+    expected_token: &str,
+    requested_token: &str,
+    cancelled: bool,
+    expires_at: u64,
+    now: u64,
+) -> bool {
+    !cancelled
+        && now < expires_at
+        && constant_time_equal(expected_session_id, requested_session_id)
+        && constant_time_equal(expected_token, requested_token)
+}
+
 async fn authorized_session(
     inner: &Arc<ExternalAgentInner>,
     session_id: &str,
@@ -101,10 +116,15 @@ async fn authorized_session(
 ) -> Option<Arc<ExternalAgentSession>> {
     let sessions = inner.sessions.read().await;
     let session = sessions.get(session_id)?.clone();
-    if session.cancelled.load(std::sync::atomic::Ordering::SeqCst)
-        || super::now_millis() >= session.capability_expires_at
-        || !constant_time_equal(&session.capability_token, token)
-    {
+    if !capability_request_is_valid(
+        &session.id,
+        session_id,
+        &session.capability_token,
+        token,
+        session.cancelled.load(std::sync::atomic::Ordering::SeqCst),
+        session.capability_expires_at,
+        super::now_millis(),
+    ) {
         return None;
     }
     Some(session)
@@ -396,5 +416,72 @@ mod tests {
         assert!(constant_time_equal("abcdef", "abcdef"));
         assert!(!constant_time_equal("abcdef", "abcdeg"));
         assert!(!constant_time_equal("abcdef", "abc"));
+    }
+
+    #[test]
+    fn capability_requires_exact_session_token_and_unexpired_active_state() {
+        assert!(capability_request_is_valid(
+            "session-a",
+            "session-a",
+            "token-a",
+            "token-a",
+            false,
+            101,
+            100,
+        ));
+        assert!(!capability_request_is_valid(
+            "session-a",
+            "session-b",
+            "token-a",
+            "token-a",
+            false,
+            101,
+            100,
+        ));
+        assert!(!capability_request_is_valid(
+            "session-a",
+            "session-a",
+            "token-a",
+            "token-b",
+            false,
+            101,
+            100,
+        ));
+        assert!(!capability_request_is_valid(
+            "session-a",
+            "session-a",
+            "token-a",
+            "token-a",
+            false,
+            100,
+            100,
+        ));
+        assert!(!capability_request_is_valid(
+            "session-a",
+            "session-a",
+            "token-a",
+            "token-a",
+            true,
+            101,
+            100,
+        ));
+    }
+
+    #[test]
+    fn loopback_ephemeral_binding_avoids_occupied_ports() {
+        let occupied = StdTcpListener::bind("127.0.0.1:0").unwrap();
+        let occupied_address = occupied.local_addr().unwrap();
+        let (first, first_address) = bind_broker_listener().unwrap();
+        let (second, second_address) = bind_broker_listener().unwrap();
+
+        assert_eq!(first_address.ip(), std::net::Ipv4Addr::LOCALHOST);
+        assert_eq!(second_address.ip(), std::net::Ipv4Addr::LOCALHOST);
+        assert_ne!(first_address.port(), 0);
+        assert_ne!(second_address.port(), 0);
+        assert_ne!(first_address, occupied_address);
+        assert_ne!(second_address, occupied_address);
+        assert_ne!(first_address, second_address);
+
+        drop((occupied, first, second));
     }
 }

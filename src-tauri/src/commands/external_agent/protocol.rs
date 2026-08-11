@@ -12,6 +12,9 @@ pub(crate) const MAX_TOOL_SCHEMA_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_TOOL_RESULT_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_TOOLS: usize = 64;
 pub(crate) const MAX_EVENT_TEXT_CHARS: usize = 16_384;
+const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
+const UTF16_LE_BOM: &[u8] = b"\xff\xfe";
+const UTF16_BE_BOM: &[u8] = b"\xfe\xff";
 
 fn sensitive_assignment_regex() -> &'static Regex {
     static VALUE: OnceLock<Regex> = OnceLock::new();
@@ -315,7 +318,7 @@ where
             return if output.is_empty() {
                 Ok(None)
             } else {
-                Ok(Some(output))
+                finish_jsonl_record(output).map(Some)
             };
         }
         let newline = available.iter().position(|byte| *byte == b'\n');
@@ -329,12 +332,24 @@ where
         output.extend_from_slice(&available[..consumed]);
         reader.consume(consumed);
         if newline.is_some() {
-            while matches!(output.last(), Some(b'\n' | b'\r')) {
-                output.pop();
-            }
-            return Ok(Some(output));
+            return finish_jsonl_record(output).map(Some);
         }
     }
+}
+
+fn finish_jsonl_record(mut output: Vec<u8>) -> Result<Vec<u8>, ExternalAgentCommandError> {
+    while matches!(output.last(), Some(b'\n' | b'\r')) {
+        output.pop();
+    }
+    if output.starts_with(UTF16_LE_BOM) || output.starts_with(UTF16_BE_BOM) {
+        return Err(ExternalAgentCommandError::protocol(
+            "External Agent output must use UTF-8, not UTF-16.",
+        ));
+    }
+    if output.starts_with(UTF8_BOM) {
+        output.drain(..UTF8_BOM.len());
+    }
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -392,5 +407,36 @@ mod tests {
         let mut reader = BufReader::new(bytes.as_slice());
         let error = read_bounded_jsonl_line(&mut reader).await.unwrap_err();
         assert_eq!(error.code, "protocol_error");
+    }
+
+    #[tokio::test]
+    async fn jsonl_reader_handles_utf8_bom_crlf_partial_chunks_and_eof_record() {
+        let bytes = b"\xef\xbb\xbf{\"path\":\"\xe5\x88\x86\xe9\x95\x9c \xe5\x8a\xa9\xe6\x89\x8b\"}\r\n{\"ok\":true}";
+        let mut reader = BufReader::with_capacity(2, bytes.as_slice());
+
+        let first = read_bounded_jsonl_line(&mut reader).await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&first).unwrap(),
+            json!({"path": "分镜 助手"})
+        );
+
+        let second = read_bounded_jsonl_line(&mut reader).await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&second).unwrap(),
+            json!({"ok": true})
+        );
+        assert!(read_bounded_jsonl_line(&mut reader)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn jsonl_reader_rejects_utf16_bom() {
+        let bytes = b"\xff\xfe{\x00}\x00\r\x00\n\x00";
+        let mut reader = BufReader::with_capacity(1, bytes.as_slice());
+        let error = read_bounded_jsonl_line(&mut reader).await.unwrap_err();
+        assert_eq!(error.code, "protocol_error");
+        assert!(error.message.contains("UTF-8"));
     }
 }

@@ -233,4 +233,16 @@ mod tests {
 
         assert!(matches!(event, ProcessMonitorEvent::Reader(Ok(()))));
     }
+
+    #[tokio::test]
+    async fn cancellation_does_not_wait_for_child_or_reader() {
+        let event = next_process_monitor_event(
+            pending::<()>(),
+            ready(()),
+            pending::<Result<(), ExternalAgentCommandError>>(),
+        )
+        .await;
+
+        assert!(matches!(event, ProcessMonitorEvent::Cancelled));
+    }
 }

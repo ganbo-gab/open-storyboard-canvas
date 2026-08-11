@@ -1,0 +1,92 @@
+name: Cross-platform quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: ${{ matrix.name }} quality and package compile
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+
+    steps:
+      - name: Force LF checkout policy
+        shell: bash
+        run: git config --global core.autocrlf false
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies from lockfile
+        run: npm ci
+
+      - name: Verify tracked line endings
+        run: npm run check:line-endings
+
+      - name: Run frontend tests
+        run: npm test -- --run
+
+      - name: Type-check frontend
+        run: npx tsc --noEmit
+
+      - name: Build production frontend
+        run: npm run build
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: Check Rust workspace
+        working-directory: src-tauri
+        run: cargo check --locked
+
+      - name: Compile unsigned Tauri application
+        run: npx tauri build --debug --no-bundle --ci
+
+      - name: Verify lockfiles and generated sources stayed clean
+        shell: bash
+        run: git diff --exit-code

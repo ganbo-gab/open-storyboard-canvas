@@ -76,6 +76,39 @@ fn push_unique(paths: &mut Vec<PathBuf>, path: PathBuf) {
     }
 }
 
+#[cfg(any(windows, test))]
+fn windows_executable_names(binary: &str, pathext: Option<&OsStr>) -> Vec<OsString> {
+    let mut extensions = Vec::new();
+    if let Some(pathext) = pathext {
+        for extension in pathext.to_string_lossy().split(';') {
+            let normalized = extension.trim().to_ascii_lowercase();
+            if matches!(normalized.as_str(), ".exe" | ".cmd" | ".bat")
+                && !extensions.contains(&normalized)
+            {
+                extensions.push(normalized);
+            }
+        }
+    }
+    for extension in [".exe", ".cmd", ".bat"] {
+        if !extensions.iter().any(|existing| existing == extension) {
+            extensions.push(extension.to_string());
+        }
+    }
+    extensions
+        .into_iter()
+        .map(|extension| OsString::from(format!("{binary}{extension}")))
+        .collect()
+}
+
+fn push_binary_candidates(paths: &mut Vec<PathBuf>, directory: &Path, binary: &str) {
+    #[cfg(not(windows))]
+    push_unique(paths, directory.join(binary));
+    #[cfg(windows)]
+    for name in windows_executable_names(binary, non_empty_env("PATHEXT").as_deref()) {
+        push_unique(paths, directory.join(name));
+    }
+}
+
 fn executable_file(path: &Path) -> bool {
     let Ok(metadata) = std::fs::metadata(path) else {
         return false;
@@ -99,12 +132,7 @@ fn candidate_paths(runtime: ExternalAgentRuntime) -> Vec<PathBuf> {
     let binary = runtime.binary_name();
     if let Some(path_env) = non_empty_env("PATH") {
         for directory in std::env::split_paths(&path_env) {
-            push_unique(&mut paths, directory.join(binary));
-            #[cfg(windows)]
-            {
-                push_unique(&mut paths, directory.join(format!("{binary}.exe")));
-                push_unique(&mut paths, directory.join(format!("{binary}.cmd")));
-            }
+            push_binary_candidates(&mut paths, &directory, binary);
         }
     }
 
@@ -116,14 +144,14 @@ fn candidate_paths(runtime: ExternalAgentRuntime) -> Vec<PathBuf> {
             ".cargo/bin",
             "bin",
         ] {
-            push_unique(&mut paths, home.join(relative).join(binary));
+            push_binary_candidates(&mut paths, &home.join(relative), binary);
         }
         if runtime == ExternalAgentRuntime::Codex {
-            push_unique(&mut paths, home.join(".codex/bin/codex"));
+            push_binary_candidates(&mut paths, &home.join(".codex/bin"), "codex");
         }
         if runtime == ExternalAgentRuntime::Claude {
-            push_unique(&mut paths, home.join(".local/bin/claude"));
-            push_unique(&mut paths, home.join(".claude/local/claude"));
+            push_binary_candidates(&mut paths, &home.join(".local/bin"), "claude");
+            push_binary_candidates(&mut paths, &home.join(".claude/local"), "claude");
         }
     }
 
@@ -136,8 +164,7 @@ fn candidate_paths(runtime: ExternalAgentRuntime) -> Vec<PathBuf> {
     {
         if let Some(appdata) = non_empty_env("APPDATA") {
             let directory = PathBuf::from(appdata).join("npm");
-            push_unique(&mut paths, directory.join(format!("{binary}.exe")));
-            push_unique(&mut paths, directory.join(format!("{binary}.cmd")));
+            push_binary_candidates(&mut paths, &directory, binary);
         }
         if let Some(local_appdata) = non_empty_env("LOCALAPPDATA") {
             let local = PathBuf::from(local_appdata);
@@ -196,22 +223,26 @@ fn resolve_windows_npm_shim(shim: &Path, runtime: ExternalAgentRuntime) -> Optio
     })
 }
 
+#[cfg(any(windows, test))]
+fn resolve_windows_candidate(path: &Path, runtime: ExternalAgentRuntime) -> Option<LaunchTarget> {
+    let extension = path.extension().and_then(OsStr::to_str)?;
+    if extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat") {
+        return resolve_windows_npm_shim(path, runtime);
+    }
+    if extension.eq_ignore_ascii_case("exe") && executable_file(path) {
+        return Some(LaunchTarget::from_direct(path.to_path_buf(), runtime));
+    }
+    None
+}
+
 pub(crate) fn discover_runtime(runtime: ExternalAgentRuntime) -> Option<LaunchTarget> {
     for path in candidate_paths(runtime) {
         #[cfg(windows)]
         {
-            let extension = path.extension().and_then(OsStr::to_str);
-            if extension.is_none() {
-                continue;
+            if let Some(target) = resolve_windows_candidate(&path, runtime) {
+                return Some(target);
             }
-            if extension.is_some_and(|value| {
-                value.eq_ignore_ascii_case("cmd") || value.eq_ignore_ascii_case("bat")
-            }) {
-                if let Some(target) = resolve_windows_npm_shim(&path, runtime) {
-                    return Some(target);
-                }
-                continue;
-            }
+            continue;
         }
         if executable_file(&path) {
             return Some(LaunchTarget::from_direct(path, runtime));
@@ -598,11 +629,13 @@ mod tests {
     #[test]
     fn windows_cmd_shim_resolves_only_known_node_entrypoint() {
         let directory = tempfile::tempdir().unwrap();
-        let shim = directory.path().join("codex.cmd");
+        let unicode_directory = directory.path().join("工具 空格");
+        std::fs::create_dir(&unicode_directory).unwrap();
+        let shim = unicode_directory.join("CODEX.CMD");
         std::fs::write(&shim, "untrusted contents").unwrap();
         assert!(resolve_windows_npm_shim(&shim, ExternalAgentRuntime::Codex).is_none());
 
-        let node = directory.path().join("node.exe");
+        let node = unicode_directory.join("node.exe");
         std::fs::write(&node, "node placeholder").unwrap();
         #[cfg(unix)]
         {
@@ -611,9 +644,7 @@ mod tests {
             permissions.set_mode(0o755);
             std::fs::set_permissions(&node, permissions).unwrap();
         }
-        let script = directory
-            .path()
-            .join("node_modules/@openai/codex/bin/codex.js");
+        let script = unicode_directory.join("node_modules/@openai/codex/bin/codex.js");
         std::fs::create_dir_all(script.parent().unwrap()).unwrap();
         std::fs::write(&script, "codex placeholder").unwrap();
         let target = resolve_windows_npm_shim(&shim, ExternalAgentRuntime::Codex).unwrap();
@@ -625,17 +656,70 @@ mod tests {
     }
 
     #[test]
+    fn windows_pathext_candidates_are_allowlisted_ordered_and_unique() {
+        let names =
+            windows_executable_names("codex", Some(OsStr::new(".BAT;.EXE;.CMD;.BAT;.PS1;.COM")));
+        assert_eq!(
+            names,
+            vec![
+                OsString::from("codex.bat"),
+                OsString::from("codex.exe"),
+                OsString::from("codex.cmd"),
+            ]
+        );
+    }
+
+    #[test]
+    fn windows_candidate_accepts_exe_and_rejects_bat_without_shell() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("程序 Files");
+        std::fs::create_dir(&directory).unwrap();
+        let executable = directory.join("codex.EXE");
+        std::fs::write(&executable, "native placeholder").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&executable, permissions).unwrap();
+        }
+        let target = resolve_windows_candidate(&executable, ExternalAgentRuntime::Codex).unwrap();
+        assert_eq!(target.command().as_std().get_program(), executable);
+
+        let batch = directory.join("codex.BAT");
+        std::fs::write(&batch, "untrusted batch contents").unwrap();
+        assert!(resolve_windows_candidate(&batch, ExternalAgentRuntime::Codex).is_none());
+    }
+
+    #[test]
     fn launch_target_keeps_arguments_separate() {
         let target = LaunchTarget::from_direct(
-            PathBuf::from("/Applications/Agent Tool/codex"),
+            PathBuf::from("/Applications/分镜 Agent Tool/codex"),
             ExternalAgentRuntime::Codex,
         );
         let command = target.command();
         assert_eq!(
             command.as_std().get_program(),
-            "/Applications/Agent Tool/codex"
+            "/Applications/分镜 Agent Tool/codex"
         );
         assert_eq!(command.as_std().get_args().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_executable_detection_requires_permission_on_unicode_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("应用 程序/claude");
+        std::fs::create_dir(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, "native placeholder").unwrap();
+        assert!(!executable_file(&executable));
+
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+        assert!(executable_file(&executable));
     }
 
     #[test]
@@ -708,8 +792,8 @@ mod tests {
             &codex_home,
             &BrokerCredentials {
                 address: "127.0.0.1:1234".to_string(),
-                token: "token".to_string(),
-                session_id: "session".to_string(),
+                token: "broker-token-secret".to_string(),
+                session_id: "broker-session-secret".to_string(),
             },
         );
         let args = command
@@ -717,6 +801,13 @@ mod tests {
             .get_args()
             .map(|value| value.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
+        for secret in [
+            "127.0.0.1:1234",
+            "broker-token-secret",
+            "broker-session-secret",
+        ] {
+            assert!(!args.iter().any(|value| value.contains(secret)));
+        }
         assert!(args.iter().any(|value| value == "--strict-config"));
         for capability in [
             "features.shell_tool=false",
@@ -734,6 +825,13 @@ mod tests {
             }),
             Some(Some(codex_home))
         );
+        assert_eq!(
+            command.as_std().get_envs().find_map(|(name, value)| {
+                (name == "STORYBOARD_EXTERNAL_AGENT_TOKEN")
+                    .then(|| value.map(|value| value.to_string_lossy().into_owned()))
+            }),
+            Some(Some("broker-token-secret".to_string()))
+        );
     }
 
     #[test]
@@ -750,8 +848,8 @@ mod tests {
                 workspace: Path::new("/tmp/storyboard workspace"),
                 broker: &BrokerCredentials {
                     address: "127.0.0.1:1234".to_string(),
-                    token: "token".to_string(),
-                    session_id: "session".to_string(),
+                    token: "broker-token-secret".to_string(),
+                    session_id: "broker-session-secret".to_string(),
                 },
                 provider_session_id: "00000000-0000-4000-8000-000000000000",
                 resume: false,
@@ -766,6 +864,13 @@ mod tests {
             .get_args()
             .map(|value| value.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
+        for secret in [
+            "127.0.0.1:1234",
+            "broker-token-secret",
+            "broker-session-secret",
+        ] {
+            assert!(!args.iter().any(|value| value.contains(secret)));
+        }
         assert!(!args.iter().any(|value| value == "--safe-mode"));
         let setting_sources = args
             .windows(2)

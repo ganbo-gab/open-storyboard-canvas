@@ -1,5 +1,8 @@
 name: Build Open Storyboard Canvas
 
+permissions:
+  contents: read
+
 on:
   push:
     tags:
@@ -54,11 +57,40 @@ jobs:
           }
           node scripts/sync-version.mjs $VERSION
 
+      - name: Record expected version metadata
+        shell: bash
+        run: git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
+
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify line endings
+        run: npm run check:line-endings
+
+      - name: Run frontend tests
+        run: npm test -- --run
+
+      - name: Type-check frontend
+        run: npx tsc --noEmit
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: Check Rust workspace
+        working-directory: src-tauri
+        run: cargo check --locked
+
       - name: Build application
-        run: npx tauri build
+        run: npx tauri build --ci
+
+      - name: Verify lockfiles and generated sources stayed clean
+        shell: bash
+        run: git diff --exit-code
 
       - name: Rename Windows installer
         shell: pwsh
@@ -125,14 +157,41 @@ jobs:
           fi
           node scripts/sync-version.mjs "$VERSION"
 
+      - name: Record expected version metadata
+        run: git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify line endings
+        run: npm run check:line-endings
+
+      - name: Run frontend tests
+        run: npm test -- --run
+
+      - name: Type-check frontend
+        run: npx tsc --noEmit
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: Check Rust workspace
+        working-directory: src-tauri
+        run: cargo check --locked
 
       - name: Build application (Universal Binary)
         env:
           CC: ""
           CXX: ""
-        run: npx tauri build --target universal-apple-darwin
+        run: npx tauri build --target universal-apple-darwin --ci
+
+      - name: Verify lockfiles and generated sources stayed clean
+        run: git diff --exit-code
 
       - name: Rename macOS DMG
         run: |

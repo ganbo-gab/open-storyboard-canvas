@@ -295,3 +295,119 @@ pub(super) async fn cleanup_turn_workspace(session: &ExternalAgentSession, turn_
         session.turn_workspaces.lock().await.remove(turn_id);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_session(workspace: SessionWorkspace) -> ExternalAgentSession {
+        ExternalAgentSession {
+            id: Uuid::new_v4().to_string(),
+            runtime: ExternalAgentRuntime::Claude,
+            capability_token: "token".to_string(),
+            capability_expires_at: u64::MAX,
+            broker: BrokerCredentials {
+                address: "127.0.0.1:1".to_string(),
+                token: "token".to_string(),
+                session_id: "session".to_string(),
+            },
+            target: LaunchTarget::from_direct_for_test(
+                PathBuf::from("claude"),
+                ExternalAgentRuntime::Claude,
+            ),
+            workspace: StdMutex::new(Some(workspace)),
+            tools: HashMap::new(),
+            provider_session_id: RwLock::new(None),
+            model: None,
+            created_at: 0,
+            cancelled: AtomicBool::new(false),
+            active_turn_id: RwLock::new(None),
+            active_process: Mutex::new(None),
+            codex_stdin: Mutex::new(None),
+            next_rpc_id: AtomicU64::new(1),
+            pending_rpc: Mutex::new(HashMap::new()),
+            claude_has_history: AtomicBool::new(false),
+            turn_gate: Mutex::new(()),
+            turn_workspaces: Mutex::new(HashMap::new()),
+        }
+    }
+
+    #[test]
+    fn unicode_workspace_root_round_trips_temporary_and_persistent_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("缓存 目录");
+
+        let temporary = create_workspace(&root, ExternalAgentRuntime::Claude, None).unwrap();
+        let temporary_path = temporary.path().to_path_buf();
+        assert!(temporary_path.starts_with(&root));
+        assert!(temporary_path.exists());
+        drop(temporary);
+        assert!(!temporary_path.exists());
+
+        let persistent = create_workspace(&root, ExternalAgentRuntime::Codex, None).unwrap();
+        let persistent_path = persistent.path().to_path_buf();
+        persist_codex_thread_marker(&persistent_path, "thread-unicode").unwrap();
+        drop(persistent);
+        let resumed =
+            create_workspace(&root, ExternalAgentRuntime::Codex, Some("thread-unicode")).unwrap();
+        assert_eq!(resumed.path(), persistent_path);
+    }
+
+    #[tokio::test]
+    async fn unicode_attachment_is_retained_then_cleaned_by_turn_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("附件 缓存");
+        let workspace = create_workspace(&root, ExternalAgentRuntime::Claude, None).unwrap();
+        let session = test_session(workspace);
+        let staged = stage_turn_attachments(
+            &session,
+            vec![ExternalAgentAttachment {
+                reference_id: "asset-unicode".to_string(),
+                title: "参考 图.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes_base64: "iVBORw0KGgo=".to_string(),
+            }],
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(staged.attachments[0].title, "参考 图.png");
+        assert!(staged.attachments[0].absolute_path.starts_with(&root));
+        let turn_path = staged.workspace.path().to_path_buf();
+
+        retain_turn_workspace(&session, "turn-unicode", Some(staged)).await;
+        assert!(turn_path.exists());
+        cleanup_turn_workspace(&session, Some("turn-unicode")).await;
+        assert!(!turn_path.exists());
+    }
+
+    #[tokio::test]
+    async fn failed_attachment_batch_removes_partially_staged_turn_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("失败 恢复");
+        let workspace = create_workspace(&root, ExternalAgentRuntime::Claude, None).unwrap();
+        let session = test_session(workspace);
+        let session_path = session.workspace_path().unwrap();
+        let error = stage_turn_attachments(
+            &session,
+            vec![
+                ExternalAgentAttachment {
+                    reference_id: "asset-valid".to_string(),
+                    title: "valid.png".to_string(),
+                    mime_type: "image/png".to_string(),
+                    bytes_base64: "iVBORw0KGgo=".to_string(),
+                },
+                ExternalAgentAttachment {
+                    reference_id: "asset-invalid".to_string(),
+                    title: "invalid.png".to_string(),
+                    mime_type: "image/png".to_string(),
+                    bytes_base64: "aW52YWxpZA==".to_string(),
+                },
+            ],
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "invalid_request");
+        assert_eq!(std::fs::read_dir(session_path).unwrap().count(), 0);
+    }
+}

@@ -28,6 +28,16 @@ function updateCargoTomlVersion(filePath, nextVersion) {
   writeTextFile(filePath, updated);
 }
 
+function updateCargoLockVersion(filePath, nextVersion) {
+  const content = fs.readFileSync(filePath, "utf8");
+  const packagePattern = /(\[\[package\]\]\nname = "open-storyboard-canvas"\nversion = ")([^"]+)(")/;
+  if (!packagePattern.test(content)) {
+    fail("Cannot locate open-storyboard-canvas package version in src-tauri/Cargo.lock");
+  }
+  const updated = content.replace(packagePattern, `$1${nextVersion}$3`);
+  writeTextFile(filePath, updated);
+}
+
 function updateTauriConfigVersion(filePath, nextVersion) {
   const content = fs.readFileSync(filePath, "utf8");
   const config = JSON.parse(content);
@@ -58,6 +68,7 @@ execSync(`npm version ${nextVersion} --no-git-tag-version --allow-same-version`,
 });
 
 updateCargoTomlVersion(path.join(repoRoot, "src-tauri", "Cargo.toml"), nextVersion);
+updateCargoLockVersion(path.join(repoRoot, "src-tauri", "Cargo.lock"), nextVersion);
 updateTauriConfigVersion(path.join(repoRoot, "src-tauri", "tauri.conf.json"), nextVersion);
 
 console.log(`Synchronized version to ${nextVersion}`);

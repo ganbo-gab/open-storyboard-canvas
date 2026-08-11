@@ -14,6 +14,7 @@
     "dev": "vite",
     "test": "vitest run",
     "build": "tsc && vite build",
+    "check:line-endings": "node scripts/check-line-endings.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "sync:version": "node scripts/sync-version.mjs",
