@@ -31,7 +31,12 @@ import type {
   AgentModelTurnRequest,
   AgentModelTurnResponse,
 } from '../domain/agentModel';
-import { CANVAS_COMMAND_VERSION, type CanvasCommand, type CanvasCommandExecutionResult } from '@/features/canvas/domain/canvasCommands';
+import {
+  CANVAS_COMMAND_TYPES,
+  CANVAS_COMMAND_VERSION,
+  type CanvasCommand,
+  type CanvasCommandExecutionResult,
+} from '@/features/canvas/domain/canvasCommands';
 import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
 import {
   buildSkillContext,
@@ -511,7 +516,11 @@ const canvasCommandInputParser = z.object({
 const canvasCommandParameters = {
   type: 'object' as const,
   properties: {
-    type: { type: 'string' as const, description: 'Registered CanvasCommand type.' },
+    type: {
+      type: 'string' as const,
+      enum: [...CANVAS_COMMAND_TYPES],
+      description: 'Registered CanvasCommand type, including safe tag and tag-group operations.',
+    },
     input: { type: 'object' as const, description: 'Command-specific input validated by CanvasCommandRegistry.', additionalProperties: true },
   },
   required: ['type', 'input'],

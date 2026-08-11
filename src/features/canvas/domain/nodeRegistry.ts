@@ -17,6 +17,8 @@ import {
   type PanoramaNodeData,
   type StoryboardGenNodeData,
   type StoryboardSplitNodeData,
+  type TagGroupNodeData,
+  type TagNodeData,
   type TextAnnotationNodeData,
   type UploadImageNodeData,
   type VideoNodeData,
@@ -24,7 +26,7 @@ import {
 import { DEFAULT_NODE_DISPLAY_NAME } from './nodeDisplay';
 import { DEFAULT_IMAGE_MODEL_ID } from '../models';
 
-export type MenuIconKey = 'upload' | 'sparkles' | 'layout' | 'text' | 'video' | 'audio';
+export type MenuIconKey = 'upload' | 'sparkles' | 'layout' | 'text' | 'video' | 'audio' | 'tag' | 'tagGroup';
 export type CanvasNodeSelectionToolbarMode = 'full' | 'deleteOnly' | 'none';
 
 export interface CanvasNodeCapabilities {
@@ -358,6 +360,66 @@ const groupNodeDefinition: CanvasNodeDefinition<GroupNodeData> = {
   }),
 };
 
+const tagNodeDefinition: CanvasNodeDefinition<TagNodeData> = {
+  type: CANVAS_NODE_TYPES.tag,
+  menuLabelKey: 'node.menu.tag',
+  menuIcon: 'tag',
+  visibleInMenu: true,
+  defaultSize: {
+    width: 260,
+    height: 132,
+  },
+  capabilities: {
+    toolbar: true,
+    selectionToolbar: 'full',
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: true,
+    targetHandle: true,
+    connectMenu: {
+      fromSource: true,
+      fromTarget: true,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.tag],
+    label: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.tag],
+    enabled: true,
+    color: 'neutral',
+  }),
+};
+
+const tagGroupNodeDefinition: CanvasNodeDefinition<TagGroupNodeData> = {
+  type: CANVAS_NODE_TYPES.tagGroup,
+  menuLabelKey: 'node.menu.tagGroup',
+  menuIcon: 'tagGroup',
+  visibleInMenu: true,
+  defaultSize: {
+    width: 320,
+    height: 180,
+  },
+  capabilities: {
+    toolbar: true,
+    selectionToolbar: 'full',
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: false,
+    targetHandle: false,
+    connectMenu: {
+      fromSource: false,
+      fromTarget: false,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.tagGroup],
+    label: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.tagGroup],
+    enabled: true,
+    memberTagIds: [],
+  }),
+};
+
 const textAnnotationNodeDefinition: CanvasNodeDefinition<TextAnnotationNodeData> = {
   type: CANVAS_NODE_TYPES.textAnnotation,
   menuLabelKey: 'node.menu.textAnnotation',
@@ -612,6 +674,8 @@ export const canvasNodeDefinitions: Record<CanvasNodeType, CanvasNodeDefinition>
   [CANVAS_NODE_TYPES.textAnnotation]: textAnnotationNodeDefinition,
   [CANVAS_NODE_TYPES.jsonCard]: jsonCardNodeDefinition,
   [CANVAS_NODE_TYPES.group]: groupNodeDefinition,
+  [CANVAS_NODE_TYPES.tag]: tagNodeDefinition,
+  [CANVAS_NODE_TYPES.tagGroup]: tagGroupNodeDefinition,
   [CANVAS_NODE_TYPES.storyboardSplit]: storyboardSplitDefinition,
   [CANVAS_NODE_TYPES.storyboardGen]: storyboardGenNodeDefinition,
   [CANVAS_NODE_TYPES.panorama]: panoramaNodeDefinition,

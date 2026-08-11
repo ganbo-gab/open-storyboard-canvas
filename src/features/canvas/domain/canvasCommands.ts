@@ -4,6 +4,7 @@ import type {
   CanvasEdge,
   CanvasNode,
   CanvasNodeType,
+  TagColor,
 } from './canvasNodes';
 
 export const CANVAS_COMMAND_VERSION = 1 as const;
@@ -17,6 +18,10 @@ export const CANVAS_COMMAND_TYPES = [
   'node.setModelConfig',
   'node.move',
   'node.layout',
+  'node.setEnabled',
+  'node.duplicate',
+  'tag.setColor',
+  'tagGroup.setMembers',
   'edge.connect',
   'edge.disconnect',
   'group.create',
@@ -49,6 +54,9 @@ export interface CanvasNodeCreateConfiguration {
   aspectRatio?: string;
   openDirectorStudio?: boolean;
   directorStudioMode?: 'flat' | 'panorama';
+  enabled?: boolean;
+  tagColor?: TagColor;
+  memberTagIds?: string[];
 }
 
 export type CanvasQueryCommand = CanvasCommandBase<'canvas.query', {
@@ -99,6 +107,31 @@ export type LayoutNodeCommand = CanvasCommandBase<'node.layout', {
   origin?: XYPosition;
   gap?: number;
   columns?: number;
+}>;
+
+export type SetNodeEnabledCommand = CanvasCommandBase<'node.setEnabled', {
+  nodeIds: string[];
+  enabled: boolean;
+}>;
+
+export interface DuplicateNodeInput {
+  sourceNodeId: string;
+  nodeId?: string;
+  position?: XYPosition;
+}
+
+export type DuplicateNodeCommand = CanvasCommandBase<'node.duplicate', {
+  copies: DuplicateNodeInput[];
+}>;
+
+export type SetTagColorCommand = CanvasCommandBase<'tag.setColor', {
+  tagId: string;
+  color: TagColor;
+}>;
+
+export type SetTagGroupMembersCommand = CanvasCommandBase<'tagGroup.setMembers', {
+  groupId: string;
+  memberTagIds: string[];
 }>;
 
 export type ConnectEdgeCommand = CanvasCommandBase<'edge.connect', {
@@ -170,6 +203,10 @@ export type CanvasCommand =
   | SetNodeModelConfigCommand
   | MoveNodeCommand
   | LayoutNodeCommand
+  | SetNodeEnabledCommand
+  | DuplicateNodeCommand
+  | SetTagColorCommand
+  | SetTagGroupMembersCommand
   | ConnectEdgeCommand
   | DisconnectEdgeCommand
   | CreateGroupCommand

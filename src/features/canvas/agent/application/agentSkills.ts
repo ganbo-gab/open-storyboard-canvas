@@ -55,9 +55,9 @@ export const BUILTIN_AGENT_SKILLS: readonly SkillDefinitionV1[] = Object.freeze(
   defineSkill({
     id: 'canvas-orchestration',
     summary: '创建、修改、连接、布局和定位画布节点',
-    activation: ['画布', '节点', '连线', '布局', '选择', 'canvas', 'node', 'connect', 'layout', 'rename', 'delete', 'move'],
+    activation: ['画布', '节点', '连线', '布局', '选择', '标签', '标签组', 'canvas', 'node', 'connect', 'layout', 'rename', 'delete', 'move', 'tag'],
     toolNamespaces: ['canvas.read', 'canvas.write', 'canvas.navigate'],
-    instructions: '先读取最小必要范围并复述目标对象；涉及多步修改时输出可编辑计划，再用共享画布命令完成并返回定位引用。',
+    instructions: '先读取最小必要范围并复述目标对象；涉及多步修改时输出可编辑计划，再用共享画布命令完成并返回定位引用。标签与标签组必须使用 node.create、node.rename、node.setEnabled、node.duplicate、tag.setColor、tagGroup.setMembers、edge.connect、edge.disconnect 和 viewport.focus，不得直接写 Store。',
     examples: [{ input: '把这三个节点横向排好并连起来', outcome: '读取节点 -> 计划布局/连线 -> 审批 -> 一次事务执行 -> 定位结果' }],
     evalCaseIds: ['canvas-orchestration:graph-edit'],
   }),

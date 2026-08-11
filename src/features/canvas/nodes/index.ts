@@ -13,6 +13,8 @@ import { PanoramaNode } from './PanoramaNode';
 import { StoryboardGenNode } from './StoryboardGenNode';
 import { StoryboardNode } from './StoryboardNode';
 import { TextAnnotationNode } from './TextAnnotationNode';
+import { TagGroupNode } from './TagGroupNode';
+import { TagNode } from './TagNode';
 import { UploadNode } from './UploadNode';
 import { VideoNode } from './VideoNode';
 import { withNodeRenderErrorBoundary } from './NodeRenderErrorBoundary';
@@ -31,6 +33,8 @@ export const nodeTypes: NodeTypes = {
   storyboardGenNode: withNodeRenderErrorBoundary(StoryboardGenNode),
   storyboardNode: withNodeRenderErrorBoundary(StoryboardNode),
   textAnnotationNode: withNodeRenderErrorBoundary(TextAnnotationNode),
+  tagNode: withNodeRenderErrorBoundary(TagNode),
+  tagGroupNode: withNodeRenderErrorBoundary(TagGroupNode),
   uploadNode: withNodeRenderErrorBoundary(UploadNode),
   videoNode: withNodeRenderErrorBoundary(VideoNode),
 };
@@ -49,6 +53,8 @@ export {
   StoryboardGenNode,
   StoryboardNode,
   TextAnnotationNode,
+  TagGroupNode,
+  TagNode,
   UploadNode,
   VideoNode,
 };

@@ -33,6 +33,8 @@ import {
   type StoryboardExportOptions,
   type StoryboardFrameItem,
   isBlueprintNode,
+  isTagColor,
+  isTagGroupNode,
   isStoryboardSplitNode,
 } from '@/features/canvas/domain/canvasNodes';
 import {
@@ -43,6 +45,11 @@ import { EXPORT_RESULT_DISPLAY_NAME } from '@/features/canvas/domain/nodeDisplay
 import { nodeCatalog } from '@/features/canvas/application/nodeCatalog';
 import { canvasNodeFactory } from '@/features/canvas/application/canvasServices';
 import { normalizeDirectorMotionProject } from '@/features/canvas/application/directorMotion';
+import { validateCanvasConnection } from '@/features/canvas/application/canvasConnectionRules';
+import {
+  migrateLegacyTagGraph,
+  reportTagMigrationDiagnostics,
+} from '@/features/canvas/application/tagPersistenceMigration';
 import { usePanelStateStore } from '@/stores/panelStateStore';
 import {
   ensureAtLeastOneMinEdge,
@@ -688,6 +695,37 @@ function normalizeNodes(rawNodes: CanvasNode[]): CanvasNode[] {
         Object.assign(mergedData, normalizeBlueprintNodeData(mergedData, defaultData as BlueprintNodeData));
       }
 
+      if (node.type === CANVAS_NODE_TYPES.tag) {
+        const tagData = mergedData as Record<string, unknown>;
+        const label = typeof tagData.label === 'string' && tagData.label.trim()
+          ? tagData.label.trim()
+          : typeof tagData.displayName === 'string' && tagData.displayName.trim()
+            ? tagData.displayName.trim()
+            : '标签';
+        tagData.label = label;
+        tagData.displayName = label;
+        tagData.enabled = tagData.enabled !== false;
+        tagData.color = isTagColor(tagData.color) ? tagData.color : 'neutral';
+        delete tagData.sourceId;
+      }
+
+      if (node.type === CANVAS_NODE_TYPES.tagGroup) {
+        const groupData = mergedData as Record<string, unknown>;
+        const label = typeof groupData.label === 'string' && groupData.label.trim()
+          ? groupData.label.trim()
+          : typeof groupData.displayName === 'string' && groupData.displayName.trim()
+            ? groupData.displayName.trim()
+            : '标签组';
+        groupData.label = label;
+        groupData.displayName = label;
+        groupData.enabled = groupData.enabled !== false;
+        groupData.memberTagIds = Array.isArray(groupData.memberTagIds)
+          ? Array.from(new Set(groupData.memberTagIds.filter((id): id is string => (
+              typeof id === 'string' && Boolean(id.trim())
+            )).map((id) => id.trim())))
+          : [];
+      }
+
       if ('aspectRatio' in mergedData && !mergedData.aspectRatio) {
         mergedData.aspectRatio = DEFAULT_ASPECT_RATIO;
       }
@@ -746,10 +784,12 @@ function normalizeHistory(history?: CanvasHistoryState): CanvasHistoryState {
         : {};
     const rawNodes = Array.isArray(snapshotRecord.nodes) ? snapshotRecord.nodes : [];
     const rawEdges = Array.isArray(snapshotRecord.edges) ? snapshotRecord.edges : [];
-    const normalizedNodes = normalizeNodes(rawNodes);
+    const migrated = migrateLegacyTagGraph(rawNodes, rawEdges);
+    reportTagMigrationDiagnostics('canvas-history', migrated.diagnostics);
+    const normalizedNodes = normalizeNodes(migrated.nodes);
     return {
       nodes: normalizedNodes,
-      edges: normalizeEdgesWithNodes(rawEdges, normalizedNodes),
+      edges: normalizeEdgesWithNodes(migrated.edges, normalizedNodes),
     };
   };
 
@@ -1174,23 +1214,35 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   onConnect: (connection) => {
     const sourceHandle = normalizeHandleId(connection.sourceHandle) ?? 'source';
     const targetHandle = normalizeHandleId(connection.targetHandle) ?? 'target';
-    set((state) => ({
-      edges: addEdge<CanvasEdge>(
-        { ...connection, sourceHandle, targetHandle, type: 'disconnectableEdge' },
-        state.edges
-      ),
-      revision: nextCanvasRevision(state.revision),
-      history: {
-        past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-        future: [],
-      },
-      dragHistorySnapshot: null,
-    }));
+    set((state) => {
+      if (!connection.source || !connection.target) return state;
+      const validation = validateCanvasConnection(
+        connection.source,
+        connection.target,
+        state.nodes,
+        state.edges,
+      );
+      if (!validation.valid || validation.existingEdgeId) return state;
+      return {
+        edges: addEdge<CanvasEdge>(
+          { ...connection, sourceHandle, targetHandle, type: 'disconnectableEdge' },
+          state.edges
+        ),
+        revision: nextCanvasRevision(state.revision),
+        history: {
+          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
+          future: [],
+        },
+        dragHistorySnapshot: null,
+      };
+    });
   },
 
   setCanvasData: (nodes, edges, history) => {
-    const normalizedNodes = normalizeNodes(nodes);
-    const normalizedEdges = normalizeEdgesWithNodes(edges, normalizedNodes);
+    const migrated = migrateLegacyTagGraph(nodes, edges);
+    reportTagMigrationDiagnostics('canvas-current', migrated.diagnostics);
+    const normalizedNodes = normalizeNodes(migrated.nodes);
+    const normalizedEdges = normalizeEdgesWithNodes(migrated.edges, normalizedNodes);
 
     set((state) => ({
       nodes: normalizedNodes,
@@ -1351,15 +1403,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     if (!sourceNode || !targetNode) {
       return null;
     }
-    if (!nodeHasSourceHandle(sourceNode.type) || !nodeHasTargetHandle(targetNode.type)) {
+    const validation = validateCanvasConnection(source, target, state.nodes, state.edges);
+    if (!validation.valid) {
       return null;
     }
 
     const edgeId = `e-${source}-${target}`;
     // Check if edge already exists
-    if (state.edges.some((e) => e.id === edgeId)) {
-      return edgeId;
-    }
+    if (validation.existingEdgeId) return validation.existingEdgeId;
 
     const newEdge: CanvasEdge = {
       id: edgeId,
@@ -2043,7 +2094,15 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       }
 
       const deleteSet = collectNodeIdsWithDescendants(state.nodes, existingIds);
-      const nextNodes = state.nodes.filter((node) => !deleteSet.has(node.id));
+      const nextNodes = state.nodes
+        .filter((node) => !deleteSet.has(node.id))
+        .map((node) => {
+          if (!isTagGroupNode(node)) return node;
+          const memberTagIds = node.data.memberTagIds.filter((tagId) => !deleteSet.has(tagId));
+          return memberTagIds.length === node.data.memberTagIds.length
+            ? node
+            : { ...node, data: { ...node.data, memberTagIds } };
+        });
       const nextEdges = state.edges.filter(
         (edge) => !deleteSet.has(edge.source) && !deleteSet.has(edge.target)
       );

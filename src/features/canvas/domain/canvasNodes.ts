@@ -12,6 +12,8 @@ export const CANVAS_NODE_TYPES = {
   textAnnotation: 'textAnnotationNode',
   jsonCard: 'jsonCardNode',
   group: 'groupNode',
+  tag: 'tagNode',
+  tagGroup: 'tagGroupNode',
   storyboardSplit: 'storyboardNode',
   storyboardGen: 'storyboardGenNode',
   panorama: 'panoramaNode',
@@ -90,6 +92,23 @@ export interface ExportImageNodeData extends NodeImageData {
 
 export interface GroupNodeData extends NodeDisplayData {
   label: string;
+  [key: string]: unknown;
+}
+
+export const TAG_COLORS = ['neutral', 'amber', 'cyan', 'violet', 'rose'] as const;
+export type TagColor = (typeof TAG_COLORS)[number];
+
+export interface TagNodeData extends NodeDisplayData {
+  label: string;
+  enabled: boolean;
+  color: TagColor;
+  [key: string]: unknown;
+}
+
+export interface TagGroupNodeData extends NodeDisplayData {
+  label: string;
+  enabled: boolean;
+  memberTagIds: string[];
   [key: string]: unknown;
 }
 
@@ -661,6 +680,8 @@ export type CanvasNodeData =
   | TextAnnotationNodeData
   | JsonCardNodeData
   | GroupNodeData
+  | TagNodeData
+  | TagGroupNodeData
   | ImageEditNodeData
   | AiVideoNodeData
   | AiTextNodeData
@@ -764,6 +785,22 @@ export function isGroupNode(
   node: CanvasNode | null | undefined
 ): node is Node<GroupNodeData, typeof CANVAS_NODE_TYPES.group> {
   return node?.type === CANVAS_NODE_TYPES.group;
+}
+
+export function isTagNode(
+  node: CanvasNode | null | undefined
+): node is Node<TagNodeData, typeof CANVAS_NODE_TYPES.tag> {
+  return node?.type === CANVAS_NODE_TYPES.tag;
+}
+
+export function isTagGroupNode(
+  node: CanvasNode | null | undefined
+): node is Node<TagGroupNodeData, typeof CANVAS_NODE_TYPES.tagGroup> {
+  return node?.type === CANVAS_NODE_TYPES.tagGroup;
+}
+
+export function isTagColor(value: unknown): value is TagColor {
+  return typeof value === 'string' && (TAG_COLORS as readonly string[]).includes(value);
 }
 
 export function isTextAnnotationNode(

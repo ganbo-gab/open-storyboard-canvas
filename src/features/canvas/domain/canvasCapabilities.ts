@@ -28,6 +28,22 @@ const COMMON_NODE_COMMANDS: CanvasCommandType[] = [
   'viewport.focus',
 ];
 
+const TAG_NODE_COMMANDS: CanvasCommandType[] = [
+  ...COMMON_NODE_COMMANDS,
+  'node.setEnabled',
+  'node.duplicate',
+  'tag.setColor',
+  'edge.connect',
+  'edge.disconnect',
+];
+
+const TAG_GROUP_NODE_COMMANDS: CanvasCommandType[] = [
+  ...COMMON_NODE_COMMANDS,
+  'node.setEnabled',
+  'node.duplicate',
+  'tagGroup.setMembers',
+];
+
 const GENERATION_NODE_COMMANDS: CanvasCommandType[] = [
   ...COMMON_NODE_COMMANDS,
   'node.setPrompt',
@@ -81,6 +97,16 @@ export const canvasNodeCapabilityManifest = {
     directCreate: false,
     directCreateReason: 'Groups must be created with group.create so membership remains valid.',
   },
+  [CANVAS_NODE_TYPES.tag]: {
+    status: 'supported',
+    commands: TAG_NODE_COMMANDS,
+    directCreate: true,
+  },
+  [CANVAS_NODE_TYPES.tagGroup]: {
+    status: 'supported',
+    commands: TAG_GROUP_NODE_COMMANDS,
+    directCreate: true,
+  },
   [CANVAS_NODE_TYPES.storyboardSplit]: {
     status: 'ui-only',
     reason: 'Storyboard frame editing remains in its validated tool workflow.',
@@ -112,6 +138,10 @@ export const canvasActionCapabilityManifest = {
   'node.setModelConfig': { status: 'supported' },
   'node.move': { status: 'supported' },
   'node.layout': { status: 'supported' },
+  'node.setEnabled': { status: 'supported' },
+  'node.duplicate': { status: 'supported' },
+  'tag.setColor': { status: 'supported' },
+  'tagGroup.setMembers': { status: 'supported' },
   'edge.connect': { status: 'supported' },
   'edge.disconnect': { status: 'supported' },
   'group.create': { status: 'supported' },

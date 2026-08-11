@@ -14,6 +14,10 @@ import {
 } from '@/features/canvas/domain/canvasNodes';
 import { canvasNodeFactory } from '@/features/canvas/application/canvasServices';
 import {
+  migrateLegacyTagGraph,
+  reportTagMigrationDiagnostics,
+} from '@/features/canvas/application/tagPersistenceMigration';
+import {
   deleteProjectRecord,
   getProjectRecord,
   listProjectSummaries,
@@ -330,10 +334,28 @@ export function decodeProject(project: PersistedProject): Project {
   const decode = (imageUrl: string | null | undefined) =>
     decodeImageReference(imageUrl, project.imagePool);
 
+  const decodedNodes = mapNodeImageReferences(project.nodes, decode);
+  const migratedCurrent = migrateLegacyTagGraph(decodedNodes, project.edges);
+  const migrateSnapshot = (
+    snapshot: CanvasHistoryState['past'][number],
+    scope: string,
+  ): CanvasHistoryState['past'][number] => {
+    const migrated = migrateLegacyTagGraph(snapshot.nodes, snapshot.edges);
+    reportTagMigrationDiagnostics(scope, migrated.diagnostics);
+    return { nodes: migrated.nodes, edges: migrated.edges };
+  };
+  const decodedHistory = mapHistoryImageReferences(project.history, decode);
+
+  reportTagMigrationDiagnostics(`project:${project.id}`, migratedCurrent.diagnostics);
+
   return {
     ...project,
-    nodes: mapNodeImageReferences(project.nodes, decode),
-    history: mapHistoryImageReferences(project.history, decode),
+    nodes: migratedCurrent.nodes,
+    edges: migratedCurrent.edges,
+    history: {
+      past: decodedHistory.past.map((snapshot, index) => migrateSnapshot(snapshot, `project:${project.id}:past:${index}`)),
+      future: decodedHistory.future.map((snapshot, index) => migrateSnapshot(snapshot, `project:${project.id}:future:${index}`)),
+    },
   };
 }
 

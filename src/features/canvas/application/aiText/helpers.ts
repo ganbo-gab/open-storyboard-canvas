@@ -1180,9 +1180,13 @@ export function collectAiTextInputs(
   agent?: TextAgentConfig | null,
   sourceAgents: TextAgentConfig[] = []
 ): AiTextInputPart[] {
-  const sourceNodes = collectDirectSourceNodes(nodeId, nodes, edges);
+  const references = collectInputReferences(nodeId, nodes, edges);
+  const nodeMap = new Map(nodes.map((node) => [node.id, node] as const));
+  const sourceNodes = references
+    .map((reference) => nodeMap.get(reference.sourceNodeId))
+    .filter((node): node is CanvasNode => Boolean(node));
   const referenceByNodeId = new Map(
-    collectInputReferences(nodeId, nodes, edges).map((reference) => [reference.sourceNodeId, reference] as const)
+    references.map((reference) => [reference.sourceNodeId, reference] as const)
   );
   const pool = {
     markdown: [] as CanvasNode[],

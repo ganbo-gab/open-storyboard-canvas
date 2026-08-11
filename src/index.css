@@ -54,6 +54,11 @@
   --canvas-node-button-bg: rgba(248, 250, 252, 0.9);
   --canvas-node-button-text: rgba(15, 23, 42, 0.78);
   --group-node-bg: color-mix(in srgb, rgb(var(--accent-rgb) / 0.2) 26%, rgb(var(--surface-rgb)));
+  --tag-color-neutral: #64748b;
+  --tag-color-amber: #b45309;
+  --tag-color-cyan: #0e7490;
+  --tag-color-violet: #7c3aed;
+  --tag-color-rose: #e11d48;
   --ui-radius-lg: 12px;
   --ui-radius-xl: 16px;
   --ui-radius-2xl: 20px;
@@ -110,6 +115,11 @@
   --canvas-node-button-bg: rgba(255, 255, 255, 0.08);
   --canvas-node-button-text: rgba(255, 255, 255, 0.78);
   --group-node-bg: color-mix(in srgb, rgb(var(--accent-rgb) / 0.3) 30%, black);
+  --tag-color-neutral: #94a3b8;
+  --tag-color-amber: #f59e0b;
+  --tag-color-cyan: #22d3ee;
+  --tag-color-violet: #a78bfa;
+  --tag-color-rose: #fb7185;
   --ui-radius-lg: 12px;
   --ui-radius-xl: 16px;
   --ui-radius-2xl: 20px;

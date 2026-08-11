@@ -484,11 +484,11 @@ export function UiModal({
   const { shouldRender, isVisible } = useDialogTransition(isOpen, UI_DIALOG_TRANSITION_MS);
   const { dialogRef, onKeyDown } = useModalFocus({ isOpen: isOpen && shouldRender, onClose });
 
-  if (!shouldRender) {
+  if (!shouldRender || typeof document === 'undefined') {
     return null;
   }
 
-  return (
+  return createPortal(
     <div
       className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-50 flex items-center justify-center ${containerClassName}`}
       onWheelCapture={(event) => event.stopPropagation()}
@@ -527,6 +527,7 @@ export function UiModal({
           </div>
         )}
       </UiPanel>
-    </div>
+    </div>,
+    document.body,
   );
 }

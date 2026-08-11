@@ -6,6 +6,8 @@ import {
   type ImageSize,
   type CanvasNode,
   type CanvasNodeData,
+  isTagGroupNode,
+  isTagNode,
 } from '../domain/canvasNodes';
 import {
   canCreateCanvasNodeDirectly,
@@ -20,15 +22,12 @@ import type {
   CanvasCommandOutput,
   CanvasCommandType,
 } from '../domain/canvasCommands';
-import {
-  nodeHasSourceHandle,
-  nodeHasTargetHandle,
-} from '../domain/nodeRegistry';
 import type { NodeFactory } from './ports';
 import type {
   CanvasGraphCommandPreparation,
   CanvasGraphDraft,
 } from './canvasTransactionCoordinator';
+import { validateCanvasConnection } from './canvasConnectionRules';
 
 export const CANVAS_GRAPH_COMMAND_TYPES = new Set<CanvasCommand['type']>([
   'node.create',
@@ -38,6 +37,10 @@ export const CANVAS_GRAPH_COMMAND_TYPES = new Set<CanvasCommand['type']>([
   'node.setModelConfig',
   'node.move',
   'node.layout',
+  'node.setEnabled',
+  'node.duplicate',
+  'tag.setColor',
+  'tagGroup.setMembers',
   'edge.connect',
   'edge.disconnect',
   'group.create',
@@ -162,6 +165,12 @@ function createNodeData(command: Extract<CanvasCommand, { type: 'node.create' }>
   const data: Record<string, unknown> = {};
   if (configuration.displayName !== undefined) {
     data.displayName = configuration.displayName;
+    if (
+      command.input.nodeType === CANVAS_NODE_TYPES.tag
+      || command.input.nodeType === CANVAS_NODE_TYPES.tagGroup
+    ) {
+      data.label = configuration.displayName;
+    }
   }
   if (configuration.prompt !== undefined) {
     data.prompt = configuration.prompt;
@@ -222,6 +231,19 @@ function createNodeData(command: Extract<CanvasCommand, { type: 'node.create' }>
   if (configuration.directorStudioMode !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.blueprint) {
     data.mode = configuration.directorStudioMode;
   }
+  if (
+    configuration.enabled !== undefined
+    && (command.input.nodeType === CANVAS_NODE_TYPES.tag
+      || command.input.nodeType === CANVAS_NODE_TYPES.tagGroup)
+  ) {
+    data.enabled = configuration.enabled;
+  }
+  if (configuration.tagColor !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.tag) {
+    data.color = configuration.tagColor;
+  }
+  if (configuration.memberTagIds !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.tagGroup) {
+    data.memberTagIds = uniqueNonEmpty(configuration.memberTagIds);
+  }
   return data as Partial<CanvasNodeData>;
 }
 
@@ -248,6 +270,17 @@ function applyCreateNode(
   if (command.input.nodeId && draft.nodes.some((node) => node.id === command.input.nodeId)) {
     return reject(`Node ${command.input.nodeId} already exists.`, 'conflict');
   }
+  if (
+    command.input.nodeType === CANVAS_NODE_TYPES.tagGroup
+    && command.input.configuration?.memberTagIds
+  ) {
+    const invalidMemberId = uniqueNonEmpty(command.input.configuration.memberTagIds).find((tagId) => (
+      !draft.nodes.some((node) => node.id === tagId && node.type === CANVAS_NODE_TYPES.tag)
+    ));
+    if (invalidMemberId) {
+      return reject(`Tag ${invalidMemberId} does not exist.`, 'not_found');
+    }
+  }
   const node = nodeFactory.createNode(
     command.input.nodeType,
     { ...command.input.position },
@@ -268,7 +301,12 @@ function applyCreateNode(
     { ...draft, nodes: [...draft.nodes, node] },
     impact(`Create ${command.input.nodeType} node.`, {
       affectedNodeIds: [node.id],
-      creates: { nodes: 1, edges: 0, groups: command.input.nodeType === CANVAS_NODE_TYPES.group ? 1 : 0 },
+      creates: {
+        nodes: 1,
+        edges: 0,
+        groups: command.input.nodeType === CANVAS_NODE_TYPES.group
+          || command.input.nodeType === CANVAS_NODE_TYPES.tagGroup ? 1 : 0,
+      },
     }),
     { references: { nodeId: node.id, nodeIds: [node.id] } },
   );
@@ -286,10 +324,22 @@ function applyDeleteNodes(
   }
   const deletedIds = collectNodeIdsWithDescendants(draft.nodes, requestedIds);
   const deletedEdges = draft.edges.filter((edge) => deletedIds.has(edge.source) || deletedIds.has(edge.target));
-  const deletedGroups = draft.nodes.filter((node) => deletedIds.has(node.id) && node.type === CANVAS_NODE_TYPES.group).length;
+  const deletedGroups = draft.nodes.filter((node) => (
+    deletedIds.has(node.id)
+    && (node.type === CANVAS_NODE_TYPES.group || node.type === CANVAS_NODE_TYPES.tagGroup)
+  )).length;
+  const survivingNodes = draft.nodes
+    .filter((node) => !deletedIds.has(node.id))
+    .map((node) => {
+      if (!isTagGroupNode(node)) return node;
+      const memberTagIds = node.data.memberTagIds.filter((tagId) => !deletedIds.has(tagId));
+      return memberTagIds.length === node.data.memberTagIds.length
+        ? node
+        : { ...node, data: { ...node.data, memberTagIds } };
+    });
   return success(
     {
-      nodes: draft.nodes.filter((node) => !deletedIds.has(node.id)),
+      nodes: survivingNodes,
       edges: draft.edges.filter((edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target)),
       selectedNodeId: draft.selectedNodeId && deletedIds.has(draft.selectedNodeId) ? null : draft.selectedNodeId,
     },
@@ -313,7 +363,10 @@ function applyRenameNode(
   }
   const displayName = command.input.displayName.trim();
   const currentName = typeof node.data.displayName === 'string' ? node.data.displayName : '';
-  const currentLabel = node.type === CANVAS_NODE_TYPES.group && typeof node.data.label === 'string'
+  const isLabelNode = node.type === CANVAS_NODE_TYPES.group
+    || node.type === CANVAS_NODE_TYPES.tag
+    || node.type === CANVAS_NODE_TYPES.tagGroup;
+  const currentLabel = isLabelNode && typeof node.data.label === 'string'
     ? node.data.label
     : currentName;
   const marksGeneratedNameCustom = (
@@ -330,7 +383,11 @@ function applyRenameNode(
           data: {
             ...candidate.data,
             displayName,
-            ...(candidate.type === CANVAS_NODE_TYPES.group ? { label: displayName } : {}),
+            ...(candidate.type === CANVAS_NODE_TYPES.group
+              || candidate.type === CANVAS_NODE_TYPES.tag
+              || candidate.type === CANVAS_NODE_TYPES.tagGroup
+              ? { label: displayName }
+              : {}),
             ...(candidate.type === CANVAS_NODE_TYPES.exportImage
               || candidate.type === CANVAS_NODE_TYPES.video
               ? { generatedNamingMode: 'custom' as const }
@@ -576,6 +633,166 @@ function applyLayoutNodes(
   }, draft);
 }
 
+function applySetNodeEnabled(
+  command: Extract<CanvasCommand, { type: 'node.setEnabled' }>,
+  draft: CanvasGraphDraft,
+): CanvasGraphCommandPreparation {
+  const nodeIds = uniqueNonEmpty(command.input.nodeIds);
+  const nodesById = new Map(draft.nodes.map((node) => [node.id, node] as const));
+  const missingId = nodeIds.find((nodeId) => !nodesById.has(nodeId));
+  if (missingId) return reject(`Node ${missingId} does not exist.`, 'not_found');
+  const unsupportedId = nodeIds.find((nodeId) => {
+    const node = nodesById.get(nodeId);
+    return node?.type !== CANVAS_NODE_TYPES.tag && node?.type !== CANVAS_NODE_TYPES.tagGroup;
+  });
+  if (unsupportedId) {
+    return reject(`Node ${unsupportedId} does not support enabled state.`, 'unsupported_command');
+  }
+  const idSet = new Set(nodeIds);
+  let changed = false;
+  const nodes = draft.nodes.map((node) => {
+    if (!idSet.has(node.id) || node.data.enabled === command.input.enabled) return node;
+    changed = true;
+    return { ...node, data: { ...node.data, enabled: command.input.enabled } as CanvasNodeData };
+  });
+  return success(
+    { ...draft, nodes },
+    impact(`${command.input.enabled ? 'Enable' : 'Disable'} ${nodeIds.length} tag item(s).`, {
+      affectedNodeIds: nodeIds,
+    }),
+    { references: { nodeIds } },
+    changed,
+  );
+}
+
+function visibleTagMetadata(node: CanvasNode): Partial<CanvasNodeData> | null {
+  if (isTagNode(node)) {
+    return {
+      displayName: node.data.displayName,
+      label: node.data.label,
+      enabled: node.data.enabled,
+      color: node.data.color,
+    } as Partial<CanvasNodeData>;
+  }
+  if (isTagGroupNode(node)) {
+    return {
+      displayName: node.data.displayName,
+      label: node.data.label,
+      enabled: node.data.enabled,
+      memberTagIds: [...node.data.memberTagIds],
+    } as Partial<CanvasNodeData>;
+  }
+  return null;
+}
+
+function applyDuplicateNodes(
+  command: Extract<CanvasCommand, { type: 'node.duplicate' }>,
+  draft: CanvasGraphDraft,
+  nodeFactory: NodeFactory,
+): CanvasGraphCommandPreparation {
+  const existingIds = new Set(draft.nodes.map((node) => node.id));
+  const requestedIds = new Set<string>();
+  const createdNodes: CanvasNode[] = [];
+  const sourceToCreated = new Map<string, string>();
+
+  for (const copy of command.input.copies) {
+    const source = draft.nodes.find((node) => node.id === copy.sourceNodeId);
+    if (!source) return reject(`Node ${copy.sourceNodeId} does not exist.`, 'not_found');
+    const data = visibleTagMetadata(source);
+    if (!data) {
+      return reject(`Node ${source.id} cannot be duplicated through the safe tag command.`, 'unsupported_command');
+    }
+    if (copy.nodeId && (existingIds.has(copy.nodeId) || requestedIds.has(copy.nodeId))) {
+      return reject(`Node ${copy.nodeId} already exists.`, 'conflict');
+    }
+    const created = nodeFactory.createNode(
+      source.type,
+      copy.position ?? { x: source.position.x + 44, y: source.position.y + 30 },
+      data,
+    );
+    if (copy.nodeId) created.id = copy.nodeId;
+    requestedIds.add(created.id);
+    createdNodes.push(created);
+    sourceToCreated.set(source.id, created.id);
+  }
+
+  const createdIds = createdNodes.map((node) => node.id);
+  return success(
+    { ...draft, nodes: [...draft.nodes, ...createdNodes] },
+    impact(`Duplicate ${createdNodes.length} tag item(s) without graph edges.`, {
+      affectedNodeIds: [
+        ...Array.from(sourceToCreated.keys()),
+        ...createdIds,
+      ],
+      creates: {
+        nodes: createdNodes.length,
+        edges: 0,
+        groups: createdNodes.filter((node) => node.type === CANVAS_NODE_TYPES.tagGroup).length,
+      },
+    }),
+    {
+      references: { nodeIds: createdIds },
+      value: { sourceToCreated: Object.fromEntries(sourceToCreated) },
+    },
+    createdNodes.length > 0,
+  );
+}
+
+function applySetTagColor(
+  command: Extract<CanvasCommand, { type: 'tag.setColor' }>,
+  draft: CanvasGraphDraft,
+): CanvasGraphCommandPreparation {
+  const tag = draft.nodes.find((node) => node.id === command.input.tagId);
+  if (!tag) return reject(`Node ${command.input.tagId} does not exist.`, 'not_found');
+  if (tag.type !== CANVAS_NODE_TYPES.tag) {
+    return reject(`Node ${tag.id} is not a tag.`, 'unsupported_command');
+  }
+  const changed = tag.data.color !== command.input.color;
+  const nodes = changed
+    ? draft.nodes.map((node) => node.id === tag.id
+      ? { ...node, data: { ...node.data, color: command.input.color } as CanvasNodeData }
+      : node)
+    : draft.nodes;
+  return success(
+    { ...draft, nodes },
+    impact(`Set color for tag ${tag.id}.`, { affectedNodeIds: [tag.id] }),
+    { references: { nodeId: tag.id, nodeIds: [tag.id] } },
+    changed,
+  );
+}
+
+function applySetTagGroupMembers(
+  command: Extract<CanvasCommand, { type: 'tagGroup.setMembers' }>,
+  draft: CanvasGraphDraft,
+): CanvasGraphCommandPreparation {
+  const group = draft.nodes.find((node) => node.id === command.input.groupId);
+  if (!group) return reject(`Node ${command.input.groupId} does not exist.`, 'not_found');
+  if (group.type !== CANVAS_NODE_TYPES.tagGroup) {
+    return reject(`Node ${group.id} is not a tag group.`, 'unsupported_command');
+  }
+  const memberTagIds = uniqueNonEmpty(command.input.memberTagIds);
+  const invalidMemberId = memberTagIds.find((tagId) => (
+    !draft.nodes.some((node) => node.id === tagId && node.type === CANVAS_NODE_TYPES.tag)
+  ));
+  if (invalidMemberId) {
+    return reject(`Tag ${invalidMemberId} does not exist.`, 'not_found');
+  }
+  const changed = !areCanvasValuesEquivalent(group.data.memberTagIds, memberTagIds);
+  const nodes = changed
+    ? draft.nodes.map((node) => node.id === group.id
+      ? { ...node, data: { ...node.data, memberTagIds } as CanvasNodeData }
+      : node)
+    : draft.nodes;
+  return success(
+    { ...draft, nodes },
+    impact(`Update ${memberTagIds.length} member tag(s) for group ${group.id}.`, {
+      affectedNodeIds: [group.id, ...memberTagIds],
+    }),
+    { references: { nodeId: group.id, nodeIds: [group.id, ...memberTagIds] } },
+    changed,
+  );
+}
+
 function createEdgeId(draft: CanvasGraphDraft, sourceNodeId: string, targetNodeId: string): string {
   const base = `e-${sourceNodeId}-${targetNodeId}`;
   if (!draft.edges.some((edge) => edge.id === base)) {
@@ -594,13 +811,25 @@ function applyConnectEdge(
 ): CanvasGraphCommandPreparation {
   const source = draft.nodes.find((node) => node.id === command.input.sourceNodeId);
   const target = draft.nodes.find((node) => node.id === command.input.targetNodeId);
-  if (!source || !target) {
-    return reject(`Cannot connect missing source or target node.`, 'not_found');
+  const validation = validateCanvasConnection(
+    command.input.sourceNodeId,
+    command.input.targetNodeId,
+    draft.nodes,
+    draft.edges,
+  );
+  if (!validation.valid || !source || !target) {
+    const code = validation.code === 'missing-node'
+      ? 'not_found'
+      : validation.code === 'tag-source-conflict'
+        || validation.code === 'tag-cycle'
+        || validation.code === 'self-connection'
+        ? 'conflict'
+        : 'unsupported_command';
+    return reject(validation.message ?? 'Cannot connect these nodes.', code);
   }
-  if (!nodeHasSourceHandle(source.type) || !nodeHasTargetHandle(target.type)) {
-    return reject(`Nodes ${source.id} and ${target.id} are not connectable.`, 'unsupported_command');
-  }
-  const existing = draft.edges.find((edge) => edge.source === source.id && edge.target === target.id);
+  const existing = validation.existingEdgeId
+    ? draft.edges.find((edge) => edge.id === validation.existingEdgeId)
+    : undefined;
   if (existing) {
     return success(
       draft,
@@ -819,6 +1048,14 @@ export function applyCanvasGraphCommand(
       return applyMoveNodes(command, draft);
     case 'node.layout':
       return applyLayoutNodes(command, draft);
+    case 'node.setEnabled':
+      return applySetNodeEnabled(command, draft);
+    case 'node.duplicate':
+      return applyDuplicateNodes(command, draft, nodeFactory);
+    case 'tag.setColor':
+      return applySetTagColor(command, draft);
+    case 'tagGroup.setMembers':
+      return applySetTagGroupMembers(command, draft);
     case 'edge.connect':
       return applyConnectEdge(command, draft);
     case 'edge.disconnect':

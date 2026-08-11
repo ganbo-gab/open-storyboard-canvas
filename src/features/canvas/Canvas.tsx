@@ -39,7 +39,7 @@ import {
 import { canvasEventBus } from '@/features/canvas/application/canvasServices';
 import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
 import { canvasNavigationFacade } from '@/features/canvas/application/canvasNavigationFacade';
-import { CANVAS_COMMAND_VERSION } from '@/features/canvas/domain/canvasCommands';
+import { CANVAS_COMMAND_VERSION, type CanvasCommand } from '@/features/canvas/domain/canvasCommands';
 import { CANVAS_GENERATION_NODE_TYPES } from '@/features/canvas/domain/canvasCapabilities';
 import { useCanvasPersistence } from '@/features/canvas/hooks/useCanvasPersistence';
 import { useCanvasGenerationPolling } from '@/features/canvas/hooks/useCanvasGenerationPolling';
@@ -48,6 +48,8 @@ import { useCanvasWasdPan } from '@/features/canvas/hooks/useCanvasWasdPan';
 import { CanvasSideToolbar } from '@/features/canvas/CanvasSideToolbar';
 import {
   CANVAS_NODE_TYPES,
+  isTagGroupNode,
+  isTagNode,
   type CanvasEdge,
   type CanvasNode,
   type CanvasNodeData,
@@ -891,6 +893,11 @@ function getClientPosition(event: MouseEvent | TouchEvent): { x: number; y: numb
   return { x: touch.clientX, y: touch.clientY };
 }
 
+function createUiNodeId(prefix: string): string {
+  const randomUuid = globalThis.crypto?.randomUUID?.();
+  return randomUuid ? `${prefix}-${randomUuid}` : `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 function toAssetPanelItem(asset: CanvasAssetCatalogItem): CanvasAssetItem | null {
   if (asset.kind === 'audio') {
     return null;
@@ -1004,7 +1011,6 @@ export function Canvas() {
   const edges = useCanvasStore((state) => state.edges);
   const applyNodesChange = useCanvasStore((state) => state.onNodesChange);
   const applyEdgesChange = useCanvasStore((state) => state.onEdgesChange);
-  const connectNodes = useCanvasStore((state) => state.onConnect);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const addNode = useCanvasStore((state) => state.addNode);
   const addEdge = useCanvasStore((state) => state.addEdge);
@@ -1082,6 +1088,29 @@ export function Canvas() {
   // explicit user actions, and the restore-flag ref so caller-side
   // effects can skip transient work during a project swap.
   const { isRestoringCanvasRef, scheduleCanvasPersist } = useCanvasPersistence(reactFlowInstance);
+
+  // All user-created graph edges go through the command transaction boundary.
+  // This keeps tag source constraints, history and Agent/UI mutations aligned.
+  const connectNodes = useCallback(
+    async (connection: Connection): Promise<boolean> => {
+      if (!connection.source || !connection.target) {
+        return false;
+      }
+      const result = await canvasCommandRegistry.execute({
+        type: 'edge.connect',
+        version: CANVAS_COMMAND_VERSION,
+        input: {
+          sourceNodeId: connection.source,
+          targetNodeId: connection.target,
+        },
+      }, 'ui');
+      if (result.ok) {
+        scheduleCanvasPersist(0);
+      }
+      return result.ok;
+    },
+    [scheduleCanvasPersist],
+  );
 
   useEffect(() => {
     const unsubscribeOpen = canvasEventBus.subscribe('tool-dialog/open', (payload) => {
@@ -1243,22 +1272,24 @@ export function Canvas() {
       if (!canNodeBeManualConnectionSource(connection.source, nodes)) {
         return;
       }
-      connectNodes(connection);
-      const sourceNode = nodes.find((node) => node.id === connection.source);
-      const targetNode = nodes.find((node) => node.id === connection.target);
-      if (sourceNode && targetNode?.type === CANVAS_NODE_TYPES.textAnnotation) {
-        const sourceText = getGeneratedTextForConnection(sourceNode, nodes);
-        if (sourceText) {
-          const currentContent = (targetNode.data as { content?: unknown }).content;
-          const normalizedCurrent = typeof currentContent === 'string' ? currentContent.trim() : '';
-          updateNodeData(targetNode.id, {
-            content: normalizedCurrent ? `${normalizedCurrent}\n${sourceText}` : sourceText,
-          } as Partial<CanvasNodeData>);
+      void connectNodes(connection).then((connected) => {
+        if (!connected) return;
+        const currentNodes = useCanvasStore.getState().nodes;
+        const sourceNode = currentNodes.find((node) => node.id === connection.source);
+        const targetNode = currentNodes.find((node) => node.id === connection.target);
+        if (sourceNode && targetNode?.type === CANVAS_NODE_TYPES.textAnnotation) {
+          const sourceText = getGeneratedTextForConnection(sourceNode, currentNodes);
+          if (sourceText) {
+            const currentContent = (targetNode.data as { content?: unknown }).content;
+            const normalizedCurrent = typeof currentContent === 'string' ? currentContent.trim() : '';
+            updateNodeData(targetNode.id, {
+              content: normalizedCurrent ? `${normalizedCurrent}\n${sourceText}` : sourceText,
+            } as Partial<CanvasNodeData>);
+          }
         }
-      }
-      scheduleCanvasPersist(0);
+      });
     },
-    [connectNodes, nodes, scheduleCanvasPersist, updateNodeData]
+    [connectNodes, nodes, updateNodeData]
   );
 
   const handleMoveEnd = useCallback(
@@ -2548,32 +2579,74 @@ export function Canvas() {
   }, [openNodeMenuAtClientPosition, selectSingleNode]);
 
   const handleNodeSelect = useCallback(
-    (type: CanvasNodeType) => {
+    async (type: CanvasNodeType) => {
+      if (type === CANVAS_NODE_TYPES.tag || type === CANVAS_NODE_TYPES.tagGroup) {
+        const nodeId = createUiNodeId(type === CANVAS_NODE_TYPES.tag ? 'tag' : 'tag-group');
+        const commands: CanvasCommand[] = [{
+          type: 'node.create',
+          version: CANVAS_COMMAND_VERSION,
+          input: {
+            nodeType: type,
+            nodeId,
+            position: flowPosition,
+            configuration: {
+              displayName: t(type === CANVAS_NODE_TYPES.tag ? 'node.menu.tag' : 'node.menu.tagGroup'),
+            },
+          },
+        }];
+        if (pendingConnectStart && type === CANVAS_NODE_TYPES.tag) {
+          commands.push({
+            type: 'edge.connect',
+            version: CANVAS_COMMAND_VERSION,
+            input: pendingConnectStart.handleType === 'source'
+              ? { sourceNodeId: pendingConnectStart.nodeId, targetNodeId: nodeId }
+              : { sourceNodeId: nodeId, targetNodeId: pendingConnectStart.nodeId },
+          });
+        }
+        const result = canvasCommandRegistry.executeTransaction({
+          id: `ui-create-${nodeId}`,
+          origin: 'ui',
+          expectedRevision: canvasCommandRegistry.getRevision(),
+          commands,
+        });
+        if (result.ok) {
+          void canvasCommandRegistry.execute({
+            type: 'selection.set',
+            version: CANVAS_COMMAND_VERSION,
+            input: { nodeIds: [nodeId] },
+          }, 'ui');
+          scheduleCanvasPersist(0);
+        }
+        setShowNodeMenu(false);
+        setNodeContextMenu(null);
+        setMenuAllowedTypes(undefined);
+        setPendingConnectStart(null);
+        setPreviewConnectionVisual(null);
+        return;
+      }
+
       const newNodeId = addNode(type, flowPosition);
       if (pendingConnectStart) {
-        if (pendingConnectStart.handleType === 'source') {
-          connectNodes({
+        const connected = await connectNodes(pendingConnectStart.handleType === 'source' ? {
             source: pendingConnectStart.nodeId,
             target: newNodeId,
             sourceHandle: 'source',
             targetHandle: 'target',
-          });
-          if (type === CANVAS_NODE_TYPES.textAnnotation) {
-            const sourceNode = useCanvasStore.getState().nodes.find((node) => node.id === pendingConnectStart.nodeId);
-            if (sourceNode) {
-              const sourceText = getGeneratedTextForConnection(sourceNode, useCanvasStore.getState().nodes);
-              if (sourceText) {
-                updateNodeData(newNodeId, { content: sourceText } as Partial<CanvasNodeData>);
-              }
-            }
-          }
-        } else {
-          connectNodes({
+          } : {
             source: newNodeId,
             target: pendingConnectStart.nodeId,
             sourceHandle: 'source',
             targetHandle: 'target',
           });
+        if (connected && type === CANVAS_NODE_TYPES.textAnnotation) {
+          const currentNodes = useCanvasStore.getState().nodes;
+          const sourceNode = currentNodes.find((node) => node.id === pendingConnectStart.nodeId);
+          if (sourceNode) {
+            const sourceText = getGeneratedTextForConnection(sourceNode, currentNodes);
+            if (sourceText) {
+              updateNodeData(newNodeId, { content: sourceText } as Partial<CanvasNodeData>);
+            }
+          }
         }
       }
 
@@ -2591,6 +2664,7 @@ export function Canvas() {
       pendingConnectStart,
       scheduleCanvasPersist,
       setPreviewConnectionVisual,
+      t,
       updateNodeData,
     ]
   );
@@ -2709,6 +2783,18 @@ export function Canvas() {
       const internalEdges = snapshot.edges.filter(
         (edge) => sourceIdSet.has(edge.source) && sourceIdSet.has(edge.target)
       );
+      const tagSourceNodes = sourceNodes.filter((node) => isTagNode(node) || isTagGroupNode(node));
+      const taggedSourceIds = new Set(tagSourceNodes.map((node) => node.id));
+      const taggedInternalEdges = internalEdges.filter((edge) => (
+        taggedSourceIds.has(edge.source) || taggedSourceIds.has(edge.target)
+      ));
+      if (
+        tagSourceNodes.length > 100
+        || (tagSourceNodes.length === sourceNodes.length
+          && tagSourceNodes.length + taggedInternalEdges.length > 100)
+      ) {
+        return null as DuplicateResult | null;
+      }
 
       const baseOffsets = [
         { x: 44, y: 30 },
@@ -2754,7 +2840,52 @@ export function Canvas() {
 
       const idMap = new Map<string, string>();
       const sizeMap = new Map<string, { width: number; height: number }>();
+      if (tagSourceNodes.length > 0) {
+        const tagCopies = tagSourceNodes.map((sourceNode) => {
+          const nextNodeId = createUiNodeId(isTagNode(sourceNode) ? 'tag' : 'tag-group');
+          const absolute = resolveAbsoluteNodePosition(sourceNode, sourceNodeMap);
+          idMap.set(sourceNode.id, nextNodeId);
+          return {
+            sourceNodeId: sourceNode.id,
+            nodeId: nextNodeId,
+            position: {
+              x: absolute.x + chosenOffset.x + offsetStep * 8,
+              y: absolute.y + chosenOffset.y + offsetStep * 6,
+            },
+          };
+        });
+        const duplicateCommands: CanvasCommand[] = [{
+          type: 'node.duplicate',
+          version: CANVAS_COMMAND_VERSION,
+          input: { copies: tagCopies },
+        }];
+        if (tagSourceNodes.length === sourceNodes.length) {
+          taggedInternalEdges.forEach((edge) => {
+            const sourceNodeId = idMap.get(edge.source);
+            const targetNodeId = idMap.get(edge.target);
+            if (sourceNodeId && targetNodeId) {
+              duplicateCommands.push({
+                type: 'edge.connect',
+                version: CANVAS_COMMAND_VERSION,
+                input: { sourceNodeId, targetNodeId },
+              });
+            }
+          });
+        }
+        const result = canvasCommandRegistry.executeTransaction({
+          id: `ui-duplicate-tags-${Date.now().toString(36)}`,
+          origin: 'ui',
+          expectedRevision: canvasCommandRegistry.getRevision(),
+          commands: duplicateCommands,
+        });
+        if (!result.ok) {
+          return null as DuplicateResult | null;
+        }
+      }
       for (const sourceNode of sourceNodes) {
+        if (taggedSourceIds.has(sourceNode.id)) {
+          continue;
+        }
         const data = cloneNodeData(sourceNode.data);
         if ('isGenerating' in (data as Record<string, unknown>)) {
           (data as { isGenerating?: boolean }).isGenerating = false;
@@ -2831,6 +2962,9 @@ export function Canvas() {
           if (!sourceNode) {
             return currentNode;
           }
+          if (isTagNode(sourceNode) || isTagGroupNode(sourceNode)) {
+            return currentNode;
+          }
 
           const copiedParentId = sourceNode.parentId ? idMap.get(sourceNode.parentId) : undefined;
           const sourceStyle = sourceNode.style && typeof sourceNode.style === 'object'
@@ -2850,10 +2984,13 @@ export function Canvas() {
         }),
       }));
 
-      if (internalEdges.length > 0) {
+      const ordinaryInternalEdges = internalEdges.filter((edge) => (
+        !taggedSourceIds.has(edge.source) && !taggedSourceIds.has(edge.target)
+      ));
+      if (ordinaryInternalEdges.length > 0) {
         useCanvasStore.setState((state) => {
           const existingEdgeIds = new Set(state.edges.map((edge) => edge.id));
-          const duplicatedEdges = internalEdges
+          const duplicatedEdges = ordinaryInternalEdges
             .map((edge) => {
               const nextSource = idMap.get(edge.source);
               const nextTarget = idMap.get(edge.target);
@@ -3790,23 +3927,26 @@ export function Canvas() {
           nodeHasSourceHandle(sourceNode.type) &&
           nodeHasTargetHandle(targetNode.type)
         ) {
-          connectNodes({
+          void connectNodes({
             source: sourceNode.id,
             target: targetNode.id,
             sourceHandle: 'source',
             targetHandle: 'target',
-          });
-          if (targetNode.type === CANVAS_NODE_TYPES.textAnnotation) {
-            const sourceText = getGeneratedTextForConnection(sourceNode, nodes);
+          }).then((connected) => {
+            if (!connected || targetNode.type !== CANVAS_NODE_TYPES.textAnnotation) return;
+            const currentNodes = useCanvasStore.getState().nodes;
+            const currentSource = currentNodes.find((node) => node.id === sourceNode.id);
+            const currentTarget = currentNodes.find((node) => node.id === targetNode.id);
+            if (!currentSource || !currentTarget || currentTarget.type !== CANVAS_NODE_TYPES.textAnnotation) return;
+            const sourceText = getGeneratedTextForConnection(currentSource, currentNodes);
             if (sourceText) {
-              const currentContent = (targetNode.data as { content?: unknown }).content;
+              const currentContent = (currentTarget.data as { content?: unknown }).content;
               const normalizedCurrent = typeof currentContent === 'string' ? currentContent.trim() : '';
-              updateNodeData(targetNode.id, {
+              updateNodeData(currentTarget.id, {
                 content: normalizedCurrent ? `${normalizedCurrent}\n${sourceText}` : sourceText,
               } as Partial<CanvasNodeData>);
             }
-          }
-          scheduleCanvasPersist(0);
+          });
           setPendingConnectStart(null);
           setPreviewConnectionVisual(null);
           return;

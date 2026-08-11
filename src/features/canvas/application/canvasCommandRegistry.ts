@@ -22,6 +22,8 @@ import {
 } from '../domain/canvasCapabilities';
 import {
   CANVAS_NODE_TYPES,
+  TAG_COLORS,
+  isTagNode,
   type CanvasNodeType,
 } from '../domain/canvasNodes';
 import {
@@ -42,6 +44,10 @@ import {
   applyCanvasGraphCommand,
   CANVAS_GRAPH_COMMAND_TYPES,
 } from './canvasCommandGraph';
+import {
+  collectInputReferences,
+  inspectTagGraphState,
+} from './graphReferenceResolver';
 
 export interface CanvasCommandDefinition {
   type: CanvasCommandType;
@@ -80,6 +86,10 @@ const EFFECTS: Record<CanvasCommandType, CanvasCommandEffect> = {
   'node.setModelConfig': 'graph',
   'node.move': 'graph',
   'node.layout': 'graph',
+  'node.setEnabled': 'graph',
+  'node.duplicate': 'graph',
+  'tag.setColor': 'graph',
+  'tagGroup.setMembers': 'graph',
   'edge.connect': 'graph',
   'edge.disconnect': 'graph',
   'group.create': 'graph',
@@ -131,6 +141,21 @@ const INPUT_SCHEMAS: Record<CanvasCommandType, CanvasJsonSchema> = {
     origin: objectField('Optional canvas origin.'),
     gap: numberField('Optional non-negative gap.'),
     columns: numberField('Optional positive grid column count.'),
+  }),
+  'node.setEnabled': objectSchema(['nodeIds', 'enabled'], {
+    nodeIds: arrayField('Tag or tag-group node ids to update atomically.'),
+    enabled: booleanField('Whether references through these tags remain active.'),
+  }),
+  'node.duplicate': objectSchema(['copies'], {
+    copies: arrayField('Metadata-only tag or tag-group copy records.'),
+  }),
+  'tag.setColor': objectSchema(['tagId', 'color'], {
+    tagId: stringField('Tag node id.'),
+    color: stringField('Registered semantic tag color.'),
+  }),
+  'tagGroup.setMembers': objectSchema(['groupId', 'memberTagIds'], {
+    groupId: stringField('Tag-group node id.'),
+    memberTagIds: arrayField('Explicit member tag node ids.'),
   }),
   'edge.connect': objectSchema(['sourceNodeId', 'targetNodeId'], {
     sourceNodeId: stringField('Source node id.'),
@@ -187,6 +212,14 @@ function summarizeCommand(command: CanvasCommand): string {
       return `Update model configuration for node ${command.input.nodeId}.`;
     case 'node.create':
       return `Create ${command.input.nodeType} node.`;
+    case 'node.setEnabled':
+      return `${command.input.enabled ? 'Enable' : 'Disable'} ${command.input.nodeIds.length} tag item(s).`;
+    case 'node.duplicate':
+      return `Duplicate ${command.input.copies.length} tag item(s) without edges.`;
+    case 'tag.setColor':
+      return `Update tag ${command.input.tagId} color.`;
+    case 'tagGroup.setMembers':
+      return `Update tag group ${command.input.groupId} membership.`;
     case 'generation.submit':
       return `Submit generation for ${command.input.nodeIds.length} node(s).`;
     default:
@@ -337,6 +370,10 @@ function allowedCreateConfigurationKeys(nodeType: CanvasNodeType): Set<string> {
       return new Set([...common, 'aspectRatio']);
     case CANVAS_NODE_TYPES.blueprint:
       return new Set([...common, 'aspectRatio', 'openDirectorStudio', 'directorStudioMode']);
+    case CANVAS_NODE_TYPES.tag:
+      return new Set([...common, 'enabled', 'tagColor']);
+    case CANVAS_NODE_TYPES.tagGroup:
+      return new Set([...common, 'enabled', 'memberTagIds']);
     default:
       return new Set(common);
   }
@@ -388,6 +425,18 @@ function validateCreateConfiguration(
     && value.directorStudioMode !== 'panorama'
   ) {
     errors.push('configuration.directorStudioMode must be flat or panorama.');
+  }
+  if ('enabled' in value && typeof value.enabled !== 'boolean') {
+    errors.push('configuration.enabled must be a boolean.');
+  }
+  if ('tagColor' in value && !(TAG_COLORS as readonly unknown[]).includes(value.tagColor)) {
+    errors.push(`configuration.tagColor must be one of: ${TAG_COLORS.join(', ')}.`);
+  }
+  if ('memberTagIds' in value) {
+    validateStringArray(value.memberTagIds, 'configuration.memberTagIds', errors, true);
+    if (Array.isArray(value.memberTagIds) && value.memberTagIds.length > 100) {
+      errors.push('configuration.memberTagIds cannot exceed 100 items.');
+    }
   }
   if (nodeType === CANVAS_NODE_TYPES.aiVideo && 'aspectRatio' in value && !('modelId' in value)) {
     errors.push('AI video create configuration requires modelId when aspectRatio is provided.');
@@ -503,6 +552,40 @@ function validateCommandInput(
       if (command.input.origin !== undefined) validateFinitePosition(command.input.origin, 'origin', errors);
       if (command.input.gap !== undefined && (!Number.isFinite(command.input.gap) || command.input.gap < 0)) errors.push('gap must be a non-negative finite number.');
       if (command.input.columns !== undefined && (!Number.isInteger(command.input.columns) || command.input.columns <= 0)) errors.push('columns must be a positive integer.');
+      break;
+    case 'node.setEnabled':
+      validateStringArray(command.input.nodeIds, 'nodeIds', errors);
+      if (typeof command.input.enabled !== 'boolean') errors.push('enabled must be a boolean.');
+      break;
+    case 'node.duplicate':
+      if (!Array.isArray(command.input.copies) || command.input.copies.length === 0) {
+        errors.push('copies must be a non-empty array.');
+      } else if (command.input.copies.length > 100) {
+        errors.push('copies cannot exceed 100 items.');
+      } else {
+        command.input.copies.forEach((copy, index) => {
+          if (!isPlainRecord(copy) || !hasOnlyKeys(copy, ['sourceNodeId', 'nodeId', 'position'])) {
+            errors.push(`copies[${index}] contains unsupported fields.`);
+            return;
+          }
+          validateString(copy.sourceNodeId, `copies[${index}].sourceNodeId`, errors);
+          if (copy.nodeId !== undefined) validateString(copy.nodeId, `copies[${index}].nodeId`, errors);
+          if (copy.position !== undefined) validateFinitePosition(copy.position, `copies[${index}].position`, errors);
+        });
+      }
+      break;
+    case 'tag.setColor':
+      validateString(command.input.tagId, 'tagId', errors);
+      if (!(TAG_COLORS as readonly string[]).includes(command.input.color)) {
+        errors.push(`color must be one of: ${TAG_COLORS.join(', ')}.`);
+      }
+      break;
+    case 'tagGroup.setMembers':
+      validateString(command.input.groupId, 'groupId', errors);
+      validateStringArray(command.input.memberTagIds, 'memberTagIds', errors, true);
+      if (Array.isArray(command.input.memberTagIds) && command.input.memberTagIds.length > 100) {
+        errors.push('memberTagIds cannot exceed 100 items.');
+      }
       break;
     case 'edge.connect':
       validateString(command.input.sourceNodeId, 'sourceNodeId', errors);
@@ -884,7 +967,18 @@ export class CanvasCommandRegistry {
       case 'node.delete':
       case 'node.layout':
       case 'group.create':
+      case 'node.setEnabled':
         command.input.nodeIds.forEach((nodeId) => seedIds.add(nodeId));
+        break;
+      case 'node.duplicate':
+        command.input.copies.forEach(({ sourceNodeId }) => seedIds.add(sourceNodeId));
+        break;
+      case 'tag.setColor':
+        seedIds.add(command.input.tagId);
+        break;
+      case 'tagGroup.setMembers':
+        seedIds.add(command.input.groupId);
+        command.input.memberTagIds.forEach((tagId) => seedIds.add(tagId));
         break;
       case 'node.rename':
       case 'node.setPrompt':
@@ -996,7 +1090,22 @@ export class CanvasCommandRegistry {
         if (relatedNodeIds && relatedSeedNodeIds) {
           for (const edge of snapshot.edges) {
             if (relatedSeedNodeIds.has(edge.source)) relatedNodeIds.add(edge.target);
-            if (relatedSeedNodeIds.has(edge.target)) relatedNodeIds.add(edge.source);
+            if (relatedSeedNodeIds.has(edge.target)) {
+              const targetNode = snapshot.nodes.find((node) => node.id === edge.target);
+              if (!isTagNode(targetNode)) relatedNodeIds.add(edge.source);
+            }
+          }
+          for (const seedNodeId of relatedSeedNodeIds) {
+            const seedNode = snapshot.nodes.find((node) => node.id === seedNodeId);
+            if (isTagNode(seedNode)) {
+              const tagState = inspectTagGraphState(seedNode.id, snapshot.nodes, snapshot.edges);
+              if (tagState.status === 'ready' && tagState.sourceNodeId) {
+                relatedNodeIds.add(tagState.sourceNodeId);
+              }
+              continue;
+            }
+            collectInputReferences(seedNodeId, snapshot.nodes, snapshot.edges)
+              .forEach((reference) => relatedNodeIds.add(reference.sourceNodeId));
           }
         }
         const regionNodeIds = command.input.region
