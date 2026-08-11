@@ -7,37 +7,15 @@ import {
   type EdgeProps,
 } from '@xyflow/react';
 
-import { CANVAS_NODE_TYPES, type CanvasNode } from '@/features/canvas/domain/canvasNodes';
+import { CANVAS_NODE_TYPES } from '@/features/canvas/domain/canvasNodes';
+import {
+  EMPTY_CANVAS_GEOMETRY_INDEX,
+  getSharedCanvasGeometryIndex,
+  getSharedCanvasNodeIndex,
+} from '@/features/canvas/application/canvasGraphIndex';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { buildOrthogonalRoute } from './edgeRouting';
-
-const EMPTY_ROUTE_NODES: CanvasNode[] = [];
-
-function resolveNodeWidth(node: CanvasNode): number | string {
-  return node.measured?.width
-    ?? node.width
-    ?? (typeof node.style?.width === 'number' || typeof node.style?.width === 'string' ? node.style.width : '');
-}
-
-function resolveNodeHeight(node: CanvasNode): number | string {
-  return node.measured?.height
-    ?? node.height
-    ?? (typeof node.style?.height === 'number' || typeof node.style?.height === 'string' ? node.style.height : '');
-}
-
-function buildNodeGeometrySignature(nodes: CanvasNode[]): string {
-  return nodes
-    .map((node) => [
-      node.id,
-      node.type,
-      node.position.x,
-      node.position.y,
-      resolveNodeWidth(node),
-      resolveNodeHeight(node),
-    ].join(':'))
-    .join('|');
-}
 
 export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgeProps) {
   const {
@@ -56,16 +34,15 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
   } = props;
   const deleteEdge = useCanvasStore((state) => state.deleteEdge);
   const canvasEdgeRoutingMode = useSettingsStore((state) => state.canvasEdgeRoutingMode);
-  const nodeGeometrySignature = useCanvasStore((state) =>
-    canvasEdgeRoutingMode === 'smartOrthogonal' ? buildNodeGeometrySignature(state.nodes) : ''
-  );
-  const routeNodes = useMemo(
-    () => (canvasEdgeRoutingMode === 'smartOrthogonal' ? useCanvasStore.getState().nodes : EMPTY_ROUTE_NODES),
-    [canvasEdgeRoutingMode, nodeGeometrySignature]
-  );
+  const geometryIndex = useCanvasStore((state) => (
+    canvasEdgeRoutingMode === 'smartOrthogonal'
+      ? getSharedCanvasGeometryIndex(state.nodes)
+      : EMPTY_CANVAS_GEOMETRY_INDEX
+  ));
   const isProcessingEdge = useCanvasStore((state) => {
-    const sourceNode = state.nodes.find((node) => node.id === source);
-    const targetNode = state.nodes.find((node) => node.id === target);
+    const nodeIndex = getSharedCanvasNodeIndex(state.nodes);
+    const sourceNode = nodeIndex.get(source);
+    const targetNode = nodeIndex.get(target);
 
     if (!sourceNode || !targetNode || targetNode.type !== CANVAS_NODE_TYPES.exportImage) {
       return false;
@@ -107,7 +84,7 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
       targetX,
       targetY,
       targetPosition: targetPosition ?? Position.Left,
-      nodes: routeNodes,
+      geometryIndex,
       smartAvoidance: canvasEdgeRoutingMode === 'smartOrthogonal',
     });
     return {
@@ -117,7 +94,7 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
     };
   }, [
     canvasEdgeRoutingMode,
-    routeNodes,
+    geometryIndex,
     source,
     sourcePosition,
     sourceX,

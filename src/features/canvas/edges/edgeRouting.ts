@@ -1,17 +1,16 @@
 import { Position } from '@xyflow/react';
 
-import { DEFAULT_NODE_WIDTH, type CanvasNode } from '@/features/canvas/domain/canvasNodes';
+import type { CanvasNode } from '@/features/canvas/domain/canvasNodes';
+import {
+  buildCanvasGeometryIndex,
+  queryCanvasGeometryByXRange,
+  type CanvasGeometryIndex,
+  type CanvasGeometryObstacle,
+} from '@/features/canvas/application/canvasGraphIndex';
 
 interface Point {
   x: number;
   y: number;
-}
-
-interface Rect {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
 }
 
 interface RouteResult {
@@ -29,12 +28,11 @@ interface BuildOrthogonalRouteInput {
   targetX: number;
   targetY: number;
   targetPosition: Position;
-  nodes: CanvasNode[];
+  nodes?: CanvasNode[];
+  geometryIndex?: CanvasGeometryIndex;
   smartAvoidance: boolean;
 }
 
-const DEFAULT_NODE_HEIGHT = 200;
-const EXPANDED_NODE_PADDING = 14;
 const ENTRY_OFFSET = 24;
 const LANE_GAP = 20;
 const EPS = 0.0001;
@@ -59,30 +57,7 @@ function getInDirection(position: Position, fallbackSign: number): number {
   return fallbackSign <= 0 ? -1 : 1;
 }
 
-function nodeToRect(node: CanvasNode): Rect {
-  const width =
-    node.measured?.width ??
-    (typeof node.style?.width === 'number' ? node.style.width : null) ??
-    DEFAULT_NODE_WIDTH;
-  const height =
-    node.measured?.height ??
-    (typeof node.style?.height === 'number' ? node.style.height : null) ??
-    DEFAULT_NODE_HEIGHT;
-  return {
-    left: node.position.x - EXPANDED_NODE_PADDING,
-    top: node.position.y - EXPANDED_NODE_PADDING,
-    right: node.position.x + width + EXPANDED_NODE_PADDING,
-    bottom: node.position.y + height + EXPANDED_NODE_PADDING,
-  };
-}
-
-function buildRectangles(nodes: CanvasNode[], sourceId?: string, targetId?: string): Rect[] {
-  return nodes
-    .filter((node) => node.id !== sourceId && node.id !== targetId)
-    .map(nodeToRect);
-}
-
-function verticalIntersectsRect(x: number, y1: number, y2: number, rect: Rect): boolean {
+function verticalIntersectsRect(x: number, y1: number, y2: number, rect: CanvasGeometryObstacle): boolean {
   if (x <= rect.left + EPS || x >= rect.right - EPS) {
     return false;
   }
@@ -91,7 +66,7 @@ function verticalIntersectsRect(x: number, y1: number, y2: number, rect: Rect): 
   return bottom > rect.top + EPS && top < rect.bottom - EPS;
 }
 
-function horizontalIntersectsRect(y: number, x1: number, x2: number, rect: Rect): boolean {
+function horizontalIntersectsRect(y: number, x1: number, x2: number, rect: CanvasGeometryObstacle): boolean {
   if (y <= rect.top + EPS || y >= rect.bottom - EPS) {
     return false;
   }
@@ -100,7 +75,7 @@ function horizontalIntersectsRect(y: number, x1: number, x2: number, rect: Rect)
   return right > rect.left + EPS && left < rect.right - EPS;
 }
 
-function polylineIntersectsAnyRect(points: Point[], rects: Rect[]): boolean {
+function polylineIntersectsAnyRect(points: Point[], rects: CanvasGeometryObstacle[]): boolean {
   for (let index = 0; index < points.length - 1; index += 1) {
     const from = points[index];
     const to = points[index + 1];
@@ -195,7 +170,7 @@ function pickLaneY(
   targetX: number,
   targetY: number,
   targetInX: number,
-  rects: Rect[]
+  rects: CanvasGeometryObstacle[]
 ): number {
   const minX = Math.min(sourceOutX, targetInX, sourceX, targetX);
   const maxX = Math.max(sourceOutX, targetInX, sourceX, targetX);
@@ -238,7 +213,8 @@ export function buildOrthogonalRoute(input: BuildOrthogonalRouteInput): RouteRes
     targetX,
     targetY,
     targetPosition,
-    nodes,
+    nodes = [],
+    geometryIndex,
     smartAvoidance,
   } = input;
 
@@ -250,7 +226,16 @@ export function buildOrthogonalRoute(input: BuildOrthogonalRouteInput): RouteRes
 
   let laneY = (sourceY + targetY) / 2;
   if (smartAvoidance) {
-    const rects = buildRectangles(nodes, sourceId, targetId);
+    const routeGeometry = geometryIndex ?? buildCanvasGeometryIndex(nodes);
+    const minRouteX = Math.min(sourceOutX, targetInX, sourceX, targetX);
+    const maxRouteX = Math.max(sourceOutX, targetInX, sourceX, targetX);
+    const rects = queryCanvasGeometryByXRange(
+      routeGeometry,
+      minRouteX,
+      maxRouteX,
+      sourceId,
+      targetId,
+    );
     laneY = pickLaneY(sourceX, sourceY, sourceOutX, targetX, targetY, targetInX, rects);
   }
 

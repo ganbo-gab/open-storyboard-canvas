@@ -1,12 +1,8 @@
-import { useEffect, useState } from 'react';
-import { ReactFlowProvider } from '@xyflow/react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
-import { Canvas } from './features/canvas/Canvas';
-import { CanvasAgentDock } from './features/canvas/agent/ui/CanvasAgentDock';
 import { TitleBar } from './components/TitleBar';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
-import { SettingsDialog } from './components/SettingsDialog';
 import { UpdateAvailableDialog, type UpdateIgnoreMode } from './components/UpdateAvailableDialog';
 import { GlobalErrorDialog } from './components/GlobalErrorDialog';
 import { ProjectHome } from './features/project/ProjectHome';
@@ -27,6 +23,17 @@ import {
   type SettingsCategory,
 } from './features/settings/settingsEvents';
 import { subscribeWebProjectStorageStatus } from './commands/projectState';
+
+const CanvasWorkspace = lazy(() =>
+  import('./features/canvas/CanvasWorkspace').then((module) => ({
+    default: module.CanvasWorkspace,
+  })),
+);
+const SettingsDialog = lazy(() =>
+  import('./components/SettingsDialog').then((module) => ({
+    default: module.SettingsDialog,
+  })),
+);
 
 function toRgbCssValue(hexColor: string): string {
   const hex = hexColor.replace('#', '');
@@ -49,6 +56,7 @@ function App() {
   const enableUpdateDialog = useSettingsStore((state) => state.enableUpdateDialog);
   const setEnableUpdateDialog = useSettingsStore((state) => state.setEnableUpdateDialog);
   const [showSettings, setShowSettings] = useState(false);
+  const [hasOpenedSettings, setHasOpenedSettings] = useState(false);
   const [settingsInitialCategory, setSettingsInitialCategory] = useState<SettingsCategory>('general');
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
   const [latestVersion, setLatestVersion] = useState<string>('');
@@ -112,6 +120,7 @@ function App() {
   useEffect(() => {
     const unsubscribe = subscribeOpenSettingsDialog(({ category }) => {
       setSettingsInitialCategory(category ?? 'general');
+      setHasOpenedSettings(true);
       setShowSettings(true);
     });
     return unsubscribe;
@@ -218,21 +227,19 @@ function App() {
 
   if (!isHydrated) {
     return (
-      <ReactFlowProvider>
-        <AppErrorBoundary>
-          <div className="w-full h-full bg-bg-dark" />
-        </AppErrorBoundary>
-      </ReactFlowProvider>
+      <AppErrorBoundary>
+        <div className="h-full w-full bg-bg-dark" />
+      </AppErrorBoundary>
     );
   }
 
   return (
-    <ReactFlowProvider>
-      <AppErrorBoundary>
+    <AppErrorBoundary>
         <div className="w-full h-full flex flex-col bg-bg-dark">
           <TitleBar
             onSettingsClick={() => {
               setSettingsInitialCategory('general');
+              setHasOpenedSettings(true);
               setShowSettings(true);
             }}
             showBackButton={!!currentProjectId}
@@ -259,12 +266,21 @@ function App() {
             {currentProjectId ? (
               <div
                 key={`canvas-${currentProjectId}`}
-                className="ui-workspace-enter relative flex h-full min-h-0 min-w-0 overflow-hidden"
+                className="ui-workspace-enter relative h-full min-h-0 min-w-0 overflow-hidden"
               >
-                <div className="relative min-h-0 min-w-0 flex-1">
-                  <Canvas />
-                </div>
-                <CanvasAgentDock projectId={currentProjectId} />
+                <Suspense
+                  fallback={(
+                    <div
+                      role="status"
+                      className="flex h-full items-center justify-center gap-2 bg-bg-dark text-sm text-text-muted"
+                    >
+                      <span className="h-2 w-2 animate-pulse rounded-full bg-accent motion-reduce:animate-none" />
+                      {t('common.loading')}
+                    </div>
+                  )}
+                >
+                  <CanvasWorkspace projectId={currentProjectId} />
+                </Suspense>
               </div>
             ) : (
               <div key="project-home" className="ui-workspace-enter h-full min-h-0">
@@ -273,12 +289,25 @@ function App() {
             )}
           </main>
 
-          <SettingsDialog
-            isOpen={showSettings}
-            onClose={() => setShowSettings(false)}
-            initialCategory={settingsInitialCategory}
-            onCheckUpdate={handleManualCheckUpdate}
-          />
+          {hasOpenedSettings ? (
+            <Suspense
+              fallback={showSettings ? (
+                <div
+                  role="status"
+                  className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/45 text-sm text-white backdrop-blur-sm"
+                >
+                  {t('common.loading')}
+                </div>
+              ) : null}
+            >
+              <SettingsDialog
+                isOpen={showSettings}
+                onClose={() => setShowSettings(false)}
+                initialCategory={settingsInitialCategory}
+                onCheckUpdate={handleManualCheckUpdate}
+              />
+            </Suspense>
+          ) : null}
           <UpdateAvailableDialog
             isOpen={showUpdateDialog}
             onClose={() => setShowUpdateDialog(false)}
@@ -296,7 +325,6 @@ function App() {
           />
         </div>
       </AppErrorBoundary>
-    </ReactFlowProvider>
   );
 }
 

@@ -243,20 +243,6 @@ function normalizeClientRect(
   };
 }
 
-function rectsOverlap(
-  a: { left: number; top: number; right: number; bottom: number },
-  b: { left: number; top: number; right: number; bottom: number }
-): boolean {
-  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-}
-
-function escapeNodeDataId(nodeId: string): string {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-    return CSS.escape(nodeId);
-  }
-  return nodeId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-}
-
 function shouldIgnoreCanvasMarqueeTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) {
     return true;
@@ -955,6 +941,7 @@ export function Canvas() {
   const { t } = useTranslation();
   const reactFlowInstance = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const canvasContainerRectRef = useRef<DOMRect | null>(null);
   const lastCanvasPointerRef = useRef<{ x: number; y: number } | null>(null);
   const suppressPaneClickUntilRef = useRef(0);
   const suppressNextEdgeClickRef = useRef(false);
@@ -1006,6 +993,18 @@ export function Canvas() {
     zoom: number;
     moved: boolean;
   } | null>(null);
+  const hasBatchSelectionRef = useRef(false);
+  const viewportOverlayFrameRef = useRef<number | null>(null);
+  const [viewportOverlayRevision, setViewportOverlayRevision] = useState(0);
+  const scheduleViewportOverlayRefresh = useCallback(() => {
+    if (!hasBatchSelectionRef.current || viewportOverlayFrameRef.current !== null) {
+      return;
+    }
+    viewportOverlayFrameRef.current = window.requestAnimationFrame(() => {
+      viewportOverlayFrameRef.current = null;
+      setViewportOverlayRevision((revision) => revision + 1);
+    });
+  }, []);
 
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
@@ -1030,7 +1029,6 @@ export function Canvas() {
   const imageViewer = useCanvasStore((state) => state.imageViewer);
   const closeImageViewer = useCanvasStore((state) => state.closeImageViewer);
   const navigateImageViewer = useCanvasStore((state) => state.navigateImageViewer);
-  const currentViewport = useCanvasStore((state) => state.currentViewport);
   const apiKeys = useSettingsStore((state) => state.apiKeys);
   const dreaminaStatus = useSettingsStore((state) => state.dreaminaStatus);
   const canvasMouseBindings = useSettingsStore((state) => state.canvasMouseBindings);
@@ -1167,10 +1165,12 @@ export function Canvas() {
 
     const updateSize = () => {
       const rect = element.getBoundingClientRect();
+      canvasContainerRectRef.current = rect;
       setCanvasViewportSize({
         width: Math.max(0, Math.round(rect.width)),
         height: Math.max(0, Math.round(rect.height)),
       });
+      scheduleViewportOverlayRefresh();
     };
 
     updateSize();
@@ -1178,9 +1178,17 @@ export function Canvas() {
     observer.observe(element);
 
     return () => {
+      canvasContainerRectRef.current = null;
       observer.disconnect();
     };
-  }, [setCanvasViewportSize]);
+  }, [scheduleViewportOverlayRefresh, setCanvasViewportSize]);
+
+  useEffect(() => () => {
+    if (viewportOverlayFrameRef.current !== null) {
+      window.cancelAnimationFrame(viewportOverlayFrameRef.current);
+      viewportOverlayFrameRef.current = null;
+    }
+  }, []);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<CanvasNode>[]) => {
@@ -1307,8 +1315,9 @@ export function Canvas() {
   const handleMove = useCallback(
     (_event: unknown, viewport: Viewport) => {
       setViewportState(viewport);
+      scheduleViewportOverlayRefresh();
     },
-    [setViewportState]
+    [scheduleViewportOverlayRefresh, setViewportState]
   );
 
   const handleMoveStart = useCallback(() => {
@@ -1615,6 +1624,7 @@ export function Canvas() {
     [selectedNodes]
   );
   const isSingleSelectedGroup = selectedNodeIds.length === 1 && selectedGroupNodeIds.length === 1;
+  hasBatchSelectionRef.current = selectedNodeIds.length > 1 || isSingleSelectedGroup;
   const selectedGroupChildNodes = useMemo(
     () => {
       if (selectedGroupNodeIds.length === 0) {
@@ -1649,7 +1659,7 @@ export function Canvas() {
       return null;
     }
     return selectedNode.id;
-  }, [currentViewport, nodes, selectedNodeIds]);
+  }, [nodes, selectedNodeIds]);
 
   useEffect(() => {
     if (selectedNodeIds.length <= 1 && !isSingleSelectedGroup) {
@@ -1659,57 +1669,46 @@ export function Canvas() {
     }
 
     const frameId = window.requestAnimationFrame(() => {
-      const containerRect = wrapperRef.current?.getBoundingClientRect();
-      if (!containerRect) {
+      const canvasState = useCanvasStore.getState();
+      const containerWidth = canvasState.canvasViewportSize.width;
+      const viewport = canvasState.currentViewport;
+      if (containerWidth <= 0) {
         setBatchToolbarPosition(null);
         setSelectionBoundsRect(null);
         return;
       }
 
-      let minLeft = Number.POSITIVE_INFINITY;
-      let minTop = Number.POSITIVE_INFINITY;
-      let maxRight = Number.NEGATIVE_INFINITY;
-      let maxBottom = Number.NEGATIVE_INFINITY;
-      let hasRect = false;
-
-      const boundsNodeIds = collectNodeIdsWithDescendants(nodes, selectedNodeIds);
-      for (const nodeId of boundsNodeIds) {
-        const nodeElement = wrapperRef.current?.querySelector<HTMLElement>(
-          `.react-flow__node[data-id="${escapeNodeDataId(nodeId)}"]`
-        );
-        if (!nodeElement) {
-          continue;
-        }
-        const rect = nodeElement.getBoundingClientRect();
-        minLeft = Math.min(minLeft, rect.left);
-        minTop = Math.min(minTop, rect.top);
-        maxRight = Math.max(maxRight, rect.right);
-        maxBottom = Math.max(maxBottom, rect.bottom);
-        hasRect = true;
-      }
-
-      if (!hasRect) {
+      const boundsNodeIds = new Set(collectNodeIdsWithDescendants(nodes, selectedNodeIds));
+      const boundsNodes = reactFlowInstance.getNodes().filter((node) => boundsNodeIds.has(node.id));
+      if (boundsNodes.length === 0) {
         setBatchToolbarPosition(null);
         setSelectionBoundsRect(null);
         return;
       }
+
+      const bounds = reactFlowInstance.getNodesBounds(boundsNodes);
+      const zoom = Math.max(0.01, viewport.zoom);
+      const minLeft = bounds.x * zoom + viewport.x;
+      const minTop = bounds.y * zoom + viewport.y;
+      const maxRight = (bounds.x + bounds.width) * zoom + viewport.x;
+      const maxBottom = (bounds.y + bounds.height) * zoom + viewport.y;
 
       setSelectionBoundsRect({
-        left: Math.max(0, minLeft - containerRect.left),
-        top: Math.max(0, minTop - containerRect.top),
+        left: Math.max(0, minLeft),
+        top: Math.max(0, minTop),
         width: Math.max(0, maxRight - minLeft),
         height: Math.max(0, maxBottom - minTop),
       });
       setBatchToolbarPosition({
-        left: Math.max(12, Math.min(containerRect.width - 12, (minLeft + maxRight) / 2 - containerRect.left)),
-        top: Math.max(12, minTop - containerRect.top - 42),
+        left: Math.max(12, Math.min(containerWidth - 12, (minLeft + maxRight) / 2)),
+        top: Math.max(12, minTop - 42),
       });
     });
 
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [currentViewport, isSingleSelectedGroup, nodes, selectedNodeIds]);
+  }, [isSingleSelectedGroup, nodes, reactFlowInstance, selectedNodeIds, viewportOverlayRevision]);
 
   const selectSingleNode = useCallback((nodeId: string | null) => {
     applyNodesChange(
@@ -1767,29 +1766,20 @@ export function Canvas() {
   }, [openContextMenuAtClientPosition]);
 
   const selectNodesInMarquee = useCallback((gesture: CanvasMarqueeGesture): string[] => {
-    const selectionClientRect = {
-      left: Math.min(gesture.startClientX, gesture.currentClientX),
-      top: Math.min(gesture.startClientY, gesture.currentClientY),
-      right: Math.max(gesture.startClientX, gesture.currentClientX),
-      bottom: Math.max(gesture.startClientY, gesture.currentClientY),
-    };
-    const nextSelectedIds = nodesRef.current
-      .filter((node) => {
-        const nodeElement = wrapperRef.current?.querySelector<HTMLElement>(
-          `.react-flow__node[data-id="${escapeNodeDataId(node.id)}"]`
-        );
-        if (!nodeElement) {
-          return false;
-        }
-        const nodeRect = nodeElement.getBoundingClientRect();
-        return rectsOverlap(selectionClientRect, {
-          left: nodeRect.left,
-          top: nodeRect.top,
-          right: nodeRect.right,
-          bottom: nodeRect.bottom,
-        });
-      })
-      .map((node) => node.id);
+    const containerRect = canvasContainerRectRef.current ?? wrapperRef.current?.getBoundingClientRect();
+    if (!containerRect) return [];
+    const viewport = reactFlowInstance.getViewport();
+    const zoom = Math.max(0.01, viewport.zoom);
+    const startX = (gesture.startClientX - containerRect.left - viewport.x) / zoom;
+    const startY = (gesture.startClientY - containerRect.top - viewport.y) / zoom;
+    const currentX = (gesture.currentClientX - containerRect.left - viewport.x) / zoom;
+    const currentY = (gesture.currentClientY - containerRect.top - viewport.y) / zoom;
+    const nextSelectedIds = reactFlowInstance.getIntersectingNodes({
+      x: Math.min(startX, currentX),
+      y: Math.min(startY, currentY),
+      width: Math.abs(currentX - startX),
+      height: Math.abs(currentY - startY),
+    }, true).map((node) => node.id);
 
     const nextSelectedSet = new Set(nextSelectedIds);
     const selectionChanges: NodeChange<CanvasNode>[] = nodesRef.current.map((node) => ({
@@ -1800,7 +1790,7 @@ export function Canvas() {
     applyNodesChange(selectionChanges);
     setSelectedNode(nextSelectedIds.length === 1 ? nextSelectedIds[0] : null);
     return nextSelectedIds;
-  }, [applyNodesChange, setSelectedNode]);
+  }, [applyNodesChange, reactFlowInstance, setSelectedNode]);
 
   useEffect(() => {
     const wrapperElement = wrapperRef.current;
@@ -1889,7 +1879,7 @@ export function Canvas() {
 
       event.preventDefault();
       event.stopPropagation();
-      const containerRect = wrapperElement.getBoundingClientRect();
+      const containerRect = canvasContainerRectRef.current ?? wrapperElement.getBoundingClientRect();
       setMarqueeRect(normalizeClientRect(
         gesture.startClientX,
         gesture.startClientY,
