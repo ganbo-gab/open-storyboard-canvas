@@ -28,6 +28,11 @@ import type {
   CanvasGraphDraft,
 } from './canvasTransactionCoordinator';
 import { validateCanvasConnection } from './canvasConnectionRules';
+import {
+  applyDirectorUpdate,
+  applyPanoramaUpdate,
+  applyStoryboardUpdate,
+} from './canvasWorkflowCommands';
 
 export const CANVAS_GRAPH_COMMAND_TYPES = new Set<CanvasCommand['type']>([
   'node.create',
@@ -39,6 +44,9 @@ export const CANVAS_GRAPH_COMMAND_TYPES = new Set<CanvasCommand['type']>([
   'node.layout',
   'node.setEnabled',
   'node.duplicate',
+  'storyboard.update',
+  'panorama.update',
+  'director.update',
   'tag.setColor',
   'tagGroup.setMembers',
   'edge.connect',
@@ -1052,6 +1060,12 @@ export function applyCanvasGraphCommand(
       return applySetNodeEnabled(command, draft);
     case 'node.duplicate':
       return applyDuplicateNodes(command, draft, nodeFactory);
+    case 'storyboard.update':
+      return applyStoryboardUpdate(command, draft);
+    case 'panorama.update':
+      return applyPanoramaUpdate(command, draft);
+    case 'director.update':
+      return applyDirectorUpdate(command, draft);
     case 'tag.setColor':
       return applySetTagColor(command, draft);
     case 'tagGroup.setMembers':

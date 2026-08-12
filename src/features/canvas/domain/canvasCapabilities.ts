@@ -53,23 +53,29 @@ const GENERATION_NODE_COMMANDS: CanvasCommandType[] = [
   'generation.locateResult',
 ];
 
+const IMAGE_TOOL_NODE_COMMANDS: CanvasCommandType[] = [
+  ...COMMON_NODE_COMMANDS,
+  'node.tool.run',
+];
+
 export const CANVAS_GENERATION_NODE_TYPES = [
   CANVAS_NODE_TYPES.imageEdit,
   CANVAS_NODE_TYPES.aiVideo,
   CANVAS_NODE_TYPES.aiText,
   CANVAS_NODE_TYPES.aiAudio,
   CANVAS_NODE_TYPES.storyboardGen,
+  CANVAS_NODE_TYPES.panorama,
 ] as const satisfies readonly CanvasNodeType[];
 
 export const canvasNodeCapabilityManifest = {
-  [CANVAS_NODE_TYPES.upload]: { status: 'supported', commands: COMMON_NODE_COMMANDS, directCreate: true },
-  [CANVAS_NODE_TYPES.imageEdit]: { status: 'supported', commands: GENERATION_NODE_COMMANDS, directCreate: true },
+  [CANVAS_NODE_TYPES.upload]: { status: 'supported', commands: IMAGE_TOOL_NODE_COMMANDS, directCreate: true },
+  [CANVAS_NODE_TYPES.imageEdit]: { status: 'supported', commands: [...GENERATION_NODE_COMMANDS, 'node.tool.run'], directCreate: true },
   [CANVAS_NODE_TYPES.aiVideo]: { status: 'supported', commands: GENERATION_NODE_COMMANDS, directCreate: true },
   [CANVAS_NODE_TYPES.aiText]: { status: 'supported', commands: GENERATION_NODE_COMMANDS, directCreate: true },
   [CANVAS_NODE_TYPES.aiAudio]: { status: 'supported', commands: GENERATION_NODE_COMMANDS, directCreate: true },
   [CANVAS_NODE_TYPES.exportImage]: {
     status: 'supported',
-    commands: [...COMMON_NODE_COMMANDS, 'asset.list', 'asset.locate'],
+    commands: [...COMMON_NODE_COMMANDS, 'asset.list', 'asset.locate', 'node.tool.run'],
     directCreate: false,
     directCreateReason: 'Image result nodes are created by validated generation or export workflows.',
   },
@@ -108,23 +114,20 @@ export const canvasNodeCapabilityManifest = {
     directCreate: true,
   },
   [CANVAS_NODE_TYPES.storyboardSplit]: {
-    status: 'ui-only',
-    reason: 'Storyboard frame editing remains in its validated tool workflow.',
-    commands: COMMON_NODE_COMMANDS,
+    status: 'supported',
+    commands: [...COMMON_NODE_COMMANDS, 'storyboard.update', 'asset.list', 'asset.locate'],
     directCreate: false,
     directCreateReason: 'Storyboard split nodes require validated frame data from the split workflow.',
   },
   [CANVAS_NODE_TYPES.storyboardGen]: { status: 'supported', commands: GENERATION_NODE_COMMANDS, directCreate: true },
   [CANVAS_NODE_TYPES.panorama]: {
-    status: 'ui-only',
-    reason: 'Panorama setup requires its dedicated source-mode form.',
-    commands: [...COMMON_NODE_COMMANDS, 'asset.list', 'asset.locate', 'generation.status', 'generation.locateResult'],
+    status: 'supported',
+    commands: [...COMMON_NODE_COMMANDS, 'panorama.update', 'asset.list', 'asset.locate', 'generation.submit', 'generation.status', 'generation.locateResult'],
     directCreate: true,
   },
   [CANVAS_NODE_TYPES.blueprint]: {
-    status: 'ui-only',
-    reason: 'Director Studio scene editing remains inside the fullscreen 3D editor.',
-    commands: COMMON_NODE_COMMANDS,
+    status: 'supported',
+    commands: [...COMMON_NODE_COMMANDS, 'director.update', 'director.open', 'director.record', 'asset.list', 'asset.locate'],
     directCreate: true,
   },
 } satisfies Record<CanvasNodeType, CanvasNodeCapabilityDeclaration>;
@@ -140,6 +143,12 @@ export const canvasActionCapabilityManifest = {
   'node.layout': { status: 'supported' },
   'node.setEnabled': { status: 'supported' },
   'node.duplicate': { status: 'supported' },
+  'node.tool.run': { status: 'supported' },
+  'storyboard.update': { status: 'supported' },
+  'panorama.update': { status: 'supported' },
+  'director.update': { status: 'supported' },
+  'director.open': { status: 'supported' },
+  'director.record': { status: 'supported' },
   'tag.setColor': { status: 'supported' },
   'tagGroup.setMembers': { status: 'supported' },
   'edge.connect': { status: 'supported' },

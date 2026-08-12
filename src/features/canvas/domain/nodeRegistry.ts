@@ -587,6 +587,7 @@ const panoramaNodeDefinition: CanvasNodeDefinition<PanoramaNodeData> = {
     sourceMode: 'text',
     sourcePrompt: '',
     sourceImageUrl: null,
+    smartBase: true,
     initialYaw: 0,
     initialPitch: 0,
     initialFov: 50,

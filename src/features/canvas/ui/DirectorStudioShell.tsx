@@ -91,6 +91,7 @@ import {
 import { DirectorTimeline } from '@/features/canvas/ui/DirectorTimeline';
 import { DirectorVideoExportDialog } from '@/features/canvas/ui/DirectorVideoExportDialog';
 import { useDirectorStudioMotion } from '@/features/canvas/ui/useDirectorStudioMotion';
+import type { CanvasEventMap } from '@/features/canvas/application/ports';
 import { ensurePos3d, genBlueprintItemId, pos3dToLegacy } from '@/features/canvas/ui/blueprintCoordinates';
 import { useCanvasStore } from '@/stores/canvasStore';
 
@@ -488,6 +489,9 @@ interface DirectorStudioShellProps {
   onUpdateNodeData: (patch: Partial<BlueprintNodeData>) => void;
   onAddSnapshotToCanvas?: (snapshotUrl: string) => Promise<boolean | void> | boolean | void;
   onAddVideoToCanvas?: (video: DirectorRecordedVideo) => Promise<boolean | void> | boolean | void;
+  getLastRecordedVideoNodeId?: () => string | null;
+  recordRequest?: CanvasEventMap['director-studio/record'] | null;
+  onRecordRequestResult?: (result: CanvasEventMap['director-studio/record-result']) => void;
   onClose: () => void;
 }
 
@@ -987,6 +991,9 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     onUpdateNodeData,
     onAddSnapshotToCanvas,
     onAddVideoToCanvas,
+    getLastRecordedVideoNodeId,
+    recordRequest,
+    onRecordRequestResult,
     onClose,
   } = props;
   const { t } = useTranslation();
@@ -1251,6 +1258,31 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     onUpdateItemAction: updateItemActionImmediately,
     onAddVideoToCanvas,
   });
+
+  const handledRecordRequestIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!recordRequest || recordRequest.nodeId !== sourceNodeId) return;
+    if (handledRecordRequestIdRef.current === recordRequest.requestId) return;
+    handledRecordRequestIdRef.current = recordRequest.requestId;
+    void startVideoExport(recordRequest).then((result) => {
+      if (!result) {
+        throw new Error(t('directorStudio.motion.export.failed'));
+      }
+      onRecordRequestResult?.({
+        requestId: recordRequest.requestId,
+        nodeId: sourceNodeId,
+        resultNodeId: result && recordRequest.addToCanvas
+          ? getLastRecordedVideoNodeId?.() ?? undefined
+          : undefined,
+      });
+    }).catch((error) => {
+      onRecordRequestResult?.({
+        requestId: recordRequest.requestId,
+        nodeId: sourceNodeId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, [getLastRecordedVideoNodeId, onRecordRequestResult, recordRequest, sourceNodeId, startVideoExport, t]);
 
   const commitInspectorTextDraft = useCallback(() => {
     if (inspectorTextCommitTimerRef.current !== null) {

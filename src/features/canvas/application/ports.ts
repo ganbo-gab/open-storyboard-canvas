@@ -131,6 +131,22 @@ export interface CanvasEventMap {
   'generation-node/trigger': {
     nodeId: string;
   };
+  'director-studio/open': {
+    nodeId: string;
+  };
+  'director-studio/record': {
+    nodeId: string;
+    resolution: '720p' | '1080p';
+    fps: 24 | 30;
+    addToCanvas: boolean;
+    requestId: string;
+  };
+  'director-studio/record-result': {
+    requestId: string;
+    nodeId: string;
+    resultNodeId?: string;
+    error?: string;
+  };
 }
 
 export interface CanvasEventBus {

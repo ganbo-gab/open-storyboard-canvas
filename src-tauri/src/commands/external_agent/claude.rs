@@ -4,6 +4,7 @@ use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdout, Command};
 
 use super::process::configure_restricted_env;
+use super::process_tree::spawn_process_tree;
 use super::session::monitor_child_process;
 
 pub(super) struct ClaudeCommandOptions<'a> {
@@ -129,20 +130,17 @@ pub(super) async fn start_claude_turn(
             attachment_root: attachment_root.as_deref(),
         },
     )?;
-    let mut child = command.spawn().map_err(|error| {
+    let mut child = spawn_process_tree(&mut command).map_err(|error| {
         ExternalAgentCommandError::process(format!("Failed to start Claude Code: {error}"))
     })?;
     let mut stdin = child
-        .stdin
-        .take()
+        .take_stdin()
         .ok_or_else(|| ExternalAgentCommandError::process("Claude stdin pipe is unavailable."))?;
     let stdout = child
-        .stdout
-        .take()
+        .take_stdout()
         .ok_or_else(|| ExternalAgentCommandError::process("Claude stdout pipe is unavailable."))?;
     let stderr = child
-        .stderr
-        .take()
+        .take_stderr()
         .ok_or_else(|| ExternalAgentCommandError::process("Claude stderr pipe is unavailable."))?;
 
     let mut content = vec![json!({"type": "text", "text": prompt})];
@@ -179,8 +177,7 @@ pub(super) async fn start_claude_turn(
     }
     .await
     {
-        let _ = child.kill().await;
-        let _ = child.wait().await;
+        let _ = child.terminate_and_wait().await;
         return Err(ExternalAgentCommandError::process(format!(
             "Failed to send Claude turn input: {error}"
         )));
@@ -189,7 +186,8 @@ pub(super) async fn start_claude_turn(
     *session.active_turn_id.write().await = Some(turn_id.clone());
     retain_turn_workspace(&session, &turn_id, staged).await;
     let (cancel_sender, mut cancel_receiver) = oneshot::channel();
-    set_active_process(&session, turn_id.clone(), cancel_sender).await;
+    let (stopped_sender, stopped_receiver) = oneshot::channel();
+    set_active_process(&session, turn_id.clone(), cancel_sender, stopped_receiver).await;
     emit_event(
         &app,
         ExternalAgentEvent::new(
@@ -214,6 +212,7 @@ pub(super) async fn start_claude_turn(
                 .await;
         let stderr = stderr_task.await.unwrap_or_default();
         clear_active_process(&monitor_session, &monitor_turn_id).await;
+        let _ = stopped_sender.send(());
         if !outcome.cancelled && !monitor_session.cancelled.load(Ordering::SeqCst) {
             let active_still_set = monitor_session.active_turn_id.read().await.as_deref()
                 == Some(monitor_turn_id.as_str());

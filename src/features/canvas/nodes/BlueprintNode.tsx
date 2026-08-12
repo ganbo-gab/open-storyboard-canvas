@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
@@ -17,6 +17,8 @@ import {
   type DirectorStudioProjectRecord,
 } from '@/features/canvas/domain/canvasNodes';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { canvasEventBus } from '@/features/canvas/application/canvasServices';
+import type { CanvasEventMap } from '@/features/canvas/application/ports';
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
 import {
   parseCanvasImageAssetSignature,
@@ -43,6 +45,7 @@ import {
 } from '@/features/canvas/application/directorVideoRecording';
 
 type BlueprintNodeProps = NodeProps & { data: BlueprintNodeData };
+type DirectorRecordRequest = CanvasEventMap['director-studio/record'];
 
 const BLUEPRINT_NODE_WIDTH = 440;
 
@@ -123,6 +126,8 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [directorStudioOpen, setDirectorStudioOpen] = useState(false);
   const [openedDirectorStudioProjects, setOpenedDirectorStudioProjects] = useState<DirectorStudioProjectRecord[] | null>(null);
+  const lastRecordedVideoNodeIdRef = useRef<string | null>(null);
+  const [recordRequest, setRecordRequest] = useState<DirectorRecordRequest | null>(null);
   const upstreamReferenceImageSignature = useCanvasStore((s) =>
     selectInputImageSignature(id, s.nodes, s.edges)
   );
@@ -173,6 +178,22 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
     if (data.openDirectorStudioOnCreate !== true) return;
     openDirectorStudio({ openDirectorStudioOnCreate: false });
   }, [data.openDirectorStudioOnCreate, openDirectorStudio]);
+
+  useEffect(() => canvasEventBus.subscribe('director-studio/open', ({ nodeId }) => {
+    if (nodeId === id) openDirectorStudio();
+  }), [id, openDirectorStudio]);
+
+  useEffect(() => canvasEventBus.subscribe('director-studio/record', (request) => {
+    if (request.nodeId !== id) return;
+    lastRecordedVideoNodeIdRef.current = null;
+    setRecordRequest(request);
+    openDirectorStudio();
+  }), [id, openDirectorStudio]);
+
+  const handleRecordRequestResult = useCallback((result: CanvasEventMap['director-studio/record-result']) => {
+    setRecordRequest((current) => current?.requestId === result.requestId ? null : current);
+    canvasEventBus.publish('director-studio/record-result', result);
+  }, []);
 
   const upstreamReferenceImages = useMemo<BlueprintReferenceImage[]>(() => {
     const urls = parseInputImageSignature(upstreamReferenceImageSignature);
@@ -375,6 +396,7 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
       });
       addEdge(id, videoNodeId);
       setSelectedNode(videoNodeId);
+      lastRecordedVideoNodeIdRef.current = videoNodeId;
       return true;
     } catch (error) {
       await showErrorDialog(
@@ -493,6 +515,9 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
           onUpdateNodeData={updateBlueprintNodeData}
           onAddSnapshotToCanvas={handleAddSnapshotToCanvas}
           onAddVideoToCanvas={handleAddVideoToCanvas}
+          getLastRecordedVideoNodeId={() => lastRecordedVideoNodeIdRef.current}
+          recordRequest={recordRequest}
+          onRecordRequestResult={handleRecordRequestResult}
           onClose={closeDirectorStudio}
         />
       )}

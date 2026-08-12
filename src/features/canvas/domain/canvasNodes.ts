@@ -388,6 +388,7 @@ export interface PanoramaNodeData extends NodeDisplayData {
   sourcePrompt: string;
   sourceImageUrl?: string | null;
   projection?: PanoramaProjection;
+  smartBase?: boolean;
   initialYaw?: number;
   initialPitch?: number;
   initialFov?: number;

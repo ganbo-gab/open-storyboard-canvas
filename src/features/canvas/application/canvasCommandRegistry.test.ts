@@ -661,16 +661,14 @@ describe('CanvasCommandRegistry transactions', () => {
     expect(useCanvasStore.getState().history).toBe(stateAfterFirstUpdate.history);
   });
 
-  it('keeps UI-only node creation available to UI while denying the Agent', async () => {
+  it('allows Agent creation only after a dedicated workflow command covers the node type', async () => {
     const agentResult = await canvasCommandRegistry.execute({
       type: 'node.create',
       version: CANVAS_COMMAND_VERSION,
       input: { nodeType: CANVAS_NODE_TYPES.panorama, position: { x: 0, y: 0 } },
     }, 'agent');
-    expect(agentResult).toMatchObject({
-      ok: false,
-      error: { code: 'invalid_command', message: expect.stringContaining('dedicated source-mode form') },
-    });
+    expect(agentResult).toMatchObject({ ok: true, commandType: 'node.create' });
+    expect(useCanvasStore.getState().nodes.filter((node) => node.type === CANVAS_NODE_TYPES.panorama)).toHaveLength(1);
 
     const uiResult = await canvasCommandRegistry.execute({
       type: 'node.create',
@@ -678,6 +676,7 @@ describe('CanvasCommandRegistry transactions', () => {
       input: { nodeType: CANVAS_NODE_TYPES.panorama, position: { x: 0, y: 0 } },
     }, 'ui');
     expect(uiResult).toMatchObject({ ok: true });
+    expect(useCanvasStore.getState().nodes.filter((node) => node.type === CANVAS_NODE_TYPES.panorama)).toHaveLength(2);
 
     const panoramaNodeId = useCanvasStore.getState().nodes[0].id;
     const agentEditResult = await canvasCommandRegistry.execute({
@@ -685,21 +684,15 @@ describe('CanvasCommandRegistry transactions', () => {
       version: CANVAS_COMMAND_VERSION,
       input: { nodeId: panoramaNodeId, displayName: 'Bypass' },
     }, 'agent');
-    expect(agentEditResult).toMatchObject({
-      ok: false,
-      error: { code: 'invalid_command', message: expect.stringContaining('dedicated source-mode form') },
-    });
-    expect(useCanvasStore.getState().nodes[0].data.displayName).not.toBe('Bypass');
+    expect(agentEditResult).toMatchObject({ ok: true, commandType: 'node.rename' });
+    expect(useCanvasStore.getState().nodes[0].data.displayName).toBe('Bypass');
 
     const systemCreateResult = await canvasCommandRegistry.execute({
       type: 'node.create',
       version: CANVAS_COMMAND_VERSION,
       input: { nodeType: CANVAS_NODE_TYPES.blueprint, position: { x: 100, y: 0 } },
     }, 'system');
-    expect(systemCreateResult).toMatchObject({
-      ok: false,
-      error: { code: 'invalid_command' },
-    });
+    expect(systemCreateResult).toMatchObject({ ok: true, commandType: 'node.create' });
   });
 
   it('produces equivalent graph/history results for UI and Agent origins', () => {

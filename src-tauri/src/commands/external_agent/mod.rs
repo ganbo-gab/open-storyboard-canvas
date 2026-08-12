@@ -2,6 +2,7 @@ mod claude;
 mod codex;
 mod mcp;
 mod process;
+mod process_tree;
 mod protocol;
 mod session;
 mod workspace;
@@ -366,6 +367,7 @@ pub(crate) struct PendingToolCall {
 struct ActiveProcess {
     id: String,
     cancel: oneshot::Sender<()>,
+    stopped: oneshot::Receiver<()>,
 }
 
 #[derive(Debug)]

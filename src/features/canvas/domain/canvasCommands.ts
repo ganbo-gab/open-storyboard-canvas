@@ -1,9 +1,23 @@
 import type { XYPosition } from '@xyflow/react';
 
 import type {
+  BlueprintActionPose,
+  BlueprintItem,
   CanvasEdge,
   CanvasNode,
   CanvasNodeType,
+  DirectorMotionProjectV1,
+  DirectorStudioAspectFrame,
+  DirectorStudioCameraSettings,
+  DirectorStudioGridSettings,
+  DirectorStudioLightingSettings,
+  DirectorStudioScreenshotResolution,
+  DirectorStudioShortcutBindings,
+  DirectorStudioViewSettings,
+  NodeToolType,
+  PanoramaProjection,
+  PanoramaSourceMode,
+  StoryboardExportOptions,
   TagColor,
 } from './canvasNodes';
 
@@ -20,6 +34,12 @@ export const CANVAS_COMMAND_TYPES = [
   'node.layout',
   'node.setEnabled',
   'node.duplicate',
+  'node.tool.run',
+  'storyboard.update',
+  'panorama.update',
+  'director.update',
+  'director.open',
+  'director.record',
   'tag.setColor',
   'tagGroup.setMembers',
   'edge.connect',
@@ -124,6 +144,72 @@ export type DuplicateNodeCommand = CanvasCommandBase<'node.duplicate', {
   copies: DuplicateNodeInput[];
 }>;
 
+export type RunNodeToolCommand = CanvasCommandBase<'node.tool.run', {
+  nodeId: string;
+  toolType: NodeToolType;
+  options?: Record<string, unknown>;
+}>;
+
+export type UpdateStoryboardCommand = CanvasCommandBase<'storyboard.update', {
+  nodeId: string;
+  frames?: Array<{
+    frameId: string;
+    note?: string;
+    order?: number;
+  }>;
+  exportOptions?: Partial<StoryboardExportOptions>;
+}>;
+
+export type UpdatePanoramaCommand = CanvasCommandBase<'panorama.update', {
+  nodeId: string;
+  sourceMode?: PanoramaSourceMode;
+  sourceAssetId?: string | null;
+  sourcePrompt?: string;
+  projection?: PanoramaProjection;
+  smartBase?: boolean;
+  initialYaw?: number;
+  initialPitch?: number;
+  initialFov?: number;
+}>;
+
+export type CanvasDirectorItemInput = Omit<BlueprintItem, 'refImageUrl' | 'refImageName'> & {
+  referenceAssetId?: string | null;
+};
+
+export type UpdateDirectorCommand = CanvasCommandBase<'director.update', {
+  nodeId: string;
+  mode?: 'flat' | 'panorama';
+  basePrompt?: string;
+  aspectRatio?: string;
+  aspectFrame?: DirectorStudioAspectFrame;
+  screenshotResolution?: DirectorStudioScreenshotResolution;
+  themeColor?: string;
+  backgroundAssetId?: string | null;
+  backgroundPanoramaAssetId?: string | null;
+  referenceAssetIds?: string[];
+  items?: CanvasDirectorItemInput[];
+  customActionPresets?: string[];
+  customActionPoses?: Record<string, BlueprintActionPose>;
+  camera?: DirectorStudioCameraSettings;
+  lighting?: DirectorStudioLightingSettings;
+  grid?: DirectorStudioGridSettings;
+  viewSettings?: DirectorStudioViewSettings;
+  shortcuts?: DirectorStudioShortcutBindings;
+  motionProject?: DirectorMotionProjectV1 | null;
+}>;
+
+export type OpenDirectorCommand = CanvasCommandBase<'director.open', {
+  nodeId: string;
+  focus?: boolean;
+}>;
+
+export type RecordDirectorCommand = CanvasCommandBase<'director.record', {
+  nodeId: string;
+  resolution: '720p' | '1080p';
+  fps: 24 | 30;
+  addToCanvas?: boolean;
+}>;
+
 export type SetTagColorCommand = CanvasCommandBase<'tag.setColor', {
   tagId: string;
   color: TagColor;
@@ -205,6 +291,12 @@ export type CanvasCommand =
   | LayoutNodeCommand
   | SetNodeEnabledCommand
   | DuplicateNodeCommand
+  | RunNodeToolCommand
+  | UpdateStoryboardCommand
+  | UpdatePanoramaCommand
+  | UpdateDirectorCommand
+  | OpenDirectorCommand
+  | RecordDirectorCommand
   | SetTagColorCommand
   | SetTagGroupMembersCommand
   | ConnectEdgeCommand

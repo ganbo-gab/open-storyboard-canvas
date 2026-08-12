@@ -97,7 +97,8 @@ async function executeCanvasCommand(
 ): Promise<unknown> {
   const command = commandFromArguments(request.arguments);
   const definition = canvasCommandRegistry.getDefinition(command.type);
-  const graphWrite = approval.impact.effect === 'canvas-write' && definition.effect === 'graph';
+  const graphWrite = approval.impact.effect === 'canvas-write'
+    && (definition.effect === 'graph' || command.type === 'node.tool.run');
   const canvas = useCanvasStore.getState();
   const rollbackToken = graphWrite
     ? canvasAgentRollbackStore.begin(
@@ -114,7 +115,9 @@ async function executeCanvasCommand(
       return result;
     }
     if (rollbackToken) canvasAgentRollbackStore.complete(rollbackToken, result.revisionAfter);
-    if (approval.impact.effect === 'canvas-write') await persistCanvas(approval.projectId);
+    if (approval.impact.effect === 'canvas-write' || command.type === 'director.record') {
+      await persistCanvas(approval.projectId);
+    }
     return rollbackToken ? { ...result, rollbackToken } : result;
   } catch (error) {
     if (rollbackToken) canvasAgentRollbackStore.discard(rollbackToken);

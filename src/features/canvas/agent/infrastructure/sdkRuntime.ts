@@ -731,7 +731,10 @@ export function createCanvasAgent(options: {
             : undefined,
           execute: async () => {
             const graphWrite = approval.impact.effect === 'canvas-write'
-              && canvasCommandRegistry.getDefinition(command.type).effect === 'graph';
+              && (
+                canvasCommandRegistry.getDefinition(command.type).effect === 'graph'
+                || command.type === 'node.tool.run'
+              );
             const rollbackToken = graphWrite
               ? canvasAgentRollbackStore.begin(
                   context.projectId,
@@ -747,7 +750,10 @@ export function createCanvasAgent(options: {
                 return result;
               }
               if (rollbackToken) canvasAgentRollbackStore.complete(rollbackToken, result.revisionAfter);
-              if (result.ok && approval.impact.effect === 'canvas-write') {
+              if (result.ok && (
+                approval.impact.effect === 'canvas-write'
+                || command.type === 'director.record'
+              )) {
                 await context.persistCanvasCheckpoint?.();
               }
               return rollbackToken ? { ...result, rollbackToken } : result;

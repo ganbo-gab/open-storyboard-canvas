@@ -32,6 +32,14 @@ function assetReadRequest(): ExternalAgentToolRequest {
   };
 }
 
+function deterministicToolRequest(): ExternalAgentToolRequest {
+  return {
+    ...request(),
+    callId: 'deterministic-tool-call',
+    arguments: { type: 'node.tool.run', input: { nodeId: 'node-1', toolType: 'crop' } },
+  };
+}
+
 describe('external Agent Canvas approval bridge', () => {
   beforeEach(() => {
     commandMocks.resolve.mockReset().mockResolvedValue(undefined);
@@ -57,6 +65,13 @@ describe('external Agent Canvas approval bridge', () => {
     expect(view).toMatchObject({ id: 'call-1', toolName: 'canvas_command' });
     expect(canvasAgentApprovalStore.get(createApprovalId('turn-1', 'canvas_command', 'call-1')))
       .toMatchObject({ projectId: 'project-1', status: 'awaiting-approval' });
+  });
+
+  it('classifies deterministic tool workflows as persisted canvas writes', async () => {
+    const toolRequest = deterministicToolRequest();
+    await prepareExternalAgentToolRequest({ projectId: 'project-1', request: toolRequest });
+    expect(canvasAgentApprovalStore.get(createApprovalId('turn-1', 'canvas_command', toolRequest.callId)))
+      .toMatchObject({ impact: { effect: 'canvas-write', externalSideEffect: false } });
   });
 
   it('returns a typed denial without changing canvas revision or history', async () => {

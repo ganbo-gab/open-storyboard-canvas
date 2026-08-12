@@ -6,11 +6,11 @@ use std::sync::Arc;
 use serde_json::json;
 use tauri::AppHandle;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::process::Child;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use super::process::concise_process_error;
+use super::process_tree::ProcessTree;
 use super::{
     emit_event, ActiveProcess, ExternalAgentCommandError, ExternalAgentEvent,
     ExternalAgentEventKind, ExternalAgentInner, ExternalAgentRuntime, ExternalAgentSession,
@@ -78,7 +78,7 @@ fn normalize_reader_result(
 }
 
 pub(super) async fn monitor_child_process(
-    child: &mut Child,
+    child: &mut ProcessTree,
     cancel_receiver: &mut oneshot::Receiver<()>,
     stdout_task: &mut JoinHandle<Result<(), ExternalAgentCommandError>>,
     provider: &str,
@@ -86,8 +86,7 @@ pub(super) async fn monitor_child_process(
     match next_process_monitor_event(child.wait(), cancel_receiver, &mut *stdout_task).await {
         ProcessMonitorEvent::Reader(reader_result) => {
             let reader_result = normalize_reader_result(provider, reader_result);
-            let _ = child.kill().await;
-            let child_status = child.wait().await;
+            let child_status = child.terminate_and_wait().await;
             ProcessMonitorOutcome {
                 cancelled: false,
                 reader_finished_first: true,
@@ -96,8 +95,7 @@ pub(super) async fn monitor_child_process(
             }
         }
         ProcessMonitorEvent::Cancelled => {
-            let _ = child.kill().await;
-            let child_status = child.wait().await;
+            let child_status = child.terminate_and_wait().await;
             let reader_result = normalize_reader_result(provider, stdout_task.await);
             ProcessMonitorOutcome {
                 cancelled: true,
@@ -122,8 +120,13 @@ pub(super) async fn set_active_process(
     session: &ExternalAgentSession,
     id: String,
     cancel: oneshot::Sender<()>,
+    stopped: oneshot::Receiver<()>,
 ) {
-    *session.active_process.lock().await = Some(ActiveProcess { id, cancel });
+    *session.active_process.lock().await = Some(ActiveProcess {
+        id,
+        cancel,
+        stopped,
+    });
 }
 
 pub(super) async fn clear_active_process(session: &ExternalAgentSession, id: &str) {
@@ -131,6 +134,11 @@ pub(super) async fn clear_active_process(session: &ExternalAgentSession, id: &st
     if active.as_ref().is_some_and(|process| process.id == id) {
         active.take();
     }
+}
+
+async fn cancel_active_process(mut process: ActiveProcess) {
+    let _ = process.cancel.send(());
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), &mut process.stopped).await;
 }
 
 pub(super) async fn terminate_session(
@@ -164,8 +172,9 @@ pub(super) async fn terminate_session(
             .with_data(json!({"code": error.code, "retryable": error.retryable})),
         );
     }
-    if let Some(process) = session.active_process.lock().await.take() {
-        let _ = process.cancel.send(());
+    let active_process = { session.active_process.lock().await.take() };
+    if let Some(process) = active_process {
+        cancel_active_process(process).await;
     }
     session.codex_stdin.lock().await.take();
     for (_, sender) in session.pending_rpc.lock().await.drain() {
@@ -244,5 +253,24 @@ mod tests {
         .await;
 
         assert!(matches!(event, ProcessMonitorEvent::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn active_process_cancellation_waits_for_the_monitor_acknowledgement() {
+        let (cancel_sender, cancel_receiver) = oneshot::channel();
+        let (stopped_sender, stopped_receiver) = oneshot::channel();
+        let acknowledgement = tokio::spawn(async move {
+            cancel_receiver.await.unwrap();
+            stopped_sender.send(()).unwrap();
+        });
+
+        cancel_active_process(ActiveProcess {
+            id: "fixture".to_string(),
+            cancel: cancel_sender,
+            stopped: stopped_receiver,
+        })
+        .await;
+
+        acknowledgement.await.unwrap();
     }
 }

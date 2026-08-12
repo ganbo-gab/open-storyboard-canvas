@@ -92,6 +92,7 @@ function approvalId(item: RunToolApprovalItem): string {
 function approvalEffect(toolName: string, command?: CanvasCommand): AgentEffect {
   if (toolName === 'config_patch') return 'config-write';
   if (toolName !== 'canvas_command' || !command) return 'read';
+  if (command.type === 'node.tool.run') return 'canvas-write';
   const effect = canvasCommandRegistry.getDefinition(command.type).effect;
   if (effect === 'generation') return 'external-submit';
   return effect === 'read' ? 'read' : 'canvas-write';

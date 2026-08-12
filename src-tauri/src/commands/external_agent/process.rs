@@ -8,6 +8,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
+use super::process_tree::spawn_process_tree;
 use super::protocol::{redact_text, truncate_chars};
 #[cfg(test)]
 use super::{
@@ -405,16 +406,13 @@ async fn run_bounded_output(mut command: Command) -> Result<CapturedOutput, Stri
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|error| error.to_string())?;
+        .stderr(Stdio::piped());
+    let mut child = spawn_process_tree(&mut command).map_err(|error| error.to_string())?;
     let stdout = child
-        .stdout
-        .take()
+        .take_stdout()
         .ok_or_else(|| "missing stdout pipe".to_string())?;
     let stderr = child
-        .stderr
-        .take()
+        .take_stderr()
         .ok_or_else(|| "missing stderr pipe".to_string())?;
     let stdout_task = tokio::spawn(drain_bounded(stdout));
     let stderr_task = tokio::spawn(drain_bounded(stderr));
@@ -422,8 +420,7 @@ async fn run_bounded_output(mut command: Command) -> Result<CapturedOutput, Stri
         Ok(Ok(status)) => status,
         Ok(Err(error)) => return Err(error.to_string()),
         Err(_) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            let _ = child.terminate_and_wait().await;
             return Err("diagnostic command timed out".to_string());
         }
     };

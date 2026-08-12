@@ -3287,6 +3287,7 @@ dependencies = [
  "image",
  "imageproc",
  "inventory",
+ "libc",
  "md5",
  "objc2-app-kit",
  "objc2-foundation",
@@ -3309,6 +3310,7 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+ "windows-sys 0.61.2",
  "zip",
 ]
 

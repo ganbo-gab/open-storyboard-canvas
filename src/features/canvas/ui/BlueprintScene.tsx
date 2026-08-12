@@ -450,7 +450,7 @@ function buildPedestrianNumberMap(items: BlueprintItem[]): Map<string, number> {
   return numbers;
 }
 
-function createDirectorFloorGrid(size = 180, minorStep = 1, majorStep = 5) {
+export function createDirectorFloorGrid(size = 180, minorStep = 1, majorStep = 5) {
   const half = size / 2;
   const group = new THREE.Group();
   group.name = '__directorFloorGrid';
@@ -494,26 +494,62 @@ function createDirectorFloorGrid(size = 180, minorStep = 1, majorStep = 5) {
   pushLine(axisX, -half, 0, half, 0);
   pushLine(axisZ, 0, -half, 0, half);
 
-  const makeLines = (positions: number[], color: number, opacity: number) => {
+  const makeLines = (positions: number[], color: number, opacity: number, width: number) => {
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    const material = new THREE.LineBasicMaterial({
+    const vertices: number[] = [];
+    for (let index = 0; index < positions.length; index += 6) {
+      const x1 = positions[index];
+      const z1 = positions[index + 2];
+      const x2 = positions[index + 3];
+      const z2 = positions[index + 5];
+      const length = Math.hypot(x2 - x1, z2 - z1);
+      if (length <= Number.EPSILON) continue;
+      const offsetX = (-(z2 - z1) / length) * width * 0.5;
+      const offsetZ = ((x2 - x1) / length) * width * 0.5;
+      const y = 0.004;
+      vertices.push(
+        x1 + offsetX, y, z1 + offsetZ,
+        x1 - offsetX, y, z1 - offsetZ,
+        x2 + offsetX, y, z2 + offsetZ,
+        x2 + offsetX, y, z2 + offsetZ,
+        x1 - offsetX, y, z1 - offsetZ,
+        x2 - offsetX, y, z2 - offsetZ,
+      );
+    }
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    const material = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
       opacity,
       depthWrite: false,
+      side: THREE.DoubleSide,
     });
-    const lines = new THREE.LineSegments(geometry, material);
+    const lines = new THREE.Mesh(geometry, material);
     lines.frustumCulled = false;
     lines.renderOrder = 1;
     return lines;
   };
 
-  group.add(makeLines(minor, DIRECTOR_GRID_PALETTE.minor, 0.42));
-  group.add(makeLines(major, DIRECTOR_GRID_PALETTE.major, 0.58));
-  group.add(makeLines(axisX, DIRECTOR_GRID_PALETTE.axisX, 0.74));
-  group.add(makeLines(axisZ, DIRECTOR_GRID_PALETTE.axisZ, 0.74));
+  group.add(makeLines(minor, DIRECTOR_GRID_PALETTE.minor, 0.42, 0.012));
+  group.add(makeLines(major, DIRECTOR_GRID_PALETTE.major, 0.58, 0.024));
+  group.add(makeLines(axisX, DIRECTOR_GRID_PALETTE.axisX, 0.74, 0.04));
+  group.add(makeLines(axisZ, DIRECTOR_GRID_PALETTE.axisZ, 0.74, 0.04));
   return group;
+}
+
+export function createDirectorFloorHitTarget() {
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(300, 300),
+    new THREE.MeshBasicMaterial({
+      color: DIRECTOR_GRID_PALETTE.clickTarget,
+      colorWrite: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.name = '__floor';
+  return floor;
 }
 
 function setRingAppearance(ring: any, color: number, opacity: number) {
@@ -811,12 +847,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     const grid = createDirectorFloorGrid();
     scene.add(grid);
     gridRef.current = grid;
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(300, 300),
-      new THREE.MeshBasicMaterial({ color: DIRECTOR_GRID_PALETTE.clickTarget, transparent: true, opacity: 0.001, side: THREE.DoubleSide }),
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.name = '__floor';
+    const floor = createDirectorFloorHitTarget();
     scene.add(floor);
     floorRef.current = floor;
 
@@ -2012,7 +2043,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     );
   }, [onMotionRoutePointInsert, raycastMotionRoutePoint, raycastMotionRouteSegment]);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
+  const handleWheel = useCallback((e: WheelEvent) => {
     if (transformDraggingRef.current) return;
     e.preventDefault();
     if (pilotStateRef.current.active && cameraRef.current) {
@@ -2038,6 +2069,13 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     viewSettings.reverseWheelZoom,
     viewSettings.wheelZoomEnabled,
   ]);
+
+  useEffect(() => {
+    const host = hostElRef.current;
+    if (!host) return;
+    host.addEventListener('wheel', handleWheel, { passive: false });
+    return () => host.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -2454,7 +2492,6 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       handlePointerMove={handlePointerMove}
       handlePointerUp={handlePointerUp}
       handleDoubleClick={handleDoubleClick}
-      handleWheel={handleWheel}
       handleContextMenu={handleContextMenu}
       overlayLabels={overlayLabels}
       showAdvancedPedestrianTags={viewSettings.showAdvancedPedestrianTags}
@@ -2508,7 +2545,6 @@ interface InternalsProps {
   handlePointerMove: (e: React.PointerEvent) => void;
   handlePointerUp: (e: React.PointerEvent) => void;
   handleDoubleClick: (e: React.MouseEvent) => void;
-  handleWheel: (e: React.WheelEvent) => void;
   handleContextMenu: (e: React.MouseEvent) => void;
   overlayLabels: BlueprintItem[];
   showAdvancedPedestrianTags: boolean;
@@ -2544,7 +2580,7 @@ interface InternalsProps {
 function BlueprintSceneInternals({
   hostElRef, canvasHostRef, overlayRef, miniMapRef,
   effectiveWidth, effectiveHeight,
-  handlePointerDown, handlePointerMove, handlePointerUp, handleDoubleClick, handleWheel, handleContextMenu,
+  handlePointerDown, handlePointerMove, handlePointerUp, handleDoubleClick, handleContextMenu,
   overlayLabels,
   showAdvancedPedestrianTags,
   pedestrianNumberById,
@@ -2584,7 +2620,6 @@ function BlueprintSceneInternals({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       onDoubleClick={handleDoubleClick}
-      onWheel={handleWheel}
       onContextMenu={handleContextMenu}
     >
       <div ref={canvasHostRef} className="absolute inset-0" />

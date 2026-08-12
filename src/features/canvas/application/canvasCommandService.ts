@@ -4,6 +4,8 @@ import { CanvasCommandRegistry } from './canvasCommandRegistry';
 import { CanvasGenerationFacade } from './canvasGenerationFacade';
 import { canvasNavigationFacade } from './canvasNavigationFacade';
 import { canvasEventBus, canvasNodeFactory } from './canvasServices';
+import { canvasToolProcessor } from './canvasServices';
+import { CanvasToolWorkflowFacade } from './canvasToolWorkflowFacade';
 
 const canvasCommandStore = {
   getSnapshot: () => {
@@ -34,10 +36,18 @@ const canvasCommandStore = {
 };
 
 export const canvasGenerationFacade = new CanvasGenerationFacade(canvasEventBus);
+export const canvasToolWorkflowFacade = new CanvasToolWorkflowFacade({
+  getNodes: () => useCanvasStore.getState().nodes,
+  addDerivedExportNode: (...args) => useCanvasStore.getState().addDerivedExportNode(...args),
+  addStoryboardSplitNode: (...args) => useCanvasStore.getState().addStoryboardSplitNode(...args),
+  addEdge: (...args) => useCanvasStore.getState().addEdge(...args),
+}, canvasToolProcessor);
 
 export const canvasCommandRegistry = new CanvasCommandRegistry({
   store: canvasCommandStore,
   nodeFactory: canvasNodeFactory,
   navigation: canvasNavigationFacade,
   generation: canvasGenerationFacade,
+  tools: canvasToolWorkflowFacade,
+  eventBus: canvasEventBus,
 });

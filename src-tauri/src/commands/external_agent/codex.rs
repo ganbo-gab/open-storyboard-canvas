@@ -4,6 +4,7 @@ use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdout, Command};
 
 use super::process::configure_restricted_env;
+use super::process_tree::spawn_process_tree;
 use super::session::monitor_child_process;
 
 pub(super) fn toml_string(value: &str) -> String {
@@ -94,25 +95,29 @@ pub(super) async fn start_codex_process(
         &codex_home,
         &session.broker,
     );
-    let mut child = command.spawn().map_err(|error| {
+    let mut child = spawn_process_tree(&mut command).map_err(|error| {
         ExternalAgentCommandError::process(format!("Failed to start Codex app-server: {error}"))
     })?;
     let stdin = child
-        .stdin
-        .take()
+        .take_stdin()
         .ok_or_else(|| ExternalAgentCommandError::process("Codex stdin pipe is unavailable."))?;
     let stdout = child
-        .stdout
-        .take()
+        .take_stdout()
         .ok_or_else(|| ExternalAgentCommandError::process("Codex stdout pipe is unavailable."))?;
     let stderr = child
-        .stderr
-        .take()
+        .take_stderr()
         .ok_or_else(|| ExternalAgentCommandError::process("Codex stderr pipe is unavailable."))?;
     *session.codex_stdin.lock().await = Some(stdin);
     let process_id = "codex-app-server".to_string();
     let (cancel_sender, mut cancel_receiver) = oneshot::channel();
-    set_active_process(&session, process_id.clone(), cancel_sender).await;
+    let (stopped_sender, stopped_receiver) = oneshot::channel();
+    set_active_process(
+        &session,
+        process_id.clone(),
+        cancel_sender,
+        stopped_receiver,
+    )
+    .await;
     let reader_session = session.clone();
     let reader_app = app.clone();
     let mut stdout_task =
@@ -127,6 +132,7 @@ pub(super) async fn start_codex_process(
                 .await;
         let stderr = stderr_task.await.unwrap_or_default();
         clear_active_process(&monitor_session, &process_id).await;
+        let _ = stopped_sender.send(());
         if !outcome.cancelled && !monitor_session.cancelled.load(Ordering::SeqCst) {
             let error = outcome.reader_result.err().unwrap_or_else(|| {
                 ExternalAgentCommandError::process(if stderr.is_empty() {

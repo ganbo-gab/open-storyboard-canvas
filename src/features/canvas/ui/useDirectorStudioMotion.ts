@@ -48,6 +48,12 @@ type Options = {
   onAddVideoToCanvas?: (video: DirectorRecordedVideo) => Promise<boolean | void> | boolean | void;
 };
 
+export interface DirectorVideoExportRequest {
+  resolution: DirectorVideoResolution;
+  fps: DirectorVideoFps;
+  addToCanvas: boolean;
+}
+
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -400,10 +406,12 @@ export function useDirectorStudioMotion({
     setVideoExportOpen(true);
   }, []);
 
-  const startVideoExport = useCallback(async () => {
-    if (motionProject.cameraTrack.length < 2 || !availableVideoFormat) return;
+  const startVideoExport = useCallback(async (
+    request?: DirectorVideoExportRequest,
+  ): Promise<DirectorRecordedVideo | null> => {
+    if (motionProject.cameraTrack.length < 2 || !availableVideoFormat) return null;
     const canvas = editorRef.current?.getCanvas();
-    if (!canvas) { setVideoExportError(t('directorStudio.motion.export.sceneUnavailable')); return; }
+    if (!canvas) { setVideoExportError(t('directorStudio.motion.export.sceneUnavailable')); return null; }
     const controller = new AbortController();
     videoExportAbortRef.current = controller;
     setMotionPlaying(false);
@@ -412,11 +420,13 @@ export function useDirectorStudioMotion({
     setVideoExportResult(null);
     setVideoExportRecording(true);
     try {
+      const resolution = request?.resolution ?? videoExportResolution;
+      const fps = request?.fps ?? videoExportFps;
       const result = await recordDirectorVideo({
         canvas,
         durationSeconds: motionProject.durationSeconds,
-        resolution: videoExportResolution,
-        fps: videoExportFps,
+        resolution,
+        fps,
         format: availableVideoFormat,
         signal: controller.signal,
         renderAtTime: (time) => {
@@ -427,8 +437,17 @@ export function useDirectorStudioMotion({
         onProgress: setVideoExportProgress,
       });
       setVideoExportResult(result);
+      if (request?.addToCanvas && onAddVideoToCanvas) {
+        const added = await onAddVideoToCanvas(result);
+        if (added === false) {
+          throw new Error(t('directorStudio.motion.export.addToCanvasFailed'));
+        }
+      }
+      return result;
     } catch (error) {
       if (!(error instanceof DirectorRecordingCancelledError)) setVideoExportError(error instanceof Error ? error.message : t('directorStudio.motion.export.failed'));
+      if (request) throw error;
+      return null;
     } finally {
       videoExportAbortRef.current = null;
       setVideoExportRecording(false);
@@ -438,7 +457,7 @@ export function useDirectorStudioMotion({
       );
       editorRef.current?.renderFrame();
     }
-  }, [availableVideoFormat, editorRef, motionPreviewMode, motionProject, t, videoExportFps, videoExportResolution]);
+  }, [availableVideoFormat, editorRef, motionPreviewMode, motionProject, onAddVideoToCanvas, t, videoExportFps, videoExportResolution]);
 
   const addVideoExportToCanvas = useCallback(async () => {
     if (!videoExportResult || !onAddVideoToCanvas) return;

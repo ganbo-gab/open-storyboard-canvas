@@ -48,6 +48,8 @@ import {
   collectInputReferences,
   inspectTagGraphState,
 } from './graphReferenceResolver';
+import { isAgentCanvasToolType, type CanvasToolWorkflowFacade } from './canvasToolWorkflowFacade';
+import type { CanvasEventBus } from './ports';
 
 export interface CanvasCommandDefinition {
   type: CanvasCommandType;
@@ -61,6 +63,8 @@ export interface CanvasCommandRegistryDependencies {
   nodeFactory: NodeFactory;
   navigation: CanvasNavigationFacade;
   generation: CanvasGenerationFacade;
+  tools: CanvasToolWorkflowFacade;
+  eventBus: CanvasEventBus;
   nextTransactionId?: () => string;
 }
 
@@ -88,6 +92,12 @@ const EFFECTS: Record<CanvasCommandType, CanvasCommandEffect> = {
   'node.layout': 'graph',
   'node.setEnabled': 'graph',
   'node.duplicate': 'graph',
+  'node.tool.run': 'generation',
+  'storyboard.update': 'graph',
+  'panorama.update': 'graph',
+  'director.update': 'graph',
+  'director.open': 'navigation',
+  'director.record': 'generation',
   'tag.setColor': 'graph',
   'tagGroup.setMembers': 'graph',
   'edge.connect': 'graph',
@@ -148,6 +158,58 @@ const INPUT_SCHEMAS: Record<CanvasCommandType, CanvasJsonSchema> = {
   }),
   'node.duplicate': objectSchema(['copies'], {
     copies: arrayField('Metadata-only tag or tag-group copy records.'),
+  }),
+  'node.tool.run': objectSchema(['nodeId', 'toolType'], {
+    nodeId: stringField('Image source node id.'),
+    toolType: stringField('Registered image or storyboard tool type.'),
+    options: objectField('Bounded tool-specific options.'),
+  }),
+  'storyboard.update': objectSchema(['nodeId'], {
+    nodeId: stringField('Storyboard split node id.'),
+    frames: arrayField('Frame note/order patches.'),
+    exportOptions: objectField('Storyboard export display options.'),
+  }),
+  'panorama.update': objectSchema(['nodeId'], {
+    nodeId: stringField('Panorama node id.'),
+    sourceMode: stringField('text or image.'),
+    sourceAssetId: stringField('Stable source image asset id.'),
+    sourcePrompt: stringField('Panorama generation prompt.'),
+    projection: stringField('spherical or cylindrical.'),
+    smartBase: booleanField('Use the panorama base-image constraint.'),
+    initialYaw: numberField('Initial viewer yaw.'),
+    initialPitch: numberField('Initial viewer pitch.'),
+    initialFov: numberField('Initial viewer field of view.'),
+  }),
+  'director.update': objectSchema(['nodeId'], {
+    nodeId: stringField('Director Studio node id.'),
+    mode: stringField('flat or panorama.'),
+    basePrompt: stringField('Scene prompt.'),
+    aspectRatio: stringField('Canvas aspect ratio.'),
+    aspectFrame: stringField('Director aspect frame.'),
+    screenshotResolution: stringField('Screenshot resolution.'),
+    themeColor: stringField('Director Studio theme color.'),
+    backgroundAssetId: stringField('Stable background image asset id.'),
+    backgroundPanoramaAssetId: stringField('Stable panorama background asset id.'),
+    referenceAssetIds: arrayField('Stable reference asset ids.'),
+    items: arrayField('Structured Director Studio scene items.'),
+    customActionPresets: arrayField('Custom action names.'),
+    customActionPoses: objectField('Custom action poses.'),
+    camera: objectField('Camera settings.'),
+    lighting: objectField('Lighting settings.'),
+    grid: objectField('Grid settings.'),
+    viewSettings: objectField('View settings.'),
+    shortcuts: objectField('Shortcut bindings.'),
+    motionProject: objectField('Versioned Director Studio motion project, or null.'),
+  }),
+  'director.open': objectSchema(['nodeId'], {
+    nodeId: stringField('Director Studio node id.'),
+    focus: booleanField('Focus the owning canvas node before opening.'),
+  }),
+  'director.record': objectSchema(['nodeId', 'resolution', 'fps'], {
+    nodeId: stringField('Director Studio node id.'),
+    resolution: stringField('720p or 1080p.'),
+    fps: numberField('24 or 30 frames per second.'),
+    addToCanvas: booleanField('Create and locate a canvas video node after recording.'),
   }),
   'tag.setColor': objectSchema(['tagId', 'color'], {
     tagId: stringField('Tag node id.'),
@@ -222,6 +284,18 @@ function summarizeCommand(command: CanvasCommand): string {
       return `Update tag group ${command.input.groupId} membership.`;
     case 'generation.submit':
       return `Submit generation for ${command.input.nodeIds.length} node(s).`;
+    case 'node.tool.run':
+      return `Run ${command.input.toolType} on node ${command.input.nodeId}.`;
+    case 'storyboard.update':
+      return `Update storyboard node ${command.input.nodeId}.`;
+    case 'panorama.update':
+      return `Update panorama node ${command.input.nodeId}.`;
+    case 'director.update':
+      return `Update Director Studio node ${command.input.nodeId}.`;
+    case 'director.open':
+      return `Open Director Studio node ${command.input.nodeId}.`;
+    case 'director.record':
+      return `Record Director Studio node ${command.input.nodeId} at ${command.input.resolution}/${command.input.fps}fps.`;
     default:
       return `${command.type} command.`;
   }
@@ -443,6 +517,149 @@ function validateCreateConfiguration(
   }
 }
 
+function validateFiniteNumber(value: unknown, label: string, errors: string[]): void {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    errors.push(`${label} must be a finite number.`);
+  }
+}
+
+function validateBoundedStringArray(value: unknown, label: string, errors: string[], max = 100): void {
+  validateStringArray(value, label, errors, true);
+  if (Array.isArray(value) && value.length > max) errors.push(`${label} cannot exceed ${max} items.`);
+}
+
+function validateStoryboardUpdateInput(input: Record<string, unknown>, errors: string[]): void {
+  if (input.frames !== undefined) {
+    if (!Array.isArray(input.frames) || input.frames.length > 100) {
+      errors.push('frames must be an array with at most 100 items.');
+    } else {
+      input.frames.forEach((frame, index) => {
+        if (!isPlainRecord(frame) || !hasOnlyKeys(frame, ['frameId', 'note', 'order'])) {
+          errors.push(`frames[${index}] contains unsupported fields.`);
+          return;
+        }
+        validateString(frame.frameId, `frames[${index}].frameId`, errors);
+        if (frame.note !== undefined) validateString(frame.note, `frames[${index}].note`, errors, true);
+        if (frame.order !== undefined && (!Number.isInteger(frame.order) || Number(frame.order) < 0)) {
+          errors.push(`frames[${index}].order must be a non-negative integer.`);
+        }
+      });
+    }
+  }
+  if (input.exportOptions !== undefined) {
+    const options = input.exportOptions;
+    const allowed = ['showFrameIndex', 'showFrameNote', 'notePlacement', 'imageFit', 'frameIndexPrefix', 'cellGap', 'outerPadding', 'fontSize', 'backgroundColor', 'textColor'];
+    if (!isPlainRecord(options) || !hasOnlyKeys(options, allowed)) {
+      errors.push('exportOptions contains unsupported fields.');
+      return;
+    }
+    for (const field of ['showFrameIndex', 'showFrameNote'] as const) {
+      if (field in options && typeof options[field] !== 'boolean') errors.push(`exportOptions.${field} must be a boolean.`);
+    }
+    if (options.notePlacement !== undefined && !['overlay', 'bottom'].includes(String(options.notePlacement))) errors.push('exportOptions.notePlacement is invalid.');
+    if (options.imageFit !== undefined && !['cover', 'contain'].includes(String(options.imageFit))) errors.push('exportOptions.imageFit is invalid.');
+    if (options.frameIndexPrefix !== undefined) validateString(options.frameIndexPrefix, 'exportOptions.frameIndexPrefix', errors, true);
+    for (const field of ['cellGap', 'outerPadding', 'fontSize'] as const) {
+      if (options[field] !== undefined) {
+        validateFiniteNumber(options[field], `exportOptions.${field}`, errors);
+        if (typeof options[field] === 'number' && options[field] < 0) errors.push(`exportOptions.${field} cannot be negative.`);
+      }
+    }
+    for (const field of ['backgroundColor', 'textColor'] as const) {
+      if (field in options) validateString(options[field], `exportOptions.${field}`, errors);
+    }
+  }
+}
+
+function validateVector3(value: unknown, label: string, errors: string[]): void {
+  if (!isPlainRecord(value) || !hasOnlyKeys(value, ['x', 'y', 'z'])) {
+    errors.push(`${label} must contain only x, y, and z.`);
+    return;
+  }
+  for (const axis of ['x', 'y', 'z'] as const) validateFiniteNumber(value[axis], `${label}.${axis}`, errors);
+}
+
+function validateDirectorUpdateInput(input: Record<string, unknown>, errors: string[]): void {
+  if (input.mode !== undefined && !['flat', 'panorama'].includes(String(input.mode))) errors.push('mode must be flat or panorama.');
+  for (const field of ['basePrompt', 'aspectRatio', 'themeColor'] as const) {
+    if (input[field] !== undefined) validateString(input[field], field, errors, field === 'basePrompt');
+  }
+  if (input.aspectFrame !== undefined && !['panorama', '1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'].includes(String(input.aspectFrame))) errors.push('aspectFrame is invalid.');
+  if (input.screenshotResolution !== undefined && !['1080p', '1440p', '4k'].includes(String(input.screenshotResolution))) errors.push('screenshotResolution is invalid.');
+  for (const field of ['backgroundAssetId', 'backgroundPanoramaAssetId'] as const) {
+    if (input[field] !== undefined && input[field] !== null) validateString(input[field], field, errors);
+  }
+  for (const field of ['referenceAssetIds', 'customActionPresets'] as const) {
+    if (input[field] !== undefined) validateBoundedStringArray(input[field], field, errors);
+  }
+  for (const field of ['customActionPoses', 'shortcuts'] as const) {
+    if (input[field] !== undefined) {
+      if (!isPlainRecord(input[field])) errors.push(`${field} must be an object.`);
+      else validateJsonConfiguration(input[field], field, errors);
+    }
+  }
+  if (input.items !== undefined) {
+    if (!Array.isArray(input.items) || input.items.length > 100) {
+      errors.push('items must be an array with at most 100 items.');
+    } else {
+      const allowed = ['id', 'label', 'x', 'y', 'color', 'showLabel', 'note', 'pos3d', 'rotation3d', 'scale3d', 'category', 'presetId', 'relation', 'action', 'directorStudioRole', 'directorStudioNumber', 'bodyControls', 'referenceAssetId'];
+      input.items.forEach((item, index) => {
+        if (!isPlainRecord(item) || !hasOnlyKeys(item, allowed)) {
+          errors.push(`items[${index}] contains unsupported fields.`);
+          return;
+        }
+        for (const field of ['id', 'label', 'color'] as const) validateString(item[field], `items[${index}].${field}`, errors);
+        for (const field of ['x', 'y'] as const) validateFiniteNumber(item[field], `items[${index}].${field}`, errors);
+        if (item.showLabel !== undefined && typeof item.showLabel !== 'boolean') errors.push(`items[${index}].showLabel must be a boolean.`);
+        for (const field of ['note', 'presetId', 'relation', 'action', 'referenceAssetId'] as const) {
+          if (item[field] !== undefined && item[field] !== null) validateString(item[field], `items[${index}].${field}`, errors, field !== 'referenceAssetId');
+        }
+        if (item.category !== undefined && !['person', 'object', 'scene'].includes(String(item.category))) errors.push(`items[${index}].category is invalid.`);
+        if (item.directorStudioRole !== undefined && item.directorStudioRole !== 'pedestrian') errors.push(`items[${index}].directorStudioRole is invalid.`);
+        if (item.directorStudioNumber !== undefined && (!Number.isInteger(item.directorStudioNumber) || Number(item.directorStudioNumber) < 0)) errors.push(`items[${index}].directorStudioNumber must be a non-negative integer.`);
+        for (const field of ['pos3d', 'rotation3d', 'scale3d'] as const) if (item[field] !== undefined) validateVector3(item[field], `items[${index}].${field}`, errors);
+        if (item.bodyControls !== undefined) validateJsonConfiguration(item.bodyControls, `items[${index}].bodyControls`, errors);
+      });
+    }
+  }
+  for (const [field, allowed] of [['camera', ['fov', 'lensDistance', 'activePreset']], ['lighting', ['enabled', 'mainIntensity', 'mainYaw', 'mainPitch', 'mainColor', 'ambientIntensity', 'ambientColor']], ['grid', ['visible', 'height']], ['viewSettings', ['wheelZoomEnabled', 'reverseWheelZoom', 'showAdvancedPedestrianTags']]] as const) {
+    const value = input[field];
+    if (value === undefined) continue;
+    if (!isPlainRecord(value) || !hasOnlyKeys(value, allowed)) {
+      errors.push(`${field} contains unsupported fields.`);
+      continue;
+    }
+    const record = value as Record<string, unknown>;
+    if (field === 'camera') {
+      for (const key of ['fov', 'lensDistance'] as const) if (record[key] !== undefined) validateFiniteNumber(record[key], `${field}.${key}`, errors);
+      if (record.activePreset !== undefined && record.activePreset !== null) validateString(record.activePreset, `${field}.activePreset`, errors);
+    } else if (field === 'lighting') {
+      if (record.enabled !== undefined && typeof record.enabled !== 'boolean') errors.push(`${field}.enabled must be a boolean.`);
+      for (const key of ['mainIntensity', 'mainYaw', 'mainPitch', 'ambientIntensity'] as const) if (record[key] !== undefined) validateFiniteNumber(record[key], `${field}.${key}`, errors);
+      for (const key of ['mainColor', 'ambientColor'] as const) if (record[key] !== undefined) validateString(record[key], `${field}.${key}`, errors);
+    } else if (field === 'grid') {
+      if (record.visible !== undefined && typeof record.visible !== 'boolean') errors.push(`${field}.visible must be a boolean.`);
+      if (record.height !== undefined) validateFiniteNumber(record.height, `${field}.height`, errors);
+    } else {
+      for (const key of ['wheelZoomEnabled', 'reverseWheelZoom', 'showAdvancedPedestrianTags'] as const) {
+        if (record[key] !== undefined && typeof record[key] !== 'boolean') errors.push(`${field}.${key} must be a boolean.`);
+      }
+    }
+  }
+  if (input.motionProject !== undefined && input.motionProject !== null) {
+    const project = input.motionProject;
+    if (!isPlainRecord(project) || !hasOnlyKeys(project, ['schemaVersion', 'durationSeconds', 'loop', 'cameraTrack', 'objectTracks', 'actionTracks', 'customClips']) || project.schemaVersion !== 1) errors.push('motionProject must be a version 1 project with only supported fields.');
+    else {
+      validateFiniteNumber(project.durationSeconds, 'motionProject.durationSeconds', errors);
+      if (typeof project.durationSeconds === 'number' && project.durationSeconds < 0) errors.push('motionProject.durationSeconds cannot be negative.');
+      for (const field of ['cameraTrack', 'objectTracks', 'actionTracks', 'customClips'] as const) {
+        if (project[field] === undefined) errors.push(`motionProject.${field} is required.`);
+        else validateJsonConfiguration(project[field], `motionProject.${field}`, errors);
+      }
+    }
+  }
+}
+
 function validateCommandInput(
   command: CanvasCommand,
   origin: CanvasCommandOrigin,
@@ -499,6 +716,52 @@ function validateCommandInput(
       if (command.input.configuration !== undefined) {
         validateCreateConfiguration(command.input.nodeType, command.input.configuration, errors);
       }
+      break;
+    case 'node.tool.run':
+      validateString(command.input.nodeId, 'nodeId', errors);
+      validateString(command.input.toolType, 'toolType', errors);
+      if (origin === 'agent'
+        && typeof command.input.toolType === 'string'
+        && !isAgentCanvasToolType(command.input.toolType)) {
+        errors.push('node.tool.run only supports deterministic crop, annotate, and split-storyboard tools for Agent callers.');
+      }
+      if (command.input.options !== undefined) {
+        validateJsonConfiguration(command.input.options, 'options', errors);
+      }
+      break;
+    case 'storyboard.update':
+      validateString(command.input.nodeId, 'nodeId', errors);
+      if (command.input.frames === undefined && command.input.exportOptions === undefined) {
+        errors.push('storyboard.update requires frames or exportOptions.');
+      }
+      validateStoryboardUpdateInput(command.input as Record<string, unknown>, errors);
+      break;
+    case 'panorama.update':
+      validateString(command.input.nodeId, 'nodeId', errors);
+      if (command.input.sourceMode !== undefined && !['text', 'image'].includes(command.input.sourceMode)) errors.push('sourceMode must be text or image.');
+      if (command.input.sourceAssetId !== undefined && command.input.sourceAssetId !== null) validateString(command.input.sourceAssetId, 'sourceAssetId', errors);
+      if (command.input.sourcePrompt !== undefined) validateString(command.input.sourcePrompt, 'sourcePrompt', errors, true);
+      if (command.input.projection !== undefined && !['spherical', 'cylindrical'].includes(command.input.projection)) errors.push('projection must be spherical or cylindrical.');
+      if (command.input.smartBase !== undefined && typeof command.input.smartBase !== 'boolean') errors.push('smartBase must be a boolean.');
+      for (const field of ['initialYaw', 'initialPitch', 'initialFov'] as const) {
+        if (command.input[field] !== undefined && !Number.isFinite(command.input[field])) errors.push(`${field} must be finite.`);
+      }
+      if (command.input.initialFov !== undefined && (command.input.initialFov < 10 || command.input.initialFov > 150)) errors.push('initialFov must be between 10 and 150.');
+      break;
+    case 'director.update':
+      validateString(command.input.nodeId, 'nodeId', errors);
+      if (Object.keys(command.input).length === 1) errors.push('director.update requires at least one scene field.');
+      validateDirectorUpdateInput(command.input as Record<string, unknown>, errors);
+      break;
+    case 'director.open':
+      validateString(command.input.nodeId, 'nodeId', errors);
+      if (command.input.focus !== undefined && typeof command.input.focus !== 'boolean') errors.push('focus must be a boolean.');
+      break;
+    case 'director.record':
+      validateString(command.input.nodeId, 'nodeId', errors);
+      if (!['720p', '1080p'].includes(command.input.resolution)) errors.push('resolution must be 720p or 1080p.');
+      if (command.input.fps !== 24 && command.input.fps !== 30) errors.push('fps must be 24 or 30.');
+      if (command.input.addToCanvas !== undefined && typeof command.input.addToCanvas !== 'boolean') errors.push('addToCanvas must be a boolean.');
       break;
     case 'node.delete':
       validateStringArray(command.input.nodeIds, 'nodeIds', errors);
@@ -985,6 +1248,11 @@ export class CanvasCommandRegistry {
       case 'node.setModelConfig':
         seedIds.add(command.input.nodeId);
         break;
+      case 'storyboard.update':
+      case 'panorama.update':
+      case 'director.update':
+        seedIds.add(command.input.nodeId);
+        break;
       case 'node.move':
         command.input.positions.forEach(({ nodeId }) => seedIds.add(nodeId));
         break;
@@ -1038,6 +1306,10 @@ export class CanvasCommandRegistry {
       case 'asset.list':
       case 'canvas.query':
         return simpleImpact(EFFECTS[command.type], this.summarize(command));
+      case 'node.tool.run':
+      case 'director.open':
+      case 'director.record':
+        return simpleImpact(EFFECTS[command.type], this.summarize(command), [command.input.nodeId]);
       default:
         return simpleImpact(EFFECTS[command.type], this.summarize(command));
     }
@@ -1194,6 +1466,67 @@ export class CanvasCommandRegistry {
         }
         const focused = await this.dependencies.navigation.focusNodeIds([nodeId], { select: command.input.select });
         return { references: { nodeId, nodeIds: [nodeId], jobId: command.input.jobId }, value: { focused } };
+      }
+      case 'node.tool.run': {
+        const result = await this.dependencies.tools.run(command.input);
+        return {
+          references: {
+            nodeId: result.resultNodeId,
+            nodeIds: [result.sourceNodeId, result.resultNodeId],
+            edgeId: result.edgeId ?? undefined,
+          },
+          value: result,
+        };
+      }
+      case 'director.open': {
+        const node = snapshot.nodes.find((candidate) => candidate.id === command.input.nodeId);
+        if (!node || node.type !== CANVAS_NODE_TYPES.blueprint) {
+          throw new CanvasCommandExecutionError('not_found', `Director Studio node ${command.input.nodeId} does not exist.`);
+        }
+        const focused = command.input.focus === false
+          ? false
+          : await this.dependencies.navigation.focusNodeIds([node.id], { select: true });
+        this.dependencies.eventBus.publish('director-studio/open', { nodeId: node.id });
+        return { references: { nodeId: node.id, nodeIds: [node.id] }, value: { focused, opened: true } };
+      }
+      case 'director.record': {
+        const node = snapshot.nodes.find((candidate) => candidate.id === command.input.nodeId);
+        if (!node || node.type !== CANVAS_NODE_TYPES.blueprint) {
+          throw new CanvasCommandExecutionError('not_found', `Director Studio node ${command.input.nodeId} does not exist.`);
+        }
+        const requestId = `director-record-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        await this.dependencies.navigation.focusNodeIds([node.id], { select: true });
+        this.dependencies.eventBus.publish('director-studio/open', { nodeId: node.id });
+        const result = await new Promise<{
+          requestId: string;
+          nodeId: string;
+          resultNodeId?: string;
+          error?: string;
+        }>((resolve, reject) => {
+          const timeoutId = globalThis.setTimeout(() => {
+            unsubscribe();
+            reject(new Error('Director Studio recording did not start or finish within the expected window.'));
+          }, 35 * 60_000);
+          const unsubscribe = this.dependencies.eventBus.subscribe('director-studio/record-result', (event) => {
+            if (event.requestId !== requestId) return;
+            globalThis.clearTimeout(timeoutId);
+            unsubscribe();
+            if (event.error) reject(new Error(event.error));
+            else resolve(event);
+          });
+          this.dependencies.eventBus.publish('director-studio/record', {
+            nodeId: node.id,
+            resolution: command.input.resolution,
+            fps: command.input.fps,
+            addToCanvas: command.input.addToCanvas !== false,
+            requestId,
+          });
+        });
+        const resultNodeIds = result.resultNodeId ? [result.resultNodeId] : [];
+        return {
+          references: { nodeId: result.resultNodeId ?? node.id, nodeIds: [node.id, ...resultNodeIds] },
+          value: { recorded: true, resultNodeId: result.resultNodeId ?? null },
+        };
       }
       default:
         throw new CanvasCommandExecutionError(

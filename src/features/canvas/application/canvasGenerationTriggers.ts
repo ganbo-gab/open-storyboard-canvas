@@ -10,6 +10,7 @@ export const CANVAS_GENERATION_TRIGGER_NODE_TYPES = [
   CANVAS_NODE_TYPES.aiText,
   CANVAS_NODE_TYPES.aiAudio,
   CANVAS_NODE_TYPES.storyboardGen,
+  CANVAS_NODE_TYPES.panorama,
 ] as const satisfies readonly CanvasNodeType[];
 
 const GENERATION_TRIGGER_NODE_TYPE_SET = new Set<CanvasNodeType>(

@@ -8,12 +8,17 @@ import { Viewer } from '@photo-sphere-viewer/core';
 import '@photo-sphere-viewer/core/index.css';
 
 import { useCanvasStore } from '@/stores/canvasStore';
+import { canvasEventBus } from '@/features/canvas/application/canvasServices';
+import { subscribeCanvasGenerationTrigger } from '@/features/canvas/application/canvasGenerationTriggers';
 import {
   getPanoramaControlSensitivityMultiplier,
   useSettingsStore,
   type PanoramaControlSensitivity,
 } from '@/stores/settingsStore';
-import type { PanoramaNodeData } from '@/features/canvas/domain/canvasNodes';
+import {
+  CANVAS_NODE_TYPES,
+  type PanoramaNodeData,
+} from '@/features/canvas/domain/canvasNodes';
 import {
   normalizePanoramaToDataUrl,
   type PanoramaProjection,
@@ -579,6 +584,19 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
       await navigator.clipboard.writeText(prompt);
     } catch { /* ignore */ }
   }, []);
+
+  useEffect(() => subscribeCanvasGenerationTrigger(
+    canvasEventBus,
+    CANVAS_NODE_TYPES.panorama,
+    id,
+    () => handleInlineSubmit(data.sourcePrompt ?? '', {
+      projection,
+      sourceMode: data.sourceMode === 'image' ? 'image' : 'text',
+      referenceImages: [],
+      directImageUrl: data.sourceImageUrl ?? firstUpstreamImage,
+      smartBase: data.smartBase !== false,
+    }),
+  ), [data.smartBase, data.sourceImageUrl, data.sourceMode, data.sourcePrompt, firstUpstreamImage, handleInlineSubmit, id, projection]);
 
   useEffect(() => {
     if (!imageUrl || !displayImageUrl) {
