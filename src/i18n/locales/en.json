@@ -1531,6 +1531,32 @@
     "providers": "API Key",
     "providersDesc": "Configure AI provider API keys",
     "myConfigurations": "My Configurations",
+    "agnes": {
+      "description": "Manage the Agnes Key separately for Agnes image, video, and chat models. Saving stores the key; verification is a separate, free model-list request.",
+      "keyLabel": "Agnes Key",
+      "keyPlaceholder": "Enter Agnes API Key",
+      "save": "Save",
+      "saved": "Agnes Key saved (not verified)",
+      "verify": "Verify Key",
+      "verifying": "Verifying...",
+      "verifySuccess": "Key verified. Agnes returned {{count}} models.",
+      "verifyFailed": "Key verification failed.",
+      "verifyErrors": {
+        "authentication": "The Agnes Key is missing, invalid, or expired.",
+        "authorization": "The Agnes account or plan cannot access the model list.",
+        "rate-limit": "Agnes is rate-limiting requests. Try verification again later.",
+        "network": "The model-list request failed. Check the selected system/direct/custom-proxy route, proxy URL, DNS, TLS, and connectivity.",
+        "response-shape": "Agnes responded successfully, but its model-list format was not recognized."
+      },
+      "chatNote": "Agnes 2.5 Flash is the primary built-in chat option. Agnes 2.0 and 1.5 remain available for saved projects.",
+      "docs": {
+        "chat25": "Current multimodal chat model with streaming, tools, and thinking support.",
+        "chatLegacy": "Legacy multimodal chat model retained for saved projects.",
+        "image21": "Current image model using symbolic 1K-4K sizes plus ratio.",
+        "image20": "Legacy image and multi-reference model retained for compatibility.",
+        "video20": "Video generation model for text, image, multi-reference, and keyframe modes."
+      }
+    },
     "dreamina": {
       "title": "Dreamina",
       "description": "Uses the local Dreamina CLI OAuth session, so no API key is stored in the app. Account, credit, and session health are checked independently so one degraded capability does not hide the others.",

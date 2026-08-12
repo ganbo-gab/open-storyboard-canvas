@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -25,27 +26,48 @@ use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeTIFF};
 const STORYBOARD_METADATA_PNG_TEXT_KEY: &str = "StoryboardCopilotMetadata";
 const FAST_PREVIEW_BYPASS_MAX_BYTES: usize = 2_000_000;
 const FAST_PREVIEW_BYPASS_MAX_DIMENSION: u32 = 2048;
-const REMOTE_IMAGE_DOWNLOAD_TIMEOUT_MS: u64 = 45_000;
+const REMOTE_IMAGE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(45);
+const REMOTE_AUDIO_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+const REMOTE_VIDEO_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 const REMOTE_IMAGE_DOWNLOAD_ATTEMPTS: usize = 3;
+const REMOTE_MEDIA_MAX_REDIRECTS: usize = 5;
+const REMOTE_IMAGE_MAX_BYTES: usize = 64 * 1024 * 1024;
+const REMOTE_VIDEO_MAX_BYTES: usize = 512 * 1024 * 1024;
+const REMOTE_AUDIO_MAX_BYTES: usize = 128 * 1024 * 1024;
 const GENERATED_MEDIA_COUNTERS_FILE_NAME: &str = "generated-media-counters.json";
 static REMOTE_IMAGE_CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
 static REMOTE_IMAGE_NO_PROXY_CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
 
 fn build_remote_media_client(no_proxy: bool) -> Result<reqwest::Client, reqwest::Error> {
     let builder = reqwest::Client::builder()
-        .timeout(Duration::from_millis(REMOTE_IMAGE_DOWNLOAD_TIMEOUT_MS))
         .pool_idle_timeout(Duration::from_secs(90))
         .tcp_keepalive(Duration::from_secs(60))
         .no_gzip()
         .no_brotli()
         .no_zstd()
-        .no_deflate();
+        .no_deflate()
+        .redirect(reqwest::redirect::Policy::none());
     let builder = if no_proxy {
         builder.no_proxy()
     } else {
         builder
     };
     builder.build()
+}
+
+fn build_custom_proxy_media_client(proxy_url: &str) -> Result<reqwest::Client, String> {
+    let proxy = crate::commands::http::validated_custom_proxy(proxy_url)?;
+    reqwest::Client::builder()
+        .pool_idle_timeout(Duration::from_secs(90))
+        .tcp_keepalive(Duration::from_secs(60))
+        .no_gzip()
+        .no_brotli()
+        .no_zstd()
+        .no_deflate()
+        .redirect(reqwest::redirect::Policy::none())
+        .proxy(proxy)
+        .build()
+        .map_err(|_| "Failed to build custom-proxy media client".to_string())
 }
 
 fn remote_image_client() -> Result<&'static reqwest::Client, String> {
@@ -78,7 +100,8 @@ struct RemoteMediaDownload {
 enum RemoteMediaAttemptFailure {
     Status {
         message: String,
-        is_client_error: bool,
+        retryable: bool,
+        fallback_allowed: bool,
     },
     Network {
         message: String,
@@ -86,6 +109,71 @@ enum RemoteMediaAttemptFailure {
     InvalidContent {
         message: String,
     },
+    TooLarge {
+        message: String,
+    },
+}
+
+impl RemoteMediaAttemptFailure {
+    fn retryable(&self) -> bool {
+        match self {
+            Self::Status { retryable, .. } => *retryable,
+            Self::Network { .. } | Self::InvalidContent { .. } => true,
+            Self::TooLarge { .. } => false,
+        }
+    }
+
+    fn fallback_allowed(&self) -> bool {
+        match self {
+            Self::Status {
+                fallback_allowed, ..
+            } => *fallback_allowed,
+            Self::Network { .. } | Self::InvalidContent { .. } => true,
+            Self::TooLarge { .. } => false,
+        }
+    }
+
+    fn into_message(self) -> String {
+        match self {
+            Self::Status { message, .. }
+            | Self::Network { message }
+            | Self::InvalidContent { message }
+            | Self::TooLarge { message } => message,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct RemoteMediaRouteFailure {
+    message: String,
+    fallback_allowed: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaNetworkRouteDto {
+    pub route: String,
+    pub custom_proxy_url: Option<String>,
+    pub configured_provider_origin: Option<String>,
+}
+
+impl MediaNetworkRouteDto {
+    fn route(&self) -> Result<&str, String> {
+        match self.route.trim() {
+            "" | "system" => Ok("system"),
+            "direct" => Ok("direct"),
+            "custom-proxy" => Ok("custom-proxy"),
+            other => Err(format!("Unsupported media network route: {other}")),
+        }
+    }
+}
+
+fn route_allows_direct_fallback(route: &str) -> bool {
+    route == "system"
+}
+
+fn should_forward_headers_to_url(allowed_origin: &str, target: &reqwest::Url) -> bool {
+    url_origin(target) == allowed_origin
 }
 
 fn describe_remote_media_url(url: &str) -> String {
@@ -98,6 +186,86 @@ fn describe_remote_media_url(url: &str) -> String {
         return format!("{}/{}", host, basename);
     }
     "remote-media".to_string()
+}
+
+fn parse_remote_media_url(url: &str) -> Result<reqwest::Url, String> {
+    let parsed =
+        reqwest::Url::parse(url).map_err(|_| "Remote media URL is malformed".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("Remote media URL must use HTTP or HTTPS and include a host".to_string());
+    }
+    Ok(parsed)
+}
+
+fn url_origin(url: &reqwest::Url) -> String {
+    url.origin().ascii_serialization()
+}
+
+fn ip_is_local_or_private(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || ip.octets()[0] == 0
+        }
+        IpAddr::V6(ip) => {
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+                || ip
+                    .to_ipv4_mapped()
+                    .is_some_and(|mapped| ip_is_local_or_private(IpAddr::V4(mapped)))
+        }
+    }
+}
+
+fn host_is_local_or_private(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
+        return true;
+    }
+    let normalized_host = host
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(host);
+    normalized_host
+        .parse::<IpAddr>()
+        .is_ok_and(ip_is_local_or_private)
+}
+
+async fn resolves_to_local_or_private(url: &reqwest::Url) -> bool {
+    if host_is_local_or_private(url) {
+        return true;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let port = url.port_or_known_default().unwrap_or(80);
+    tokio::net::lookup_host((host, port))
+        .await
+        .map(|mut addresses| addresses.any(|address| ip_is_local_or_private(address.ip())))
+        .unwrap_or(false)
+}
+
+fn media_byte_limit(media_kind: &str) -> usize {
+    match media_kind {
+        "video" => REMOTE_VIDEO_MAX_BYTES,
+        "audio" => REMOTE_AUDIO_MAX_BYTES,
+        _ => REMOTE_IMAGE_MAX_BYTES,
+    }
+}
+
+fn media_download_timeout(media_kind: &str) -> Duration {
+    match media_kind {
+        "video" => REMOTE_VIDEO_DOWNLOAD_TIMEOUT,
+        "audio" => REMOTE_AUDIO_DOWNLOAD_TIMEOUT,
+        _ => REMOTE_IMAGE_DOWNLOAD_TIMEOUT,
+    }
 }
 
 fn describe_reqwest_network_error(error: &reqwest::Error) -> String {
@@ -117,7 +285,7 @@ fn describe_reqwest_network_error(error: &reqwest::Error) -> String {
     if kinds.is_empty() {
         kinds.push("send");
     }
-    format!("{} [{}]", error, kinds.join(","))
+    format!("network failure [{}]", kinds.join(","))
 }
 
 async fn try_remote_media_request(
@@ -128,90 +296,267 @@ async fn try_remote_media_request(
     headers: Option<&HashMap<String, String>>,
     media_kind: &str,
     attempt: usize,
+    configured_provider_origin: Option<&str>,
 ) -> Result<RemoteMediaDownload, RemoteMediaAttemptFailure> {
-    let url_label = describe_remote_media_url(url);
-    let mut request = client
-        .get(url)
-        .header(reqwest::header::ACCEPT, accept_header)
-        .header(reqwest::header::ACCEPT_ENCODING, "identity")
-        .header(reqwest::header::USER_AGENT, "Open-Storyboard-Canvas/1.0");
-    if let Some(headers) = headers {
-        for (key, value) in headers {
-            let trimmed_key = key.trim();
-            if trimmed_key.is_empty() || !should_forward_remote_image_header(trimmed_key) {
-                continue;
-            }
-            request = request.header(trimmed_key, value.as_str());
-        }
-    }
+    try_remote_media_request_with_limit(
+        client,
+        route_label,
+        url,
+        accept_header,
+        headers,
+        media_kind,
+        attempt,
+        configured_provider_origin,
+        media_byte_limit(media_kind),
+    )
+    .await
+}
 
-    let response = request
-        .send()
-        .await
-        .map_err(|error| RemoteMediaAttemptFailure::Network {
-            message: format!(
-                "{} route attempt {} failed to send remote {} request for {}: {}",
-                route_label,
-                attempt,
-                media_kind,
-                url_label,
-                describe_reqwest_network_error(&error)
-            ),
-        })?;
-
-    let status = response.status();
-    if !status.is_success() {
+async fn try_remote_media_request_with_limit(
+    client: &reqwest::Client,
+    route_label: &str,
+    url: &str,
+    accept_header: &str,
+    headers: Option<&HashMap<String, String>>,
+    media_kind: &str,
+    attempt: usize,
+    configured_provider_origin: Option<&str>,
+    byte_limit: usize,
+) -> Result<RemoteMediaDownload, RemoteMediaAttemptFailure> {
+    let mut current_url = parse_remote_media_url(url)
+        .map_err(|message| RemoteMediaAttemptFailure::InvalidContent { message })?;
+    let initial_origin = url_origin(&current_url);
+    let allowed_header_origin = configured_provider_origin
+        .and_then(|origin| reqwest::Url::parse(origin).ok())
+        .map(|origin| url_origin(&origin))
+        .unwrap_or_else(|| initial_origin.clone());
+    let configured_local_origin = configured_provider_origin
+        .and_then(|origin| reqwest::Url::parse(origin).ok())
+        .filter(host_is_local_or_private)
+        .map(|origin| url_origin(&origin));
+    if resolves_to_local_or_private(&current_url).await
+        && configured_local_origin.as_deref() != Some(initial_origin.as_str())
+    {
         return Err(RemoteMediaAttemptFailure::Status {
             message: format!(
-                "{} route attempt {} returned HTTP {} for remote {} {}",
-                route_label, attempt, status, media_kind, url_label
-            ),
-            is_client_error: status.is_client_error(),
-        });
-    }
-
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("unknown")
-        .to_string();
-    let content_encoding = response
-        .headers()
-        .get(reqwest::header::CONTENT_ENCODING)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("none")
-        .to_string();
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| RemoteMediaAttemptFailure::Network {
-            message: format!(
-                "{} route attempt {} failed to read remote {} body for {} (content-type={}, content-encoding={}): {}",
+                "{} route rejected unconfigured local remote {} {}",
                 route_label,
-                attempt,
                 media_kind,
-                url_label,
-                content_type,
-                content_encoding,
-                describe_reqwest_network_error(&error)
+                describe_remote_media_url(current_url.as_str())
             ),
-        })?
-        .to_vec();
-
-    if let Some(message) = remote_media_content_error(media_kind, &content_type, &bytes) {
-        return Err(RemoteMediaAttemptFailure::InvalidContent {
-            message: format!(
-                "{} route attempt {} returned invalid remote {} content for {}: {}",
-                route_label, attempt, media_kind, url_label, message
-            ),
+            retryable: false,
+            fallback_allowed: false,
         });
     }
 
-    Ok(RemoteMediaDownload {
-        bytes,
-        content_type,
-    })
+    for redirect_count in 0..=REMOTE_MEDIA_MAX_REDIRECTS {
+        let url_label = describe_remote_media_url(current_url.as_str());
+        let mut request = client
+            .get(current_url.clone())
+            .timeout(media_download_timeout(media_kind))
+            .header(reqwest::header::ACCEPT, accept_header)
+            .header(reqwest::header::ACCEPT_ENCODING, "identity")
+            .header(reqwest::header::USER_AGENT, "Open-Storyboard-Canvas/1.0");
+        if should_forward_headers_to_url(&allowed_header_origin, &current_url) {
+            if let Some(headers) = headers {
+                for (key, value) in headers {
+                    let trimmed_key = key.trim();
+                    if trimmed_key.is_empty() || !should_forward_remote_image_header(trimmed_key) {
+                        continue;
+                    }
+                    request = request.header(trimmed_key, value.as_str());
+                }
+            }
+        }
+
+        let response =
+            request
+                .send()
+                .await
+                .map_err(|error| RemoteMediaAttemptFailure::Network {
+                    message: format!(
+                        "{} route attempt {} failed to send remote {} request for {}: {}",
+                        route_label,
+                        attempt,
+                        media_kind,
+                        url_label,
+                        describe_reqwest_network_error(&error)
+                    ),
+                })?;
+
+        let status = response.status();
+        if status.is_redirection() {
+            if redirect_count >= REMOTE_MEDIA_MAX_REDIRECTS {
+                return Err(RemoteMediaAttemptFailure::Status {
+                    message: format!(
+                        "{} route exceeded redirect limit for remote {} {}",
+                        route_label, media_kind, url_label
+                    ),
+                    retryable: false,
+                    fallback_allowed: false,
+                });
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| RemoteMediaAttemptFailure::Status {
+                    message: format!(
+                        "{} route received redirect without Location for remote {} {}",
+                        route_label, media_kind, url_label
+                    ),
+                    retryable: false,
+                    fallback_allowed: false,
+                })?;
+            let next_url =
+                current_url
+                    .join(location)
+                    .map_err(|_| RemoteMediaAttemptFailure::Status {
+                        message: format!(
+                            "{} route received malformed redirect for remote {} {}",
+                            route_label, media_kind, url_label
+                        ),
+                        retryable: false,
+                        fallback_allowed: false,
+                    })?;
+            parse_remote_media_url(next_url.as_str()).map_err(|message| {
+                RemoteMediaAttemptFailure::Status {
+                    message: format!(
+                        "{} route rejected redirect for remote {} {}: {}",
+                        route_label, media_kind, url_label, message
+                    ),
+                    retryable: false,
+                    fallback_allowed: false,
+                }
+            })?;
+            if resolves_to_local_or_private(&next_url).await {
+                let next_origin = url_origin(&next_url);
+                let local_redirect_is_same_configured_origin = configured_local_origin.as_deref()
+                    == Some(initial_origin.as_str())
+                    && configured_local_origin.as_deref() == Some(next_origin.as_str());
+                if !local_redirect_is_same_configured_origin {
+                    return Err(RemoteMediaAttemptFailure::Status {
+                        message: format!(
+                            "{} route rejected redirect into unconfigured local remote {} {}",
+                            route_label, media_kind, url_label
+                        ),
+                        retryable: false,
+                        fallback_allowed: false,
+                    });
+                }
+            }
+            current_url = next_url;
+            continue;
+        }
+        if !status.is_success() {
+            return Err(RemoteMediaAttemptFailure::Status {
+                message: format!(
+                    "{} route attempt {} returned HTTP {} for remote {} {}",
+                    route_label, attempt, status, media_kind, url_label
+                ),
+                retryable: status.as_u16() == 408
+                    || status.as_u16() == 429
+                    || status.is_server_error(),
+                fallback_allowed: status.as_u16() == 408 || status.is_server_error(),
+            });
+        }
+
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("unknown")
+            .to_string();
+        let content_encoding = response
+            .headers()
+            .get(reqwest::header::CONTENT_ENCODING)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("none")
+            .to_string();
+        if response
+            .content_length()
+            .is_some_and(|length| length > byte_limit as u64)
+        {
+            return Err(RemoteMediaAttemptFailure::TooLarge {
+                message: format!(
+                    "{} route remote {} exceeded {} byte limit for {}",
+                    route_label, media_kind, byte_limit, url_label
+                ),
+            });
+        }
+        let mut response = response;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|error| RemoteMediaAttemptFailure::Network {
+        message: format!(
+            "{} route attempt {} failed to read remote {} body for {} (content-type={}, content-encoding={}): {}",
+            route_label, attempt, media_kind, url_label, content_type, content_encoding,
+            describe_reqwest_network_error(&error)
+        ),
+    })? {
+        if bytes.len().saturating_add(chunk.len()) > byte_limit {
+            return Err(RemoteMediaAttemptFailure::TooLarge {
+                message: format!("{} route remote {} exceeded {} byte limit for {}", route_label, media_kind, byte_limit, url_label),
+            });
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+
+        if let Some(message) = remote_media_content_error(media_kind, &content_type, &bytes) {
+            return Err(RemoteMediaAttemptFailure::InvalidContent {
+                message: format!(
+                    "{} route attempt {} returned invalid remote {} content for {}: {}",
+                    route_label, attempt, media_kind, url_label, message
+                ),
+            });
+        }
+
+        return Ok(RemoteMediaDownload {
+            bytes,
+            content_type,
+        });
+    }
+    unreachable!("redirect loop returns or continues within its bounded range")
+}
+
+async fn try_remote_media_route(
+    client: &reqwest::Client,
+    route_label: &str,
+    url: &str,
+    accept_header: &str,
+    headers: Option<&HashMap<String, String>>,
+    media_kind: &str,
+    configured_provider_origin: Option<&str>,
+) -> Result<RemoteMediaDownload, RemoteMediaRouteFailure> {
+    for attempt in 1..=REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
+        match try_remote_media_request(
+            client,
+            route_label,
+            url,
+            accept_header,
+            headers,
+            media_kind,
+            attempt,
+            configured_provider_origin,
+        )
+        .await
+        {
+            Ok(download) => return Ok(download),
+            Err(failure) => {
+                let retryable = failure.retryable();
+                let fallback_allowed = failure.fallback_allowed();
+                let message = failure.into_message();
+                if !retryable || attempt == REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
+                    return Err(RemoteMediaRouteFailure {
+                        message,
+                        fallback_allowed,
+                    });
+                }
+            }
+        }
+
+        sleep(Duration::from_millis(350 * attempt as u64)).await;
+    }
+    unreachable!("media route loop returns within its bounded attempt count")
 }
 
 async fn download_remote_media_bytes(
@@ -219,133 +564,83 @@ async fn download_remote_media_bytes(
     headers: Option<&HashMap<String, String>>,
     accept_header: &str,
     media_kind: &str,
+    network: Option<&MediaNetworkRouteDto>,
 ) -> Result<RemoteMediaDownload, String> {
     let url_label = describe_remote_media_url(url);
-    let mut default_error = String::new();
-    let mut should_try_no_proxy = false;
-
-    let default_client = remote_image_client().map_err(|error| {
+    parse_remote_media_url(url).map_err(|error| {
         format!(
-            "Remote {} download failed for {}: {}; no-proxy route not attempted because default client was unavailable",
+            "Remote {} materialize failed via invalid route for {}: {}",
             media_kind, url_label, error
         )
     })?;
-
-    for attempt in 1..=REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
-        match try_remote_media_request(
-            default_client,
-            "default",
-            url,
-            accept_header,
-            headers,
-            media_kind,
-            attempt,
-        )
-        .await
-        {
-            Ok(download) => return Ok(download),
-            Err(RemoteMediaAttemptFailure::Status {
-                message,
-                is_client_error,
-            }) => {
-                if is_client_error {
-                    return Err(format!(
-                        "Remote {} download failed for {}: {}; no-proxy route not attempted for HTTP client status",
-                        media_kind, url_label, message
-                    ));
-                }
-                should_try_no_proxy = true;
-                default_error = message;
-            }
-            Err(RemoteMediaAttemptFailure::Network { message }) => {
-                should_try_no_proxy = true;
-                default_error = message;
-            }
-            Err(RemoteMediaAttemptFailure::InvalidContent { message }) => {
-                should_try_no_proxy = true;
-                default_error = message;
-                break;
-            }
+    let route = network
+        .map(MediaNetworkRouteDto::route)
+        .transpose()?
+        .unwrap_or("system");
+    let provider_origin = network.and_then(|value| value.configured_provider_origin.as_deref());
+    let custom_client;
+    let first_client = match route {
+        "system" => remote_image_client()?,
+        "direct" => remote_image_no_proxy_client()?,
+        "custom-proxy" => {
+            let proxy_url = network
+                .and_then(|value| value.custom_proxy_url.as_deref())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "custom-proxy media route requires customProxyUrl".to_string())?;
+            custom_client = build_custom_proxy_media_client(proxy_url)?;
+            &custom_client
         }
+        _ => unreachable!(),
+    };
+    let should_try_no_proxy = route_allows_direct_fallback(route);
+    let first_failure = match try_remote_media_route(
+        first_client,
+        route,
+        url,
+        accept_header,
+        headers,
+        media_kind,
+        provider_origin,
+    )
+    .await
+    {
+        Ok(download) => return Ok(download),
+        Err(failure) => failure,
+    };
 
-        if attempt < REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
-            sleep(Duration::from_millis(350 * attempt as u64)).await;
-        }
-    }
-
-    if !should_try_no_proxy {
+    if !should_try_no_proxy || !first_failure.fallback_allowed {
         return Err(format!(
-            "Remote {} download failed for {}: {}; no-proxy route not attempted because default route returned HTTP status errors",
-            media_kind,
-            url_label,
-            if default_error.is_empty() {
-                "default route failed".to_string()
-            } else {
-                default_error
-            }
+            "Remote {} materialize failed via {} for {}: {}",
+            media_kind, route, url_label, first_failure.message
         ));
     }
 
-    let mut no_proxy_error = String::new();
     let no_proxy_client = remote_image_no_proxy_client().map_err(|error| {
         format!(
             "Remote {} download failed for {}: default route {}; no-proxy route unavailable: {}",
-            media_kind,
-            url_label,
-            if default_error.is_empty() {
-                "failed".to_string()
-            } else {
-                default_error.clone()
-            },
-            error
+            media_kind, url_label, first_failure.message, error
         )
     })?;
 
-    for attempt in 1..=REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
-        match try_remote_media_request(
-            no_proxy_client,
-            "no-proxy",
-            url,
-            accept_header,
-            headers,
-            media_kind,
-            attempt,
-        )
-        .await
-        {
-            Ok(download) => return Ok(download),
-            Err(RemoteMediaAttemptFailure::Status { message, .. }) => {
-                no_proxy_error = message;
-                break;
-            }
-            Err(RemoteMediaAttemptFailure::Network { message }) => {
-                no_proxy_error = message;
-            }
-            Err(RemoteMediaAttemptFailure::InvalidContent { message }) => {
-                no_proxy_error = message;
-                break;
-            }
-        }
-
-        if attempt < REMOTE_IMAGE_DOWNLOAD_ATTEMPTS {
-            sleep(Duration::from_millis(350 * attempt as u64)).await;
-        }
-    }
+    let no_proxy_failure = match try_remote_media_route(
+        no_proxy_client,
+        "no-proxy",
+        url,
+        accept_header,
+        headers,
+        media_kind,
+        provider_origin,
+    )
+    .await
+    {
+        Ok(download) => return Ok(download),
+        Err(failure) => failure,
+    };
 
     Err(format!(
         "Remote {} download failed for {}: default route {}; no-proxy route {}",
-        media_kind,
-        url_label,
-        if default_error.is_empty() {
-            "failed".to_string()
-        } else {
-            default_error
-        },
-        if no_proxy_error.is_empty() {
-            "failed".to_string()
-        } else {
-            no_proxy_error
-        }
+        media_kind, url_label, first_failure.message, no_proxy_failure.message
     ))
 }
 
@@ -1138,6 +1433,7 @@ pub async fn prepare_node_image_source_with_headers(
     app: AppHandle,
     source: String,
     headers: Option<HashMap<String, String>>,
+    network: Option<MediaNetworkRouteDto>,
     max_preview_dimension: Option<u32>,
 ) -> Result<PrepareNodeImageResult, String> {
     let started = Instant::now();
@@ -1148,7 +1444,8 @@ pub async fn prepare_node_image_source_with_headers(
 
     let safe_max_dimension = max_preview_dimension.unwrap_or(512).clamp(64, 4096);
     let resolve_started = Instant::now();
-    let (bytes, extension) = resolve_source_bytes_with_headers(trimmed, headers.as_ref()).await?;
+    let (bytes, extension) =
+        resolve_source_bytes_with_headers(trimmed, headers.as_ref(), network.as_ref()).await?;
     let resolve_elapsed = resolve_started.elapsed().as_millis();
     let result = prepare_node_image_from_bytes(
         &app,
@@ -2144,9 +2441,26 @@ fn remote_media_content_error(
     let is_textual_error = content_type_is_textual_non_image(content_type)
         || textual_preview
             .as_deref()
-            .map(|preview| looks_like_json_text(preview) || looks_like_html_text(preview))
+            .map(|preview| {
+                looks_like_json_text(preview)
+                    || looks_like_html_text(preview)
+                    || looks_like_textual_error(preview)
+            })
             .unwrap_or(false);
     if !is_textual_error {
+        if media_kind == "image" {
+            let image_probe = ImageReader::new(Cursor::new(bytes))
+                .with_guessed_format()
+                .map_err(|_| ())
+                .and_then(|reader| reader.into_dimensions().map_err(|_| ()));
+            if image_probe.is_err() {
+                return Some(format!(
+                    "Remote result did not return decodable image bytes (content-type={}, bytes={})",
+                    content_type,
+                    bytes.len()
+                ));
+            }
+        }
         return None;
     }
     Some(match media_kind {
@@ -2157,41 +2471,33 @@ fn remote_media_content_error(
 }
 
 fn describe_non_image_remote_body(content_type: &str, bytes: &[u8]) -> String {
-    let preview = bytes_text_preview(bytes, 360)
-        .unwrap_or_else(|| format!("{} bytes, binary preview unavailable", bytes.len()));
     format!(
-        "Remote result did not return image bytes (content-type={}, bytes={}). Body preview: {}",
+        "Remote result did not return image bytes (content-type={}, bytes={})",
         content_type,
-        bytes.len(),
-        preview
+        bytes.len()
     )
 }
 
 fn describe_non_video_remote_body(content_type: &str, bytes: &[u8]) -> String {
-    let preview = bytes_text_preview(bytes, 360)
-        .unwrap_or_else(|| format!("{} bytes, binary preview unavailable", bytes.len()));
     format!(
-        "Remote result did not return video bytes (content-type={}, bytes={}). Body preview: {}",
+        "Remote result did not return video bytes (content-type={}, bytes={})",
         content_type,
-        bytes.len(),
-        preview
+        bytes.len()
     )
 }
 
 fn describe_non_audio_remote_body(content_type: &str, bytes: &[u8]) -> String {
-    let preview = bytes_text_preview(bytes, 360)
-        .unwrap_or_else(|| format!("{} bytes, binary preview unavailable", bytes.len()));
     format!(
-        "Remote result did not return audio bytes (content-type={}, bytes={}). Body preview: {}",
+        "Remote result did not return audio bytes (content-type={}, bytes={})",
         content_type,
-        bytes.len(),
-        preview
+        bytes.len()
     )
 }
 
 async fn resolve_video_source_bytes_with_headers(
     source: &str,
     headers: Option<&HashMap<String, String>>,
+    network: Option<&MediaNetworkRouteDto>,
 ) -> Result<(Vec<u8>, String), String> {
     let trimmed = source.trim();
     if trimmed.is_empty() {
@@ -2209,6 +2515,7 @@ async fn resolve_video_source_bytes_with_headers(
             headers,
             "video/mp4,video/webm,video/quicktime,video/*,*/*;q=0.8",
             "video",
+            network,
         )
         .await?;
         let content_type = download.content_type;
@@ -2272,6 +2579,7 @@ async fn resolve_audio_source_bytes(source: &str) -> Result<(Vec<u8>, String), S
             None,
             "audio/mpeg,audio/wav,audio/ogg,audio/webm,audio/*,*/*;q=0.8",
             "audio",
+            None,
         )
         .await?;
         let content_type = download.content_type;
@@ -2555,7 +2863,7 @@ fn encode_png_with_storyboard_metadata(
 }
 
 async fn resolve_source_bytes(source: &str) -> Result<(Vec<u8>, String), String> {
-    resolve_source_bytes_with_headers(source, None).await
+    resolve_source_bytes_with_headers(source, None, None).await
 }
 
 fn should_forward_remote_image_header(key: &str) -> bool {
@@ -2565,6 +2873,7 @@ fn should_forward_remote_image_header(key: &str) -> bool {
 async fn resolve_source_bytes_with_headers(
     source: &str,
     headers: Option<&HashMap<String, String>>,
+    network: Option<&MediaNetworkRouteDto>,
 ) -> Result<(Vec<u8>, String), String> {
     let mut current_source = source.trim().to_string();
     let mut unwrap_count = 0usize;
@@ -2588,6 +2897,7 @@ async fn resolve_source_bytes_with_headers(
                 headers,
                 "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
                 "image",
+                network,
             )
             .await?;
             let content_type = download.content_type;
@@ -2711,6 +3021,7 @@ pub async fn persist_video_source(
     app: AppHandle,
     source: String,
     headers: Option<HashMap<String, String>>,
+    network: Option<MediaNetworkRouteDto>,
 ) -> Result<String, String> {
     let started = Instant::now();
     let trimmed = source.trim();
@@ -2719,7 +3030,8 @@ pub async fn persist_video_source(
     }
 
     let (bytes, extension) =
-        resolve_video_source_bytes_with_headers(trimmed, headers.as_ref()).await?;
+        resolve_video_source_bytes_with_headers(trimmed, headers.as_ref(), network.as_ref())
+            .await?;
     let output = persist_video_bytes(&app, &bytes, &extension)?;
     info!(
         "persist_video_source done: bytes={}, ext={}, elapsed={}ms",
@@ -3045,7 +3357,8 @@ pub async fn save_video_source_to_path(
         return Err("Target path is empty".to_string());
     }
 
-    let (bytes, extension) = resolve_video_source_bytes_with_headers(trimmed_source, None).await?;
+    let (bytes, extension) =
+        resolve_video_source_bytes_with_headers(trimmed_source, None, None).await?;
     let raw_path = PathBuf::from(normalize_user_selected_path(trimmed_target));
     let output_path = ensure_output_path_with_extension(&raw_path, &extension);
 
@@ -3076,7 +3389,8 @@ pub async fn save_video_source_to_directory(
         return Err("Target directory is empty".to_string());
     }
 
-    let (bytes, extension) = resolve_video_source_bytes_with_headers(trimmed_source, None).await?;
+    let (bytes, extension) =
+        resolve_video_source_bytes_with_headers(trimmed_source, None, None).await?;
     let dir_path = PathBuf::from(normalize_user_selected_path(trimmed_dir));
     std::fs::create_dir_all(&dir_path)
         .map_err(|e| format!("Failed to create target dir: {}", e))?;
@@ -3269,7 +3583,89 @@ pub async fn load_image(file_path: String) -> Result<String, String> {
 
 #[cfg(test)]
 mod remote_media_tests {
-    use super::remote_media_content_error;
+    use base64::Engine as _;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    use super::{
+        build_remote_media_client, describe_non_image_remote_body, describe_remote_media_url,
+        host_is_local_or_private, ip_is_local_or_private, media_byte_limit, media_download_timeout,
+        parse_remote_media_url, remote_media_content_error, route_allows_direct_fallback,
+        should_forward_headers_to_url, try_remote_media_request_with_limit, try_remote_media_route,
+        url_origin, MediaNetworkRouteDto, RemoteMediaAttemptFailure, REMOTE_AUDIO_DOWNLOAD_TIMEOUT,
+        REMOTE_IMAGE_DOWNLOAD_TIMEOUT, REMOTE_IMAGE_MAX_BYTES, REMOTE_VIDEO_DOWNLOAD_TIMEOUT,
+        REMOTE_VIDEO_MAX_BYTES,
+    };
+
+    fn minimal_png() -> Vec<u8> {
+        base64::engine::general_purpose::STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+            .unwrap()
+    }
+
+    async fn spawn_http_fixture<F>(handler: F) -> String
+    where
+        F: Fn(String, usize) -> Vec<u8> + Send + Sync + 'static,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let handler = Arc::new(handler);
+        tokio::spawn(async move {
+            let mut request_number = 0usize;
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                request_number += 1;
+                let handler = Arc::clone(&handler);
+                tokio::spawn(async move {
+                    let mut request = vec![0u8; 16 * 1024];
+                    let read = stream.read(&mut request).await.unwrap_or(0);
+                    let request = String::from_utf8_lossy(&request[..read]).into_owned();
+                    let response = handler(request, request_number);
+                    let _ = stream.write_all(&response).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        format!("http://{}", address)
+    }
+
+    fn http_response(status: &str, headers: &[(&str, String)], body: &[u8]) -> Vec<u8> {
+        let mut response = format!("HTTP/1.1 {status}\r\nConnection: close\r\n");
+        for (name, value) in headers {
+            response.push_str(&format!("{name}: {value}\r\n"));
+        }
+        response.push_str(&format!("Content-Length: {}\r\n\r\n", body.len()));
+        let mut bytes = response.into_bytes();
+        bytes.extend_from_slice(body);
+        bytes
+    }
+
+    fn chunked_http_response(
+        status: &str,
+        headers: &[(&str, String)],
+        chunks: &[&[u8]],
+    ) -> Vec<u8> {
+        let mut response =
+            format!("HTTP/1.1 {status}\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n");
+        for (name, value) in headers {
+            response.push_str(&format!("{name}: {value}\r\n"));
+        }
+        response.push_str("\r\n");
+        let mut bytes = response.into_bytes();
+        for chunk in chunks {
+            bytes.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+            bytes.extend_from_slice(chunk);
+            bytes.extend_from_slice(b"\r\n");
+        }
+        bytes.extend_from_slice(b"0\r\n\r\n");
+        bytes
+    }
 
     #[test]
     fn html_success_body_is_rejected_before_route_is_accepted() {
@@ -3286,7 +3682,16 @@ mod remote_media_tests {
 
     #[test]
     fn image_content_is_allowed() {
-        assert!(remote_media_content_error("image", "image/png", b"\x89PNG\r\n\x1a\n",).is_none());
+        assert!(remote_media_content_error("image", "image/png", &minimal_png()).is_none());
+    }
+
+    #[test]
+    fn truncated_image_is_rejected_inside_the_retry_boundary() {
+        assert!(
+            remote_media_content_error("image", "image/png", b"\x89PNG\r\n\x1a\n")
+                .unwrap()
+                .contains("decodable image bytes")
+        );
     }
 
     #[test]
@@ -3317,5 +3722,328 @@ mod remote_media_tests {
             br#"{"page_url":"https://example.com/results/123"}"#,
         )
         .is_some());
+    }
+
+    #[test]
+    fn plain_text_body_with_image_content_type_is_rejected_without_echoing_body() {
+        let body = b"temporary upstream failure: private-token-value";
+        let error = remote_media_content_error("image", "image/png", body).unwrap();
+        assert!(error.contains("did not return image bytes"));
+        assert!(!error.contains("private-token-value"));
+    }
+
+    #[test]
+    fn only_system_route_allows_direct_fallback() {
+        assert!(route_allows_direct_fallback("system"));
+        assert!(!route_allows_direct_fallback("direct"));
+        assert!(!route_allows_direct_fallback("custom-proxy"));
+    }
+
+    #[test]
+    fn media_route_rejects_unknown_values_and_keeps_explicit_routes() {
+        for route in ["system", "direct", "custom-proxy"] {
+            let dto = MediaNetworkRouteDto {
+                route: route.to_string(),
+                custom_proxy_url: None,
+                configured_provider_origin: None,
+            };
+            assert_eq!(dto.route().unwrap(), route);
+        }
+        let invalid = MediaNetworkRouteDto {
+            route: "automatic".to_string(),
+            custom_proxy_url: None,
+            configured_provider_origin: None,
+        };
+        assert!(invalid.route().is_err());
+    }
+
+    #[test]
+    fn redirect_origin_drops_provider_headers_cross_origin() {
+        let provider = parse_remote_media_url("https://provider.example/v1/result").unwrap();
+        let same_origin =
+            parse_remote_media_url("https://provider.example/files/image.png").unwrap();
+        let cdn = parse_remote_media_url("https://cdn.example/image.png").unwrap();
+        let origin = url_origin(&provider);
+        assert!(should_forward_headers_to_url(&origin, &same_origin));
+        assert!(!should_forward_headers_to_url(&origin, &cdn));
+    }
+
+    #[test]
+    fn local_and_private_targets_are_detected() {
+        for value in [
+            "http://localhost/result.png",
+            "http://127.0.0.1/result.png",
+            "http://10.0.0.4/result.png",
+            "http://169.254.1.2/result.png",
+            "http://[::1]/result.png",
+            "http://[fd00::1]/result.png",
+            "http://[fe80::1]/result.png",
+            "http://[::ffff:127.0.0.1]/result.png",
+        ] {
+            assert!(host_is_local_or_private(
+                &parse_remote_media_url(value).unwrap()
+            ));
+        }
+        assert!(!host_is_local_or_private(
+            &parse_remote_media_url("https://cdn.example/result.png").unwrap()
+        ));
+        assert!(ip_is_local_or_private("::1".parse().unwrap()));
+        assert!(ip_is_local_or_private("fd12:3456::1".parse().unwrap()));
+        assert!(ip_is_local_or_private("fe80::1234".parse().unwrap()));
+        assert!(ip_is_local_or_private("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(!ip_is_local_or_private("::ffff:8.8.8.8".parse().unwrap()));
+        assert!(!ip_is_local_or_private(
+            "2606:4700:4700::1111".parse().unwrap()
+        ));
+    }
+
+    #[test]
+    fn remote_url_diagnostics_redact_query_credentials() {
+        let label = describe_remote_media_url(
+            "https://cdn.example/results/image.png?signature=secret&token=hidden",
+        );
+        assert_eq!(label, "cdn.example/image.png");
+        assert!(!label.contains("secret"));
+        assert!(!label.contains("token"));
+    }
+
+    #[test]
+    fn invalid_content_diagnostics_do_not_include_body_preview() {
+        let message =
+            describe_non_image_remote_body("application/json", br#"{"token":"private-value"}"#);
+        assert!(message.contains("application/json"));
+        assert!(!message.contains("private-value"));
+        assert!(!message.contains("Body preview"));
+    }
+
+    #[test]
+    fn image_and_video_downloads_have_separate_bounds() {
+        assert_eq!(media_byte_limit("image"), REMOTE_IMAGE_MAX_BYTES);
+        assert_eq!(media_byte_limit("video"), REMOTE_VIDEO_MAX_BYTES);
+        assert!(media_byte_limit("video") > media_byte_limit("image"));
+    }
+
+    #[test]
+    fn media_download_timeouts_scale_with_expected_payload_size() {
+        assert_eq!(
+            media_download_timeout("image"),
+            REMOTE_IMAGE_DOWNLOAD_TIMEOUT
+        );
+        assert_eq!(
+            media_download_timeout("audio"),
+            REMOTE_AUDIO_DOWNLOAD_TIMEOUT
+        );
+        assert_eq!(
+            media_download_timeout("video"),
+            REMOTE_VIDEO_DOWNLOAD_TIMEOUT
+        );
+        assert!(media_download_timeout("video") > media_download_timeout("audio"));
+        assert!(media_download_timeout("audio") > media_download_timeout("image"));
+    }
+
+    #[test]
+    fn media_retry_policy_keeps_429_on_route_and_retries_fallback_failures() {
+        let rate_limit = RemoteMediaAttemptFailure::Status {
+            message: "rate limited".to_string(),
+            retryable: true,
+            fallback_allowed: false,
+        };
+        assert!(rate_limit.retryable());
+        assert!(!rate_limit.fallback_allowed());
+
+        let server_failure = RemoteMediaAttemptFailure::Status {
+            message: "server unavailable".to_string(),
+            retryable: true,
+            fallback_allowed: true,
+        };
+        assert!(server_failure.retryable());
+        assert!(server_failure.fallback_allowed());
+
+        let invalid = RemoteMediaAttemptFailure::InvalidContent {
+            message: "transient invalid body".to_string(),
+        };
+        assert!(invalid.retryable());
+        assert!(invalid.fallback_allowed());
+
+        let oversized = RemoteMediaAttemptFailure::TooLarge {
+            message: "byte limit exceeded".to_string(),
+        };
+        assert!(!oversized.retryable());
+        assert!(!oversized.fallback_allowed());
+    }
+
+    #[tokio::test]
+    async fn actual_redirect_requests_keep_same_origin_headers_and_drop_cross_origin_headers() {
+        let same_origin_header_count = Arc::new(AtomicUsize::new(0));
+        let same_origin_header_count_for_server = Arc::clone(&same_origin_header_count);
+        let same_origin = spawn_http_fixture(move |request, _| {
+            if request.starts_with("GET /redirect ") {
+                return http_response("302 Found", &[("Location", "/result".to_string())], b"");
+            }
+            if request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer secret")
+            {
+                same_origin_header_count_for_server.fetch_add(1, Ordering::SeqCst);
+            }
+            http_response(
+                "200 OK",
+                &[("Content-Type", "image/png".to_string())],
+                &minimal_png(),
+            )
+        })
+        .await;
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer secret".to_string());
+        let client = build_remote_media_client(true).unwrap();
+        let same_download = try_remote_media_request_with_limit(
+            &client,
+            "direct",
+            &format!("{same_origin}/redirect"),
+            "image/*",
+            Some(&headers),
+            "image",
+            1,
+            Some(&same_origin),
+            32,
+        )
+        .await
+        .unwrap();
+        assert_eq!(same_download.bytes, minimal_png());
+        assert_eq!(same_origin_header_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn local_provider_cannot_redirect_to_a_different_local_origin() {
+        let redirect_target = spawn_http_fixture(|_request, _| {
+            http_response(
+                "200 OK",
+                &[("Content-Type", "image/png".to_string())],
+                &minimal_png(),
+            )
+        })
+        .await;
+        let redirect_target_for_server = redirect_target.clone();
+        let provider = spawn_http_fixture(move |_request, _| {
+            http_response(
+                "302 Found",
+                &[("Location", format!("{redirect_target_for_server}/result"))],
+                b"",
+            )
+        })
+        .await;
+        let client = build_remote_media_client(true).unwrap();
+        let failure = try_remote_media_request_with_limit(
+            &client,
+            "direct",
+            &format!("{provider}/redirect"),
+            "image/*",
+            None,
+            "image",
+            1,
+            Some(&provider),
+            32,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            failure,
+            RemoteMediaAttemptFailure::Status {
+                retryable: false,
+                fallback_allowed: false,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn actual_download_stream_stops_at_limit_and_retries_transient_results() {
+        let oversized = spawn_http_fixture(|_request, _| {
+            chunked_http_response(
+                "200 OK",
+                &[("Content-Type", "image/png".to_string())],
+                &[b"01234", b"56789"],
+            )
+        })
+        .await;
+        let client = build_remote_media_client(true).unwrap();
+        let oversized_failure = try_remote_media_request_with_limit(
+            &client,
+            "direct",
+            &format!("{oversized}/result"),
+            "image/*",
+            None,
+            "image",
+            1,
+            Some(&oversized),
+            8,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            oversized_failure,
+            RemoteMediaAttemptFailure::TooLarge { .. }
+        ));
+
+        let server_failures = Arc::new(AtomicUsize::new(0));
+        let server_failures_for_server = Arc::clone(&server_failures);
+        let retry_server = spawn_http_fixture(move |_request, request_number| {
+            server_failures_for_server.fetch_add(1, Ordering::SeqCst);
+            if request_number < 3 {
+                return http_response("503 Service Unavailable", &[], b"");
+            }
+            http_response(
+                "200 OK",
+                &[("Content-Type", "image/png".to_string())],
+                &minimal_png(),
+            )
+        })
+        .await;
+        try_remote_media_route(
+            &client,
+            "no-proxy",
+            &format!("{retry_server}/result"),
+            "image/*",
+            None,
+            "image",
+            Some(&retry_server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(server_failures.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn unconfigured_initial_local_target_is_rejected() {
+        let local = spawn_http_fixture(|_request, _| {
+            http_response(
+                "200 OK",
+                &[("Content-Type", "image/png".to_string())],
+                &minimal_png(),
+            )
+        })
+        .await;
+        let client = build_remote_media_client(true).unwrap();
+        let failure = try_remote_media_request_with_limit(
+            &client,
+            "direct",
+            &format!("{local}/result"),
+            "image/*",
+            None,
+            "image",
+            1,
+            Some("https://provider.example"),
+            32,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            failure,
+            RemoteMediaAttemptFailure::Status {
+                retryable: false,
+                fallback_allowed: false,
+                ..
+            }
+        ));
     }
 }

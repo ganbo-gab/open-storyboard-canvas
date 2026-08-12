@@ -133,6 +133,30 @@ export const OPENAI_VIDEO_PROVIDER_DEFAULTS = {
   statusEndpointPath: '/v1/videos/{taskId}',
 } as const;
 
+const AGNES_IMAGE_21_RESOLUTIONS = [
+  '1K',
+  '2K',
+  '3K',
+  '4K',
+  '1024x1024',
+  '1024x768',
+  '768x1024',
+  '2048x2048',
+  '2048x1152',
+  '1152x2048',
+  '4096x4096',
+  '3840x2160',
+  '2160x3840',
+  'auto',
+] as const;
+
+const AGNES_IMAGE_20_RESOLUTIONS = [
+  '1024x1024',
+  '1024x768',
+  '768x1024',
+  'auto',
+] as const;
+
 export const AGNES_PROVIDER_DEFAULTS = {
   baseUrl: 'https://apihub.agnes-ai.com/v1',
   imageEndpointPath: '/images/generations',
@@ -140,26 +164,18 @@ export const AGNES_PROVIDER_DEFAULTS = {
   videoStatusEndpointPath: '/videos/{taskId}',
   chatEndpointPath: '/chat/completions',
   modelListEndpointPath: '/models',
-  imageResolutions: [
-    '1k',
-    '2k',
-    '4k',
-    '1024x1024',
-    '1024x768',
-    '768x1024',
-    '2048x2048',
-    '2048x1152',
-    '1152x2048',
-    '4096x4096',
-    '3840x2160',
-    '2160x3840',
-    'auto',
-  ],
+  image21Resolutions: AGNES_IMAGE_21_RESOLUTIONS,
+  image20Resolutions: AGNES_IMAGE_20_RESOLUTIONS,
+  imageResolutions: Array.from(new Set([
+    ...AGNES_IMAGE_21_RESOLUTIONS,
+    ...AGNES_IMAGE_20_RESOLUTIONS,
+  ])),
   videoResolutions: ['1k', '2k', '1280x720', '720x1280', '1024x1024'],
   models: {
     image21Flash: 'agnes-image-2.1-flash',
     image20Flash: 'agnes-image-2.0-flash',
     video20: 'agnes-video-v2.0',
+    chat25Flash: 'agnes-2.5-flash',
     chat20Flash: 'agnes-2.0-flash',
     chat15Flash: 'agnes-1.5-flash',
   },

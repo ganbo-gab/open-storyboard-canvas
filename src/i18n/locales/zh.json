@@ -1527,6 +1527,32 @@
     "providers": "密钥",
     "providersDesc": "配置 AI 服务商的 API 密钥",
     "myConfigurations": "我的配置",
+    "agnes": {
+      "description": "独立管理 Agnes Key，用于 Agnes 图片、视频和对话模型。保存只会存储密钥；验证会另外发起一次免费的模型列表请求。",
+      "keyLabel": "Agnes Key",
+      "keyPlaceholder": "输入 Agnes API Key",
+      "save": "保存",
+      "saved": "已保存 Agnes Key（未验证）",
+      "verify": "验证 Key",
+      "verifying": "验证中...",
+      "verifySuccess": "Key 验证成功，Agnes 返回了 {{count}} 个模型。",
+      "verifyFailed": "Key 验证失败。",
+      "verifyErrors": {
+        "authentication": "Agnes Key 未填写、无效或已过期。",
+        "authorization": "Agnes 账号或当前套餐无权访问模型列表。",
+        "rate-limit": "Agnes 正在限流，请稍后再验证。",
+        "network": "模型列表请求失败。请检查当前系统/直连/自定义代理路线、代理地址、DNS、TLS 和网络连接。",
+        "response-shape": "Agnes 已成功响应，但返回的模型列表格式无法识别。"
+      },
+      "chatNote": "Agnes 2.5 Flash 是当前主要的内置对话选项；Agnes 2.0 和 1.5 仍保留给历史工程使用。",
+      "docs": {
+        "chat25": "当前多模态对话模型，支持流式、工具调用和 thinking。",
+        "chatLegacy": "为历史工程保留的多模态对话模型。",
+        "image21": "当前图片模型，使用 1K-4K 档位和独立比例。",
+        "image20": "为兼容保留的旧版图片与多参考模型。",
+        "video20": "支持文生、图生、多参考和关键帧模式的视频生成模型。"
+      }
+    },
     "dreamina": {
       "title": "Dreamina 即梦",
       "description": "使用本机 Dreamina CLI 的 OAuth 登录态，无需在应用中保存 API Key。账号、积分与 session 分开检测，单项故障不会掩盖其他可用能力。",

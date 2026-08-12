@@ -11,9 +11,9 @@ import {
 } from '@/commands/ai';
 import { isTauri } from '@tauri-apps/api/core';
 import {
-  prepareNodeImageSource,
   prepareNodeImageSourceWithHeaders,
   persistVideoSource,
+  type MediaNetworkRoute,
 } from '@/commands/image';
 import {
   AGNES_PROVIDER_DEFAULTS,
@@ -511,10 +511,20 @@ function buildAgnesProviderConfig(mediaType: 'image' | 'video' | 'chat', apiKey:
       httpMethod: 'POST',
       apiKey,
       apiStyle: 'openai-compatible',
-      models: [AGNES_PROVIDER_DEFAULTS.models.chat20Flash, AGNES_PROVIDER_DEFAULTS.models.chat15Flash],
+      models: [
+        AGNES_PROVIDER_DEFAULTS.models.chat25Flash,
+        AGNES_PROVIDER_DEFAULTS.models.chat20Flash,
+        AGNES_PROVIDER_DEFAULTS.models.chat15Flash,
+      ],
       supportsWebSearch: false,
       responseFormat: 'generic',
       modelMetadata: {
+        [AGNES_PROVIDER_DEFAULTS.models.chat25Flash]: {
+          supportsMultimodal: true,
+          contextWindow: 256000,
+          maxOutputTokens: 65500,
+          description: 'Agnes 2.5 Flash multimodal chat model',
+        },
         [AGNES_PROVIDER_DEFAULTS.models.chat20Flash]: {
           supportsMultimodal: true,
           contextWindow: 256000,
@@ -876,6 +886,11 @@ const AGNES_IMAGE_SIZE_BY_TIER: Record<'1k' | '2k' | '4k', Record<string, string
 function resolveAgnesImageSize(cfg: CustomProviderConfig, request: GenerateRequest): string {
   const selectedResolution = request.extra_params?.resolutionType ?? request.size;
   if (isPixelSize(selectedResolution)) return selectedResolution.trim();
+  const selectedToken = typeof selectedResolution === 'string' ? selectedResolution.trim().toLowerCase() : '';
+  if (request.model.endsWith(`:${AGNES_PROVIDER_DEFAULTS.models.image21Flash}`)) {
+    if (selectedToken === 'auto') return '1K';
+    if (/^[1234]k$/.test(selectedToken)) return selectedToken.toUpperCase();
+  }
   const tier = normalizeResolutionTier(selectedResolution);
   if (tier === 'auto') {
     return AGNES_IMAGE_SIZE_BY_TIER['1k'][normalizeRatioKey(request.aspect_ratio)]
@@ -966,6 +981,11 @@ function buildAgnesImageRequestBody(
     model: modelName,
     prompt: request.prompt,
     size,
+    ...(modelName === AGNES_PROVIDER_DEFAULTS.models.image21Flash
+      && request.aspect_ratio?.trim()
+      && request.aspect_ratio !== 'auto'
+      ? { ratio: request.aspect_ratio.trim() }
+      : {}),
     n: 1,
   });
 }
@@ -3218,7 +3238,7 @@ async function runCustomProviderJob(
     let aspectWarning: string | null = null;
     try {
       const materializeStartedAt = Date.now();
-      const materialized = await materializeGeneratedImageSourceDetails(cfg, imageUrl);
+      const materialized = await materializeGeneratedImageSourceDetails(cfg, imageUrl, network);
       preparedImageSource = materialized.imageSource;
       aspectWarning = formatImageAspectDiagnostic(
         request.aspect_ratio === 'auto' ? request.size : request.aspect_ratio,
@@ -3419,6 +3439,7 @@ export async function detectInlineImageAspectRatio(source: string): Promise<stri
 async function materializeGeneratedImageSourceDetails(
   cfg: CustomProviderConfig,
   imageSource: string,
+  network?: Readonly<GenerationNetworkSettings>,
 ): Promise<MaterializedGeneratedImageSource> {
   if (!isRemoteHttpImageSource(imageSource)) {
     return {
@@ -3427,50 +3448,57 @@ async function materializeGeneratedImageSourceDetails(
     };
   }
 
+  const authHeaders = buildAuthenticatedImageFetchHeaders(cfg);
+  const route = buildMediaNetworkRoute(cfg, network);
+  const mayForwardCredentials = shouldForwardProviderCredentials(cfg.baseUrl, imageSource);
+  const safeHeaders = mayForwardCredentials ? authHeaders : {};
+  const auth = resolveCustomProviderAuth(cfg);
+  const authenticatedImageSource = auth.mode === 'query' && cfg.apiKey.trim() && mayForwardCredentials
+    ? appendQueryParams(imageSource, {
+      [auth.name]: configuredApiKeyValue(cfg, auth.prefix),
+    })
+    : imageSource;
   try {
-    const prepared = await prepareNodeImageSource(imageSource);
+    const prepared = await prepareNodeImageSourceWithHeaders(
+      authenticatedImageSource,
+      safeHeaders,
+      512,
+      route,
+    );
     return { imageSource: prepared.imagePath, aspectRatio: prepared.aspectRatio };
-  } catch (publicError) {
-    const authHeaders = buildAuthenticatedImageFetchHeaders(cfg);
-    const auth = resolveCustomProviderAuth(cfg);
-    const authenticatedImageSource = auth.mode === 'query' && cfg.apiKey.trim()
-      ? appendQueryParams(imageSource, {
-        [auth.name]: configuredApiKeyValue(cfg, auth.prefix),
-      })
-      : imageSource;
-    const mayForwardCredentials = shouldForwardProviderCredentials(cfg.baseUrl, imageSource);
-    const hasAuthenticatedRetry = Object.keys(authHeaders).length > 0
-      || authenticatedImageSource !== imageSource;
-    if (!hasAuthenticatedRetry || !mayForwardCredentials) {
-      throw new Error(
-        [
-          '已获取到生成结果地址，但图片下载或解析失败。',
-          `无鉴权下载：${formatUnknownError(publicError)}`,
-          !mayForwardCredentials ? '结果地址与服务商不同源，未转发 Authorization/Cookie 以避免凭据泄露。' : '',
-        ].filter(Boolean).join('\n')
-      );
-    }
-
-    try {
-      const prepared = await prepareNodeImageSourceWithHeaders(authenticatedImageSource, authHeaders);
-      return { imageSource: prepared.imagePath, aspectRatio: prepared.aspectRatio };
-    } catch (authenticatedError) {
-      throw new Error(
-        [
-          '已获取到生成结果地址，但图片下载或解析失败。',
-          `无鉴权下载：${formatUnknownError(publicError)}`,
-          `带服务商鉴权下载：${formatUnknownError(authenticatedError)}`,
-        ].join('\n')
-      );
-    }
+  } catch (materializeError) {
+    throw new Error([
+      '已获取到生成结果地址，但图片下载或解析失败。',
+      formatUnknownError(materializeError),
+      !mayForwardCredentials ? '结果地址与服务商不同源，未转发 Authorization/Cookie。' : '',
+    ].filter(Boolean).join('\n'));
   }
+}
+
+function buildMediaNetworkRoute(
+  cfg: CustomProviderConfig,
+  network?: Readonly<GenerationNetworkSettings>,
+): MediaNetworkRoute {
+  const selected = network ?? useSettingsStore.getState().generationNetworkSettings;
+  let configuredProviderOrigin: string | undefined;
+  try {
+    configuredProviderOrigin = new URL(normalizeProviderBaseUrl(cfg.baseUrl)).origin;
+  } catch {
+    configuredProviderOrigin = undefined;
+  }
+  return {
+    route: selected.route,
+    ...(selected.route === 'custom-proxy' ? { customProxyUrl: selected.customProxyUrl } : {}),
+    ...(configuredProviderOrigin ? { configuredProviderOrigin } : {}),
+  };
 }
 
 async function materializeGeneratedImageSource(
   cfg: CustomProviderConfig,
   imageSource: string,
+  network?: Readonly<GenerationNetworkSettings>,
 ): Promise<string> {
-  return (await materializeGeneratedImageSourceDetails(cfg, imageSource)).imageSource;
+  return (await materializeGeneratedImageSourceDetails(cfg, imageSource, network)).imageSource;
 }
 
 function aspectRatioParts(value: string | undefined): { width: number; height: number } | null {
@@ -4513,31 +4541,33 @@ async function pollGeneratedVideoTask(
 async function materializeGeneratedVideoSource(
   cfg: CustomProviderConfig,
   videoSource: string,
+  network?: Readonly<GenerationNetworkSettings>,
 ): Promise<string> {
   const authHeaders = buildAuthenticatedImageFetchHeaders(cfg);
+  const route = buildMediaNetworkRoute(cfg, network);
   if (!isRemoteHttpSource(videoSource)) {
-    return await persistVideoSource(videoSource, Object.keys(authHeaders).length > 0 ? authHeaders : undefined);
+    return await persistVideoSource(videoSource, Object.keys(authHeaders).length > 0 ? authHeaders : undefined, route);
   }
 
+  const mayForwardCredentials = shouldForwardProviderCredentials(cfg.baseUrl, videoSource);
+  const auth = resolveCustomProviderAuth(cfg);
+  const authenticatedVideoSource = auth.mode === 'query' && cfg.apiKey.trim() && mayForwardCredentials
+    ? appendQueryParams(videoSource, {
+      [auth.name]: configuredApiKeyValue(cfg, auth.prefix),
+    })
+    : videoSource;
   try {
-    return await persistVideoSource(videoSource);
-  } catch (publicError) {
-    if (Object.keys(authHeaders).length === 0) {
-      throw new Error(
-        `已获取到生成视频地址，但视频下载或解析失败：${formatUnknownError(publicError)}`
-      );
-    }
-    try {
-      return await persistVideoSource(videoSource, authHeaders);
-    } catch (authenticatedError) {
-      throw new Error(
-        [
-          '已获取到生成视频地址，但视频下载或解析失败。',
-          `无鉴权下载：${formatUnknownError(publicError)}`,
-          `带服务商鉴权下载：${formatUnknownError(authenticatedError)}`,
-        ].join('\n')
-      );
-    }
+    return await persistVideoSource(
+      authenticatedVideoSource,
+      mayForwardCredentials ? authHeaders : undefined,
+      route,
+    );
+  } catch (materializeError) {
+    throw new Error([
+      '已获取到生成视频地址，但视频下载或解析失败。',
+      formatUnknownError(materializeError),
+      !mayForwardCredentials ? '结果地址与服务商不同源，未转发 Authorization/Cookie。' : '',
+    ].filter(Boolean).join('\n'));
   }
 }
 
@@ -4635,7 +4665,7 @@ async function runCustomVideoJob(
     }
     let preparedVideoSource: string;
     try {
-      preparedVideoSource = await materializeGeneratedVideoSource(cfg, videoSource);
+      preparedVideoSource = await materializeGeneratedVideoSource(cfg, videoSource, network);
     } catch (materializeError) {
       const retrySource = asLightweightRetryResultSource(videoSource);
       updateCachedJob(jobId, {
@@ -4736,7 +4766,11 @@ async function retryCustomVideoPoll(jobId: string, retryContext: VideoPollRetryC
     );
     let preparedVideoSource: string;
     try {
-      preparedVideoSource = await materializeGeneratedVideoSource(retryContext.cfg, videoSource);
+      preparedVideoSource = await materializeGeneratedVideoSource(
+        retryContext.cfg,
+        videoSource,
+        retryContext.network,
+      );
     } catch (materializeError) {
       const retrySource = asLightweightRetryResultSource(videoSource);
       updateCachedJob(jobId, {
@@ -5501,10 +5535,18 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<void
       }
       return;
     }
-    const cfg = useCustomProvidersStore.getState().providers.find(
+    const savedProvider = useCustomProvidersStore.getState().providers.find(
       (provider) => provider.id === job.provider_id
     );
     const model = job.model_id?.trim() ?? '';
+    const agnesKey = useSettingsStore.getState().agnesApiKey.trim();
+    const cfg = savedProvider ?? (
+      job.provider_id === 'agnes'
+      && agnesKey
+      && (job.media_type === 'image' || job.media_type === 'video')
+        ? buildAgnesProviderConfig(job.media_type, agnesKey)
+        : undefined
+    );
     if (!cfg || !model) {
       throw new Error('恢复任务需要原供应商配置和模型；当前配置已删除或模型标识缺失。');
     }
@@ -5554,8 +5596,8 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<void
     });
 
     const result = job.media_type === 'video'
-      ? await materializeGeneratedVideoSource(cfg, remoteSource)
-      : (await materializeGeneratedImageSourceDetails(cfg, remoteSource)).imageSource;
+      ? await materializeGeneratedVideoSource(cfg, remoteSource, network)
+      : (await materializeGeneratedImageSourceDetails(cfg, remoteSource, network)).imageSource;
     if (!(await persistRecoveryJobUpdate(job.job_id, {
       status: 'succeeded',
       phase: 'materialize',
@@ -5660,6 +5702,14 @@ export interface CustomProviderModelListResult {
   rawPreview?: string;
 }
 
+export interface AgnesKeyVerificationResult {
+  ok: boolean;
+  status?: number;
+  modelCount?: number;
+  category?: 'authentication' | 'authorization' | 'rate-limit' | 'network' | 'response-shape';
+  errorMessage?: string;
+}
+
 function extractModelIds(payload: unknown): string[] {
   const ids = new Set<string>();
   const pushString = (value: unknown) => {
@@ -5733,6 +5783,52 @@ export async function fetchCustomProviderModels(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, models: [], errorMessage: `请求失败：${msg}` };
+  }
+}
+
+export async function verifyAgnesKey(
+  apiKey: string,
+  network: Readonly<GenerationNetworkSettings> = useSettingsStore.getState().generationNetworkSettings,
+): Promise<AgnesKeyVerificationResult> {
+  const trimmedKey = apiKey.trim();
+  if (!trimmedKey) {
+    return { ok: false, category: 'authentication', errorMessage: '请先输入 Agnes Key。' };
+  }
+  const cfg = buildAgnesProviderConfig('chat', trimmedKey);
+  try {
+    const { status, parsed } = await requestJson(resolveModelListUrl(cfg), {
+      method: 'GET',
+      headers: buildChatRequestHeaders(cfg, 'GET'),
+      timeoutMs: 20000,
+      network,
+    });
+    const models = extractModelIds(parsed);
+    if (models.length === 0) {
+      return {
+        ok: false,
+        status,
+        category: 'response-shape',
+        errorMessage: 'Agnes 已响应，但模型列表格式无法识别。',
+      };
+    }
+    return { ok: true, status, modelCount: models.length };
+  } catch (error) {
+    if (error instanceof HttpStatusError) {
+      if (error.status === 401) {
+        return { ok: false, status: 401, category: 'authentication', errorMessage: 'Agnes Key 无效或已过期。' };
+      }
+      if (error.status === 403) {
+        return { ok: false, status: 403, category: 'authorization', errorMessage: 'Agnes 账号或当前套餐无权访问模型列表。' };
+      }
+      if (error.status === 429) {
+        return { ok: false, status: 429, category: 'rate-limit', errorMessage: 'Agnes 请求受限，请稍后再验证。' };
+      }
+    }
+    return {
+      ok: false,
+      category: 'network',
+      errorMessage: formatUnknownError(error),
+    };
   }
 }
 

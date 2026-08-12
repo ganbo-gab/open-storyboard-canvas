@@ -114,6 +114,7 @@ export function buildChatModelCatalog(
 
   if (agnesApiKey.trim()) {
     for (const [modelId, label] of [
+      [AGNES_PROVIDER_DEFAULTS.models.chat25Flash, 'Agnes 2.5 Flash'],
       [AGNES_PROVIDER_DEFAULTS.models.chat20Flash, 'Agnes 2.0 Flash'],
       [AGNES_PROVIDER_DEFAULTS.models.chat15Flash, 'Agnes 1.5 Flash'],
     ] as const) {

@@ -4,11 +4,15 @@ const {
   customHttpRequestMock,
   createGenerationJobMock,
   getGenerationJobRecordMock,
+  persistVideoSourceMock,
+  prepareNodeImageSourceWithHeadersMock,
   updateGenerationJobMock,
 } = vi.hoisted(() => ({
   customHttpRequestMock: vi.fn(),
   createGenerationJobMock: vi.fn(),
   getGenerationJobRecordMock: vi.fn(),
+  persistVideoSourceMock: vi.fn(),
+  prepareNodeImageSourceWithHeadersMock: vi.fn(),
   updateGenerationJobMock: vi.fn(),
 }));
 
@@ -20,6 +24,15 @@ vi.mock('@/commands/ai', async (importOriginal) => {
     createGenerationJob: createGenerationJobMock,
     getGenerationJobRecord: getGenerationJobRecordMock,
     updateGenerationJob: updateGenerationJobMock,
+  };
+});
+
+vi.mock('@/commands/image', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/commands/image')>();
+  return {
+    ...actual,
+    persistVideoSource: persistVideoSourceMock,
+    prepareNodeImageSourceWithHeaders: prepareNodeImageSourceWithHeadersMock,
   };
 });
 
@@ -41,6 +54,7 @@ import {
   summarizeMaterializedSourceForLog,
   submitCustomProviderJob,
   submitCustomVideoJob,
+  verifyAgnesKey,
 } from './customProviderGateway';
 
 const storageValues = new Map<string, string>();
@@ -79,11 +93,14 @@ afterEach(() => {
   delete (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri;
   useCustomProvidersStore.getState().replaceAll([]);
   useSettingsStore.getState().setGenerationNetworkSettings(DEFAULT_GENERATION_NETWORK_SETTINGS);
+  useSettingsStore.getState().setAgnesApiKey('');
   storageValues.clear();
   customHttpRequestMock.mockReset();
   createGenerationJobMock.mockReset();
   createGenerationJobMock.mockResolvedValue(undefined);
   getGenerationJobRecordMock.mockReset();
+  persistVideoSourceMock.mockReset();
+  prepareNodeImageSourceWithHeadersMock.mockReset();
   updateGenerationJobMock.mockReset();
   updateGenerationJobMock.mockResolvedValue(undefined);
 });
@@ -142,6 +159,119 @@ describe('custom provider submission safety', () => {
     expect(customHttpRequestMock).toHaveBeenCalledTimes(1);
     expect(job.status).toBe('unknown');
     expect(job.error).toContain('为避免重复计费未自动重试');
+  });
+
+  it('propagates the captured custom-proxy route into remote image materialization', async () => {
+    useSettingsStore.getState().setGenerationNetworkSettings({
+      route: 'custom-proxy',
+      customProxyUrl: 'http://127.0.0.1:7890',
+    });
+    useCustomProvidersStore.getState().replaceAll([provider()]);
+    customHttpRequestMock.mockImplementationOnce(() => response(200, {
+      data: [{ url: 'https://example.com/v1/result.png?signature=private' }],
+    }));
+    prepareNodeImageSourceWithHeadersMock.mockResolvedValueOnce({
+      imagePath: '/local/result.png',
+      previewImagePath: '/local/result.preview.png',
+      aspectRatio: '1:1',
+    });
+
+    const job = await waitForTerminalJob(await submitCustomProviderJob({
+      prompt: 'draw',
+      model: 'custom:provider-1:gpt-image-2',
+      size: '1024x1024',
+      aspect_ratio: '1:1',
+    }));
+
+    expect(job).toMatchObject({ status: 'succeeded', result: '/local/result.png' });
+    expect(customHttpRequestMock).toHaveBeenCalledTimes(1);
+    expect(prepareNodeImageSourceWithHeadersMock).toHaveBeenCalledWith(
+      'https://example.com/v1/result.png?signature=private',
+      expect.objectContaining({ Authorization: 'Bearer secret' }),
+      512,
+      {
+        route: 'custom-proxy',
+        customProxyUrl: 'http://127.0.0.1:7890',
+        configuredProviderOrigin: 'https://example.com',
+      },
+    );
+  });
+
+  it('propagates the captured direct route into remote video materialization', async () => {
+    useSettingsStore.getState().setGenerationNetworkSettings({ route: 'direct', customProxyUrl: '' });
+    useCustomProvidersStore.getState().replaceAll([provider({
+      mediaType: 'video',
+      endpointPath: '/videos',
+      models: ['video-model'],
+      extraParams: { requestBodyMode: 'json' },
+    })]);
+    customHttpRequestMock.mockImplementationOnce(() => response(200, {
+      video_url: 'https://cdn.example/video.mp4',
+    }));
+    persistVideoSourceMock.mockResolvedValueOnce('/local/video.mp4');
+
+    const job = await waitForTerminalJob(await submitCustomVideoJob({
+      prompt: 'animate',
+      model: 'custom:provider-1:video-model',
+      size: '1280x720',
+      aspect_ratio: '16:9',
+    }));
+
+    expect(job).toMatchObject({ status: 'succeeded', result: '/local/video.mp4' });
+    expect(customHttpRequestMock).toHaveBeenCalledTimes(1);
+    expect(persistVideoSourceMock).toHaveBeenCalledWith(
+      'https://cdn.example/video.mp4',
+      undefined,
+      { route: 'direct', configuredProviderOrigin: 'https://example.com' },
+    );
+  });
+
+  it('forwards query authentication only to a same-origin video result', async () => {
+    useCustomProvidersStore.getState().replaceAll([provider({
+      mediaType: 'video',
+      endpointPath: '/videos',
+      models: ['video-model'],
+      extraParams: {
+        requestBodyMode: 'json',
+        auth: { mode: 'query', name: 'access_token' },
+      },
+    })]);
+    customHttpRequestMock.mockImplementationOnce(() => response(200, {
+      video_url: 'https://example.com/v1/video.mp4?download=1',
+    }));
+    persistVideoSourceMock.mockResolvedValueOnce('/local/video.mp4');
+
+    const sameOriginJob = await waitForTerminalJob(await submitCustomVideoJob({
+      prompt: 'animate',
+      model: 'custom:provider-1:video-model',
+      size: '1280x720',
+      aspect_ratio: '16:9',
+    }));
+
+    expect(sameOriginJob.status).toBe('succeeded');
+    expect(persistVideoSourceMock).toHaveBeenLastCalledWith(
+      'https://example.com/v1/video.mp4?download=1&access_token=secret',
+      {},
+      { route: 'system', configuredProviderOrigin: 'https://example.com' },
+    );
+
+    customHttpRequestMock.mockImplementationOnce(() => response(200, {
+      video_url: 'https://cdn.example/video.mp4?download=1',
+    }));
+    persistVideoSourceMock.mockResolvedValueOnce('/local/cdn-video.mp4');
+    const crossOriginJob = await waitForTerminalJob(await submitCustomVideoJob({
+      prompt: 'animate again',
+      model: 'custom:provider-1:video-model',
+      size: '1280x720',
+      aspect_ratio: '16:9',
+    }));
+
+    expect(crossOriginJob.status).toBe('succeeded');
+    expect(persistVideoSourceMock).toHaveBeenLastCalledWith(
+      'https://cdn.example/video.mp4?download=1',
+      undefined,
+      { route: 'system', configuredProviderOrigin: 'https://example.com' },
+    );
   });
 
   it.each(['image', 'video'] as const)(
@@ -221,6 +351,47 @@ describe('custom provider submission safety', () => {
       jobId: 'custom-local-restored-image',
       status: 'succeeded',
     }));
+  });
+
+  it('recovers an Agnes materialize-only job from the dedicated saved key', async () => {
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
+    useSettingsStore.getState().setAgnesApiKey('agnes-secret');
+    useSettingsStore.getState().setGenerationNetworkSettings({
+      route: 'custom-proxy',
+      customProxyUrl: 'http://127.0.0.1:7890',
+    });
+    getGenerationJobRecordMock.mockResolvedValueOnce({
+      job_id: 'agnes-restored-image',
+      status: 'recoverable_wait',
+      result: null,
+      result_url: 'https://apihub.agnes-ai.com/v1/results/image.png',
+      error: 'previous materialize failed',
+      media_type: 'image',
+      provider_id: 'agnes',
+      model_id: 'agnes-image-2.1-flash',
+      network_route: 'custom-proxy',
+    });
+    prepareNodeImageSourceWithHeadersMock.mockResolvedValueOnce({
+      imagePath: '/local/agnes.png',
+      previewImagePath: '/local/agnes.preview.png',
+      aspectRatio: '1:1',
+    });
+
+    await getCustomProviderJobAsync('agnes-restored-image');
+    const job = await waitForTerminalJob('agnes-restored-image');
+
+    expect(job).toMatchObject({ status: 'succeeded', result: '/local/agnes.png' });
+    expect(customHttpRequestMock).not.toHaveBeenCalled();
+    expect(prepareNodeImageSourceWithHeadersMock).toHaveBeenCalledWith(
+      'https://apihub.agnes-ai.com/v1/results/image.png',
+      { Authorization: 'Bearer agnes-secret' },
+      512,
+      {
+        route: 'custom-proxy',
+        customProxyUrl: 'http://127.0.0.1:7890',
+        configuredProviderOrigin: 'https://apihub.agnes-ai.com',
+      },
+    );
   });
 
   it('does not publish recovered success before critical state is persisted', async () => {
@@ -346,6 +517,53 @@ describe('custom provider submission safety', () => {
 });
 
 describe('custom provider image request contracts', () => {
+  it.each(['1K', '2K', '3K', '4K'])(
+    'keeps Agnes Image 2.1 symbolic %s and sends ratio at the top level',
+    (tier) => {
+      useSettingsStore.getState().setAgnesApiKey('agnes-secret');
+      const preview = buildCustomProviderRequestDebugPreview({
+        prompt: 'wide establishing shot',
+        model: 'agnes:image:agnes-image-2.1-flash',
+        size: tier,
+        aspect_ratio: '16:9',
+        extra_params: { resolutionType: tier },
+      });
+
+      expect(preview.body).toEqual(expect.objectContaining({
+        model: 'agnes-image-2.1-flash',
+        prompt: 'wide establishing shot',
+        size: tier,
+        ratio: '16:9',
+        n: 1,
+        return_base64: true,
+      }));
+    },
+  );
+
+  it('keeps Agnes Image 2.1 explicit legacy pixels and documented reference shape', () => {
+    useSettingsStore.getState().setAgnesApiKey('agnes-secret');
+    const reference = `data:image/png;base64,${'a'.repeat(400)}`;
+    const preview = buildCustomProviderRequestDebugPreview({
+      prompt: 'preserve identity',
+      model: 'agnes:image:agnes-image-2.1-flash',
+      size: '2048x1152',
+      aspect_ratio: '16:9',
+      reference_images: [reference],
+    });
+
+    expect(preview.body).toEqual(expect.objectContaining({
+      model: 'agnes-image-2.1-flash',
+      size: '2048x1152',
+      ratio: '16:9',
+      extra_body: {
+        image: [expect.stringMatching(/^data:image\/png;base64,\[base64 \d+ chars\]$/)],
+        response_format: 'b64_json',
+      },
+    }));
+    expect(JSON.stringify(preview)).not.toContain('agnes-secret');
+    expect(JSON.stringify(preview)).not.toContain('aaaa');
+  });
+
   it('sends an API key through a configured custom header without Bearer auth', async () => {
     useCustomProvidersStore.getState().replaceAll([provider({
       extraParams: { auth: { mode: 'header', name: 'X-API-Key', prefix: 'Token' } },
@@ -1171,6 +1389,48 @@ describe('custom provider image request contracts', () => {
     expect(job.error).toContain('[data-url omitted]');
     expect(job.error).not.toContain('top-secret');
     expect(job.error).not.toContain(secretBase64);
+  });
+});
+
+describe('Agnes key verification', () => {
+  it('uses the non-generation model-list endpoint and selected route', async () => {
+    customHttpRequestMock.mockImplementationOnce(() => response(200, {
+      data: [{ id: 'agnes-2.5-flash' }, { id: 'agnes-image-2.1-flash' }],
+    }));
+
+    const result = await verifyAgnesKey('  agnes-secret  ', {
+      route: 'custom-proxy',
+      customProxyUrl: 'http://127.0.0.1:7890',
+    });
+
+    expect(result).toMatchObject({ ok: true, status: 200, modelCount: 2 });
+    expect(customHttpRequestMock).toHaveBeenCalledTimes(1);
+    expect(customHttpRequestMock.mock.calls[0][0]).toMatchObject({
+      method: 'GET',
+      url: 'https://apihub.agnes-ai.com/v1/models',
+      networkRoute: 'custom-proxy',
+      customProxyUrl: 'http://127.0.0.1:7890',
+      headers: { Authorization: 'Bearer agnes-secret' },
+    });
+  });
+
+  it.each([
+    [401, 'authentication'],
+    [403, 'authorization'],
+    [429, 'rate-limit'],
+  ] as const)('classifies Agnes HTTP %s verification failures', async (status, category) => {
+    customHttpRequestMock.mockImplementationOnce(() => response(status, { error: 'rejected' }));
+    const result = await verifyAgnesKey('agnes-secret');
+    expect(result).toMatchObject({ ok: false, status, category });
+  });
+
+  it('rejects an unrecognized successful response shape', async () => {
+    customHttpRequestMock.mockImplementationOnce(() => response(200, { ok: true }));
+    expect(await verifyAgnesKey('agnes-secret')).toMatchObject({
+      ok: false,
+      status: 200,
+      category: 'response-shape',
+    });
   });
 });
 

@@ -59,6 +59,12 @@ export interface PrepareNodeImageSourceResult {
   aspectRatio: string;
 }
 
+export interface MediaNetworkRoute {
+  route: 'system' | 'direct' | 'custom-proxy';
+  customProxyUrl?: string;
+  configuredProviderOrigin?: string;
+}
+
 export interface RenameLocalMediaFilesPayload {
   primaryPath: string;
   previewPath?: string;
@@ -137,12 +143,14 @@ export async function prepareNodeImageSource(
 export async function prepareNodeImageSourceWithHeaders(
   source: string,
   headers: Record<string, string>,
-  maxPreviewDimension = 512
+  maxPreviewDimension = 512,
+  network?: MediaNetworkRoute,
 ): Promise<PrepareNodeImageSourceResult> {
   return await invoke('prepare_node_image_source_with_headers', {
     source,
     headers,
     maxPreviewDimension,
+    network,
   });
 }
 
@@ -176,9 +184,10 @@ export async function persistImageSource(source: string): Promise<string> {
 
 export async function persistVideoSource(
   source: string,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  network?: MediaNetworkRoute,
 ): Promise<string> {
-  return await invoke('persist_video_source', { source, headers });
+  return await invoke('persist_video_source', { source, headers, network });
 }
 
 export async function persistImageBinary(

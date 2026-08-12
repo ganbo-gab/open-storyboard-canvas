@@ -98,6 +98,15 @@ fn direct_http_client() -> &'static reqwest::Client {
     })
 }
 
+pub(crate) fn validated_custom_proxy(raw_url: &str) -> Result<reqwest::Proxy, String> {
+    let parsed = reqwest::Url::parse(raw_url)
+        .map_err(|_| "customProxyUrl must be a valid HTTP or HTTPS URL".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("customProxyUrl must use http:// or https:// and include a host".to_string());
+    }
+    reqwest::Proxy::all(parsed).map_err(|_| "customProxyUrl could not be configured".to_string())
+}
+
 fn client_for_route(
     route: Option<&str>,
     custom_proxy_url: Option<&str>,
@@ -110,15 +119,7 @@ fn client_for_route(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| "custom-proxy route requires customProxyUrl".to_string())?;
-            let parsed = reqwest::Url::parse(raw_url)
-                .map_err(|_| "customProxyUrl must be a valid HTTP or HTTPS URL".to_string())?;
-            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-                return Err(
-                    "customProxyUrl must use http:// or https:// and include a host".to_string(),
-                );
-            }
-            let proxy = reqwest::Proxy::all(parsed)
-                .map_err(|_| "customProxyUrl could not be configured".to_string())?;
+            let proxy = validated_custom_proxy(raw_url)?;
             reqwest::Client::builder()
                 .proxy(proxy)
                 .pool_idle_timeout(Duration::from_secs(90))
