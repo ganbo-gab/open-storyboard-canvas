@@ -18,26 +18,41 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 const MAIN_WINDOW_LABEL: &str = "main";
 const FRONTEND_READY_TIMEOUT_MS: u64 = 3_500;
 
+fn build_file_appender(
+    log_dir: &std::path::Path,
+) -> Result<tracing_appender::rolling::RollingFileAppender, tracing_appender::rolling::InitError> {
+    tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("storyboard.log")
+        .build(log_dir)
+}
+
 fn setup_logging() {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "info,open_storyboard_canvas=debug".into());
 
     if let Some(log_dir) = diagnostic_log::resolve_log_dir() {
-        let file_appender = tracing_appender::rolling::daily(log_dir, "storyboard.log");
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-        std::mem::forget(_guard);
-
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(tracing_subscriber::fmt::layer().with_writer(non_blocking))
-            .init();
-    } else {
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(tracing_subscriber::fmt::layer())
-            .init();
+        match build_file_appender(&log_dir) {
+            Ok(file_appender) => {
+                let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+                std::mem::forget(guard);
+                tracing_subscriber::registry()
+                    .with(env_filter)
+                    .with(tracing_subscriber::fmt::layer().with_writer(non_blocking))
+                    .init();
+                info!("Open Storyboard Canvas starting...");
+                return;
+            }
+            Err(error) => {
+                eprintln!("file logging is unavailable; using stderr diagnostics: {error}");
+            }
+        }
     }
 
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .init();
     info!("Open Storyboard Canvas starting...");
 }
 
@@ -79,8 +94,14 @@ pub fn run() {
             show_main_window(&window.app_handle());
         })
         .setup(|app| {
-            app.state::<external_agent::ExternalAgentState>()
-                .start_broker(app.handle().clone())?;
+            if let Err(error) = app
+                .state::<external_agent::ExternalAgentState>()
+                .start_broker(app.handle().clone())
+            {
+                warn!(
+                    "external Agent broker is unavailable; Codex and Claude runtimes are disabled: {error}"
+                );
+            }
 
             let window_config = app
                 .config()
@@ -228,4 +249,18 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_file_appender;
+
+    #[test]
+    fn file_logging_initialization_failure_is_recoverable() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let not_a_directory = directory.path().join("occupied");
+        std::fs::write(&not_a_directory, b"file").expect("write occupied path");
+
+        assert!(build_file_appender(&not_a_directory).is_err());
+    }
 }

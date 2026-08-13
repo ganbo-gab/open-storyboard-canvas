@@ -36,6 +36,16 @@ pub(crate) fn bind_broker_listener() -> Result<(StdTcpListener, SocketAddr), Str
     Ok((listener, address))
 }
 
+fn into_async_listener(listener: StdTcpListener) -> Result<TcpListener, String> {
+    // `setup` is synchronous and macOS runs it on the AppKit thread. Enter the
+    // application runtime while Tokio registers the listener, without nesting
+    // a second executor through `block_on` on platforms that already entered it.
+    let runtime = tauri::async_runtime::handle();
+    let _runtime_guard = runtime.inner().enter();
+    TcpListener::from_std(listener)
+        .map_err(|error| format!("failed to start loopback broker: {error}"))
+}
+
 pub(crate) fn start_broker_listener(
     inner: Arc<ExternalAgentInner>,
     app: AppHandle,
@@ -58,8 +68,7 @@ pub(crate) fn start_broker_listener(
                     .unwrap_or_else(|| "external Agent broker is unavailable".to_string())
             }
         })?;
-    let listener = TcpListener::from_std(listener)
-        .map_err(|error| format!("failed to start loopback broker: {error}"))?;
+    let listener = into_async_listener(listener)?;
     inner
         .broker_started
         .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -483,5 +492,12 @@ mod tests {
         assert_ne!(first_address, second_address);
 
         drop((occupied, first, second));
+    }
+
+    #[test]
+    fn std_listener_conversion_is_safe_without_a_caller_runtime() {
+        let (listener, address) = bind_broker_listener().expect("bind broker");
+        let converted = into_async_listener(listener).expect("convert broker listener");
+        assert_eq!(converted.local_addr().expect("listener address"), address);
     }
 }
