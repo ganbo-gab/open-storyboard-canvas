@@ -3905,7 +3905,7 @@ mod remote_media_tests {
             "image",
             1,
             Some(&same_origin),
-            32,
+            minimal_png().len() + 1,
         )
         .await
         .unwrap();

@@ -200,7 +200,30 @@
     "unknownModel": "Unknown generation model",
     "safeHandle": "Safe recovery available",
     "locateTask": "Locate on canvas",
-    "taskNodeMissing": "The matching node is not available in this project"
+    "taskNodeMissing": "The matching node is not available in this project",
+    "operationsView": "Generation operations view",
+    "view": {
+      "tasks": "Tasks",
+      "logs": "Logs"
+    },
+    "copyLogs": "Copy redacted diagnostics",
+    "searchLogs": "Search logs",
+    "filterSeverity": "Filter by severity",
+    "filterSource": "Filter by source",
+    "allSeverity": "All levels",
+    "allSources": "All sources",
+    "sourceGeneration": "Generation",
+    "sourceApplication": "Application",
+    "loadingLogs": "Loading diagnostics...",
+    "noLogs": "No matching diagnostics",
+    "nativeLogsUnavailable": "Application file logs are available in the desktop app. Persisted generation events remain visible here.",
+    "nativeLogsEmpty": "No native application log file is available yet.",
+    "logRecoverable": "This persisted task has a safe recovery handle.",
+    "recoverResult": "Retrieve existing result",
+    "recoveryConfirm": "This only queries the existing upstream task, downloads its result, and saves it locally. It will not submit a generation request or intentionally create a new generation charge.",
+    "confirmRecovery": "Retrieve result",
+    "recoveryRunning": "Retrieving the existing result...",
+    "recoverySucceeded": "Result saved locally and updated on the canvas."
   },
   "common": {
     "save": "Save",

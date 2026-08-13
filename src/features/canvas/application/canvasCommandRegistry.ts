@@ -109,6 +109,7 @@ const EFFECTS: Record<CanvasCommandType, CanvasCommandEffect> = {
   'asset.list': 'read',
   'asset.locate': 'navigation',
   'generation.submit': 'generation',
+  'generation.recover': 'generation',
   'generation.status': 'read',
   'generation.locateResult': 'navigation',
 };
@@ -251,6 +252,10 @@ const INPUT_SCHEMAS: Record<CanvasCommandType, CanvasJsonSchema> = {
     select: booleanField('Whether to select the asset node.'),
   }),
   'generation.submit': objectSchema(['nodeIds'], { nodeIds: arrayField('Generation-capable node ids.') }),
+  'generation.recover': objectSchema(['jobId'], {
+    jobId: stringField('Persisted generation job id with a safe upstream handle.'),
+    nodeIds: arrayField('Optional canvas nodes already associated with this job.'),
+  }),
   'generation.status': objectSchema([], {
     nodeId: stringField('Generation node id.'),
     jobId: stringField('Stable generation job id.'),
@@ -284,6 +289,8 @@ function summarizeCommand(command: CanvasCommand): string {
       return `Update tag group ${command.input.groupId} membership.`;
     case 'generation.submit':
       return `Submit generation for ${command.input.nodeIds.length} node(s).`;
+    case 'generation.recover':
+      return `Retrieve the existing result for job ${command.input.jobId}; no generation request will be submitted.`;
     case 'node.tool.run':
       return `Run ${command.input.toolType} on node ${command.input.nodeId}.`;
     case 'storyboard.update':
@@ -910,6 +917,10 @@ function validateCommandInput(
     case 'generation.submit':
       validateStringArray(command.input.nodeIds, 'nodeIds', errors);
       break;
+    case 'generation.recover':
+      validateString(command.input.jobId, 'jobId', errors);
+      if (command.input.nodeIds !== undefined) validateStringArray(command.input.nodeIds, 'nodeIds', errors);
+      break;
     case 'generation.status':
     case 'generation.locateResult':
       if (!command.input.nodeId && !command.input.jobId) errors.push('nodeId or jobId is required.');
@@ -1300,6 +1311,8 @@ export class CanvasCommandRegistry {
       case 'viewport.focus':
       case 'generation.submit':
         return simpleImpact(EFFECTS[command.type], this.summarize(command), command.input.nodeIds);
+      case 'generation.recover':
+        return simpleImpact(EFFECTS[command.type], this.summarize(command), command.input.nodeIds ?? []);
       case 'asset.locate':
       case 'generation.locateResult':
       case 'generation.status':
@@ -1443,6 +1456,13 @@ export class CanvasCommandRegistry {
         }
         const result = this.dependencies.generation.submit(command.input.nodeIds, snapshot.nodes);
         return { references: { nodeIds: result.acceptedNodeIds }, value: result };
+      }
+      case 'generation.recover': {
+        const result = await this.dependencies.generation.recover(command.input.jobId, command.input.nodeIds);
+        return {
+          references: { nodeIds: result.nodeIds, jobId: command.input.jobId, jobIds: [command.input.jobId] },
+          value: result,
+        };
       }
       case 'generation.status': {
         const status = this.dependencies.generation.getStatus(snapshot.nodes, snapshot.edges, command.input);

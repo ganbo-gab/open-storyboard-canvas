@@ -177,7 +177,7 @@ export function projectSafeGenerationJobDiagnostic(
     networkRoute: job.network_route ?? null,
     externalTaskId,
     hasResultUrl,
-    safeRecoveryAvailable: Boolean(externalTaskId || hasResultUrl),
+    safeRecoveryAvailable: job.resumable !== false && Boolean(externalTaskId || hasResultUrl),
     automaticResubmitAllowed: false,
     billingRisk: job.status === 'unknown' ? 'possible' : 'not-indicated',
     submitAttempts: Math.max(0, Math.min(1, job.submit_attempts ?? 0)),

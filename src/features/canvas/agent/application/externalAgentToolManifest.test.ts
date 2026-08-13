@@ -20,6 +20,9 @@ describe('external Canvas MCP manifest', () => {
     ]);
     expect(JSON.stringify(manifest)).not.toMatch(/\b(shell|bash|filesystem|child_process|fetch|credential|apiKey)\b/i);
     expect(manifest.tools.every((tool) => tool.annotations.openWorldHint === false)).toBe(true);
+    const diagnostics = manifest.tools.find((tool) => tool.name === 'diagnostics');
+    const operations = ((diagnostics?.inputSchema.properties as Record<string, any>).operation.enum) as string[];
+    expect(operations).toContain('application-logs');
   });
 
   it('only exposes tool kinds selected for the turn and fails closed', () => {

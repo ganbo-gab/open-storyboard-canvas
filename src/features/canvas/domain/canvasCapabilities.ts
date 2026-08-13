@@ -160,6 +160,7 @@ export const canvasActionCapabilityManifest = {
   'asset.list': { status: 'supported' },
   'asset.locate': { status: 'supported' },
   'generation.submit': { status: 'supported' },
+  'generation.recover': { status: 'supported' },
   'generation.status': { status: 'supported' },
   'generation.locateResult': { status: 'supported' },
 } satisfies Record<CanvasCommandType, CanvasCapabilityDeclaration>;

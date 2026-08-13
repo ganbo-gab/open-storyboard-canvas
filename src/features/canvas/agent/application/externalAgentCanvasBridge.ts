@@ -33,6 +33,7 @@ import { canvasAgentRollbackStore } from './agentCanvasRollback';
 import { prepareCanvasAgentToolApproval, type AgentApprovalView } from './canvasAgentController';
 import { redactSensitiveValue } from './agentRedaction';
 import type { ExternalAgentToolRequest } from '../domain/agentModel';
+import { loadDiagnosticEvents } from '@/features/canvas/application/diagnosticEvents';
 
 export interface ExternalAgentToolExecutionResult {
   approvalId: string;
@@ -134,6 +135,12 @@ async function executeDiagnostics(argumentsValue: unknown): Promise<unknown> {
     case 'health': return inspectCanvasHealth(input);
     case 'provider-config': return inspectDiagnosticConfigSnapshot();
     case 'generation-jobs': return inspectPersistedGenerationJobs({ jobId: input.jobId, limit: input.limit });
+    case 'application-logs': return loadDiagnosticEvents({
+      severity: input.severity,
+      source: input.source,
+      query: input.query,
+      limit: input.limit,
+    });
     case 'classify-error': return classifyAgentError(input.error);
     case 'bundle-preview': return buildDiagnosticBundlePreview({
       error: input.error,

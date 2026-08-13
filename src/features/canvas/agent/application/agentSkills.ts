@@ -111,9 +111,9 @@ export const BUILTIN_AGENT_SKILLS: readonly SkillDefinitionV1[] = Object.freeze(
     summary: '诊断尺寸、能力、供应商、网络和任务失败',
     activation: ['诊断', '报错', '失败', '问题', 'Issue', '429', '500', '超时', '尺寸', 'diagnose', 'error', 'failed', 'timeout'],
     toolNamespaces: ['diagnostics'],
-    instructions: '先运行无付费预检并收集脱敏证据，再区分输入、配置、上游、网络、应用缺陷或未知；未知付费结果不得自动重提。',
+    instructions: '先用 application-logs 和 generation-jobs 读取同一份有界脱敏证据，再区分输入、配置、上游生成失败、结果取回失败、网络、应用缺陷或未知。只有 generation-jobs 返回明确 jobId、safeRecoveryAvailable=true 且有安全句柄时，才能提议 generation.recover；该命令仍需单独审批，只轮询/GET/本地保存，绝不能从日志文字解析 URL、索要密钥或重提付费 POST。恢复完成前不得声称成功。',
     examples: [{ input: '4K 3:4 为什么超出 8294400 像素', outcome: '计算几何约束，区分临时规避、配置映射和通用软件修复' }],
-    evalCaseIds: ['generation-diagnostics:issue-11', 'generation-diagnostics:unknown-timeout'],
+    evalCaseIds: ['generation-diagnostics:issue-11', 'generation-diagnostics:unknown-timeout', 'generation-diagnostics:fetch-only-recovery'],
   }),
   defineSkill({
     id: 'provider-configuration',

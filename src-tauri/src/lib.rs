@@ -1,10 +1,10 @@
 pub mod ai;
 pub mod commands;
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use commands::ai as ai_commands;
+use commands::diagnostic_log;
 use commands::external_agent;
 use commands::image;
 use commands::portability;
@@ -18,34 +18,11 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 const MAIN_WINDOW_LABEL: &str = "main";
 const FRONTEND_READY_TIMEOUT_MS: u64 = 3_500;
 
-fn resolve_log_dir() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-
-    #[cfg(target_os = "macos")]
-    if let Ok(home) = std::env::var("HOME") {
-        candidates.push(PathBuf::from(home).join("Library/Logs/open-storyboard-canvas"));
-    }
-
-    candidates.push(std::env::temp_dir().join("open-storyboard-canvas/logs"));
-
-    if let Ok(current_dir) = std::env::current_dir() {
-        candidates.push(current_dir.join("logs"));
-    }
-
-    for directory in candidates {
-        if std::fs::create_dir_all(&directory).is_ok() {
-            return Some(directory);
-        }
-    }
-
-    None
-}
-
 fn setup_logging() {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "info,open_storyboard_canvas=debug".into());
 
-    if let Some(log_dir) = resolve_log_dir() {
+    if let Some(log_dir) = diagnostic_log::resolve_log_dir() {
         let file_appender = tracing_appender::rolling::daily(log_dir, "storyboard.log");
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
         std::mem::forget(_guard);
@@ -231,6 +208,7 @@ pub fn run() {
             ai_commands::list_generation_jobs,
             ai_commands::get_generation_job_record,
             ai_commands::forget_generation_job,
+            diagnostic_log::read_diagnostic_logs,
             ai_commands::generate_image,
             ai_commands::list_models,
             project_state::list_project_summaries,

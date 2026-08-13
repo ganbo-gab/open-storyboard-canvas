@@ -72,6 +72,7 @@ import {
   toOpaqueAgentMediaReference,
 } from '../application/agentMediaResolver';
 import { buildCanvasAssetCatalog } from '@/features/canvas/application/canvasAssetCatalog';
+import { loadDiagnosticEvents } from '@/features/canvas/application/diagnosticEvents';
 import { canvasAgentRollbackStore } from '../application/agentCanvasRollback';
 import {
   canvasAgentApprovalExecution,
@@ -538,7 +539,7 @@ const canvasCommandParameters = {
 };
 
 const diagnosticsParameters = z.object({
-  operation: z.enum(['health', 'provider-config', 'generation-jobs', 'preflight', 'classify-error', 'bundle-preview']),
+  operation: z.enum(['health', 'provider-config', 'generation-jobs', 'application-logs', 'preflight', 'classify-error', 'bundle-preview']),
   error: z.string().optional(),
   width: z.number().optional(),
   height: z.number().optional(),
@@ -556,6 +557,9 @@ const diagnosticsParameters = z.object({
   endpointValid: z.boolean().optional(),
   reproductionSteps: z.array(z.string()).optional(),
   jobId: z.string().optional(),
+  severity: z.enum(['debug', 'info', 'warning', 'error']).optional(),
+  source: z.string().max(200).optional(),
+  query: z.string().max(200).optional(),
   limit: z.number().int().min(1).max(50).optional(),
 });
 
@@ -855,6 +859,13 @@ export function createCanvasAgent(options: {
               ? inspectDiagnosticConfigSnapshot()
               : input.operation === 'generation-jobs'
                 ? inspectPersistedGenerationJobs({ jobId: input.jobId, limit: input.limit })
+              : input.operation === 'application-logs'
+                ? loadDiagnosticEvents({
+                    severity: input.severity,
+                    source: input.source,
+                    query: input.query,
+                    limit: input.limit,
+                  })
               : input.operation === 'classify-error'
                 ? classifyAgentError(input.error)
                 : input.operation === 'bundle-preview'

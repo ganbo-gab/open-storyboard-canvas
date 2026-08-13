@@ -92,7 +92,7 @@ function approvalId(item: RunToolApprovalItem): string {
 function approvalEffect(toolName: string, command?: CanvasCommand): AgentEffect {
   if (toolName === 'config_patch') return 'config-write';
   if (toolName !== 'canvas_command' || !command) return 'read';
-  if (command.type === 'node.tool.run') return 'canvas-write';
+  if (command.type === 'node.tool.run' || command.type === 'generation.recover') return 'canvas-write';
   const effect = canvasCommandRegistry.getDefinition(command.type).effect;
   if (effect === 'generation') return 'external-submit';
   return effect === 'read' ? 'read' : 'canvas-write';
@@ -159,13 +159,16 @@ function buildApprovalImpact(toolName: string, args: unknown): {
     const generationDetails = command.type === 'generation.submit'
       ? generationApprovalDetails(command.input.nodeIds)
       : undefined;
+    const recoverySummary = command.type === 'generation.recover'
+      ? `只查询/下载任务 ${command.input.jobId} 的现有结果并保存到本机画布；不会提交生成 POST，预计不会产生新的生成费用。`
+      : undefined;
     return {
       baseRevision: preview.baseRevision,
       impact: {
         effect,
         title: command.type,
         summary: preview.valid
-          ? generationDetails?.summary
+          ? recoverySummary ?? generationDetails?.summary
             ?? (readLimit > 0 ? `Read up to ${readLimit} item(s) with ${command.type}.` : canvasCommandRegistry.summarize(command))
           : preview.errors.map((error) => error.message).join(' '),
         affectedNodeCount: affectedNodeIds.size || quantity || readLimit,

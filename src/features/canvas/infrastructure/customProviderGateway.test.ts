@@ -51,6 +51,7 @@ import {
   detectInlineImageAspectRatio,
   getCustomProviderJob,
   getCustomProviderJobAsync,
+  recoverCustomProviderJob,
   summarizeMaterializedSourceForLog,
   submitCustomProviderJob,
   submitCustomVideoJob,
@@ -377,8 +378,7 @@ describe('custom provider submission safety', () => {
       aspectRatio: '1:1',
     });
 
-    await getCustomProviderJobAsync('agnes-restored-image');
-    const job = await waitForTerminalJob('agnes-restored-image');
+    const job = await recoverCustomProviderJob('agnes-restored-image');
 
     expect(job).toMatchObject({ status: 'succeeded', result: '/local/agnes.png' });
     expect(customHttpRequestMock).not.toHaveBeenCalled();
@@ -392,6 +392,58 @@ describe('custom provider submission safety', () => {
         configuredProviderOrigin: 'https://apihub.agnes-ai.com',
       },
     );
+  });
+
+  it('deduplicates concurrent fetch-only recovery and sends no generation POST', async () => {
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
+    useCustomProvidersStore.getState().replaceAll([provider()]);
+    getGenerationJobRecordMock.mockResolvedValue({
+      job_id: 'custom-local-deduplicated-recovery',
+      status: 'recoverable_wait',
+      result: null,
+      result_url: 'https://example.com/results/existing.png',
+      error: 'previous download failed',
+      media_type: 'image',
+      provider_id: 'provider-1',
+      model_id: 'gpt-image-2',
+      network_route: 'system',
+      resumable: true,
+    });
+    prepareNodeImageSourceWithHeadersMock.mockResolvedValue({
+      imagePath: '/local/deduplicated.png',
+      previewImagePath: '/local/deduplicated.preview.png',
+      aspectRatio: '1:1',
+    });
+
+    const [left, right] = await Promise.all([
+      recoverCustomProviderJob('custom-local-deduplicated-recovery'),
+      recoverCustomProviderJob('custom-local-deduplicated-recovery'),
+    ]);
+
+    expect(left).toMatchObject({ status: 'succeeded', result: '/local/deduplicated.png' });
+    expect(right).toEqual(left);
+    expect(getGenerationJobRecordMock).toHaveBeenCalledTimes(1);
+    expect(prepareNodeImageSourceWithHeadersMock).toHaveBeenCalledTimes(1);
+    expect(customHttpRequestMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown outcome without a safe handle and performs no network request', async () => {
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
+    getGenerationJobRecordMock.mockResolvedValueOnce({
+      job_id: 'custom-local-unknown-without-handle',
+      status: 'unknown',
+      result: null,
+      media_type: 'image',
+      provider_id: 'provider-1',
+      model_id: 'gpt-image-2',
+      network_route: 'system',
+      resumable: false,
+    });
+
+    await expect(recoverCustomProviderJob('custom-local-unknown-without-handle'))
+      .rejects.toThrow('没有可安全恢复');
+    expect(customHttpRequestMock).not.toHaveBeenCalled();
+    expect(prepareNodeImageSourceWithHeadersMock).not.toHaveBeenCalled();
   });
 
   it('does not publish recovered success before critical state is persisted', async () => {

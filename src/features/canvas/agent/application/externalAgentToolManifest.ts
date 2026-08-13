@@ -31,7 +31,7 @@ const diagnosticsSchema = {
   properties: {
     operation: {
       type: 'string',
-      enum: ['health', 'provider-config', 'generation-jobs', 'preflight', 'classify-error', 'bundle-preview'],
+      enum: ['health', 'provider-config', 'generation-jobs', 'application-logs', 'preflight', 'classify-error', 'bundle-preview'],
     },
     error: { type: 'string' },
     width: { type: 'number' },
@@ -48,6 +48,9 @@ const diagnosticsSchema = {
     endpointValid: { type: 'boolean' },
     reproductionSteps: { type: 'array', items: { type: 'string' }, maxItems: 20 },
     jobId: { type: 'string' },
+    severity: { type: 'string', enum: ['debug', 'info', 'warning', 'error'] },
+    source: { type: 'string', maxLength: 200 },
+    query: { type: 'string', maxLength: 200 },
     limit: { type: 'integer', minimum: 1, maximum: 50 },
   },
 };

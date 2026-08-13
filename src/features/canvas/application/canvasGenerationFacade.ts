@@ -5,6 +5,7 @@ import {
 } from '../domain/canvasNodes';
 import type { CanvasEventBus } from './ports';
 import { supportsCanvasGenerationTrigger } from './canvasGenerationTriggers';
+import { recoverPersistedGenerationResult, type GenerationRecoveryResult } from './generationRecovery';
 
 export type CanvasGenerationStatus =
   | 'idle'
@@ -200,6 +201,10 @@ export class CanvasGenerationFacade {
     }
 
     return { acceptedNodeIds, status: 'accepted' };
+  }
+
+  async recover(jobId: string, nodeIds?: string[]): Promise<GenerationRecoveryResult> {
+    return await recoverPersistedGenerationResult({ jobId, nodeIds });
   }
 
   getStatus(

@@ -51,6 +51,7 @@ export const CANVAS_COMMAND_TYPES = [
   'asset.list',
   'asset.locate',
   'generation.submit',
+  'generation.recover',
   'generation.status',
   'generation.locateResult',
 ] as const;
@@ -269,6 +270,11 @@ export type SubmitGenerationCommand = CanvasCommandBase<'generation.submit', {
   nodeIds: string[];
 }>;
 
+export type RecoverGenerationCommand = CanvasCommandBase<'generation.recover', {
+  jobId: string;
+  nodeIds?: string[];
+}>;
+
 export type GetGenerationStatusCommand = CanvasCommandBase<'generation.status', {
   nodeId?: string;
   jobId?: string;
@@ -308,6 +314,7 @@ export type CanvasCommand =
   | ListAssetsCommand
   | LocateAssetCommand
   | SubmitGenerationCommand
+  | RecoverGenerationCommand
   | GetGenerationStatusCommand
   | LocateGenerationResultCommand;
 

@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod diagnostic_log;
 pub mod dreamina;
 mod dreamina_cli;
 pub mod external_agent;
@@ -10,6 +11,7 @@ pub mod system;
 pub mod update;
 
 pub use ai::*;
+pub use diagnostic_log::*;
 pub use dreamina::*;
 pub use external_agent::*;
 pub use http::*;

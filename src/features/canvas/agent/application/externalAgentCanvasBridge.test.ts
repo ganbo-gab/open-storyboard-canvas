@@ -40,6 +40,14 @@ function deterministicToolRequest(): ExternalAgentToolRequest {
   };
 }
 
+function recoveryRequest(): ExternalAgentToolRequest {
+  return {
+    ...request(),
+    callId: 'recover-call-1',
+    arguments: { type: 'generation.recover', input: { jobId: 'job-1', nodeIds: ['node-1'] } },
+  };
+}
+
 describe('external Agent Canvas approval bridge', () => {
   beforeEach(() => {
     commandMocks.resolve.mockReset().mockResolvedValue(undefined);
@@ -72,6 +80,14 @@ describe('external Agent Canvas approval bridge', () => {
     await prepareExternalAgentToolRequest({ projectId: 'project-1', request: toolRequest });
     expect(canvasAgentApprovalStore.get(createApprovalId('turn-1', 'canvas_command', toolRequest.callId)))
       .toMatchObject({ impact: { effect: 'canvas-write', externalSideEffect: false } });
+  });
+
+  it('describes result recovery as a canvas write without a new paid submission', async () => {
+    const toolRequest = recoveryRequest();
+    const view = await prepareExternalAgentToolRequest({ projectId: 'project-1', request: toolRequest });
+    expect(view).toMatchObject({ impact: { effect: 'canvas-write', externalSideEffect: false } });
+    expect(view.summary).toContain('不会提交生成 POST');
+    expect(view.summary).toContain('不会产生新的生成费用');
   });
 
   it('returns a typed denial without changing canvas revision or history', async () => {

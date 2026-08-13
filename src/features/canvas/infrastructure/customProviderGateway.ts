@@ -27,7 +27,10 @@ import {
   type GenerationNetworkSettings,
 } from '@/stores/settingsStore';
 import { hasCustomProviderCredential } from '@/features/canvas/application/providerAvailability';
-import { isLocalFilesystemResultSource } from '@/features/canvas/application/generationRetry';
+import {
+  isLightweightGenerationRetryResultUrl,
+  isLocalFilesystemResultSource,
+} from '@/features/canvas/application/generationRetry';
 import {
   loadImageElement,
   reduceAspectRatio,
@@ -124,7 +127,8 @@ class RemoteGenerationFailedError extends Error {
 
 const cache = new Map<string, CachedJob>();
 const persistenceQueues = new Map<string, Promise<void>>();
-const recoveryJobs = new Set<string>();
+const recoveryJobs = new Map<string, Promise<GenerationJobStatus>>();
+const recoveryLoads = new Map<string, Promise<GenerationJobStatus>>();
 const POLL_TIMEOUT_MS = 120000;
 const VIDEO_POLL_TIMEOUT_MS = 15 * 60 * 1000;
 const CONNECTIVITY_TEST_POLL_TIMEOUT_MS = 180000;
@@ -5510,17 +5514,7 @@ export function getCustomProviderJob(jobId: string): GenerationJobStatus {
   };
 }
 
-function isPersistedRecoveryState(status: GenerationJobStatus['status']): boolean {
-  return status === 'queued'
-    || status === 'submitting'
-    || status === 'running'
-    || status === 'recoverable_wait'
-    || status === 'materializing';
-}
-
-async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<void> {
-  if (recoveryJobs.has(job.job_id) || !isPersistedRecoveryState(job.status)) return;
-  recoveryJobs.add(job.job_id);
+async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<GenerationJobStatus> {
   try {
     if (job.status === 'submitting' && !job.external_task_id && !job.result_url) {
       const message = '应用在提交响应确认前关闭；上游可能已经接受请求。为避免重复计费，系统不会自动重新提交。';
@@ -5533,7 +5527,7 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<void
       if (persisted) {
         cache.set(job.job_id, { ...job, status: 'unknown', error: message });
       }
-      return;
+      return getCustomProviderJob(job.job_id);
     }
     const savedProvider = useCustomProvidersStore.getState().providers.find(
       (provider) => provider.id === job.provider_id
@@ -5562,6 +5556,9 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<void
     }
 
     let remoteSource = job.result_url?.trim() || '';
+    if (remoteSource && !isLightweightGenerationRetryResultUrl(remoteSource)) {
+      throw new Error('任务保存的结果地址不是安全的轻量来源，未执行下载。');
+    }
     const taskId = job.external_task_id?.trim() || '';
     if (!remoteSource && !taskId) {
       throw new Error('任务没有可恢复的上游 task id 或结果地址，不能安全重发生成请求。');
@@ -5587,7 +5584,7 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<void
       status: 'materializing',
       phase: 'materialize',
       resultUrl: asLightweightRetryResultSource(remoteSource) ?? undefined,
-    }))) return;
+    }))) return getCustomProviderJob(job.job_id);
     cache.set(job.job_id, {
       ...job,
       status: 'materializing',
@@ -5603,13 +5600,14 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<void
       phase: 'materialize',
       result,
       resultUrl: asLightweightRetryResultSource(remoteSource) ?? undefined,
-    }))) return;
+    }))) return getCustomProviderJob(job.job_id);
     cache.set(job.job_id, {
       ...job,
       status: 'succeeded',
       result,
       error: null,
     });
+    return getCustomProviderJob(job.job_id);
   } catch (error) {
     const message = formatUnknownError(error);
     cache.set(job.job_id, {
@@ -5624,9 +5622,57 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<void
       error: message,
       errorCategory: classifyGenerationError(error),
     });
-  } finally {
-    recoveryJobs.delete(job.job_id);
+    return getCustomProviderJob(job.job_id);
   }
+}
+
+export async function recoverCustomProviderJob(jobId: string): Promise<GenerationJobStatus> {
+  const normalizedJobId = jobId.trim();
+  if (!normalizedJobId) throw new Error('恢复任务需要有效的 jobId。');
+  const active = recoveryJobs.get(normalizedJobId);
+  if (active) return await active;
+  const loading = recoveryLoads.get(normalizedJobId);
+  if (loading) return await loading;
+  const pending = (async () => {
+    const persisted = await getGenerationJobRecord(normalizedJobId);
+    if (persisted.status === 'succeeded' && persisted.result) {
+      cache.set(normalizedJobId, { ...persisted });
+      return getCustomProviderJob(normalizedJobId);
+    }
+    const resumableStatus = persisted.status === 'recoverable_wait'
+      || persisted.status === 'unknown'
+      || persisted.status === 'queued'
+      || persisted.status === 'running'
+      || persisted.status === 'materializing';
+    if (!resumableStatus) {
+      throw new Error(`任务状态 ${persisted.status} 不允许安全取回；不会重新提交生成请求。`);
+    }
+    // Older persisted rows did not carry the flag; a durable safe handle is
+    // the migration evidence for those rows. Explicit false remains blocked.
+    if (persisted.resumable === false || (!persisted.external_task_id && !persisted.result_url)) {
+      throw new Error('任务没有可安全恢复的上游 task id 或结果地址；不会重新提交生成请求。');
+    }
+    return await startPersistedRecovery(persisted);
+  })();
+  recoveryLoads.set(normalizedJobId, pending);
+  try {
+    return await pending;
+  } finally {
+    if (recoveryLoads.get(normalizedJobId) === pending) recoveryLoads.delete(normalizedJobId);
+  }
+}
+
+function startPersistedRecovery(persisted: GenerationJobStatus): Promise<GenerationJobStatus> {
+  const jobId = persisted.job_id;
+  const active = recoveryJobs.get(jobId);
+  if (active) return active;
+  cache.set(jobId, { ...persisted });
+  const pending = recoverPersistedCustomJob(persisted);
+  recoveryJobs.set(jobId, pending);
+  void pending.then(() => undefined, () => undefined).finally(() => {
+    if (recoveryJobs.get(jobId) === pending) recoveryJobs.delete(jobId);
+  });
+  return pending;
 }
 
 export async function getCustomProviderJobAsync(jobId: string): Promise<GenerationJobStatus> {
@@ -5635,8 +5681,19 @@ export async function getCustomProviderJobAsync(jobId: string): Promise<Generati
   try {
     const persisted = await getGenerationJobRecord(jobId);
     cache.set(jobId, cached ? { ...persisted, ...cached } : { ...persisted });
-    if (!cached && isPersistedRecoveryState(persisted.status)) {
-      void recoverPersistedCustomJob(persisted);
+    if (!cached && (
+      persisted.status === 'queued'
+      || persisted.status === 'submitting'
+      || persisted.status === 'running'
+      || persisted.status === 'materializing'
+    )) {
+      if (
+        persisted.resumable === true
+        || Boolean(persisted.external_task_id || persisted.result_url)
+        || persisted.status === 'submitting'
+      ) {
+        void startPersistedRecovery(persisted).catch(() => undefined);
+      }
     }
     return getCustomProviderJob(jobId);
   } catch {
@@ -5647,15 +5704,15 @@ export async function getCustomProviderJobAsync(jobId: string): Promise<Generati
 export function retryCustomProviderJob(jobId: string): boolean {
   const cached = cache.get(jobId);
   if (
-    cached?.status === 'recoverable_wait'
+    (cached?.status === 'recoverable_wait' || cached?.status === 'unknown')
     && (cached.external_task_id || cached.result_url)
   ) {
-    const restarted = updateCachedJob(jobId, {
+    updateCachedJob(jobId, {
       status: cached.result_url ? 'materializing' : 'running',
       phase: cached.result_url ? 'materialize' : 'polling',
       error: null,
     });
-    void recoverPersistedCustomJob(restarted);
+    void recoverCustomProviderJob(jobId);
     return true;
   }
   if (cached?.status === 'failed' && cached.videoPollRetry) {

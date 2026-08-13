@@ -200,7 +200,30 @@
     "unknownModel": "未知生成模型",
     "safeHandle": "可安全恢复",
     "locateTask": "定位到画布",
-    "taskNodeMissing": "当前项目中没有找到对应节点"
+    "taskNodeMissing": "当前项目中没有找到对应节点",
+    "operationsView": "生成任务操作视图",
+    "view": {
+      "tasks": "任务",
+      "logs": "日志"
+    },
+    "copyLogs": "复制脱敏诊断",
+    "searchLogs": "搜索日志",
+    "filterSeverity": "按级别筛选",
+    "filterSource": "按来源筛选",
+    "allSeverity": "全部级别",
+    "allSources": "全部来源",
+    "sourceGeneration": "生成任务",
+    "sourceApplication": "应用日志",
+    "loadingLogs": "正在读取诊断日志...",
+    "noLogs": "没有匹配的诊断记录",
+    "nativeLogsUnavailable": "应用文件日志仅在桌面版可用；这里仍会显示持久化的生成任务事件。",
+    "nativeLogsEmpty": "暂时还没有可读取的应用日志文件。",
+    "logRecoverable": "该持久任务包含可安全恢复的上游句柄。",
+    "recoverResult": "取回已有结果",
+    "recoveryConfirm": "只会查询已有上游任务、下载结果并保存到本机；不会提交新的生成请求，也不会主动产生新的生成费用。",
+    "confirmRecovery": "取回结果",
+    "recoveryRunning": "正在取回已有结果...",
+    "recoverySucceeded": "结果已保存到本机并更新到画布。"
   },
   "common": {
     "save": "保存",
