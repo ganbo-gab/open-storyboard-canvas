@@ -30,7 +30,8 @@ function updateCargoTomlVersion(filePath, nextVersion) {
 
 function updateCargoLockVersion(filePath, nextVersion) {
   const content = fs.readFileSync(filePath, "utf8");
-  const packagePattern = /(\[\[package\]\]\nname = "open-storyboard-canvas"\nversion = ")([^"]+)(")/;
+  const packagePattern =
+    /(\[\[package\]\]\r?\nname = "open-storyboard-canvas"\r?\nversion = ")([^"]+)(")/;
   if (!packagePattern.test(content)) {
     fail("Cannot locate open-storyboard-canvas package version in src-tauri/Cargo.lock");
   }
