@@ -15,7 +15,7 @@
 <table>
 
 <tr>
-<td width="180"><a href="https://torchai.ai"><img src="https://torchai.ai/logo.png" alt="TorchAI.ai" width="150"></a></td>
+<td width="180"><a href="https://torchai.ai"><img src="docs/partners/torchai.jpg" alt="TorchAI.ai" width="150"></a></td>
 <td>感谢 TorchAI.ai 赞助了本项目！<a href="https://torchai.ai">TorchAI.ai</a> 核心主营 GPT 号池与 Claude 号池，自主搭建 Pro / Max 账户池，全力保障稳定流畅的 GPT 调用体验；无掺假、无套壳，只做真实、稳定、高性价比线路。企业对接倍率更低，支持 10000 RPM，可测模型。点击<a href="https://torchai.ai">此链接</a>了解更多。</td>
 </tr>
 
