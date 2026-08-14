@@ -1,6 +1,12 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
-import type { GenerateRequest, GenerationJobStatus } from '@/commands/ai';
+import {
+  createGenerationJob,
+  getGenerationJobRecord,
+  updateGenerationJob,
+  type GenerateRequest,
+  type GenerationJobStatus,
+} from '@/commands/ai';
 import { loadAudioSourceDataUrl, persistVideoSource } from '@/commands/image';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
@@ -25,6 +31,7 @@ interface DreaminaBackendResult {
 }
 
 const resultCache = new Map<string, GenerationJobStatus>();
+const pendingJobPersistence = new Map<string, Parameters<typeof updateGenerationJob>[0]>();
 
 function createJobId(kind: 'image' | 'video'): string {
   return `dreamina-${kind}-local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -38,6 +45,120 @@ function setFailedJob(jobId: string, error: string): string {
     error,
   });
   return jobId;
+}
+
+function cacheJob(status: GenerationJobStatus): GenerationJobStatus {
+  resultCache.set(status.job_id, status);
+  return status;
+}
+
+async function persistInitialJob(input: {
+  jobId: string;
+  media: 'image' | 'video';
+  model: string;
+}): Promise<GenerationJobStatus | null> {
+  try {
+    return cacheJob(await createGenerationJob({
+      jobId: input.jobId,
+      mediaType: input.media,
+      providerId: 'dreamina',
+      modelId: input.model,
+      status: 'submitting',
+      phase: 'submit',
+      resumable: false,
+    }));
+  } catch (error) {
+    setFailedJob(
+      input.jobId,
+      `无法创建本地生成任务，未向即梦提交请求：${redactDreaminaDiagnostic(error instanceof Error ? error.message : String(error)).slice(0, 240)}`,
+    );
+    return null;
+  }
+}
+
+async function persistAcceptedJob(input: {
+  current: GenerationJobStatus;
+  jobId: string;
+  submitId: string;
+  resultUrl?: string | null;
+}): Promise<GenerationJobStatus> {
+  const succeeded = Boolean(input.resultUrl);
+  return await persistJobUpdateOrRecover(input.current, {
+    jobId: input.jobId,
+    status: succeeded ? 'succeeded' : 'running',
+    phase: succeeded ? 'complete' : 'poll',
+    externalTaskId: input.submitId,
+    pollDescriptor: {
+      kind: 'dreamina-query-result',
+      media: input.current.media_type === 'video' ? 'video' : 'image',
+    },
+    ...(input.resultUrl ? {
+      result: rewrapLocalPath(input.resultUrl),
+      resultUrl: input.resultUrl,
+    } : {}),
+    error: '',
+    errorCategory: '',
+    resumable: !succeeded,
+  });
+}
+
+async function persistRejectedSubmission(
+  current: GenerationJobStatus,
+  backend: DreaminaBackendResult | null,
+  error: string,
+): Promise<void> {
+  const explicitFailure = backend ? isExplicitDreaminaFailure(backend) : false;
+  await persistJobUpdateOrRecover(current, {
+    jobId: current.job_id,
+    status: explicitFailure ? 'failed' : 'unknown',
+    phase: explicitFailure ? 'upstream-failed' : 'submit-unknown',
+    ...(backend?.submitId ? { externalTaskId: backend.submitId } : {}),
+    error,
+    errorCategory: explicitFailure ? 'upstream-terminal' : 'submit-unknown',
+    resumable: false,
+  });
+}
+
+async function persistJobUpdate(
+  current: GenerationJobStatus,
+  patch: Parameters<typeof updateGenerationJob>[0],
+): Promise<GenerationJobStatus> {
+  const persisted = await updateGenerationJob(patch);
+  pendingJobPersistence.delete(current.job_id);
+  return cacheJob(persisted);
+}
+
+function cachePersistenceFailure(
+  current: GenerationJobStatus,
+  patch: Parameters<typeof updateGenerationJob>[0],
+  error: unknown,
+): GenerationJobStatus {
+  pendingJobPersistence.set(current.job_id, patch);
+  const externalTaskId = patch.externalTaskId || current.external_task_id || null;
+  const diagnostic = redactDreaminaDiagnostic(error instanceof Error ? error.message : String(error)).slice(0, 160);
+  return cacheJob({
+    ...current,
+    status: 'recoverable_wait',
+    phase: 'local-persistence',
+    external_task_id: externalTaskId,
+    result: null,
+    ...(patch.resultUrl ? { result_url: patch.resultUrl } : {}),
+    error: `即梦任务状态暂未写入本地数据库，已保留上游任务标识并将在后续查询时重试。${diagnostic ? ` ${diagnostic}` : ''}`,
+    error_category: 'local-persistence',
+    resumable: Boolean(externalTaskId),
+    updated_at: Date.now(),
+  });
+}
+
+async function persistJobUpdateOrRecover(
+  current: GenerationJobStatus,
+  patch: Parameters<typeof updateGenerationJob>[0],
+): Promise<GenerationJobStatus> {
+  try {
+    return await persistJobUpdate(current, patch);
+  } catch (error) {
+    return cachePersistenceFailure(current, patch, error);
+  }
 }
 
 function defaultSessionId(): number {
@@ -194,32 +315,114 @@ function acceptedSubmission(backend: DreaminaBackendResult): {
   };
 }
 
-async function pollDreaminaResult(
-  jobId: string,
-  submitId: string,
-  media: 'image' | 'video',
-  timeoutMs: number,
-): Promise<string | null> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    const queried = await invoke<DreaminaBackendResult>('dreamina_query_result', {
-      submitId,
-      downloadDir: undefined,
+function isExplicitDreaminaFailure(result: DreaminaBackendResult): boolean {
+  const combined = `${result.stdout}\n${result.stderr}`;
+  const genStatus = result.genStatus?.toLowerCase() ?? extractGenStatusFallback(combined);
+  return genStatus === 'fail' || result.complianceRequired === true;
+}
+
+async function queryDreaminaJob(current: GenerationJobStatus): Promise<GenerationJobStatus> {
+  const submitId = current.external_task_id?.trim();
+  const media = current.media_type === 'video' ? 'video' : 'image';
+  if (!submitId) return current;
+  const queried = await invoke<DreaminaBackendResult>('dreamina_query_result', {
+    submitId,
+    downloadDir: undefined,
+  });
+  const combined = `${queried.stdout}\n${queried.stderr}`;
+  const resultUrl = extractResultUrl(combined, media);
+  if (resultUrl) {
+    return await persistJobUpdateOrRecover(current, {
+      jobId: current.job_id,
+      status: 'succeeded',
+      phase: 'complete',
+      result: rewrapLocalPath(resultUrl),
+      resultUrl,
+      error: '',
+      errorCategory: '',
+      resumable: false,
+      lastPollAt: Date.now(),
+      consecutiveNetworkErrors: 0,
     });
-    const combined = `${queried.stdout}\n${queried.stderr}`;
-    const resultUrl = extractResultUrl(combined, media);
-    if (resultUrl) return resultUrl;
-    const genStatus = queried.genStatus?.toLowerCase() ?? extractGenStatusFallback(combined);
-    if (genStatus === 'querying' || genStatus === 'running' || genStatus === 'pending') {
-      continue;
+  }
+  const genStatus = queried.genStatus?.toLowerCase() ?? extractGenStatusFallback(combined);
+  if (queried.ok && ['querying', 'running', 'pending'].includes(genStatus ?? '')) {
+    return await persistJobUpdateOrRecover(current, {
+      jobId: current.job_id,
+      status: 'running',
+      phase: 'poll',
+      error: '',
+      errorCategory: '',
+      resumable: true,
+      lastPollAt: Date.now(),
+      consecutiveNetworkErrors: 0,
+    });
+  }
+  if (isExplicitDreaminaFailure(queried)) {
+    return await persistJobUpdateOrRecover(current, {
+      jobId: current.job_id,
+      status: 'failed',
+      phase: 'upstream-failed',
+      error: backendFailure(queried),
+      errorCategory: 'upstream-terminal',
+      resumable: false,
+      lastPollAt: Date.now(),
+    });
+  }
+
+  // query_result can temporarily lose a task that list_task still knows. This
+  // second read is safe and never creates another paid generation.
+  const listed = await invoke<DreaminaBackendResult>('dreamina_list_task', { submitId }).catch(() => null);
+  if (listed) {
+    const listedCombined = `${listed.stdout}\n${listed.stderr}`;
+    const listedResult = extractResultUrl(listedCombined, media);
+    if (listedResult) {
+      return await persistJobUpdateOrRecover(current, {
+        jobId: current.job_id,
+        status: 'succeeded',
+        phase: 'complete',
+        result: rewrapLocalPath(listedResult),
+        resultUrl: listedResult,
+        error: '',
+        errorCategory: '',
+        resumable: false,
+        lastPollAt: Date.now(),
+      });
     }
-    if (!queried.ok || genStatus === 'fail' || queried.complianceRequired) {
-      setFailedJob(jobId, backendFailure(queried));
-      return null;
+    const listedStatus = listed.genStatus?.toLowerCase() ?? extractGenStatusFallback(listedCombined);
+    if (['querying', 'running', 'pending'].includes(listedStatus ?? '')) {
+      return await persistJobUpdateOrRecover(current, {
+        jobId: current.job_id,
+        status: 'running',
+        phase: 'poll',
+        error: '',
+        errorCategory: '',
+        resumable: true,
+        lastPollAt: Date.now(),
+      });
+    }
+    if (isExplicitDreaminaFailure(listed)) {
+      return await persistJobUpdateOrRecover(current, {
+        jobId: current.job_id,
+        status: 'failed',
+        phase: 'upstream-failed',
+        error: backendFailure(listed),
+        errorCategory: 'upstream-terminal',
+        resumable: false,
+        lastPollAt: Date.now(),
+      });
     }
   }
-  return null;
+  return await persistJobUpdateOrRecover(current, {
+    jobId: current.job_id,
+    status: 'recoverable_wait',
+    phase: 'lookup',
+    error: '即梦暂时没有查到该任务，但 submit_id 已保存。可使用“重新获取”继续安全查询，不会再次提交或扣费。',
+    errorCategory: 'upstream-lookup-missing',
+    resumable: true,
+    lastPollAt: Date.now(),
+    consecutiveNetworkErrors: (current.consecutive_network_errors ?? 0) + 1,
+  });
 }
 
 function capabilityErrorMessage(messages: readonly string[]): string {
@@ -280,6 +483,9 @@ export async function submitDreaminaJob(request: GenerateRequest): Promise<strin
     return setFailedJob(jobId, capabilityErrorMessage(issues.map(({ message }) => message)));
   }
 
+  const persistedJob = await persistInitialJob({ jobId, media: 'image', model: request.model });
+  if (!persistedJob) return jobId;
+
   try {
     const sessionId = defaultSessionId();
     let backend: DreaminaBackendResult;
@@ -315,38 +521,86 @@ export async function submitDreaminaJob(request: GenerateRequest): Promise<strin
 
     const submission = acceptedSubmission(backend);
     if (!submission.accepted || !submission.submitId) {
-      return setFailedJob(jobId, backendFailure(backend));
-    }
-    const combined = `${backend.stdout}\n${backend.stderr}`;
-    let resultUrl = extractResultUrl(combined, 'image');
-    if (!resultUrl) {
-      resultUrl = await pollDreaminaResult(jobId, submission.submitId, 'image', 5 * 60 * 1000);
-    }
-    if (!resultUrl) {
-      const current = resultCache.get(jobId);
-      if (current?.status !== 'failed') {
-        setFailedJob(jobId, '即梦图片任务超过 5 分钟未返回结果，请使用 submit_id 在即梦任务记录中继续查询。');
-      }
+      await persistRejectedSubmission(persistedJob, backend, backendFailure(backend));
       return jobId;
     }
-    resultCache.set(jobId, {
-      job_id: jobId,
-      status: 'succeeded',
-      result: rewrapLocalPath(resultUrl),
-      error: null,
-    });
+    const combined = `${backend.stdout}\n${backend.stderr}`;
+    const resultUrl = extractResultUrl(combined, 'image');
+    await persistAcceptedJob({ current: persistedJob, jobId, submitId: submission.submitId, resultUrl });
     return jobId;
   } catch (error) {
-    return setFailedJob(
-      jobId,
+    await persistRejectedSubmission(
+      persistedJob,
+      null,
       humanizeDreaminaFailReason(error instanceof Error ? error.message : String(error)),
     );
+    return jobId;
   }
 }
 
-export function getDreaminaJob(jobId: string): GenerationJobStatus {
-  return resultCache.get(jobId)
-    ?? { job_id: jobId, status: 'not_found', result: null, error: 'job id not found' };
+export async function getDreaminaJob(jobId: string): Promise<GenerationJobStatus> {
+  const cached = resultCache.get(jobId) ?? null;
+  let durable: GenerationJobStatus | null = null;
+  try {
+    durable = await getGenerationJobRecord(jobId);
+  } catch {
+    // Compatibility for an in-flight task created before persistent records.
+  }
+  const pendingPatch = pendingJobPersistence.get(jobId);
+  if (pendingPatch) {
+    const persistenceBase = durable ?? cached;
+    if (!persistenceBase) {
+      return { job_id: jobId, status: 'not_found', result: null, error: 'job id not found' };
+    }
+    try {
+      return await persistJobUpdate(persistenceBase, pendingPatch);
+    } catch (error) {
+      return cachePersistenceFailure(persistenceBase, pendingPatch, error);
+    }
+  }
+  const current = durable ? cacheJob(durable) : cached;
+  if (!current) {
+    return { job_id: jobId, status: 'not_found', result: null, error: 'job id not found' };
+  }
+  if (!['running', 'recoverable_wait', 'unknown'].includes(current.status)) return current;
+  try {
+    return await queryDreaminaJob(current);
+  } catch (error) {
+    return await persistJobUpdateOrRecover(current, {
+      jobId,
+      status: 'recoverable_wait',
+      phase: 'lookup',
+      error: humanizeDreaminaFailReason(error instanceof Error ? error.message : String(error)),
+      errorCategory: 'dreamina-query-error',
+      resumable: Boolean(current.external_task_id),
+      lastPollAt: Date.now(),
+      consecutiveNetworkErrors: (current.consecutive_network_errors ?? 0) + 1,
+    });
+  }
+}
+
+export async function retryDreaminaJob(jobId: string): Promise<boolean> {
+  let current = await getDreaminaJob(jobId);
+  if (current.status === 'succeeded' || current.status === 'running') {
+    return true;
+  }
+  if (
+    !current.external_task_id
+    || current.status === 'canceled'
+    || (current.status === 'failed' && current.error_category === 'upstream-terminal')
+  ) {
+    return false;
+  }
+  current = await persistJobUpdateOrRecover(current, {
+    jobId,
+    status: 'running',
+    phase: 'poll',
+    error: '',
+    errorCategory: '',
+    resumable: true,
+    lastPollAt: Date.now(),
+  });
+  return current.status === 'running';
 }
 
 export async function submitDreaminaVideoJob(payload: GenerateVideoPayload): Promise<string> {
@@ -387,6 +641,9 @@ export async function submitDreaminaVideoJob(payload: GenerateVideoPayload): Pro
   if (issues.length > 0) {
     return setFailedJob(jobId, capabilityErrorMessage(issues.map(({ message }) => message)));
   }
+
+  const persistedJob = await persistInitialJob({ jobId, media: 'video', model: payload.model });
+  if (!persistedJob) return jobId;
 
   try {
     const sessionId = defaultSessionId();
@@ -461,35 +718,24 @@ export async function submitDreaminaVideoJob(payload: GenerateVideoPayload): Pro
 
     const submission = acceptedSubmission(backend);
     if (!submission.accepted || !submission.submitId) {
-      return setFailedJob(jobId, backendFailure(backend));
-    }
-    const combined = `${backend.stdout}\n${backend.stderr}`;
-    let resultUrl = extractResultUrl(combined, 'video');
-    if (!resultUrl) {
-      resultUrl = await pollDreaminaResult(jobId, submission.submitId, 'video', 8 * 60 * 1000);
-    }
-    if (!resultUrl) {
-      const current = resultCache.get(jobId);
-      if (current?.status !== 'failed') {
-        setFailedJob(jobId, '即梦视频任务超过 8 分钟未返回结果，请使用 submit_id 在即梦任务记录中继续查询。');
-      }
+      await persistRejectedSubmission(persistedJob, backend, backendFailure(backend));
       return jobId;
     }
-    resultCache.set(jobId, {
-      job_id: jobId,
-      status: 'succeeded',
-      result: rewrapLocalPath(resultUrl),
-      error: null,
-    });
+    const combined = `${backend.stdout}\n${backend.stderr}`;
+    const resultUrl = extractResultUrl(combined, 'video');
+    await persistAcceptedJob({ current: persistedJob, jobId, submitId: submission.submitId, resultUrl });
     return jobId;
   } catch (error) {
-    return setFailedJob(
-      jobId,
+    await persistRejectedSubmission(
+      persistedJob,
+      null,
       humanizeDreaminaFailReason(error instanceof Error ? error.message : String(error)),
     );
+    return jobId;
   }
 }
 
 export function clearDreaminaGatewayCacheForTests(): void {
   resultCache.clear();
+  pendingJobPersistence.clear();
 }

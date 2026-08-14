@@ -64,6 +64,27 @@ function validateToolCall(call: AgentModelToolCall): AgentModelToolCall {
   return { ...call, arguments: call.arguments || '{}' };
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function assertStructuredToolCalling(
+  request: AgentModelTurnRequest,
+  text: string | undefined,
+  toolCalls: readonly AgentModelToolCall[],
+): void {
+  if (!text?.trim() || toolCalls.length || !request.tools.length) return;
+  const toolNames = request.tools.flatMap((tool) => [tool.name, wireToolName(tool)]);
+  const names = Array.from(new Set(toolNames.filter(Boolean))).map(escapeRegExp).join('|');
+  if (!names) return;
+  const textualCall = new RegExp(`(?:^|[\\n\\r])\\s*(?:\\*\\*|#{1,6}\\s*)?(?:${names})(?:\\*\\*)?\\s*\\(\\s*\\{`, 'i');
+  if (textualCall.test(text)) {
+    throw new AgentModelProtocolError(
+      '模型把工具调用作为普通文本返回，未执行任何画布操作。请确认该渠道支持结构化工具调用，并检查 API 协议配置。',
+    );
+  }
+}
+
 function parseResponsesOutput(
   payload: unknown,
   tools: readonly AgentModelToolDefinition[],
@@ -215,6 +236,7 @@ export function parseAgentProviderResponse(
     && typeof output.reasoningSummary === 'string'
     ? output.reasoningSummary
     : undefined;
+  assertStructuredToolCalling(request, output.text, output.toolCalls);
   return {
     responseId,
     requestId: stringValue(getPath(payload, ['request_id']))
@@ -270,6 +292,7 @@ export class AgentProviderStreamAccumulator {
         arguments: call.arguments || '{}',
       });
     });
+    assertStructuredToolCalling(this.request, this.text, toolCalls);
     return {
       responseId: safeResponseId(this.responseId),
       requestId: this.requestId,

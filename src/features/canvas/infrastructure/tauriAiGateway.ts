@@ -10,7 +10,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { normalizeVideoInputSchema } from '../application/videoInputSchema';
 
 import type { AiGateway, GenerateImagePayload } from '../application/ports';
-import { submitDreaminaJob, submitDreaminaVideoJob, getDreaminaJob } from './dreaminaGateway';
+import { submitDreaminaJob, submitDreaminaVideoJob, getDreaminaJob, retryDreaminaJob } from './dreaminaGateway';
 import {
   submitCustomProviderJob,
   getCustomProviderJobAsync,
@@ -25,7 +25,7 @@ import type { GenerateVideoPayload } from '../application/ports';
 function isDreaminaModel(id: string): boolean { return id.startsWith('dreamina:'); }
 function isCustomModel(id: string): boolean { return id.startsWith('custom:'); }
 function isAgnesModel(id: string): boolean { return id.startsWith('agnes:'); }
-function isDreaminaJob(id: string): boolean { return id.startsWith('dreamina-local-'); }
+function isDreaminaJob(id: string): boolean { return /^dreamina-(?:image|video)-local-/.test(id); }
 function isCustomJob(id: string): boolean { return id.startsWith('custom-local-'); }
 
 export interface GenerateImageDebugPreview {
@@ -238,7 +238,7 @@ export const tauriAiGateway: AiGateway = {
     return await submitGenerateImageJob(request);
   },
   getGenerateImageJob: async (jobId: string) => {
-    if (isDreaminaJob(jobId)) return getDreaminaJob(jobId);
+    if (isDreaminaJob(jobId)) return await getDreaminaJob(jobId);
     if (isCustomJob(jobId)) return await getCustomProviderJobAsync(jobId);
     return await getGenerateImageJob(jobId);
   },
@@ -268,17 +268,23 @@ export const tauriAiGateway: AiGateway = {
     });
   },
   getGenerateVideoJob: async (jobId: string) => {
-    if (isDreaminaJob(jobId)) return getDreaminaJob(jobId);
+    if (isDreaminaJob(jobId)) return await getDreaminaJob(jobId);
     if (isCustomJob(jobId)) return await getCustomProviderJobAsync(jobId);
     return { job_id: jobId, status: 'not_found', result: null, error: 'video job id not found' };
   },
   retryGenerateVideoJob: async (jobId: string) => {
+    if (isDreaminaJob(jobId)) {
+      return await retryDreaminaJob(jobId);
+    }
     if (isCustomJob(jobId)) {
       return retryCustomProviderJob(jobId);
     }
     return false;
   },
   retryGenerationJob: async (jobId: string) => {
+    if (isDreaminaJob(jobId)) {
+      return await retryDreaminaJob(jobId);
+    }
     if (isCustomJob(jobId)) {
       return retryCustomProviderJob(jobId);
     }

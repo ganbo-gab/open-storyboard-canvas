@@ -10,7 +10,7 @@ import type {
   AgentProviderHttpResponse,
 } from '../domain/agentModel';
 import { buildAgentProviderBody } from '../application/agentProviderRequestCodec';
-import { createAgentModelTransport } from './agentModelGateway';
+import { AgentModelGatewayError, createAgentModelTransport } from './agentModelGateway';
 
 function model(
   protocol: AgentModelProtocol,
@@ -341,6 +341,21 @@ describe('agent model provider gateway', () => {
     await expect(failure).rejects.toThrow('[redacted]');
   });
 
+  it('preserves an explicit quota-exhausted provider error for retry policy classification', async () => {
+    const client = new FixtureHttpClient({
+      status: 429,
+      text: JSON.stringify({
+        error: {
+          message: 'You exceeded your current quota, please check your plan and billing details.',
+          type: 'insufficient_quota',
+        },
+      }),
+    }, []);
+
+    await expect(transport(client).getResponse(request(model('openai-chat-completions', { stream: false }))))
+      .rejects.toThrow('exceeded your current quota');
+  });
+
   it('uses non-stream fallback and propagates AbortSignal cancellation', async () => {
     const fallbackClient = new FixtureHttpClient({
       status: 200,
@@ -383,6 +398,60 @@ describe('agent model provider gateway', () => {
     await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'text_delta', delta: 'partial' } });
     controller.abort();
     await expect(iterator.next()).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('falls back once to non-stream when an OpenAI-compatible stream fails before output', async () => {
+    const requests: AgentProviderHttpRequest[] = [];
+    const client: AgentProviderHttpClient = {
+      async request(requestValue) {
+        requests.push(requestValue);
+        return {
+          status: 200,
+          text: JSON.stringify({
+            id: 'chat-fallback',
+            choices: [{ message: { content: 'Recovered response' }, finish_reason: 'stop' }],
+          }),
+        };
+      },
+      async *stream(requestValue) {
+        requests.push(requestValue);
+        throw new AgentModelGatewayError('The quota has been exceeded.', 429, true, false);
+      },
+    };
+
+    const events = await collect(transport(client)
+      .getStreamedResponse(request(model('openai-chat-completions'))));
+
+    expect(requests).toHaveLength(2);
+    expect(events).toEqual([
+      { type: 'text_delta', delta: 'Recovered response' },
+      expect.objectContaining({
+        type: 'completed',
+        response: expect.objectContaining({
+          text: 'Recovered response',
+          providerSummary: expect.objectContaining({ transportFallback: 'non-stream' }),
+        }),
+      }),
+    ]);
+  });
+
+  it('falls back once when a provider closes a successful stream without text or tools', async () => {
+    const client = new FixtureHttpClient({
+      status: 200,
+      text: JSON.stringify({
+        id: 'chat-empty-fallback',
+        choices: [{ message: { content: 'Non-stream response' }, finish_reason: 'stop' }],
+      }),
+    }, ['data: [DONE]\n']);
+
+    const events = await collect(transport(client)
+      .getStreamedResponse(request(model('openai-chat-completions'))));
+
+    expect(client.requests).toHaveLength(2);
+    expect(events).toEqual([
+      { type: 'text_delta', delta: 'Non-stream response' },
+      expect.objectContaining({ type: 'completed', response: expect.objectContaining({ text: 'Non-stream response' }) }),
+    ]);
   });
 
   it('uses provider-specific named tool choice wire shapes', () => {
@@ -527,5 +596,22 @@ describe('agent model provider gateway', () => {
         arguments: '{"title":"Gemini shot"}',
       }],
     });
+  });
+
+  it('fails closed when a provider prints an available tool call as Markdown', async () => {
+    const client = new FixtureHttpClient({
+      status: 200,
+      text: JSON.stringify({
+        id: 'chat-textual-tool',
+        choices: [{
+          finish_reason: 'stop',
+          message: {
+            content: '准备创建节点。\n\ncanvas__create_node({"title":"Not executed"})',
+          },
+        }],
+      }),
+    }, []);
+    await expect(transport(client).getResponse(request(model('openai-chat-completions'))))
+      .rejects.toThrow('普通文本返回');
   });
 });

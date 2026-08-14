@@ -40,7 +40,7 @@ export const TagNode = memo(({ id, data, selected }: TagNodeProps) => {
   const disabledByGroup = useCanvasStore((state) => state.nodes.some((node) => (
     isTagGroupNode(node)
     && !node.data.enabled
-    && node.data.memberTagIds.includes(id)
+    && (node.data.memberTagIds ?? []).includes(id)
   )));
   const resolvedTitle = useMemo(
     () => resolveNodeDisplayName(CANVAS_NODE_TYPES.tag, data),

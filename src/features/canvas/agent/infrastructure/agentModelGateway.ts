@@ -39,6 +39,44 @@ function sanitizeGatewayErrorMessage(value: string): string {
     .slice(0, 2_000);
 }
 
+function providerErrorDetail(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    const visit = (value: unknown, depth = 0): string | null => {
+      if (depth > 4) return null;
+      if (typeof value === 'string' && value.trim()) return value.trim();
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+      const record = value as Record<string, unknown>;
+      for (const key of ['message', 'code', 'type', 'error', 'detail']) {
+        const found = visit(record[key], depth + 1);
+        if (found) return found;
+      }
+      return null;
+    };
+    return visit(parsed);
+  } catch {
+    return trimmed;
+  }
+}
+
+function providerHttpError(
+  response: AgentProviderHttpResponse,
+  responseStarted = false,
+): AgentModelGatewayError {
+  const detail = providerErrorDetail(response.text);
+  const message = detail
+    ? `${sanitizeGatewayErrorMessage(detail)} (HTTP ${response.status})`
+    : `Provider model request failed with HTTP ${response.status}.`;
+  return new AgentModelGatewayError(
+    message,
+    response.status,
+    RETRYABLE_MODEL_STATUS_CODES.has(response.status),
+    responseStarted,
+  );
+}
+
 export class AgentModelGatewayError extends Error {
   constructor(
     message: string,
@@ -208,6 +246,7 @@ export class TauriAgentProviderHttpClient implements AgentProviderHttpClient {
       onChunk: (chunk, nextStatus) => {
         if (aborted) return;
         status = typeof nextStatus === 'number' ? nextStatus : status;
+        if (typeof status === 'number' && (status < 200 || status >= 300)) return;
         emittedChunks += 1;
         queue.push(chunk);
       },
@@ -225,12 +264,7 @@ export class TauriAgentProviderHttpClient implements AgentProviderHttpClient {
       if (aborted) return;
       status = response.status;
       if (response.status < 200 || response.status >= 300) {
-        queue.fail(new AgentModelGatewayError(
-          `Provider model request failed with HTTP ${response.status}.`,
-          response.status,
-          RETRYABLE_MODEL_STATUS_CODES.has(response.status),
-          emittedChunks > 0,
-        ));
+        queue.fail(providerHttpError(response, emittedChunks > 0));
         return;
       }
       if (emittedChunks === 0 && response.text) queue.push(response.text);
@@ -322,17 +356,31 @@ function validateRequestCapabilities(request: AgentModelTurnRequest): void {
 
 function parseJsonResponse(response: AgentProviderHttpResponse): unknown {
   if (response.status < 200 || response.status >= 300) {
-    throw new AgentModelGatewayError(
-      `Provider model request failed with HTTP ${response.status}.`,
-      response.status,
-      RETRYABLE_MODEL_STATUS_CODES.has(response.status),
-    );
+    throw providerHttpError(response);
   }
   try {
     return JSON.parse(response.text) as unknown;
   } catch {
     throw new AgentModelProtocolError('Provider returned a non-JSON model response.');
   }
+}
+
+function hasAgentResponsePayload(response: AgentModelTurnResponse): boolean {
+  return Boolean(
+    response.text?.trim()
+    || response.reasoningSummary?.trim()
+    || response.toolCalls.length,
+  );
+}
+
+function markStreamFallback(response: AgentModelTurnResponse): AgentModelTurnResponse {
+  return {
+    ...response,
+    providerSummary: {
+      ...(response.providerSummary ?? {}),
+      transportFallback: 'non-stream',
+    },
+  };
 }
 
 export function createAgentModelTransport(
@@ -400,21 +448,53 @@ export function createAgentModelTransport(
       const accumulator = new AgentProviderStreamAccumulator(request);
       const decoder = new ProviderEventDecoder();
       let done = false;
-      for await (const chunk of httpClient.stream(buildRequest(request, true), signal)) {
-        throwIfAborted(signal);
-        const decoded = decoder.push(chunk);
-        for (const payload of decoded.payloads) {
-          for (const event of accumulator.consume(payload)) yield event;
+      let emittedVisibleDelta = false;
+      try {
+        for await (const chunk of httpClient.stream(buildRequest(request, true), signal)) {
+          throwIfAborted(signal);
+          const decoded = decoder.push(chunk);
+          for (const payload of decoded.payloads) {
+            for (const event of accumulator.consume(payload)) {
+              if (event.type !== 'completed') emittedVisibleDelta = true;
+              yield event;
+            }
+          }
+          done = done || decoded.done;
+          if (done) break;
         }
-        done = done || decoded.done;
-        if (done) break;
+        const remaining = decoder.finish();
+        for (const payload of remaining.payloads) {
+          for (const event of accumulator.consume(payload)) {
+            if (event.type !== 'completed') emittedVisibleDelta = true;
+            yield event;
+          }
+        }
+        throwIfAborted(signal);
+        const response = accumulator.complete();
+        if (!emittedVisibleDelta && !hasAgentResponsePayload(response)) {
+          const fallback = markStreamFallback(await this.getResponse(request, signal));
+          if (fallback.text) yield { type: 'text_delta', delta: fallback.text };
+          if (fallback.reasoningSummary) {
+            yield { type: 'reasoning_summary_delta', delta: fallback.reasoningSummary };
+          }
+          yield { type: 'completed', response: fallback };
+          return;
+        }
+        yield { type: 'completed', response };
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') throw error;
+        if (
+          emittedVisibleDelta
+          || !(error instanceof AgentModelGatewayError)
+          || error.responseStarted
+        ) throw error;
+        const fallback = markStreamFallback(await this.getResponse(request, signal));
+        if (fallback.text) yield { type: 'text_delta', delta: fallback.text };
+        if (fallback.reasoningSummary) {
+          yield { type: 'reasoning_summary_delta', delta: fallback.reasoningSummary };
+        }
+        yield { type: 'completed', response: fallback };
       }
-      const remaining = decoder.finish();
-      for (const payload of remaining.payloads) {
-        for (const event of accumulator.consume(payload)) yield event;
-      }
-      throwIfAborted(signal);
-      yield { type: 'completed', response: accumulator.complete() };
     },
   };
 }

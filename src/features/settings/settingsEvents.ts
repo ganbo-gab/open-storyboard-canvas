@@ -16,6 +16,7 @@ export type SettingsCategory =
   | 'general'
   | 'keybindings'
   | 'portability'
+  | 'externalAgents'
   | 'about';
 
 interface OpenSettingsEventDetail {

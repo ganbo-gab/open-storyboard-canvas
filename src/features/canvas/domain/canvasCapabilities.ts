@@ -41,7 +41,10 @@ const TAG_GROUP_NODE_COMMANDS: CanvasCommandType[] = [
   ...COMMON_NODE_COMMANDS,
   'node.setEnabled',
   'node.duplicate',
+  'tagGroup.setAppearance',
   'tagGroup.setMembers',
+  'edge.connect',
+  'edge.disconnect',
 ];
 
 const GENERATION_NODE_COMMANDS: CanvasCommandType[] = [
@@ -132,6 +135,12 @@ export const canvasNodeCapabilityManifest = {
   },
 } satisfies Record<CanvasNodeType, CanvasNodeCapabilityDeclaration>;
 
+export const CANVAS_AGENT_DIRECT_CREATE_NODE_TYPES = Object.freeze(
+  (Object.entries(canvasNodeCapabilityManifest) as Array<[CanvasNodeType, CanvasNodeCapabilityDeclaration]>)
+    .filter(([, capability]) => capability.status === 'supported' && capability.directCreate)
+    .map(([nodeType]) => nodeType),
+);
+
 export const canvasActionCapabilityManifest = {
   'canvas.query': { status: 'supported' },
   'node.create': { status: 'supported' },
@@ -151,6 +160,7 @@ export const canvasActionCapabilityManifest = {
   'director.record': { status: 'supported' },
   'tag.setColor': { status: 'supported' },
   'tagGroup.setMembers': { status: 'supported' },
+  'tagGroup.setAppearance': { status: 'supported' },
   'edge.connect': { status: 'supported' },
   'edge.disconnect': { status: 'supported' },
   'group.create': { status: 'supported' },

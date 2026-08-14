@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { AlertTriangle, Download, ShieldAlert, Upload } from 'lucide-react';
+import { AlertTriangle, Download, FolderArchive, Settings2, ShieldAlert, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { readPortabilityTextFile, writePortabilityTextFile } from '@/commands/portability';
 import { UiButton, UiCheckbox, UiModal } from '@/components/ui';
@@ -144,6 +144,25 @@ export function SettingsPortabilitySection() {
       </div>
 
       <div className="ui-scrollbar flex-1 space-y-6 overflow-y-auto p-6">
+        <div className="grid gap-3 md:grid-cols-2">
+          <section className="rounded-xl border border-border-dark bg-surface-dark/55 p-4">
+            <div className="flex items-center gap-2 text-sm font-medium text-text-dark">
+              <FolderArchive className="h-4 w-4 text-accent" />
+              {t('portability.settings.projectTransferTitle')}
+            </div>
+            <p className="mt-2 text-xs leading-5 text-text-muted">{t('portability.settings.projectTransferDescription')}</p>
+            <p className="mt-2 text-[11px] leading-5 text-text-muted">{t('portability.settings.projectTransferLocation')}</p>
+          </section>
+          <section className="rounded-xl border border-accent/25 bg-accent/[0.055] p-4">
+            <div className="flex items-center gap-2 text-sm font-medium text-text-dark">
+              <Settings2 className="h-4 w-4 text-accent" />
+              {t('portability.settings.settingsBackupTitle')}
+            </div>
+            <p className="mt-2 text-xs leading-5 text-text-muted">{t('portability.settings.settingsBackupDescription')}</p>
+            <p className="mt-2 text-[11px] leading-5 text-text-muted">{t('portability.settings.settingsBackupExcludes')}</p>
+          </section>
+        </div>
+
         <section>
           <h3 className="text-sm font-medium text-text-dark">{t('portability.settings.exportTitle')}</h3>
           <p className="mt-1 text-xs text-text-muted">{t('portability.settings.exportDescription')}</p>
@@ -155,7 +174,7 @@ export function SettingsPortabilitySection() {
             />
             <span>
               <span className="block text-sm text-text-dark">{t('portability.settings.includeCredentials')}</span>
-              <span className="mt-1 block text-xs text-amber-300">{t('portability.settings.credentialsPlaintextHint')}</span>
+              <span className="mt-1 block text-xs text-amber-700 dark:text-amber-300">{t('portability.settings.credentialsPlaintextHint')}</span>
             </span>
           </label>
           <UiButton
@@ -210,7 +229,7 @@ export function SettingsPortabilitySection() {
         </section>
 
         {feedback && (
-          <div className={`rounded-md border p-3 text-sm ${feedback.kind === 'error' ? 'border-red-500/30 text-red-300' : 'border-emerald-500/30 text-emerald-300'}`}>
+          <div className={`rounded-md border p-3 text-sm ${feedback.kind === 'error' ? 'border-red-500/30 bg-red-500/5 text-red-700 dark:text-red-300' : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300'}`}>
             {feedback.message}
           </div>
         )}
@@ -267,7 +286,7 @@ export function SettingsPortabilitySection() {
               <span>{t('portability.settings.schemaVersion')}: {importPayload.schemaVersion}</span>
             </div>
             {importPayload.includesCredentials && (
-              <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+              <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
                 <AlertTriangle className="h-4 w-4 shrink-0" />
                 {t('portability.settings.importCredentialsWarning')}
               </div>
@@ -289,7 +308,7 @@ export function SettingsPortabilitySection() {
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2 text-sm text-text-dark">
                       {t(`portability.settings.categories.${diff.category}`)}
-                      <span className={`text-[11px] ${diff.status === 'conflict' ? 'text-amber-300' : 'text-text-muted'}`}>
+                      <span className={`text-[11px] ${diff.status === 'conflict' ? 'text-amber-700 dark:text-amber-300' : 'text-text-muted'}`}>
                         {t(`portability.settings.status.${diff.status}`)}
                       </span>
                     </span>

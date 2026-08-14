@@ -1,7 +1,7 @@
 import { memo, useCallback, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
-import { ImagePlus, Globe2, LayoutGrid, Images, ListPlus, Video } from 'lucide-react';
+import { ImagePlus, Globe2, LayoutGrid, Images, ListPlus, ScrollText, Video } from 'lucide-react';
 
 import { CANVAS_NODE_TYPES, type CanvasNodeType } from '@/features/canvas/domain/canvasNodes';
 import {
@@ -15,6 +15,7 @@ import {
   type PromptImportMappedRow,
 } from '@/features/canvas/application/promptImport';
 import { PromptImportDialog } from '@/features/canvas/ui/PromptImportDialog';
+import { CanvasDiagnosticDrawer } from '@/features/canvas/ui/CanvasDiagnosticDrawer';
 import { useCanvasStore } from '@/stores/canvasStore';
 
 interface SideToolbarItem {
@@ -76,6 +77,8 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
   const reactFlow = useReactFlow();
   const addNodesBatch = useCanvasStore((s) => s.addNodesBatch);
   const [isPromptImportOpen, setIsPromptImportOpen] = useState(false);
+  const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
+  const nodes = useCanvasStore((s) => s.nodes);
 
   const handleAdd = useCallback((
     type: CanvasNodeType,
@@ -184,6 +187,17 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
         })}
         <button
           type="button"
+          title={t('canvasToolbar.logsTitle')}
+          aria-label={t('canvasToolbar.logsTitle')}
+          aria-expanded={isDiagnosticOpen}
+          onClick={() => setIsDiagnosticOpen((value) => !value)}
+          className={`canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border px-2 py-2 text-[10px] transition-colors ${isDiagnosticOpen ? 'border-accent/60 bg-accent/15 text-accent' : 'border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] text-[var(--canvas-rail-button-text)] hover:border-accent/60 hover:bg-accent/15 hover:text-accent'}`}
+        >
+          <ScrollText className="h-4 w-4" />
+          <span className="canvas-side-toolbar__label leading-tight">{t('canvasToolbar.logs')}</span>
+        </button>
+        <button
+          type="button"
           title={t('canvasToolbar.bulkPromptImportTitle')}
           aria-label={t('canvasToolbar.bulkPromptImportTitle')}
           onClick={() => setIsPromptImportOpen(true)}
@@ -193,6 +207,7 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
           <span className="canvas-side-toolbar__label leading-tight">{t('canvasToolbar.bulkPromptImport')}</span>
         </button>
       </div>
+      <CanvasDiagnosticDrawer isOpen={isDiagnosticOpen} nodes={nodes} onClose={() => setIsDiagnosticOpen(false)} />
       <PromptImportDialog
         isOpen={isPromptImportOpen}
         onClose={() => setIsPromptImportOpen(false)}

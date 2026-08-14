@@ -151,7 +151,16 @@ pub(super) async fn terminate_session(
     let Some(session) = session else {
         return;
     };
+    if session.user_managed {
+        let mut managed_connection_id = inner.managed_connection_id.write().await;
+        if managed_connection_id.as_deref() == Some(session_id) {
+            *managed_connection_id = None;
+        }
+    }
     session.cancelled.store(true, Ordering::SeqCst);
+    if let Some(descriptor_path) = &session.descriptor_path {
+        let _ = std::fs::remove_file(descriptor_path);
+    }
     if session.runtime == ExternalAgentRuntime::Codex {
         if let Ok(workspace) = session.workspace_path() {
             let auth_file = workspace.join("codex-home/auth.json");

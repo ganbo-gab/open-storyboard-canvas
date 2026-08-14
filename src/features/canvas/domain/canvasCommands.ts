@@ -19,6 +19,7 @@ import type {
   PanoramaSourceMode,
   StoryboardExportOptions,
   TagColor,
+  TagGroupShape,
 } from './canvasNodes';
 
 export const CANVAS_COMMAND_VERSION = 1 as const;
@@ -42,6 +43,7 @@ export const CANVAS_COMMAND_TYPES = [
   'director.record',
   'tag.setColor',
   'tagGroup.setMembers',
+  'tagGroup.setAppearance',
   'edge.connect',
   'edge.disconnect',
   'group.create',
@@ -73,11 +75,16 @@ export interface CanvasNodeCreateConfiguration {
   modelId?: string;
   providerId?: string | null;
   aspectRatio?: string;
+  resolution?: string;
+  duration?: string;
+  extraParams?: Record<string, unknown>;
   openDirectorStudio?: boolean;
   directorStudioMode?: 'flat' | 'panorama';
   enabled?: boolean;
   tagColor?: TagColor;
-  memberTagIds?: string[];
+  memberNodeIds?: string[];
+  tagGroupColor?: TagColor;
+  tagGroupShape?: TagGroupShape;
 }
 
 export type CanvasQueryCommand = CanvasCommandBase<'canvas.query', {
@@ -218,7 +225,13 @@ export type SetTagColorCommand = CanvasCommandBase<'tag.setColor', {
 
 export type SetTagGroupMembersCommand = CanvasCommandBase<'tagGroup.setMembers', {
   groupId: string;
-  memberTagIds: string[];
+  memberNodeIds: string[];
+}>;
+
+export type SetTagGroupAppearanceCommand = CanvasCommandBase<'tagGroup.setAppearance', {
+  groupId: string;
+  color?: TagColor;
+  shape?: TagGroupShape;
 }>;
 
 export type ConnectEdgeCommand = CanvasCommandBase<'edge.connect', {
@@ -305,6 +318,7 @@ export type CanvasCommand =
   | RecordDirectorCommand
   | SetTagColorCommand
   | SetTagGroupMembersCommand
+  | SetTagGroupAppearanceCommand
   | ConnectEdgeCommand
   | DisconnectEdgeCommand
   | CreateGroupCommand
@@ -323,14 +337,21 @@ export type CanvasCommandOfType<TType extends CanvasCommandType> = Extract<
   { type: TType }
 >;
 
+export interface CanvasJsonSchemaProperty {
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  description: string;
+  enum?: readonly string[];
+  properties?: Record<string, CanvasJsonSchemaProperty>;
+  required?: string[];
+  additionalProperties?: boolean;
+  items?: CanvasJsonSchemaProperty;
+}
+
 export interface CanvasJsonSchema {
   type: 'object';
   additionalProperties: false;
   required: string[];
-  properties: Record<string, {
-    type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-    description: string;
-  }>;
+  properties: Record<string, CanvasJsonSchemaProperty>;
 }
 
 export interface CanvasCommandSchema {

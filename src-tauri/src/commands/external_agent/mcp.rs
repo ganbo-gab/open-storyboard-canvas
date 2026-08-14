@@ -10,12 +10,14 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+use super::connection::ExternalAgentConnectionDescriptor;
 use super::protocol::{
     mcp_tool_result, read_bounded_jsonl_line, sanitize_json, MAX_TOOL_RESULT_BYTES,
 };
 use super::{
     emit_event, ExternalAgentCommandError, ExternalAgentEvent, ExternalAgentEventKind,
-    ExternalAgentInner, ExternalAgentSession, ExternalAgentToolCall, PendingToolCall,
+    ExternalAgentInner, ExternalAgentSession, ExternalAgentToolCall, ExternalAgentToolDefinition,
+    PendingToolCall,
 };
 
 const MCP_MODE_ARGUMENT: &str = "--external-agent-mcp";
@@ -118,6 +120,24 @@ fn capability_request_is_valid(
         && constant_time_equal(expected_token, requested_token)
 }
 
+fn pending_tool_event(
+    session: &ExternalAgentSession,
+    turn_id: Option<String>,
+    call_id: String,
+    tool: ExternalAgentToolDefinition,
+    input: Value,
+) -> ExternalAgentEvent {
+    ExternalAgentEvent::new(session, ExternalAgentEventKind::ToolRequested, turn_id).with_tool_call(
+        ExternalAgentToolCall {
+            call_id,
+            name: tool.name,
+            input,
+            // External clients never inherit the built-in Agent's Auto mode.
+            requires_approval: true,
+        },
+    )
+}
+
 async fn authorized_session(
     inner: &Arc<ExternalAgentInner>,
     session_id: &str,
@@ -139,7 +159,7 @@ async fn authorized_session(
     Some(session)
 }
 
-async fn handle_broker_connection(
+pub(crate) async fn handle_broker_connection(
     stream: TcpStream,
     inner: Arc<ExternalAgentInner>,
     app: AppHandle,
@@ -167,6 +187,19 @@ async fn handle_broker_connection(
             .map_err(|error| ExternalAgentCommandError::protocol(error.to_string()))?;
         return Ok(());
     };
+    let activity_at = super::now_millis();
+    session
+        .connected_at
+        .compare_exchange(
+            0,
+            activity_at,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .ok();
+    session
+        .last_activity_at
+        .store(activity_at, std::sync::atomic::Ordering::SeqCst);
 
     let action = request
         .get("action")
@@ -184,30 +217,28 @@ async fn handle_broker_connection(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             if let Some(tool) = session.tools.get(name).cloned() {
+                session
+                    .call_count
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let input = sanitize_json(request.get("input").unwrap_or(&Value::Null))?;
                 let call_id = Uuid::new_v4().to_string();
                 let (sender, receiver) = oneshot::channel();
+                let event = pending_tool_event(
+                    &session,
+                    session.active_turn_id.read().await.clone(),
+                    call_id.clone(),
+                    tool,
+                    input,
+                );
                 inner.pending_tools.lock().await.insert(
                     call_id.clone(),
                     PendingToolCall {
                         session_id: session.id.clone(),
                         sender,
+                        event: event.clone(),
                     },
                 );
-                emit_event(
-                    &app,
-                    ExternalAgentEvent::new(
-                        &session,
-                        ExternalAgentEventKind::ToolRequested,
-                        session.active_turn_id.read().await.clone(),
-                    )
-                    .with_tool_call(ExternalAgentToolCall {
-                        call_id: call_id.clone(),
-                        name: tool.name,
-                        input,
-                        requires_approval: tool.requires_approval,
-                    }),
-                );
+                emit_event(&app, event);
                 match tokio::time::timeout(TOOL_RESOLUTION_TIMEOUT, receiver).await {
                     Ok(Ok(resolution)) => {
                         json!({"ok": true, "result": mcp_tool_result(resolution)})
@@ -311,6 +342,48 @@ impl ChildBrokerCredentials {
             session_id: value("STORYBOARD_EXTERNAL_AGENT_SESSION")?,
         })
     }
+
+    fn from_descriptor(path: &std::path::Path) -> Result<Self, String> {
+        let metadata = std::fs::symlink_metadata(path)
+            .map_err(|_| "Canvas MCP connection descriptor is unavailable".to_string())?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err("Canvas MCP connection descriptor must be a regular file".to_string());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o077 != 0 {
+                return Err(
+                    "Canvas MCP connection descriptor permissions are too broad".to_string()
+                );
+            }
+        }
+        if metadata.len() > 16 * 1024 {
+            return Err("Canvas MCP connection descriptor is too large".to_string());
+        }
+        let bytes = std::fs::read(path)
+            .map_err(|_| "Canvas MCP connection descriptor cannot be read".to_string())?;
+        let descriptor: ExternalAgentConnectionDescriptor = serde_json::from_slice(&bytes)
+            .map_err(|_| "Canvas MCP connection descriptor is malformed".to_string())?;
+        if descriptor.schema_version != 1 {
+            return Err("Canvas MCP connection descriptor version is unsupported".to_string());
+        }
+        if super::now_millis() >= descriptor.expires_at {
+            return Err("Canvas MCP connection descriptor has expired".to_string());
+        }
+        let address: SocketAddr = descriptor
+            .broker_address
+            .parse()
+            .map_err(|_| "Canvas MCP connection descriptor address is invalid".to_string())?;
+        if !address.ip().is_loopback() {
+            return Err("Canvas MCP connection descriptor address is not loopback".to_string());
+        }
+        Ok(Self {
+            address: descriptor.broker_address,
+            token: descriptor.capability_token,
+            session_id: descriptor.session_id,
+        })
+    }
 }
 
 fn jsonrpc_response(id: Value, result: Value) -> Value {
@@ -408,7 +481,10 @@ pub fn is_external_agent_mcp_mode() -> bool {
 }
 
 pub fn run_external_agent_mcp_mode() -> Result<(), String> {
-    let credentials = ChildBrokerCredentials::from_env()?;
+    let credentials = match env::args_os().nth(2) {
+        Some(path) => ChildBrokerCredentials::from_descriptor(std::path::Path::new(&path))?,
+        None => ChildBrokerCredentials::from_env()?,
+    };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -420,11 +496,110 @@ pub fn run_external_agent_mcp_mode() -> Result<(), String> {
 mod tests {
     use super::*;
 
+    fn managed_test_session() -> ExternalAgentSession {
+        let workspace = tempfile::tempdir().unwrap();
+        ExternalAgentSession {
+            id: "connection-a".to_string(),
+            runtime: super::super::ExternalAgentRuntime::Codex,
+            capability_token: "token".to_string(),
+            capability_expires_at: u64::MAX,
+            broker: super::super::BrokerCredentials {
+                address: "127.0.0.1:1234".to_string(),
+                token: "token".to_string(),
+                session_id: "connection-a".to_string(),
+            },
+            target: super::super::process::LaunchTarget::from_direct_for_test(
+                std::path::PathBuf::from("canvas"),
+                super::super::ExternalAgentRuntime::Codex,
+            ),
+            workspace: std::sync::Mutex::new(Some(super::super::SessionWorkspace::Temporary(
+                workspace,
+            ))),
+            tools: std::collections::HashMap::new(),
+            provider_session_id: tokio::sync::RwLock::new(None),
+            model: None,
+            created_at: 1,
+            cancelled: std::sync::atomic::AtomicBool::new(false),
+            active_turn_id: tokio::sync::RwLock::new(Some("managed-connection-a".to_string())),
+            active_process: tokio::sync::Mutex::new(None),
+            codex_stdin: tokio::sync::Mutex::new(None),
+            next_rpc_id: std::sync::atomic::AtomicU64::new(1),
+            pending_rpc: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            claude_has_history: std::sync::atomic::AtomicBool::new(false),
+            turn_gate: tokio::sync::Mutex::new(()),
+            turn_workspaces: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            user_managed: true,
+            project_id: Some("project-a".to_string()),
+            project_name: Some("Project A".to_string()),
+            descriptor_path: None,
+            connected_at: std::sync::atomic::AtomicU64::new(0),
+            last_activity_at: std::sync::atomic::AtomicU64::new(0),
+            call_count: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
     #[test]
     fn capability_comparison_is_exact() {
         assert!(constant_time_equal("abcdef", "abcdef"));
         assert!(!constant_time_equal("abcdef", "abcdeg"));
         assert!(!constant_time_equal("abcdef", "abc"));
+    }
+
+    #[test]
+    fn descriptor_credentials_reject_broad_permissions_and_expiry() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("connection.json");
+        let write = |expires_at| {
+            std::fs::write(
+                &path,
+                serde_json::to_vec(&ExternalAgentConnectionDescriptor {
+                    schema_version: 1,
+                    broker_address: "127.0.0.1:1234".to_string(),
+                    capability_token: "secret".to_string(),
+                    session_id: "session-a".to_string(),
+                    expires_at,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        };
+        write(super::super::now_millis().saturating_add(60_000));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(ChildBrokerCredentials::from_descriptor(&path).is_err());
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert_eq!(
+            ChildBrokerCredentials::from_descriptor(&path)
+                .unwrap()
+                .session_id,
+            "session-a"
+        );
+        write(super::super::now_millis().saturating_sub(1));
+        assert!(ChildBrokerCredentials::from_descriptor(&path).is_err());
+    }
+
+    #[test]
+    fn managed_tool_request_has_stable_turn_and_forces_manual_approval() {
+        let session = managed_test_session();
+        let event = pending_tool_event(
+            &session,
+            Some("managed-connection-a".to_string()),
+            "call-a".to_string(),
+            ExternalAgentToolDefinition {
+                name: "canvas_command".to_string(),
+                description: "Canvas only".to_string(),
+                input_schema: json!({"type": "object"}),
+                requires_approval: false,
+            },
+            json!({"type": "canvas.query", "input": {}}),
+        );
+        assert_eq!(event.turn_id.as_deref(), Some("managed-connection-a"));
+        let tool_call = event.tool_call.unwrap();
+        assert_eq!(tool_call.call_id, "call-a");
+        assert!(tool_call.requires_approval);
     }
 
     #[test]

@@ -1,4 +1,6 @@
 import {
+  CANVAS_NODE_TYPES,
+  isTagGroupNode,
   isTagNode,
   type CanvasEdge,
   type CanvasNode,
@@ -8,9 +10,18 @@ import {
   nodeHasTargetHandle,
 } from '@/features/canvas/domain/nodeRegistry';
 
+const TAG_GROUP_REFERENCE_TARGET_TYPES = new Set<CanvasNode['type']>([
+  CANVAS_NODE_TYPES.imageEdit,
+  CANVAS_NODE_TYPES.aiVideo,
+  CANVAS_NODE_TYPES.aiText,
+  CANVAS_NODE_TYPES.aiAudio,
+  CANVAS_NODE_TYPES.storyboardGen,
+  CANVAS_NODE_TYPES.panorama,
+]);
+
 export interface CanvasConnectionValidation {
   valid: boolean;
-  code?: 'missing-node' | 'unsupported' | 'self-connection' | 'duplicate' | 'tag-source-conflict' | 'tag-cycle';
+  code?: 'missing-node' | 'unsupported' | 'self-connection' | 'duplicate' | 'tag-source-conflict' | 'tag-cycle' | 'tag-group-target';
   message?: string;
   existingEdgeId?: string;
 }
@@ -54,6 +65,13 @@ export function validateCanvasConnection(
   }
   if (!nodeHasSourceHandle(source.type) || !nodeHasTargetHandle(target.type)) {
     return { valid: false, code: 'unsupported', message: `Nodes ${source.id} and ${target.id} are not connectable.` };
+  }
+  if (isTagGroupNode(source) && !TAG_GROUP_REFERENCE_TARGET_TYPES.has(target.type)) {
+    return {
+      valid: false,
+      code: 'tag-group-target',
+      message: `Tag group ${source.id} can only connect to a supported AI generation node.`,
+    };
   }
   const existing = edges.find((edge) => edge.source === source.id && edge.target === target.id);
   if (existing) {

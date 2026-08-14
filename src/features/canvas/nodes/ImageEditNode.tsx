@@ -40,7 +40,9 @@ import {
 } from '@/features/canvas/application/canvasGraphSelectors';
 import {
   buildReferenceContextPrompt,
+  collapseTagGroupReferenceOptions,
   collectInputReferences,
+  normalizeReferenceTokensForSubmission,
 } from '@/features/canvas/application/graphReferenceResolver';
 import { resolveErrorContent, showErrorDialog } from '@/features/canvas/application/errorDialog';
 import {
@@ -354,6 +356,10 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     })),
     [incomingReferences]
   );
+  const incomingReferencePickerItems = useMemo(
+    () => collapseTagGroupReferenceOptions(incomingReferenceItems),
+    [incomingReferenceItems]
+  );
   const functionPickerItems = useMemo(() => [
     ...MULTI_FUNCTION_ITEMS.map((item) => ({
       kind: 'function' as const,
@@ -534,15 +540,15 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   }, [data.modelConfig, id, nodeModelConfig, updateNodeData]);
 
   useEffect(() => {
-    if (incomingReferenceItems.length === 0) {
+    if (incomingReferencePickerItems.length === 0) {
       setShowImagePicker(false);
       setPickerCursor(null);
       setPickerActiveIndex(0);
       return;
     }
 
-    setPickerActiveIndex((previous) => Math.min(previous, incomingReferenceItems.length - 1));
-  }, [incomingReferenceItems.length]);
+    setPickerActiveIndex((previous) => Math.min(previous, incomingReferencePickerItems.length - 1));
+  }, [incomingReferencePickerItems.length]);
 
   useEffect(() => {
     const handleOutside = (event: MouseEvent) => {
@@ -591,7 +597,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     const latestIncomingImages = latestReferences
       .filter((reference) => reference.kind === 'image' && reference.imageUrl)
       .map((reference) => reference.imageUrl as string);
-    let basePrompt = currentPromptDraft.replace(/@(?=(?:图|视频|文本)\d+)/g, '').trim();
+    let basePrompt = normalizeReferenceTokensForSubmission(currentPromptDraft, latestReferences);
 
     const selectedPresetId = latestData.selectedPromptPresetId ?? null;
     const selectedFunctionChip = selectedPresetId ? null : latestData.selectedFunctionChip ?? null;
@@ -999,7 +1005,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   }, [syncPromptHighlightScroll]);
 
   const insertGraphReference = useCallback((referenceIndex: number) => {
-    const marker = incomingReferenceItems[referenceIndex]?.token;
+    const marker = incomingReferencePickerItems[referenceIndex]?.token;
     if (!marker) {
       return;
     }
@@ -1018,7 +1024,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     setPickerActiveIndex(0);
 
     restorePromptCaret(nextCursor, previousViewport);
-  }, [flushPromptDraft, incomingReferenceItems, pickerCursor, restorePromptCaret]);
+  }, [flushPromptDraft, incomingReferencePickerItems, pickerCursor, restorePromptCaret]);
 
   const selectPromptPresetFromFunctionPicker = useCallback((presetId: string) => {
     updateNodeData(id, {
@@ -1186,17 +1192,17 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       }
     }
 
-    if (showImagePicker && incomingReferenceItems.length > 0) {
+    if (showImagePicker && incomingReferencePickerItems.length > 0) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
-        setPickerActiveIndex((previous) => (previous + 1) % incomingReferenceItems.length);
+        setPickerActiveIndex((previous) => (previous + 1) % incomingReferencePickerItems.length);
         return;
       }
 
       if (event.key === 'ArrowUp') {
         event.preventDefault();
         setPickerActiveIndex((previous) =>
-          previous === 0 ? incomingReferenceItems.length - 1 : previous - 1
+          previous === 0 ? incomingReferencePickerItems.length - 1 : previous - 1
         );
         return;
       }
@@ -1223,7 +1229,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       return;
     }
 
-    if (event.key === '@' && incomingReferenceItems.length > 0) {
+    if (event.key === '@' && incomingReferencePickerItems.length > 0) {
       event.preventDefault();
       const cursor = event.currentTarget.selectionStart ?? promptDraftRef.current.length;
       setPickerAnchor(resolvePickerAnchor(rootRef.current, event.currentTarget, cursor));
@@ -1339,7 +1345,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
           />
         </div>
 
-        {showImagePicker && incomingReferenceItems.length > 0 && (
+        {showImagePicker && incomingReferencePickerItems.length > 0 && (
           <div
             className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
             style={{ left: pickerAnchor.left, top: pickerAnchor.top }}
@@ -1350,7 +1356,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
               className="ui-scrollbar nowheel max-h-[180px] overflow-y-auto"
               onWheelCapture={(event) => event.stopPropagation()}
             >
-              {incomingReferenceItems.map((item, index) => (
+              {incomingReferencePickerItems.map((item, index) => (
                 <button
                   key={`${item.kind}-${item.sourceNodeId}-${index}`}
                   type="button"
@@ -1580,7 +1586,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         </UiButton>
       </div>
 
-      {error && <div className="mt-1 shrink-0 text-xs text-red-400">{error}</div>}
+      {error && <div className="mt-1 shrink-0 text-xs text-red-700 dark:text-red-300">{error}</div>}
 
       <UiModal
         isOpen={payloadDebugText !== null}

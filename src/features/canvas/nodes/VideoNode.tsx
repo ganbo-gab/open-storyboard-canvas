@@ -345,12 +345,12 @@ export const VideoNode = memo(({ id, data, selected, type, width, height }: Vide
             </span>
           </div>
         ) : hasVideoError ? (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-red-300">
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-red-700 dark:text-red-300">
             <AlertTriangle className="h-7 w-7 opacity-90" />
-            <span className="text-center text-[12px] font-medium leading-5 text-red-200">
+            <span className="text-center text-[12px] font-semibold leading-5 text-red-800 dark:text-red-200">
               {t(errorTitleKey)}
             </span>
-            <span className="max-h-[96px] overflow-y-auto break-words text-center text-[11px] leading-5 text-red-200/90">
+            <span className="max-h-[96px] overflow-y-auto break-words text-center text-[11px] leading-5 text-red-800/90 dark:text-red-200/90">
               {errorText}
             </span>
           </div>

@@ -38,6 +38,7 @@ export interface CanvasNodeCapabilities {
 export interface CanvasNodeConnectivity {
   sourceHandle: boolean;
   targetHandle: boolean;
+  manualSource?: boolean;
   connectMenu: {
     fromSource: boolean;
     fromTarget: boolean;
@@ -70,6 +71,7 @@ const uploadNodeDefinition: CanvasNodeDefinition<UploadImageNodeData> = {
   connectivity: {
     sourceHandle: true,
     targetHandle: false,
+    manualSource: true,
     connectMenu: {
       fromSource: false,
       fromTarget: true,
@@ -97,6 +99,7 @@ const imageEditNodeDefinition: CanvasNodeDefinition<ImageEditNodeData> = {
   connectivity: {
     sourceHandle: true,
     targetHandle: true,
+    manualSource: true,
     connectMenu: {
       fromSource: true,
       fromTarget: false,
@@ -164,6 +167,7 @@ const aiTextNodeDefinition: CanvasNodeDefinition<AiTextNodeData> = {
   connectivity: {
     sourceHandle: true,
     targetHandle: true,
+    manualSource: true,
     connectMenu: {
       fromSource: true,
       fromTarget: false,
@@ -230,6 +234,7 @@ const exportImageNodeDefinition: CanvasNodeDefinition<ExportImageNodeData> = {
   connectivity: {
     sourceHandle: true,
     targetHandle: true,
+    manualSource: true,
     connectMenu: {
       fromSource: false,
       fromTarget: false,
@@ -271,6 +276,7 @@ const videoNodeDefinition: CanvasNodeDefinition<VideoNodeData> = {
   connectivity: {
     sourceHandle: true,
     targetHandle: true,
+    manualSource: true,
     connectMenu: {
       fromSource: true,
       fromTarget: false,
@@ -313,6 +319,7 @@ const audioNodeDefinition: CanvasNodeDefinition<AudioNodeData> = {
   connectivity: {
     sourceHandle: true,
     targetHandle: true,
+    manualSource: true,
     connectMenu: {
       fromSource: true,
       fromTarget: false,
@@ -364,7 +371,7 @@ const tagNodeDefinition: CanvasNodeDefinition<TagNodeData> = {
   type: CANVAS_NODE_TYPES.tag,
   menuLabelKey: 'node.menu.tag',
   menuIcon: 'tag',
-  visibleInMenu: true,
+  visibleInMenu: false,
   defaultSize: {
     width: 260,
     height: 132,
@@ -378,8 +385,8 @@ const tagNodeDefinition: CanvasNodeDefinition<TagNodeData> = {
     sourceHandle: true,
     targetHandle: true,
     connectMenu: {
-      fromSource: true,
-      fromTarget: true,
+      fromSource: false,
+      fromTarget: false,
     },
   },
   createDefaultData: () => ({
@@ -396,8 +403,8 @@ const tagGroupNodeDefinition: CanvasNodeDefinition<TagGroupNodeData> = {
   menuIcon: 'tagGroup',
   visibleInMenu: true,
   defaultSize: {
-    width: 320,
-    height: 180,
+    width: 420,
+    height: 260,
   },
   capabilities: {
     toolbar: true,
@@ -405,18 +412,23 @@ const tagGroupNodeDefinition: CanvasNodeDefinition<TagGroupNodeData> = {
     promptInput: false,
   },
   connectivity: {
-    sourceHandle: false,
+    sourceHandle: true,
     targetHandle: false,
+    manualSource: true,
     connectMenu: {
       fromSource: false,
       fromTarget: false,
     },
   },
   createDefaultData: () => ({
+    schemaVersion: 2,
     displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.tagGroup],
     label: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.tagGroup],
     enabled: true,
-    memberTagIds: [],
+    color: 'neutral',
+    shape: 'rounded',
+    memberNodeIds: [],
+    unresolvedMemberIds: [],
   }),
 };
 
@@ -433,6 +445,7 @@ const textAnnotationNodeDefinition: CanvasNodeDefinition<TextAnnotationNodeData>
   connectivity: {
     sourceHandle: true,
     targetHandle: true,
+    manualSource: true,
     connectMenu: {
       fromSource: true,
       fromTarget: false,
@@ -466,6 +479,7 @@ const jsonCardNodeDefinition: CanvasNodeDefinition<JsonCardNodeData> = {
   connectivity: {
     sourceHandle: true,
     targetHandle: true,
+    manualSource: true,
     connectMenu: {
       fromSource: true,
       fromTarget: false,
@@ -702,6 +716,11 @@ export function nodeHasSourceHandle(type: CanvasNodeType): boolean {
 
 export function nodeHasTargetHandle(type: CanvasNodeType): boolean {
   return canvasNodeDefinitions[type].connectivity.targetHandle;
+}
+
+export function nodeCanStartManualConnection(type: CanvasNodeType): boolean {
+  const connectivity = canvasNodeDefinitions[type].connectivity;
+  return connectivity.sourceHandle && connectivity.manualSource === true;
 }
 
 export function getConnectMenuNodeTypes(handleType: 'source' | 'target'): CanvasNodeType[] {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Image, LocateFixed, Type, Video } from 'lucide-react';
 
 import { UiButton, UiCheckbox, UiModal, UiSelect } from '@/components/ui';
 import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
@@ -9,6 +10,8 @@ import {
 } from '@/features/canvas/domain/canvasCommands';
 import {
   isTagGroupNode,
+  isEligibleTagGroupMember,
+  getTagGroupMemberKind,
   isTagNode,
   type CanvasNode,
 } from '@/features/canvas/domain/canvasNodes';
@@ -18,6 +21,8 @@ import {
   nodeHasTargetHandle,
 } from '@/features/canvas/domain/nodeRegistry';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
+import { canvasNavigationFacade } from '@/features/canvas/application/canvasNavigationFacade';
 
 type TagRelationsDialogProps = {
   isOpen: boolean;
@@ -32,6 +37,39 @@ function nodeLabel(node: CanvasNode): string {
 
 function createTransactionId(nodeId: string): string {
   return `ui-tag-relations-${nodeId}-${Date.now().toString(36)}`;
+}
+
+function getMemberPreview(node: CanvasNode): { kind: 'image' | 'video' | 'text'; source?: string; text?: string } | null {
+  const kind = getTagGroupMemberKind(node.type);
+  if (!kind) return null;
+  const data = node.data as Record<string, unknown>;
+  if (kind === 'image') {
+    const firstFrame = Array.isArray(data.frames)
+      ? data.frames.find((frame) => frame && typeof frame === 'object') as Record<string, unknown> | undefined
+      : undefined;
+    const source = typeof data.previewImageUrl === 'string'
+      ? data.previewImageUrl
+      : typeof data.imageUrl === 'string'
+        ? data.imageUrl
+        : typeof firstFrame?.previewImageUrl === 'string'
+          ? firstFrame.previewImageUrl
+          : typeof firstFrame?.imageUrl === 'string'
+            ? firstFrame.imageUrl
+            : undefined;
+    return { kind, source };
+  }
+  if (kind === 'video') {
+    const source = typeof data.thumbnailUrl === 'string' ? data.thumbnailUrl : undefined;
+    return { kind, source };
+  }
+  const text = typeof data.content === 'string'
+    ? data.content
+    : typeof data.rawContent === 'string'
+      ? data.rawContent
+      : typeof data.prompt === 'string'
+        ? data.prompt
+        : '';
+  return { kind, text: text.trim().slice(0, 160) };
 }
 
 export function TagRelationsDialog({
@@ -63,9 +101,9 @@ export function TagRelationsDialog({
   );
   const tagCandidates = useMemo(
     () => nodes
-      .filter(isTagNode)
+      .filter((node) => variant === 'members' ? isEligibleTagGroupMember(node) : isTagNode(node))
       .sort((left, right) => nodeLabel(left).localeCompare(nodeLabel(right))),
-    [nodes],
+    [nodes, variant],
   );
 
   useEffect(() => {
@@ -85,9 +123,9 @@ export function TagRelationsDialog({
       setSelectedNodeIds(new Set());
       return;
     }
-    const validTagIds = new Set(snapshot.nodes.filter(isTagNode).map((node) => node.id));
-    const existingMemberIds = group.data.memberTagIds.filter((tagId) => validTagIds.has(tagId));
-    setMissingMemberCount(group.data.memberTagIds.length - existingMemberIds.length);
+    const validTagIds = new Set(snapshot.nodes.filter((node) => isEligibleTagGroupMember(node)).map((node) => node.id));
+    const existingMemberIds = group.data.memberNodeIds.filter((memberId) => validTagIds.has(memberId));
+    setMissingMemberCount(group.data.unresolvedMemberIds?.length ?? 0);
     setSelectedNodeIds(new Set(existingMemberIds));
   }, [isOpen, nodeId, variant]);
 
@@ -164,7 +202,7 @@ export function TagRelationsDialog({
     const result = await canvasCommandRegistry.execute({
       type: 'tagGroup.setMembers',
       version: CANVAS_COMMAND_VERSION,
-      input: { groupId: nodeId, memberTagIds: Array.from(selectedNodeIds) },
+      input: { groupId: nodeId, memberNodeIds: Array.from(selectedNodeIds) },
     }, 'ui');
     setIsSaving(false);
     if (!result.ok) {
@@ -234,6 +272,8 @@ export function TagRelationsDialog({
               <p className="py-6 text-center text-sm text-text-muted">{t('node.tag.emptyCandidates')}</p>
             ) : candidates.map((node) => {
               const label = nodeLabel(node);
+              const preview = variant === 'members' ? getMemberPreview(node) : null;
+              const KindIcon = preview?.kind === 'video' ? Video : preview?.kind === 'text' ? Type : Image;
               return (
                 <div
                   key={node.id}
@@ -247,7 +287,27 @@ export function TagRelationsDialog({
                     onClick={(event) => event.stopPropagation()}
                     onCheckedChange={() => toggleSelected(node.id)}
                   />
-                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                  {preview?.source ? (
+                    <img src={resolveImageDisplayUrl(preview.source)} alt="" className="h-11 w-14 shrink-0 rounded object-cover" />
+                  ) : preview ? (
+                    <span className="flex h-11 w-14 shrink-0 items-center justify-center rounded bg-[var(--canvas-node-bg)] text-text-muted"><KindIcon className="h-4 w-4" /></span>
+                  ) : null}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{label}</span>
+                    {preview ? <span className="mt-0.5 block truncate text-[10px] text-text-muted">{preview.text || t(`node.tag.memberTypes.${preview.kind}`)}</span> : null}
+                  </span>
+                  {variant === 'members' ? (
+                    <button
+                      type="button"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-text-muted hover:bg-accent/10 hover:text-accent"
+                      aria-label={t('node.tag.locateMember')}
+                      title={t('node.tag.locateMember')}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void canvasNavigationFacade.focusNodeIds([node.id], { select: true, padding: 0.24 });
+                      }}
+                    ><LocateFixed className="h-4 w-4" /></button>
+                  ) : null}
                 </div>
               );
             })}

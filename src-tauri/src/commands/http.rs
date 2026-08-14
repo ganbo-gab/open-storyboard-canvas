@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
@@ -9,6 +9,7 @@ use reqwest::multipart::{Form, Part};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter};
+use tracing::{info, warn};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +77,84 @@ pub struct HttpStreamEventDto {
 
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static DIRECT_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+#[derive(Debug)]
+struct SafeHttpRequestSummary {
+    method: String,
+    host: String,
+    path: String,
+    model: String,
+    stream: bool,
+    message_count: usize,
+    tool_count: usize,
+    body_bytes: usize,
+    network_route: String,
+}
+
+fn summarize_http_request(request: &HttpRequestDto) -> SafeHttpRequestSummary {
+    let parsed_url = reqwest::Url::parse(&request.url).ok();
+    let body = request.body.as_ref();
+    SafeHttpRequestSummary {
+        method: request.method.trim().to_uppercase(),
+        host: parsed_url
+            .as_ref()
+            .and_then(reqwest::Url::host_str)
+            .unwrap_or("[invalid-host]")
+            .to_string(),
+        path: parsed_url
+            .as_ref()
+            .map(|url| url.path().to_string())
+            .unwrap_or_else(|| "[invalid-path]".to_string()),
+        model: body
+            .and_then(|value| value.get("model"))
+            .and_then(Value::as_str)
+            .unwrap_or("[unspecified]")
+            .chars()
+            .take(160)
+            .collect(),
+        stream: body
+            .and_then(|value| value.get("stream"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        message_count: body
+            .and_then(|value| value.get("messages"))
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0),
+        tool_count: body
+            .and_then(|value| value.get("tools"))
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0),
+        body_bytes: body
+            .and_then(|value| serde_json::to_vec(value).ok())
+            .map(|value| value.len())
+            .unwrap_or(0),
+        network_route: request
+            .network_route
+            .as_deref()
+            .unwrap_or("system")
+            .trim()
+            .to_string(),
+    }
+}
+
+fn log_http_request(summary: &SafeHttpRequestSummary, transport: &str) {
+    info!(
+        target: "custom_provider_http",
+        transport,
+        method = %summary.method,
+        host = %summary.host,
+        path = %summary.path,
+        model = %summary.model,
+        stream = summary.stream,
+        message_count = summary.message_count,
+        tool_count = summary.tool_count,
+        body_bytes = summary.body_bytes,
+        network_route = %summary.network_route,
+        "custom provider request"
+    );
+}
 
 fn shared_http_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(|| {
@@ -380,6 +459,9 @@ fn take_decodable_utf8(pending: &mut Vec<u8>, flush: bool) -> Option<String> {
 
 #[tauri::command]
 pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponseDto, String> {
+    let summary = summarize_http_request(&request);
+    let started_at = Instant::now();
+    log_http_request(&summary, "buffered");
     let client = client_for_route(
         request.network_route.as_deref(),
         request.custom_proxy_url.as_deref(),
@@ -387,12 +469,35 @@ pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponse
     let response = build_http_request(&client, request)?
         .send()
         .await
-        .map_err(|err| format!("HTTP request failed: {err}"))?;
+        .map_err(|err| {
+            warn!(
+                target: "custom_provider_http",
+                transport = "buffered",
+                host = %summary.host,
+                path = %summary.path,
+                model = %summary.model,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "custom provider request transport failed: {err}"
+            );
+            format!("HTTP request failed: {err}")
+        })?;
     let status = response.status().as_u16();
     let text = response
         .text()
         .await
         .map_err(|err| format!("HTTP response read failed: {err}"))?;
+
+    info!(
+        target: "custom_provider_http",
+        transport = "buffered",
+        host = %summary.host,
+        path = %summary.path,
+        model = %summary.model,
+        status,
+        response_bytes = text.len(),
+        elapsed_ms = started_at.elapsed().as_millis(),
+        "custom provider response"
+    );
 
     Ok(HttpResponseDto { status, text })
 }
@@ -408,6 +513,10 @@ pub async fn custom_http_stream_request(
         return Err("streamId is required".to_string());
     }
 
+    let summary = summarize_http_request(&request);
+    let started_at = Instant::now();
+    log_http_request(&summary, "stream");
+
     let client = client_for_route(
         request.network_route.as_deref(),
         request.custom_proxy_url.as_deref(),
@@ -416,6 +525,15 @@ pub async fn custom_http_stream_request(
         .send()
         .await
         .map_err(|err| {
+            warn!(
+                target: "custom_provider_http",
+                transport = "stream",
+                host = %summary.host,
+                path = %summary.path,
+                model = %summary.model,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "custom provider request transport failed: {err}"
+            );
             let message = format!("HTTP request failed: {err}");
             emit_stream_event(
                 &app,
@@ -430,6 +548,17 @@ pub async fn custom_http_stream_request(
             message
         })?;
     let status = response.status().as_u16();
+
+    info!(
+        target: "custom_provider_http",
+        transport = "stream",
+        host = %summary.host,
+        path = %summary.path,
+        model = %summary.model,
+        status,
+        elapsed_ms = started_at.elapsed().as_millis(),
+        "custom provider response headers"
+    );
 
     emit_stream_event(
         &app,
@@ -497,6 +626,18 @@ pub async fn custom_http_stream_request(
         let error_text = String::from_utf8_lossy(&error_bytes).to_string();
         let preview: String = error_text.chars().take(1000).collect();
         let message = format!("HTTP {status}: {preview}");
+        warn!(
+            target: "custom_provider_http",
+            transport = "stream",
+            host = %summary.host,
+            path = %summary.path,
+            model = %summary.model,
+            status,
+            response_bytes = full_bytes.len(),
+            chunk_count,
+            elapsed_ms = started_at.elapsed().as_millis(),
+            "custom provider stream failed"
+        );
         emit_stream_event(
             &app,
             HttpStreamEventDto {
@@ -512,6 +653,19 @@ pub async fn custom_http_stream_request(
 
     let byte_length = full_bytes.len();
     let text = String::from_utf8_lossy(&full_bytes).to_string();
+
+    info!(
+        target: "custom_provider_http",
+        transport = "stream",
+        host = %summary.host,
+        path = %summary.path,
+        model = %summary.model,
+        status,
+        response_bytes = byte_length,
+        chunk_count,
+        elapsed_ms = started_at.elapsed().as_millis(),
+        "custom provider stream completed"
+    );
 
     emit_stream_event(
         &app,
@@ -536,6 +690,28 @@ pub async fn custom_http_stream_request(
 mod tests {
     use super::*;
 
+    fn diagnostic_request() -> HttpRequestDto {
+        HttpRequestDto {
+            url: "https://example.com/v1/chat/completions?token=secret".to_string(),
+            method: "POST".to_string(),
+            headers: Some(HashMap::from([(
+                "Authorization".to_string(),
+                "Bearer secret".to_string(),
+            )])),
+            body_mode: Some("json".to_string()),
+            body: Some(serde_json::json!({
+                "model": "grok-4.6",
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [{"type": "function"}],
+                "stream": true
+            })),
+            multipart: None,
+            timeout_ms: Some(30_000),
+            network_route: Some("system".to_string()),
+            custom_proxy_url: None,
+        }
+    }
+
     #[test]
     fn route_clients_accept_supported_modes() {
         assert!(client_for_route(Some("system"), None).is_ok());
@@ -549,5 +725,22 @@ mod tests {
         assert!(client_for_route(Some("custom-proxy"), Some("socks5://127.0.0.1:7890")).is_err());
         assert!(client_for_route(Some("custom-proxy"), Some("not a url")).is_err());
         assert!(client_for_route(Some("unexpected"), None).is_err());
+    }
+
+    #[test]
+    fn request_summary_exposes_only_bounded_transport_metadata() {
+        let summary = summarize_http_request(&diagnostic_request());
+        assert_eq!(summary.method, "POST");
+        assert_eq!(summary.host, "example.com");
+        assert_eq!(summary.path, "/v1/chat/completions");
+        assert_eq!(summary.model, "grok-4.6");
+        assert!(summary.stream);
+        assert_eq!(summary.message_count, 1);
+        assert_eq!(summary.tool_count, 1);
+        assert!(summary.body_bytes > 0);
+        assert_eq!(summary.network_route, "system");
+        let debug = format!("{summary:?}");
+        assert!(!debug.contains("Bearer secret"));
+        assert!(!debug.contains("token=secret"));
     }
 }

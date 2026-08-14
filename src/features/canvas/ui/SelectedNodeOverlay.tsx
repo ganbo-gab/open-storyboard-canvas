@@ -12,6 +12,7 @@ import {
   EXPORT_RESULT_NODE_LAYOUT_HEIGHT,
   isExportImageNode,
   isImageEditNode,
+  isTagGroupNode,
   isUploadNode,
   type CanvasNode,
 } from '@/features/canvas/domain/canvasNodes';
@@ -62,6 +63,7 @@ const BlueprintPanel = lazy(() =>
 );
 import { NodeActionToolbar } from './NodeActionToolbar';
 import { NodeDeleteToolbar } from './NodeDeleteToolbar';
+import { TagGroupToolbar } from './TagGroupToolbar';
 import {
   NODE_TOOLBAR_ALIGN,
   NODE_TOOLBAR_CLASS,
@@ -816,7 +818,9 @@ export const SelectedNodeOverlay = memo(() => {
 
   return (
     <>
-      {selectedNodeToolbarMode === 'full' && shouldCollapseActionToolbar && (
+      {isTagGroupNode(selectedNode) ? (
+        <TagGroupToolbar nodeId={selectedNode.id} data={selectedNode.data} />
+      ) : selectedNodeToolbarMode === 'full' && shouldCollapseActionToolbar && (
         <ReactFlowNodeToolbar
           nodeId={selectedNode.id}
           isVisible
@@ -843,7 +847,7 @@ export const SelectedNodeOverlay = memo(() => {
           </button>
         </ReactFlowNodeToolbar>
       )}
-      {selectedNodeToolbarMode === 'full' && isActionToolbarExpanded && (
+      {!isTagGroupNode(selectedNode) && selectedNodeToolbarMode === 'full' && isActionToolbarExpanded && (
         <NodeActionToolbar
           node={selectedNode}
           offset={shouldCollapseActionToolbar ? EXPANDED_ACTION_TOOLBAR_OFFSET : undefined}

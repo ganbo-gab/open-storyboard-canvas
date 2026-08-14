@@ -18,6 +18,7 @@ import {
   type StreamEvent,
   type protocol,
 } from '@openai/agents';
+import type { JsonObjectSchemaNonStrict } from '@openai/agents-core/types';
 import { z } from 'zod';
 
 import { AgentModelGatewayError, createAgentModelTransport } from './agentModelGateway';
@@ -74,6 +75,7 @@ import {
 import { buildCanvasAssetCatalog } from '@/features/canvas/application/canvasAssetCatalog';
 import { loadDiagnosticEvents } from '@/features/canvas/application/diagnosticEvents';
 import { canvasAgentRollbackStore } from '../application/agentCanvasRollback';
+import { classifyCanvasAgentFailure } from '../application/agentFailurePolicy';
 import {
   canvasAgentApprovalExecution,
   canvasAgentApprovalStore,
@@ -88,6 +90,9 @@ import {
 
 const GENERATION_POLL_PURPOSE = 'poll-approved-generation-status';
 const GENERATION_POLL_GRANT_TTL_MS = 5 * 60_000;
+const GENERATION_FOLLOW_THROUGH_MAX_ATTEMPTS = 72;
+const GENERATION_FOLLOW_THROUGH_INITIAL_DELAY_MS = 1_500;
+const GENERATION_FOLLOW_THROUGH_MAX_DELAY_MS = 3_000;
 const STORYBOARD_DEFERRED_TOOL = 'storyboardDeferredTool';
 const STORYBOARD_TOOL_NAMESPACE = 'storyboard_canvas';
 const STORYBOARD_TOOL_NAMESPACE_DESCRIPTION = '画布编排、诊断、供应商配置和获批图片读取工具。';
@@ -340,6 +345,90 @@ function toUsage(response: AgentModelTurnResponse): Usage {
   });
 }
 
+export function normalizeStoryboardAgentToolCalls(
+  calls: AgentModelTurnResponse['toolCalls'],
+): AgentModelTurnResponse['toolCalls'] {
+  const registeredToolNames = new Set(['canvas_command', 'diagnostics', 'config_patch', 'asset_read']);
+  return calls.flatMap((originalCall) => {
+    const wrappedCall = !originalCall.namespace && CANVAS_COMMAND_TYPES.includes(originalCall.name as CanvasCommand['type'])
+      ? {
+          ...originalCall,
+          name: 'canvas_command',
+          arguments: JSON.stringify({
+            type: originalCall.name,
+            input: (() => {
+              try { return JSON.parse(originalCall.arguments || '{}'); } catch { return { raw: originalCall.arguments }; }
+            })(),
+          }),
+        }
+      : originalCall;
+    const call = !wrappedCall.namespace && wrappedCall.name === 'canvas_command'
+      ? { ...wrappedCall, arguments: normalizeCanvasCommandToolArguments(wrappedCall.arguments) }
+      : wrappedCall;
+    return !call.namespace && !registeredToolNames.has(call.name) ? [] : [call];
+  });
+}
+
+const CANVAS_NODE_TYPE_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  image: 'imageNode',
+  aiimage: 'imageNode',
+  aiimagenode: 'imageNode',
+  imageedit: 'imageNode',
+  imageeditnode: 'imageNode',
+  video: 'aiVideoNode',
+  aivideo: 'aiVideoNode',
+});
+
+function normalizeCreateResolution(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toUpperCase();
+  return ['0.5K', '1K', '2K', '4K'].includes(normalized) ? normalized : value;
+}
+
+/**
+ * Canonicalizes only unambiguous model aliases at the model/tool boundary.
+ * This is intentionally narrow: it never invents node ids, model ids, prompts,
+ * or paid-operation fields. A missing node.create position is the sole safe
+ * default because it is only a placement hint; the canvas placement service
+ * still resolves the final collision-free location. The command registry
+ * remains the final validator for every supplied field.
+ */
+export function normalizeCanvasCommandToolArguments(argumentsJson: string): string {
+  let value: unknown;
+  try {
+    value = JSON.parse(argumentsJson || '{}');
+  } catch {
+    return argumentsJson;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return argumentsJson;
+  const command = value as Record<string, unknown>;
+  if (command.type !== 'node.create' || !command.input || typeof command.input !== 'object' || Array.isArray(command.input)) {
+    return argumentsJson;
+  }
+  const input = { ...(command.input as Record<string, unknown>) };
+  if (input.position === undefined) {
+    input.position = { x: 0, y: 0 };
+  }
+  if (typeof input.nodeType === 'string') {
+    const alias = input.nodeType.replace(/[\s_-]/g, '').toLowerCase();
+    input.nodeType = CANVAS_NODE_TYPE_ALIASES[alias] ?? input.nodeType;
+  }
+  if (input.configuration && typeof input.configuration === 'object' && !Array.isArray(input.configuration)) {
+    const configuration = { ...(input.configuration as Record<string, unknown>) };
+    if (configuration.aspectRatio === undefined && configuration.ratio !== undefined) {
+      configuration.aspectRatio = configuration.ratio;
+    }
+    if (configuration.resolution === undefined && configuration.size !== undefined) {
+      configuration.resolution = configuration.size;
+    }
+    delete configuration.ratio;
+    delete configuration.size;
+    configuration.resolution = normalizeCreateResolution(configuration.resolution);
+    input.configuration = configuration;
+  }
+  return JSON.stringify({ ...command, input });
+}
+
 function toModelOutput(response: AgentModelTurnResponse): protocol.OutputModelItem[] {
   const output: protocol.OutputModelItem[] = [];
   if (response.reasoningSummary) {
@@ -357,7 +446,7 @@ function toModelOutput(response: AgentModelTurnResponse): protocol.OutputModelIt
       content: [{ type: 'output_text', text: response.text }],
     });
   }
-  for (const call of response.toolCalls) {
+  for (const call of normalizeStoryboardAgentToolCalls(response.toolCalls)) {
     output.push({
       id: response.responseId,
       type: 'function_call',
@@ -433,6 +522,13 @@ export class StoryboardAgentModel implements Model {
       return { suggested: false, replaySafety: 'unsafe', reason: 'aborted by user' };
     }
     if (args.error instanceof AgentModelGatewayError) {
+      if (classifyCanvasAgentFailure(args.error).kind === 'provider-quota') {
+        return {
+          suggested: false,
+          replaySafety: 'unsafe',
+          reason: 'provider reported exhausted quota; an immediate retry cannot recover it',
+        };
+      }
       if (args.error.retryable && !args.error.responseStarted) {
         return {
           suggested: true,
@@ -500,7 +596,7 @@ export interface StoryboardAgentRuntime {
 export interface CanvasAgentToolEvent {
   toolName: string;
   callId?: string;
-  status: 'awaiting-approval' | 'executing' | 'succeeded' | 'failed' | 'unknown';
+  status: 'awaiting-approval' | 'executing' | 'succeeded' | 'failed' | 'warning' | 'unknown';
   input?: unknown;
   output?: unknown;
   error?: string;
@@ -517,12 +613,42 @@ export interface CanvasAgentContext {
   /** Optional safe evidence providers. Values are recursively redacted before they reach the model. */
   getDiagnosticEvidence?: () => DiagnosticEvidenceInput;
   getDiagnosticRuntimeSnapshot?: () => unknown;
+  generationFollowThrough?: {
+    maxAttempts?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    wait?: (delayMs: number) => Promise<void>;
+  };
 }
 
 const canvasCommandInputParser = z.object({
   type: z.string().min(1),
   input: z.record(z.string(), z.unknown()).default({}),
 }).strict();
+
+function canvasCommandContractSummary(): string {
+  return canvasCommandRegistry.list().map(({ type, schema }) => {
+    const required = new Set(schema.input.required);
+    const fields = Object.entries(schema.input.properties).map(([name, field]) => (
+      `${name}${required.has(name) ? '' : '?'}:${field.type}`
+    ));
+    return `${type} { ${fields.join(', ')} }`;
+  }).join('; ');
+}
+
+function canvasCommandVariants(): Array<Record<string, unknown>> {
+  return canvasCommandRegistry.list().map(({ type, schema }) => ({
+    title: type,
+    description: `Exact canvas_command contract for ${type}.`,
+    type: 'object',
+    properties: {
+      type: { type: 'string', enum: [type] },
+      input: schema.input,
+    },
+    required: ['type', 'input'],
+    additionalProperties: false,
+  }));
+}
 
 const canvasCommandParameters = {
   type: 'object' as const,
@@ -532,11 +658,22 @@ const canvasCommandParameters = {
       enum: [...CANVAS_COMMAND_TYPES],
       description: 'Registered CanvasCommand type, including safe tag and tag-group operations.',
     },
-    input: { type: 'object' as const, description: 'Command-specific input validated by CanvasCommandRegistry.', additionalProperties: true },
+    input: {
+      type: 'object' as const,
+      description: `Command-specific input. Use only the fields listed for the selected type. Exact contracts: ${canvasCommandContractSummary()}`,
+    },
   },
   required: ['type', 'input'],
-  additionalProperties: true as const,
+  additionalProperties: false as const,
+  anyOf: canvasCommandVariants(),
 };
+
+// The SDK's non-strict schema type requires `additionalProperties: true`, even
+// though providers accept a closed JSON Schema when `strict` is disabled. Keep
+// the runtime schema closed and exact, and adapt only at this SDK typing boundary.
+const canvasCommandSdkParameters = canvasCommandParameters as unknown as JsonObjectSchemaNonStrict<
+  typeof canvasCommandParameters.properties
+>;
 
 const diagnosticsParameters = z.object({
   operation: z.enum(['health', 'provider-config', 'generation-jobs', 'application-logs', 'preflight', 'classify-error', 'bundle-preview']),
@@ -595,6 +732,167 @@ function toolEvent(context: CanvasAgentContext, event: CanvasAgentToolEvent): vo
   });
 }
 
+function isRevisionConflictMessage(value: unknown): boolean {
+  const message = typeof value === 'string'
+    ? value
+    : value instanceof Error
+      ? value.message
+      : '';
+  return /revision.*conflict|审批后发生变化|需要重新预览|配置.*变化|stale preview/i.test(message);
+}
+
+type GenerationFollowThroughOutcome = 'succeeded' | 'failed' | 'recoverable';
+
+interface GenerationFollowThroughResult {
+  outcome: GenerationFollowThroughOutcome;
+  attempts: number;
+  inputNodeIds: string[];
+  resultNodeIds: string[];
+  status: CanvasCommandExecutionResult;
+  message: string;
+}
+
+function generationStatusValue(result: CanvasCommandExecutionResult): Record<string, unknown> | null {
+  if (!result.ok || !result.output.value || typeof result.output.value !== 'object' || Array.isArray(result.output.value)) {
+    return null;
+  }
+  return result.output.value as Record<string, unknown>;
+}
+
+function generationResultNodeIds(result: CanvasCommandExecutionResult, inputNodeIds: string[]): string[] {
+  if (!result.ok) return [];
+  const value = generationStatusValue(result);
+  const candidates = [
+    ...(Array.isArray(value?.resultNodeIds) ? value.resultNodeIds : []),
+    ...(typeof value?.resultNodeId === 'string' ? [value.resultNodeId] : []),
+    ...(Array.isArray(result.output.references.nodeIds) ? result.output.references.nodeIds : []),
+    ...(typeof result.output.references.nodeId === 'string' ? [result.output.references.nodeId] : []),
+  ];
+  const inputs = new Set(inputNodeIds);
+  return Array.from(new Set(candidates.filter(
+    (nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0 && !inputs.has(nodeId),
+  )));
+}
+
+async function followAcceptedGeneration(input: {
+  context: CanvasAgentContext;
+  inputNodeIds: string[];
+  execute: (command: CanvasCommand, expectedRevision: number) => Promise<CanvasCommandExecutionResult>;
+  callId: string;
+}): Promise<GenerationFollowThroughResult> {
+  const maxAttempts = Math.max(1, Math.min(
+    100,
+    input.context.generationFollowThrough?.maxAttempts ?? GENERATION_FOLLOW_THROUGH_MAX_ATTEMPTS,
+  ));
+  const initialDelayMs = Math.max(
+    0,
+    input.context.generationFollowThrough?.initialDelayMs ?? GENERATION_FOLLOW_THROUGH_INITIAL_DELAY_MS,
+  );
+  const maxDelayMs = Math.max(
+    initialDelayMs,
+    input.context.generationFollowThrough?.maxDelayMs ?? GENERATION_FOLLOW_THROUGH_MAX_DELAY_MS,
+  );
+  const wait = input.context.generationFollowThrough?.wait
+    ?? ((delayMs: number) => new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs)));
+  let lastStatus: CanvasCommandExecutionResult | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (attempt > 1 || initialDelayMs > 0) {
+      const delayMs = Math.min(maxDelayMs, initialDelayMs * Math.max(1, attempt - 1));
+      if (delayMs > 0) await wait(delayMs);
+    }
+    const statuses = await Promise.all(input.inputNodeIds.map((nodeId) => input.execute({
+      type: 'generation.status',
+      version: CANVAS_COMMAND_VERSION,
+      input: { nodeId },
+    }, input.context.getCanvasRevision?.() ?? canvasCommandRegistry.getRevision())));
+    const failedRead = statuses.find((status) => !status.ok);
+    if (failedRead) {
+      return {
+        outcome: 'recoverable',
+        attempts: attempt,
+        inputNodeIds: input.inputNodeIds,
+        resultNodeIds: [],
+        status: failedRead,
+        message: '生成已提交，但状态查询暂时失败。已保留原生成节点，可安全重新查询；没有重复提交生成请求。',
+      };
+    }
+    const explicitFailure = statuses.find((status) => generationStatusValue(status)?.status === 'failed'
+      || generationStatusValue(status)?.status === 'canceled');
+    if (explicitFailure) {
+      return {
+        outcome: 'failed',
+        attempts: attempt,
+        inputNodeIds: input.inputNodeIds,
+        resultNodeIds: generationResultNodeIds(explicitFailure, input.inputNodeIds),
+        status: explicitFailure,
+        message: String(generationStatusValue(explicitFailure)?.error || '上游生成明确失败。'),
+      };
+    }
+    const recoverable = statuses.find((status) => {
+      const state = generationStatusValue(status)?.status;
+      return state === 'recoverable_wait' || state === 'unknown';
+    });
+    if (recoverable) {
+      return {
+        outcome: 'recoverable',
+        attempts: attempt,
+        inputNodeIds: input.inputNodeIds,
+        resultNodeIds: generationResultNodeIds(recoverable, input.inputNodeIds),
+        status: recoverable,
+        message: '生成结果当前处于可恢复的未知状态。可以继续查询或重新获取已有任务结果；没有重复提交生成请求。',
+      };
+    }
+    const pending = statuses.filter((status) => {
+      const state = generationStatusValue(status)?.status;
+      return state === 'idle' || state === 'queued' || state === 'submitting'
+        || state === 'running' || state === 'materializing';
+    });
+    lastStatus = statuses[statuses.length - 1] ?? lastStatus;
+    input.context.onToolEvent?.({
+      toolName: 'canvas_command',
+      callId: input.callId,
+      status: 'executing',
+      output: redactSensitiveValue({
+        followThrough: {
+          phase: 'generation-follow-through',
+          attempt,
+          maxAttempts,
+          inputNodeIds: input.inputNodeIds,
+          resultNodeIds: statuses.flatMap((status) => generationResultNodeIds(status, input.inputNodeIds)),
+          statuses: statuses.map((status) => generationStatusValue(status)?.status ?? 'unknown'),
+        },
+      }),
+    });
+    if (pending.length === 0) {
+      const resultNodeIds = statuses.flatMap((status) => generationResultNodeIds(status, input.inputNodeIds));
+      return {
+        outcome: 'succeeded',
+        attempts: attempt,
+        inputNodeIds: input.inputNodeIds,
+        resultNodeIds: Array.from(new Set(resultNodeIds)),
+        status: statuses[statuses.length - 1],
+        message: '生成已完成。',
+      };
+    }
+  }
+
+  return {
+    outcome: 'recoverable',
+    attempts: maxAttempts,
+    inputNodeIds: input.inputNodeIds,
+    resultNodeIds: lastStatus ? generationResultNodeIds(lastStatus, input.inputNodeIds) : [],
+    status: lastStatus ?? {
+      ok: false,
+      commandType: 'generation.status',
+      revisionBefore: input.context.getCanvasRevision?.() ?? canvasCommandRegistry.getRevision(),
+      revisionAfter: input.context.getCanvasRevision?.() ?? canvasCommandRegistry.getRevision(),
+      error: { code: 'execution_failed', message: '生成状态查询已达到本轮上限。' },
+    },
+    message: `已完成 ${maxAttempts} 次有上限的状态查询，任务仍在处理中。已保留原任务，可稍后安全继续查询；没有重复提交生成请求。`,
+  };
+}
+
 function requiredToolCallId(details: { toolCall?: { callId?: string } } | undefined): string {
   const callId = details?.toolCall?.callId;
   if (!callId) throw new Error('Agent 工具调用缺少稳定 callId，已拒绝执行。');
@@ -650,6 +948,11 @@ export function createCanvasAgent(options: {
   supportsVision?: boolean;
   supportsToolSearch?: boolean;
   protocol?: AgentModelProtocol;
+  executionMode?: 'manual' | 'auto';
+  generationPreferences?: {
+    image?: { modelId: string; supportedRatios?: string[]; supportedResolutions?: string[] };
+    video?: { modelId: string; supportedRatios?: string[]; supportedResolutions?: string[]; supportedDurations?: string[] };
+  };
   context: CanvasAgentContext;
 }): Agent<CanvasAgentContext> {
   const { runtime, context } = options;
@@ -665,8 +968,10 @@ export function createCanvasAgent(options: {
   const execute = context.executeCanvasCommand ?? (async (command: CanvasCommand, expectedRevision: number) => canvasCommandRegistry.executeApproved(command, expectedRevision, 'agent'));
   const canvasTool = tool({
     name: 'canvas_command',
-    description: 'Read or change the canvas through the versioned command contract. Every call is visible and requires confirmation.',
-    parameters: canvasCommandParameters,
+    description: options.executionMode === 'auto'
+      ? 'Read or change the canvas through the versioned command contract. Calls are visible; only node deletion requires confirmation in automatic mode.'
+      : 'Read or change the canvas through the versioned command contract. Calls are visible and require confirmation in manual mode.',
+    parameters: canvasCommandSdkParameters,
     strict: false,
     providerData: toolPolicy.deferredToolKinds.includes('canvas')
       ? { [STORYBOARD_DEFERRED_TOOL]: true }
@@ -790,11 +1095,51 @@ export function createCanvasAgent(options: {
             });
           }
         }
+        let followThrough: GenerationFollowThroughResult | undefined;
+        if (command.type === 'generation.submit' && result.ok) {
+          const inputNodeIds = result.output.references.nodeIds ?? command.input.nodeIds;
+          if (inputNodeIds.length > 0) {
+            toolEvent(context, {
+              toolName: 'canvas_command',
+              callId,
+              status: 'executing',
+              output: {
+                ...result,
+                followThrough: {
+                  phase: 'accepted',
+                  inputNodeIds,
+                  resultNodeIds: [],
+                },
+              },
+            });
+            followThrough = await followAcceptedGeneration({
+              context,
+              inputNodeIds,
+              execute,
+              callId,
+            });
+          }
+        }
+        const receiptStatus = followThrough?.outcome === 'succeeded'
+          ? 'succeeded' as const
+          : followThrough?.outcome === 'failed'
+            ? 'failed' as const
+            : execution.receipt.status;
+        if (receiptStatus !== execution.receipt.status) {
+          const storedReceipt = canvasAgentApprovalStore.getReceiptById(execution.receipt.id) ?? execution.receipt;
+          canvasAgentApprovalStore.putReceipt({
+            ...storedReceipt,
+            status: receiptStatus,
+            updatedAt: Date.now(),
+            output: redactSensitiveValue({ ...result, followThrough }),
+          });
+        }
         const toolOutput = redactSensitiveValue({
           ...result,
+          ...(followThrough ? { followThrough } : {}),
           execution: {
             receiptId: execution.receipt.id,
-            receiptStatus: execution.receipt.status,
+            receiptStatus,
             safeRecovery: execution.receipt.safeRecovery,
             replayed: execution.replayed,
           },
@@ -802,8 +1147,15 @@ export function createCanvasAgent(options: {
         toolEvent(context, {
           toolName: 'canvas_command',
           callId,
-          status: execution.receipt.status === 'unknown' ? 'unknown' : result.ok ? 'succeeded' : 'failed',
+          status: followThrough?.outcome === 'failed'
+            ? 'failed'
+            : followThrough?.outcome === 'recoverable' || receiptStatus === 'unknown'
+              ? 'unknown'
+              : result.ok ? 'succeeded' : 'failed',
           output: toolOutput,
+          error: followThrough && followThrough.outcome !== 'succeeded'
+            ? followThrough.message
+            : undefined,
         });
         return toolOutput;
       } catch (error) {
@@ -826,7 +1178,13 @@ export function createCanvasAgent(options: {
             replayed: true,
           },
         } : { ok: false, error: message };
-        toolEvent(context, { toolName: 'canvas_command', callId, status: recovery ? 'unknown' : 'failed', output, error: message });
+        toolEvent(context, {
+          toolName: 'canvas_command',
+          callId,
+          status: recovery ? 'unknown' : isRevisionConflictMessage(message) ? 'warning' : 'failed',
+          output,
+          error: message,
+        });
         return output;
       }
     },
@@ -962,11 +1320,16 @@ export function createCanvasAgent(options: {
         });
         const result = execution.output;
         const toolOutput = { ...result, execution: { receiptId: execution.receipt.id, replayed: execution.replayed } };
-        toolEvent(context, { toolName: 'config_patch', callId, status: result.ok ? 'succeeded' : 'failed', output: toolOutput });
+        toolEvent(context, {
+          toolName: 'config_patch',
+          callId,
+          status: result.ok ? 'succeeded' : isRevisionConflictMessage('issues' in result ? result.issues.join(' ') : result.error) ? 'warning' : 'failed',
+          output: toolOutput,
+        });
         return toolOutput;
       } catch (error) {
         const message = redactSensitiveValue(error instanceof Error ? error.message : String(error));
-        toolEvent(context, { toolName: 'config_patch', callId, status: 'failed', error: message });
+        toolEvent(context, { toolName: 'config_patch', callId, status: isRevisionConflictMessage(message) ? 'warning' : 'failed', error: message });
         return { ok: false, error: message };
       }
     },
@@ -1065,8 +1428,24 @@ export function createCanvasAgent(options: {
     model: runtime.modelProvider.getModel(options.modelName),
     instructions: [
       '你是 Storyboard Copilot 的全能画布助手。你可以理解文本和获批的图片引用，使用类型化工具完成画布工作。',
-      '所有读取、增删改、配置修改和外部生成都必须经过 SDK approval interruption；不要把“我会做”当成已执行。',
+      options.executionMode === 'auto'
+        ? '当前是自动模式：直接发起结构化工具调用，应用会自动执行本次用户要求范围内的操作；只有删除节点会等待用户确认。不要先要求用户回复“继续”或批准，也不要把“我会做”当成已执行。'
+        : '当前是手动模式：需要操作时直接发起结构化工具调用，由应用显示确认卡；不要在正文里要求用户另行回复“继续”，也不要把“我会做”当成已执行。',
       '结果必须引用真实 nodeId/assetId/jobId；成功后告诉用户如何定位。错误要分类并保留未知状态。',
+      '用户可见正文必须简洁自然。禁止在正文输出 Reasoning Summary、Context Analysis、Constraint Check、Action Strategy、Node Creation、Generation Submission 等内部分析标题或英文工作记录；应用已有独立的 reasoning summary 展开区。状态查询和生成结果通常用一至三段中文说明状态、关键结果与下一步，不重复罗列 nodeId、jobId、坐标或“如何定位”，除非用户正在排错或明确要求详情。',
+      'generation.submit 被接受后，应用会在本次工具调用内执行有上限的安全状态跟进。必须根据 followThrough.outcome 总结实际结果；不要承诺“稍后检查”，不要再重复提交同一付费生成请求。followThrough 为 failed 时先解释明确失败并安全诊断，recoverable 时说明可继续查询/恢复，succeeded 时定位结果。',
+      toolPolicy.toolKinds.includes('canvas')
+        ? '不要猜测画布命令字段。canvas.query 只使用 scope/nodeIds/limit。从零生图时直接调用已注册的 canvas_command 工具：先用 node.create 创建 imageNode，configuration 写入 prompt、当前所选 modelId、aspectRatio、resolution，position 只作为空白位置提示且不要自造 nodeId；创建返回 ok=true 后，再把 output.references.nodeId 原样用于 generation.submit.input.nodeIds。generation.submit 不接收 prompt、modelId、ratio 或 resolution。必须使用结构化工具调用，绝不能把工具名、参数 JSON 或代码块写进正文。参数错误时只按精确契约纠正一次。'
+        : '本轮没有暴露画布命令工具。只进行普通对话或提出一个必要的澄清问题；不得在正文中伪造工具名、参数 JSON、批准卡或执行结果。',
+      selectedTools.length
+        ? `本轮只允许调用实际注册的工具：${selectedTools.map((selected) => selected.name).join('、')}。generation.status、asset.list 等画布命令类型不能作为顶层工具。所有调用必须走结构化工具协议，不能写成 Markdown。`
+        : '本轮没有注册工具；不要声称正在创建、提交、查询或修改画布。',
+      options.generationPreferences?.image
+        ? `用户当前选择的图片生成目标：modelId=${options.generationPreferences.image.modelId}；可用比例=${options.generationPreferences.image.supportedRatios?.join(', ') || '未声明'}；可用分辨率=${options.generationPreferences.image.supportedResolutions?.join(', ') || '未声明'}。创建 imageNode 时优先写入这些配置。`
+        : '用户当前没有选择可用的图片模型；需要生图时先说明并请用户配置或选择图片模型。',
+      options.generationPreferences?.video
+        ? `用户当前选择的视频生成目标：modelId=${options.generationPreferences.video.modelId}；可用比例=${options.generationPreferences.video.supportedRatios?.join(', ') || '未声明'}；可用分辨率=${options.generationPreferences.video.supportedResolutions?.join(', ') || '未声明'}；可用时长=${options.generationPreferences.video.supportedDurations?.join(', ') || '未声明'}。`
+        : '用户当前没有选择可用的视频模型；需要生视频时先说明并请用户配置或选择视频模型。',
       options.supportsVision
         ? '需要查看画布图片时，先用 asset.list 缩小到稳定 assetId，再单独调用 asset_read 请求用户确认；不要猜测图片内容。'
         : '当前模型不支持视觉输入，不得声称已经查看图片；可以用 asset.list 返回的安全元数据帮助用户定位。',

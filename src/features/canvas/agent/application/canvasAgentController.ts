@@ -19,12 +19,12 @@ import {
   prepareAgentMediaSource,
   validateAgentTurnMediaInputs,
 } from './agentMediaResolver';
-import { buildSkillContext, resolveAgentToolPolicy } from './agentSkills';
+import { buildSkillContext, resolveAgentToolPolicy, type SkillRoutingContext } from './agentSkills';
 import { getAgentGenerationNetworkRevision, getAgentProviderRevision } from './agentConfigPatch';
 import { canvasAgentBudgetLedger } from './agentBudget';
 import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
 import { buildCanvasAssetCatalog } from '@/features/canvas/application/canvasAssetCatalog';
-import { CANVAS_COMMAND_VERSION, type CanvasCommand } from '@/features/canvas/domain/canvasCommands';
+import { CANVAS_COMMAND_TYPES, CANVAS_COMMAND_VERSION, type CanvasCommand } from '@/features/canvas/domain/canvasCommands';
 import { useProjectStore } from '@/stores/projectStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import {
@@ -38,6 +38,8 @@ import {
   type AgentImpactSummary,
   type AgentApprovalRecord,
 } from './agentApproval';
+import { consumeAgentRunStream } from './agentRunStreamReader';
+import { decideAgentAutoApproval, type CanvasAgentExecutionMode } from './agentAutoApprovalPolicy';
 
 const repository = new AgentSessionRepository();
 const activeRuns = new Map<string, ActiveRun>();
@@ -52,6 +54,8 @@ interface ActiveRun {
   runtime: CanvasAgentSdkRuntimeModule;
   orchestrator: ReturnType<CanvasAgentSdkRuntimeModule['createStoryboardAgentRuntime']>;
   agent: Agent<any, any>;
+  invalidRepairKeys: Set<string>;
+  skillRoutingContext: SkillRoutingContext;
   state: RunState<any, any>;
 }
 
@@ -105,8 +109,11 @@ function canvasCommandFromArguments(value: unknown): CanvasCommand | undefined {
   return { type: record.type, version: CANVAS_COMMAND_VERSION, input: record.input } as CanvasCommand;
 }
 
-function generationApprovalDetails(nodeIds: string[]): { model?: string; summary: string } {
-  const requested = new Set(nodeIds);
+function generationApprovalDetails(nodeIds: unknown): { model?: string; summary: string } {
+  const safeNodeIds = Array.isArray(nodeIds)
+    ? nodeIds.filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.trim().length > 0)
+    : [];
+  const requested = new Set(safeNodeIds);
   const nodes = useCanvasStore.getState().nodes.filter((node) => requested.has(node.id));
   const models = new Set<string>();
   const parameters = new Set<string>();
@@ -132,8 +139,31 @@ function generationApprovalDetails(nodeIds: string[]): { model?: string; summary
   const parameterSummary = parameters.size > 0 ? ` Key parameters: ${Array.from(parameters).join(', ')}.` : ' Key parameters: unavailable.';
   return {
     model: models.size > 0 ? Array.from(models).join(', ') : undefined,
-    summary: `Submit generation for ${nodeIds.length} node(s).${modelSummary}${parameterSummary}`,
+    summary: `Submit generation for ${safeNodeIds.length} node(s).${modelSummary}${parameterSummary}`,
   };
+}
+
+function invalidCanvasCommandReason(toolName: string, args: unknown): string | null {
+  if (toolName !== 'canvas_command') return null;
+  const command = canvasCommandFromArguments(args);
+  if (!command) {
+    return '画布工具调用缺少有效的 type 或 input。请根据工具结构补齐参数后重试，不要让用户批准这个无效请求。';
+  }
+  const preview = canvasCommandRegistry.inspect(command, 'agent');
+  if (preview.valid) return null;
+  const detail = preview.errors.map((error) => error.message).filter(Boolean).join(' ');
+  const repair = command.type === 'generation.submit'
+    ? '正确流程：如果是从零生成，先调用 node.create 创建 imageNode/aiVideoNode，并在 configuration 中写入 prompt、modelId、aspectRatio、resolution 等配置；再把 node.create 返回的真实 nodeId 放入 generation.submit.input.nodeIds。generation.submit 不接受 prompt。'
+    : command.type === 'canvas.query'
+      ? '正确格式：{"type":"canvas.query","input":{"scope":"graph|nodes|edges|selection","nodeIds":["可选"],"limit":100}}。不存在 filter 字段。'
+      : command.type === 'node.create'
+        ? '从零生图的正确格式：{"type":"node.create","input":{"nodeType":"imageNode","position":{"x":0,"y":0},"configuration":{"prompt":"完整提示词","modelId":"当前所选模型","aspectRatio":"16:9","resolution":"2K"}}}。不要写 image、imageEditNode、ratio、size，也不要在创建成功前自造 nodeId。只有返回 ok=true 后才可使用 output.references.nodeId。'
+        : CANVAS_COMMAND_TYPES.includes(command.type)
+          ? `允许的 input 字段：${Object.entries(canvasCommandRegistry.getDefinition(command.type).schema.input.properties)
+          .map(([name, field]) => `${name}:${field.type}`)
+          .join(', ')}。`
+          : `允许的命令类型：${CANVAS_COMMAND_TYPES.join(', ')}。`;
+  return `画布工具参数校验失败：${detail || '命令结构无效。'} ${repair} 只纠正一次；不要重复提交相同无效参数。若信息不足，先询问用户。`;
 }
 
 function buildApprovalImpact(toolName: string, args: unknown): {
@@ -233,6 +263,8 @@ export async function prepareCanvasAgentToolApproval(input: {
   arguments: unknown;
   persist?: boolean;
 }): Promise<PreparedCanvasAgentApproval> {
+  const invalidReason = invalidCanvasCommandReason(input.toolName, input.arguments);
+  if (invalidReason) throw new Error(invalidReason);
   const safe = redactSensitiveValue(input.arguments);
   const id = createApprovalId(input.runId, input.toolName, input.callId);
   const existing = canvasAgentApprovalStore.get(id);
@@ -294,6 +326,10 @@ export async function prepareCanvasAgentToolApproval(input: {
       expiresAt: safeRecord.expiresAt,
     },
   };
+}
+
+export function explainInvalidCanvasAgentCommand(toolName: string, argumentsValue: unknown): string | null {
+  return invalidCanvasCommandReason(toolName, argumentsValue);
 }
 
 async function prepareApproval(
@@ -381,22 +417,33 @@ async function createActiveRun(input: {
   message: string;
   media?: AgentTurnMediaInput[];
   projectContext?: { brief: string; pinnedNodeIds: string[] };
+  generationPreferences?: Parameters<CanvasAgentSdkRuntimeModule['createCanvasAgent']>[0]['generationPreferences'];
   onToolEvent?: (event: CanvasAgentToolEvent) => void;
+  executionMode?: CanvasAgentExecutionMode;
 }): Promise<Omit<ActiveRun, 'state'>> {
   const runtime = await loadCanvasAgentSdkRuntime();
   const reference = resolveAgentModelReference(input.model);
   const orchestrator = runtime.createStoryboardAgentRuntime({ resolveModel: () => reference });
+  const recentUserText = getCanvasAgentSessionMessages(input.sessionId)
+    .filter((message) => message.role === 'user')
+    .slice(-6)
+    .map((message) => message.text)
+    .join('\n');
+  const skillRoutingContext: SkillRoutingContext = {
+    text: input.message,
+    recentUserText,
+    attachmentKinds: input.media?.length ? ['image'] : [],
+  };
   const agent = runtime.createCanvasAgent({
     runtime: orchestrator,
     modelName: reference.catalogId,
-    skillContext: {
-      text: input.message,
-      attachmentKinds: input.media?.length ? ['image'] : [],
-    },
+    skillContext: skillRoutingContext,
     projectContext: input.projectContext,
     supportsVision: reference.capabilities.vision,
     supportsToolSearch: reference.capabilities.toolSearch,
     protocol: reference.capabilities.protocol,
+    generationPreferences: input.generationPreferences,
+    executionMode: input.executionMode,
     context: {
       projectId: input.projectId,
       runId: input.runId,
@@ -413,7 +460,18 @@ async function createActiveRun(input: {
       },
     },
   });
-  return { runId: input.runId, sessionId: input.sessionId, projectId: input.projectId, modelRef: reference.catalogId, supportsStreaming: input.model.supportsStreaming, runtime, orchestrator, agent };
+  return {
+    runId: input.runId,
+    sessionId: input.sessionId,
+    projectId: input.projectId,
+    modelRef: reference.catalogId,
+    supportsStreaming: input.model.supportsStreaming,
+    runtime,
+    orchestrator,
+    agent,
+    invalidRepairKeys: new Set<string>(),
+    skillRoutingContext,
+  };
 }
 
 function streamDelta(event: unknown): { kind: 'text' | 'reasoning'; delta: string } | null {
@@ -441,17 +499,17 @@ async function runAgentWithFeedback(input: {
     context: { projectId: input.active.projectId, runId: input.active.runId },
     session: repository.createSdkSession(input.sessionId),
     signal: input.signal,
+    maxTurns: 24,
   };
   if (!input.active.supportsStreaming) {
     return input.active.orchestrator.runner.run(input.active.agent, input.turnInput, options);
   }
   const streamed = await input.active.orchestrator.runner.run(input.active.agent, input.turnInput, { ...options, stream: true });
-  for await (const event of streamed) {
+  await consumeAgentRunStream(streamed, (event) => {
     const delta = streamDelta(event);
     if (delta?.kind === 'text') input.onTextDelta?.(delta.delta);
     else if (delta?.kind === 'reasoning') input.onReasoningDelta?.(delta.delta);
-  }
-  await streamed.completed;
+  });
   if (streamed.error) throw streamed.error;
   if (streamed.cancelled || input.signal?.aborted) {
     const error = new DOMException('The Agent run was cancelled.', 'AbortError') as DOMException & { state?: RunState<any, any> };
@@ -459,6 +517,93 @@ async function runAgentWithFeedback(input: {
     throw error;
   }
   return streamed;
+}
+
+async function continuePastInvalidToolRequests(input: {
+  active: ActiveRun | Omit<ActiveRun, 'state'>;
+  result: Awaited<ReturnType<typeof runAgentWithFeedback>>;
+  sessionId: string;
+  signal?: AbortSignal;
+  onToolEvent?: (event: CanvasAgentToolEvent) => void;
+  onTextDelta?: (delta: string) => void;
+  onReasoningDelta?: (delta: string) => void;
+}): Promise<Awaited<ReturnType<typeof runAgentWithFeedback>>> {
+  let result = input.result;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const invalid = result.interruptions.flatMap((item) => {
+      let args: unknown = item.arguments ?? {};
+      if (typeof args === 'string') {
+        try { args = JSON.parse(args); } catch { args = { raw: args }; }
+      }
+      const toolName = item.name ?? item.toolName ?? 'tool';
+      const reason = invalidCanvasCommandReason(toolName, args);
+      return reason ? [{ item, toolName, args, callId: approvalId(item), reason }] : [];
+    });
+    if (!invalid.length) return result;
+
+    for (const failure of invalid) {
+      await rememberInvalidCanvasAgentRequest(
+        input.active.invalidRepairKeys,
+        failure.toolName,
+        failure.args,
+      );
+      input.onToolEvent?.({
+        toolName: failure.toolName,
+        callId: failure.callId,
+        status: 'failed',
+        input: redactSensitiveValue(failure.args),
+        error: failure.reason,
+        output: { ok: false, error: { code: 'invalid_command', message: failure.reason } },
+      });
+      result.state.reject(failure.item, { message: failure.reason });
+    }
+
+    const active = { ...input.active, state: result.state } as ActiveRun;
+    activeRuns.set(active.runId, active);
+    result = await runAgentWithFeedback({
+      active,
+      turnInput: active.state,
+      sessionId: input.sessionId,
+      signal: input.signal,
+      onTextDelta: input.onTextDelta,
+      onReasoningDelta: input.onReasoningDelta,
+    });
+  }
+  const remainingInvalid = result.interruptions.some((item) => {
+    let args: unknown = item.arguments ?? {};
+    if (typeof args === 'string') {
+      try { args = JSON.parse(args); } catch { args = { raw: args }; }
+    }
+    return invalidCanvasCommandReason(item.name ?? item.toolName ?? 'tool', args) !== null;
+  });
+  if (remainingInvalid) {
+    throw new Error('Agent 连续生成了无效的画布命令。本轮已安全停止，请让 Agent 诊断后重新规划。');
+  }
+  return result;
+}
+
+export async function rememberInvalidCanvasAgentRequest(
+  rejectedFingerprints: Set<string>,
+  toolName: string,
+  args: unknown,
+): Promise<void> {
+  const commandType = toolName === 'canvas_command'
+    && args
+    && typeof args === 'object'
+    && !Array.isArray(args)
+    && typeof (args as Record<string, unknown>).type === 'string'
+    ? (args as Record<string, unknown>).type as string
+    : 'unknown';
+  const repairKey = `repair:${toolName}:${commandType}`;
+  const fingerprint = await createAgentRequestFingerprint(
+    toolName,
+    redactSensitiveValue(args),
+  );
+  if (rejectedFingerprints.has(fingerprint) || rejectedFingerprints.has(repairKey)) {
+    throw new Error(`Agent 已经用过一次 ${commandType} 参数纠正机会，但仍未遵守工具契约。本轮已安全停止；请重新规划，不要继续消耗模型配额。`);
+  }
+  rejectedFingerprints.add(fingerprint);
+  rejectedFingerprints.add(repairKey);
 }
 
 function errorRunState(error: unknown): RunState<any, any> | undefined {
@@ -508,10 +653,12 @@ export async function runCanvasAgentTurn(input: {
   message: string;
   media?: AgentTurnMediaInput[];
   projectContext?: { brief: string; pinnedNodeIds: string[] };
+  generationPreferences?: Parameters<CanvasAgentSdkRuntimeModule['createCanvasAgent']>[0]['generationPreferences'];
   signal?: AbortSignal;
   onToolEvent?: (event: CanvasAgentToolEvent) => void;
   onTextDelta?: (delta: string) => void;
   onReasoningDelta?: (delta: string) => void;
+  executionMode?: CanvasAgentExecutionMode;
 }): Promise<CanvasAgentTurnResult> {
   if (useProjectStore.getState().currentProjectId !== input.projectId) {
     throw new Error('Agent 请求的项目不是当前打开的项目。');
@@ -525,12 +672,21 @@ export async function runCanvasAgentTurn(input: {
         source: await prepareAgentMediaSource(media.source),
       }))))
     : [];
+  const createdSession = !input.sessionId;
   const session = input.sessionId
     ? repository.getSession(input.sessionId)
     : repository.createSession({ projectId: input.projectId, title: input.message.slice(0, 36), modelRef: input.model.id });
   if (!session || session.projectId !== input.projectId) throw new Error('Agent 对话不属于当前项目。');
   const runId = nextId('run');
-  const partial = await createActiveRun({ ...input, media: preparedMedia, runId, sessionId: session.id });
+  let partial: Awaited<ReturnType<typeof createActiveRun>>;
+  try {
+    partial = await createActiveRun({ ...input, media: preparedMedia, runId, sessionId: session.id });
+  } catch (error) {
+    if (createdSession && repository.getSession(session.id)?.items.length === 0) {
+      repository.deleteSession(session.id);
+    }
+    throw redactedRunError(error, input.signal);
+  }
   const referencedMedia = preparedMedia.map((media) => ({
     media,
     reference: createAgentMediaReference(
@@ -571,16 +727,54 @@ export async function runCanvasAgentTurn(input: {
       onTextDelta: input.onTextDelta,
       onReasoningDelta: input.onReasoningDelta,
     });
+    result = await continuePastInvalidToolRequests({
+      active: partial,
+      result,
+      sessionId: session.id,
+      signal: input.signal,
+      onToolEvent: input.onToolEvent,
+      onTextDelta: input.onTextDelta,
+      onReasoningDelta: input.onReasoningDelta,
+    });
   } catch (error) {
     persistFailedRun(partial, error, input.signal);
+    if (createdSession && repository.getSession(session.id)?.items.length === 0) {
+      repository.deleteSession(session.id);
+    }
     throw redactedRunError(error, input.signal);
   }
   const state = result.state;
-  const prepared = await Promise.all(result.interruptions.map((item) => prepareApproval(item, runId, input.projectId)));
+  let prepared = await Promise.all(result.interruptions.map((item) => prepareApproval(item, runId, input.projectId)));
   activeRuns.set(runId, { ...partial, state });
   persistRunCheckpoint(partial, state, prepared);
+  if (input.executionMode === 'auto') {
+    let iterations = 0;
+    while (prepared.length > 0 && iterations < 32) {
+      const nextAutoApproval = prepared.find((approval) => decideAgentAutoApproval(approval).allowed);
+      if (!nextAutoApproval) break;
+      const resumed = await performCanvasAgentApprovalResolution({
+        runId,
+        approvalId: nextAutoApproval.view.id,
+        approve: true,
+        model: input.model,
+        signal: input.signal,
+        onToolEvent: input.onToolEvent,
+        onTextDelta: input.onTextDelta,
+        onReasoningDelta: input.onReasoningDelta,
+      });
+      if (resumed.status === 'completed') return resumed;
+      prepared = await Promise.all(resumed.approvals.map((view) => prepareCanvasAgentToolApproval({
+        runId,
+        projectId: input.projectId,
+        callId: view.id,
+        toolName: view.toolName,
+        arguments: view.arguments,
+      })));
+      iterations += 1;
+    }
+  }
   const approvals = prepared.map((approval) => approval.view);
-  const skillContext = buildSkillContext({ text: input.message, attachmentKinds: referencedMedia.length ? ['image'] : [] });
+  const skillContext = buildSkillContext(partial.skillRoutingContext);
   const toolPolicy = resolveAgentToolPolicy({
     skillContext,
     supportsVision: input.model.supportsMultimodal,
@@ -683,6 +877,15 @@ async function performCanvasAgentApprovalResolution(input: {
       onTextDelta: input.onTextDelta,
       onReasoningDelta: input.onReasoningDelta,
     });
+    result = await continuePastInvalidToolRequests({
+      active,
+      result,
+      sessionId: active.sessionId,
+      signal: input.signal,
+      onToolEvent: input.onToolEvent,
+      onTextDelta: input.onTextDelta,
+      onReasoningDelta: input.onReasoningDelta,
+    });
   } catch (error) {
     persistFailedRun(active, error, input.signal);
     const status = canvasAgentApprovalStore.get(storedApprovalId)?.status;
@@ -739,7 +942,10 @@ export async function resolveCanvasAgentApproval(input: {
   }
 }
 
-export function listCanvasAgentSessions(projectId: string) { return repository.listSessions(projectId); }
+export function listCanvasAgentSessions(projectId: string) {
+  return repository.listSessions(projectId)
+    .filter((session) => hasVisibleCanvasAgentSessionItems(session.items));
+}
 export function deleteCanvasAgentSession(sessionId: string): void { repository.deleteSession(sessionId); }
 
 export function listPendingCanvasAgentApprovals(projectId: string): Array<AgentApprovalView & { runId: string }> {
@@ -818,6 +1024,10 @@ function projectSessionMessage(item: unknown): {
   return trimmed || mediaReferenceIds.length
     ? { role: record.role, text: trimmed, mediaReferenceIds: Array.from(new Set(mediaReferenceIds)) }
     : null;
+}
+
+export function hasVisibleCanvasAgentSessionItems(items: readonly unknown[]): boolean {
+  return items.some((item) => projectSessionMessage(item) !== null);
 }
 
 function projectSessionMediaReference(

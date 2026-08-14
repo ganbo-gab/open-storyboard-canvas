@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { diagnosticEventsToText, loadDiagnosticEvents } from './diagnosticEvents';
+import { diagnosticEventSummaryKey, diagnosticEventsToText, loadDiagnosticEvents } from './diagnosticEvents';
 
 const { listGenerationJobsMock, readDiagnosticLogsMock } = vi.hoisted(() => ({
   listGenerationJobsMock: vi.fn(),
@@ -62,5 +62,16 @@ describe('diagnostic event projection', () => {
       expect.objectContaining({ source: 'application', category: 'network' }),
       expect.objectContaining({ source: 'generation', category: 'diagnostic-source' }),
     ]));
+  });
+
+  it('maps redacted technical evidence to stable human-readable summary keys', () => {
+    expect(diagnosticEventSummaryKey({
+      id: 'start', occurredAt: 1, severity: 'info', source: 'application',
+      category: 'open_storyboard_canvas', message: 'Open Storyboard Canvas starting...', recoverable: false,
+    })).toBe('applicationStarted');
+    expect(diagnosticEventSummaryKey({
+      id: 'download', occurredAt: 1, severity: 'error', source: 'generation',
+      category: 'materialize', message: 'download failed', recoverable: true,
+    })).toBe('generationFailed');
   });
 });

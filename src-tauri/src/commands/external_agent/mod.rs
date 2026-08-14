@@ -1,5 +1,6 @@
 mod claude;
 mod codex;
+pub(crate) mod connection;
 mod mcp;
 mod process;
 mod process_tree;
@@ -362,6 +363,7 @@ pub(crate) struct BrokerCredentials {
 pub(crate) struct PendingToolCall {
     pub session_id: String,
     pub sender: oneshot::Sender<ExternalAgentToolResolution>,
+    pub event: ExternalAgentEvent,
 }
 
 struct ActiveProcess {
@@ -419,6 +421,13 @@ pub(crate) struct ExternalAgentSession {
     claude_has_history: AtomicBool,
     turn_gate: Mutex<()>,
     turn_workspaces: Mutex<HashMap<String, TempDir>>,
+    user_managed: bool,
+    project_id: Option<String>,
+    project_name: Option<String>,
+    descriptor_path: Option<PathBuf>,
+    connected_at: AtomicU64,
+    last_activity_at: AtomicU64,
+    call_count: AtomicU64,
 }
 
 impl ExternalAgentSession {
@@ -456,6 +465,8 @@ pub(crate) struct ExternalAgentInner {
     broker_initialization_error: Option<String>,
     broker_started: AtomicBool,
     workspace_root: StdMutex<PathBuf>,
+    connection_descriptor_root: StdMutex<PathBuf>,
+    managed_connection_id: RwLock<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -489,6 +500,12 @@ impl ExternalAgentState {
                 broker_initialization_error: broker_error,
                 broker_started: AtomicBool::new(false),
                 workspace_root: StdMutex::new(workspace_root),
+                connection_descriptor_root: StdMutex::new(
+                    std::env::temp_dir()
+                        .join(SESSION_ROOT_NAME)
+                        .join("connections"),
+                ),
+                managed_connection_id: RwLock::new(None),
             }),
         }
     }
@@ -508,6 +525,19 @@ impl ExternalAgentState {
             .lock()
             .map_err(|_| "external Agent workspace root lock is poisoned".to_string())? =
             workspace_root;
+        let descriptor_root = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| format!("failed to resolve Canvas MCP descriptor directory: {error}"))?
+            .join("external-agent-connections");
+        std::fs::create_dir_all(&descriptor_root)
+            .map_err(|error| format!("failed to prepare Canvas MCP descriptors: {error}"))?;
+        *self
+            .inner
+            .connection_descriptor_root
+            .lock()
+            .map_err(|_| "Canvas MCP descriptor root lock is poisoned".to_string())? =
+            descriptor_root;
         mcp::start_broker_listener(self.inner.clone(), app)
     }
 }
@@ -651,6 +681,13 @@ pub async fn start_external_agent_session(
         claude_has_history: AtomicBool::new(resume_id.is_some()),
         turn_gate: Mutex::new(()),
         turn_workspaces: Mutex::new(HashMap::new()),
+        user_managed: false,
+        project_id: None,
+        project_name: None,
+        descriptor_path: None,
+        connected_at: AtomicU64::new(0),
+        last_activity_at: AtomicU64::new(0),
+        call_count: AtomicU64::new(0),
     });
     state
         .inner
@@ -954,6 +991,13 @@ mod tests {
             claude_has_history: AtomicBool::new(false),
             turn_gate: Mutex::new(()),
             turn_workspaces: Mutex::new(HashMap::new()),
+            user_managed: false,
+            project_id: None,
+            project_name: None,
+            descriptor_path: None,
+            connected_at: AtomicU64::new(0),
+            last_activity_at: AtomicU64::new(0),
+            call_count: AtomicU64::new(0),
         };
         let error = stage_turn_attachments(
             &session,

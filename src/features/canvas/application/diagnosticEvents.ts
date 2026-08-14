@@ -18,6 +18,41 @@ export interface DiagnosticEvent {
   recoverable: boolean;
 }
 
+export type DiagnosticEventSummaryKey =
+  | 'generationFailed'
+  | 'generationRecovered'
+  | 'generationRunning'
+  | 'generationCompleted'
+  | 'applicationStarted'
+  | 'canvasOpened'
+  | 'networkFailed'
+  | 'diagnosticsUnavailable'
+  | 'applicationEvent'
+  | 'generationEvent';
+
+/**
+ * Maps structured/redacted evidence to stable product language. The original
+ * redacted record remains available separately and is never used as the row
+ * title, so log wording changes cannot make the drawer unreadable.
+ */
+export function diagnosticEventSummaryKey(event: DiagnosticEvent): DiagnosticEventSummaryKey {
+  const category = event.category.toLowerCase();
+  const message = event.message.toLowerCase();
+  if (category === 'diagnostic-source') return 'diagnosticsUnavailable';
+  if (event.source === 'generation') {
+    if (event.severity === 'error' || /failed|error|失败|download/.test(message)) return 'generationFailed';
+    if (/recover|materializ|取回|保存结果/.test(`${category} ${message}`)) return 'generationRecovered';
+    if (/succeed|complete|已完成/.test(message)) return 'generationCompleted';
+    return 'generationRunning';
+  }
+  if (/open storyboard canvas starting/.test(message)) return 'applicationStarted';
+  if (/main page loaded|frontend_ready/.test(message)) return 'canvasOpened';
+  if (/network|request|connect|timeout|fetch|http/.test(`${category} ${message}`) && event.severity !== 'info') {
+    return 'networkFailed';
+  }
+  return 'applicationEvent';
+}
+
 function severity(value: string): DiagnosticEvent['severity'] {
   if (value === 'error') return 'error';
   if (value === 'warn' || value === 'warning') return 'warning';

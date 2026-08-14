@@ -3,6 +3,9 @@ import {
   type CanvasEdge,
   type CanvasNode,
   type CanvasNodeData,
+  isEligibleTagGroupMember,
+  isTagColor,
+  isTagGroupShape,
 } from '@/features/canvas/domain/canvasNodes';
 import { validateCanvasConnection } from './canvasConnectionRules';
 
@@ -12,7 +15,9 @@ export type TagMigrationDiagnosticCode =
   | 'redundant-source-id-removed'
   | 'conflicting-source-id'
   | 'missing-source-node'
-  | 'invalid-source-connection';
+  | 'invalid-source-connection'
+  | 'tag-group-v2'
+  | 'unresolved-group-member';
 
 export interface TagMigrationDiagnostic {
   code: TagMigrationDiagnosticCode;
@@ -63,14 +68,6 @@ export function migrateLegacyTagGraph(
         tagNodeId: node.id,
         message: `Migrated legacy node type ${String(node.type)} to ${String(normalizedType)}.`,
       });
-    }
-
-    if (normalizedType === CANVAS_NODE_TYPES.tagGroup) {
-      if (!Array.isArray(data.memberTagIds) && Array.isArray(data.tagIds)) {
-        data.memberTagIds = data.tagIds;
-        delete data.tagIds;
-        changed = true;
-      }
     }
 
     return {
@@ -162,6 +159,85 @@ export function migrateLegacyTagGraph(
       edgeIds: [edgeId],
       message: 'Converted legacy tag sourceId into the tag source edge.',
     });
+  });
+
+  const refreshedNodesById = new Map(nodes.map((node) => [node.id, node] as const));
+  const resolveLegacyMember = (memberId: string): string | null => {
+    let currentId = memberId;
+    const visited = new Set<string>();
+    while (!visited.has(currentId)) {
+      visited.add(currentId);
+      const member = refreshedNodesById.get(currentId);
+      if (!member) return null;
+      if (isEligibleTagGroupMember(member)) return member.id;
+      if (member.type !== CANVAS_NODE_TYPES.tag) return null;
+      const incoming = edges.filter((edge) => edge.target === member.id);
+      if (incoming.length !== 1) return null;
+      currentId = incoming[0].source;
+    }
+    return null;
+  };
+
+  nodes.forEach((node, nodeIndex) => {
+    if (node.type !== CANVAS_NODE_TYPES.tagGroup) return;
+    const data = node.data as Record<string, unknown>;
+    const rawIds = [
+      ...(Array.isArray(data.memberNodeIds) ? data.memberNodeIds : []),
+      ...(Array.isArray(data.memberTagIds) ? data.memberTagIds : []),
+      ...(Array.isArray(data.tagIds) ? data.tagIds : []),
+    ];
+    const legacyMemberTagIds = Array.from(new Set([
+      ...(Array.isArray(data.legacyMemberTagIds) ? data.legacyMemberTagIds : []),
+      ...(Array.isArray(data.memberTagIds) ? data.memberTagIds : []),
+      ...(Array.isArray(data.tagIds) ? data.tagIds : []),
+    ].filter((id): id is string => typeof id === 'string' && Boolean(id.trim())).map((id) => id.trim())));
+    const memberNodeIds: string[] = [];
+    const unresolvedMemberIds: string[] = Array.isArray(data.unresolvedMemberIds)
+      ? data.unresolvedMemberIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
+      : [];
+
+    rawIds.forEach((value) => {
+      if (typeof value !== 'string' || !value.trim()) return;
+      const legacyId = value.trim();
+      const resolvedId = resolveLegacyMember(legacyId);
+      if (resolvedId) {
+        if (!memberNodeIds.includes(resolvedId)) memberNodeIds.push(resolvedId);
+        return;
+      }
+      if (!unresolvedMemberIds.includes(legacyId)) unresolvedMemberIds.push(legacyId);
+      diagnostics.push({
+        code: 'unresolved-group-member',
+        tagNodeId: node.id,
+        sourceNodeId: legacyId,
+        message: `Tag-group member ${legacyId} could not be resolved to one eligible source without guessing.`,
+      });
+    });
+
+    const wasV2 = data.schemaVersion === 2
+      && Array.isArray(data.memberNodeIds)
+      && !Object.prototype.hasOwnProperty.call(data, 'memberTagIds')
+      && !Object.prototype.hasOwnProperty.call(data, 'tagIds');
+    const nextData: Record<string, unknown> = {
+      ...data,
+      schemaVersion: 2,
+      enabled: data.enabled !== false,
+      color: isTagColor(data.color) ? data.color : 'neutral',
+      shape: isTagGroupShape(data.shape) ? data.shape : 'rounded',
+      memberNodeIds,
+      unresolvedMemberIds,
+      legacyMemberTagIds,
+    };
+    delete nextData.memberTagIds;
+    delete nextData.tagIds;
+    nodes[nodeIndex] = { ...node, data: nextData as CanvasNodeData };
+    if (!wasV2) {
+      changed = true;
+      diagnostics.push({
+        code: 'tag-group-v2',
+        tagNodeId: node.id,
+        message: 'Migrated tag group to schema version 2 direct membership.',
+      });
+    }
   });
 
   return { nodes, edges, diagnostics, changed };

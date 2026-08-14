@@ -19,6 +19,7 @@ const MAX_SESSION_ITEMS = 2_000;
 const MAX_SERIALIZED_BYTES = 8 * 1024 * 1024;
 const MAX_COMPACTED_SUMMARY_CHARACTERS = 100_000;
 const MAX_SESSION_MEDIA_REFERENCES = 256;
+const MAX_RESUMABLE_RUN_STATE_AGE_MS = 30 * 60_000;
 
 interface StorageLike {
   getItem(key: string): string | null;
@@ -169,13 +170,27 @@ function parseSessionEnvelope(raw: string | null): SessionEnvelope {
   }
 }
 
-function parseRunStateEnvelope(raw: string | null): RunStateEnvelope {
+function parseRunStateEnvelope(raw: string | null, now = Date.now()): RunStateEnvelope {
   if (!raw) return { version: 1, runStates: [] };
   try {
     const parsed = JSON.parse(raw) as Partial<RunStateEnvelope>;
     if (parsed.version !== 1 || !Array.isArray(parsed.runStates)) throw new Error('unsupported run-state schema');
-    assertPersistenceSafe(parsed);
-    const runStates = parsed.runStates.filter(isAgentRunStateRecord);
+    const runStates = parsed.runStates.filter(isAgentRunStateRecord).map((record) => {
+      const resumable = record.status === 'running' || record.status === 'awaiting_approval';
+      const stale = resumable
+        && now >= record.updatedAt
+        && now - record.updatedAt > MAX_RESUMABLE_RUN_STATE_AGE_MS;
+      const terminal = stale
+        || record.status === 'completed'
+        || record.status === 'failed'
+        || record.status === 'cancelled';
+      const normalized = terminal
+        ? { ...record, ...(stale ? { status: 'cancelled' as const } : {}), serializedState: '{}' }
+        : record;
+      assertPersistenceSafe({ ...normalized, serializedState: '{}' });
+      assertAgentSerializedRunStateSafe(normalized.serializedState);
+      return normalized;
+    });
     if (runStates.length !== parsed.runStates.length) throw new Error('invalid run-state record');
     return { version: 1, runStates };
   } catch {
@@ -245,9 +260,10 @@ function isAgentRunStateRecord(value: unknown): value is AgentRunStateRecord {
 function defaultStorage(): StorageLike | null {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return null;
-    const probe = `${SESSION_STORAGE_KEY}:probe`;
-    window.localStorage.setItem(probe, '1');
-    window.localStorage.removeItem(probe);
+    // Reading remains available when WebKit has reached its localStorage
+    // quota. A write-probe incorrectly turned a full-but-readable store into
+    // an empty in-memory repository, hiding all existing Agent history.
+    void window.localStorage.length;
     return window.localStorage;
   } catch {
     return null;
@@ -259,11 +275,13 @@ export class AgentSessionRepository {
   private runStateMemory: RunStateEnvelope = { version: 1, runStates: [] };
 
   constructor(
-    private readonly storage: StorageLike | null = defaultStorage(),
+    private storage: StorageLike | null = defaultStorage(),
     private readonly now: () => number = () => Date.now(),
     private readonly nextId: () => string = () => globalThis.crypto?.randomUUID?.()
       ?? `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
-  ) {}
+  ) {
+    this.compactPersistedTerminalRunStates();
+  }
 
   listSessions(projectId: string): AgentSessionRecord[] {
     return this.readSessions().sessions
@@ -390,12 +408,16 @@ export class AgentSessionRepository {
     if (session.projectId !== input.projectId) {
       throw new Error('Agent RunState project does not match its session project.');
     }
-    assertAgentSerializedRunStateSafe(input.serializedState);
+    const serializedState = input.status === 'awaiting_approval' || input.status === 'running'
+      ? input.serializedState
+      : '{}';
+    assertAgentSerializedRunStateSafe(serializedState);
     const envelope = this.readRunStates();
     const existingIndex = envelope.runStates.findIndex((record) => record.id === input.id);
     const now = this.now();
     const record: AgentRunStateRecord = {
       ...input,
+      serializedState,
       runtimeVersion: CANVAS_AGENT_RUNTIME_VERSION,
       agentDefinitionVersion: CANVAS_AGENT_DEFINITION_VERSION,
       commandSchemaVersion: CANVAS_COMMAND_VERSION,
@@ -409,7 +431,18 @@ export class AgentSessionRepository {
   }
 
   getRunState(runStateId: string): AgentRunStateRecord | null {
-    const record = this.readRunStates().runStates.find((candidate) => candidate.id === runStateId);
+    const envelope = this.readRunStates();
+    const index = envelope.runStates.findIndex((candidate) => candidate.id === runStateId);
+    const record = index >= 0 ? envelope.runStates[index] : undefined;
+    if (record && (record.status === 'running' || record.status === 'awaiting_approval')) {
+      const now = this.now();
+      if (now >= record.updatedAt && now - record.updatedAt > MAX_RESUMABLE_RUN_STATE_AGE_MS) {
+        const cancelled = { ...record, status: 'cancelled' as const, serializedState: '{}', updatedAt: now };
+        envelope.runStates[index] = cancelled;
+        this.writeRunStates(envelope);
+        return cloneJson(cancelled);
+      }
+    }
     return record ? cloneJson(record) : null;
   }
 
@@ -444,6 +477,9 @@ export class AgentSessionRepository {
     const record = {
       ...envelope.runStates[index],
       status,
+      ...((status === 'completed' || status === 'failed' || status === 'cancelled')
+        ? { serializedState: '{}' }
+        : {}),
       updatedAt: this.now(),
     };
     envelope.runStates[index] = record;
@@ -506,24 +542,101 @@ export class AgentSessionRepository {
 
   private readSessions(): SessionEnvelope {
     if (!this.storage) return cloneJson(this.sessionMemory);
-    return parseSessionEnvelope(this.storage.getItem(SESSION_STORAGE_KEY));
+    try {
+      return parseSessionEnvelope(this.storage.getItem(SESSION_STORAGE_KEY));
+    } catch {
+      this.switchToMemory();
+      return cloneJson(this.sessionMemory);
+    }
   }
 
   private writeSessions(envelope: SessionEnvelope): void {
     const serialized = serializeBounded(envelope);
     if (!this.storage) this.sessionMemory = cloneJson(envelope);
-    else this.storage.setItem(SESSION_STORAGE_KEY, serialized);
+    else {
+      try {
+        this.storage.setItem(SESSION_STORAGE_KEY, serialized);
+      } catch {
+        this.compactPersistedTerminalRunStates();
+        if (!this.storage) {
+          this.sessionMemory = cloneJson(envelope);
+          return;
+        }
+        try {
+          this.storage.setItem(SESSION_STORAGE_KEY, serialized);
+        } catch {
+          this.switchToMemory({ sessions: envelope });
+        }
+      }
+    }
   }
 
   private readRunStates(): RunStateEnvelope {
     if (!this.storage) return cloneJson(this.runStateMemory);
-    return parseRunStateEnvelope(this.storage.getItem(RUN_STATE_STORAGE_KEY));
+    try {
+      return parseRunStateEnvelope(this.storage.getItem(RUN_STATE_STORAGE_KEY), this.now());
+    } catch {
+      this.switchToMemory();
+      return cloneJson(this.runStateMemory);
+    }
   }
 
   private writeRunStates(envelope: RunStateEnvelope): void {
     const serialized = serializeBounded(envelope);
     if (!this.storage) this.runStateMemory = cloneJson(envelope);
-    else this.storage.setItem(RUN_STATE_STORAGE_KEY, serialized);
+    else {
+      try {
+        this.storage.setItem(RUN_STATE_STORAGE_KEY, serialized);
+      } catch {
+        this.switchToMemory({ runStates: envelope });
+      }
+    }
+  }
+
+  private compactPersistedTerminalRunStates(): void {
+    if (!this.storage) return;
+    let raw: string | null;
+    let envelope: RunStateEnvelope;
+    try {
+      raw = this.storage.getItem(RUN_STATE_STORAGE_KEY);
+      envelope = parseRunStateEnvelope(raw, this.now());
+    } catch {
+      this.switchToMemory();
+      return;
+    }
+    const serialized = serializeBounded(envelope);
+    if (raw === serialized) return;
+    try {
+      this.storage.setItem(RUN_STATE_STORAGE_KEY, serialized);
+    } catch {
+      this.switchToMemory({ runStates: envelope });
+    }
+  }
+
+  private switchToMemory(overrides: {
+    sessions?: SessionEnvelope;
+    runStates?: RunStateEnvelope;
+  } = {}): void {
+    const storage = this.storage;
+    if (storage) {
+      if (!overrides.sessions) {
+        try {
+          this.sessionMemory = parseSessionEnvelope(storage.getItem(SESSION_STORAGE_KEY));
+        } catch {
+          // Keep the last valid memory snapshot.
+        }
+      }
+      if (!overrides.runStates) {
+        try {
+          this.runStateMemory = parseRunStateEnvelope(storage.getItem(RUN_STATE_STORAGE_KEY), this.now());
+        } catch {
+          // Keep the last valid memory snapshot.
+        }
+      }
+    }
+    if (overrides.sessions) this.sessionMemory = cloneJson(overrides.sessions);
+    if (overrides.runStates) this.runStateMemory = cloneJson(overrides.runStates);
+    this.storage = null;
   }
 
   async applyHistoryMutation(sessionId: string, args: SessionHistoryRewriteArgs): Promise<void> {

@@ -329,6 +329,13 @@ mod tests {
             claude_has_history: AtomicBool::new(false),
             turn_gate: Mutex::new(()),
             turn_workspaces: Mutex::new(HashMap::new()),
+            user_managed: false,
+            project_id: None,
+            project_name: None,
+            descriptor_path: None,
+            connected_at: AtomicU64::new(0),
+            last_activity_at: AtomicU64::new(0),
+            call_count: AtomicU64::new(0),
         }
     }
 

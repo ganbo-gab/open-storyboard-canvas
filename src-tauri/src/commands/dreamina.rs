@@ -822,11 +822,18 @@ pub async fn dreamina_query_result(
     run_dreamina_subcommand(args, CommandExpectation::Query).await
 }
 
-/// Run `dreamina list_task` and return the full JSON stdout so the caller
-/// (frontend gateway) can scan for a specific submit_id + gen_status.
+/// Run `dreamina list_task` and return the full JSON stdout so the caller can
+/// corroborate a temporarily missing query_result without submitting again.
 #[tauri::command]
-pub async fn dreamina_list_task() -> DreaminaSubmitResult {
-    run_dreamina_subcommand(vec!["list_task".into()], CommandExpectation::Utility).await
+pub async fn dreamina_list_task(submit_id: Option<String>) -> DreaminaSubmitResult {
+    let mut args = vec!["list_task".into()];
+    if let Some(submit_id) = submit_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        args.push(format!("--submit_id={submit_id}"));
+    }
+    run_dreamina_subcommand(args, CommandExpectation::Utility).await
 }
 
 /// Dreamina HD upscale — single input image, optional resolution tier.

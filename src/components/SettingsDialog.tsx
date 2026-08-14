@@ -34,6 +34,9 @@ import { PromptManagementSection } from '@/components/settings/PromptManagementS
 import { PromptPresetsSection } from '@/components/settings/PromptPresetsSection';
 import { AudioModelsSection } from '@/components/settings/AudioModelsSection';
 import { SettingsPortabilitySection } from '@/components/settings/SettingsPortabilitySection';
+import { ExternalAgentConnectionPanel } from '@/features/canvas/agent/ui/ExternalAgentConnectionPanel';
+import { buildExternalCanvasMcpManifest } from '@/features/canvas/agent/application/externalAgentToolManifest';
+import { useProjectStore } from '@/stores/projectStore';
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -291,6 +294,10 @@ export function SettingsDialog({
     const visibleIds = new Set(['grsai']);
     return listModelProviders().slice().filter((p) => visibleIds.has(p.id));
   }, []);
+  const externalAgentProject = useProjectStore((state) => state.currentProject);
+  const externalAgentTools = useMemo(() => buildExternalCanvasMcpManifest([
+    'canvas', 'diagnostics', 'config', 'asset-read',
+  ]).tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, requiresApproval: true })), []);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>(
     normalizeSettingsCategory(initialCategory)
   );
@@ -922,6 +929,20 @@ export function SettingsDialog({
               </button>
 
               <button
+                onClick={() => setActiveCategory('externalAgents')}
+                className={`
+                w-full flex items-center gap-3 px-4 py-2.5 text-left
+                transition-colors
+                ${activeCategory === 'externalAgents'
+                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
+                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
+                  }
+              `}
+              >
+                <span className="text-sm">{t('settings.externalAgents')}</span>
+              </button>
+
+              <button
                 onClick={() => setActiveCategory('portability')}
                 className={`
                 w-full flex items-center gap-3 px-4 py-2.5 text-left
@@ -954,6 +975,12 @@ export function SettingsDialog({
           {/* Content */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {activeCategory === 'portability' && <SettingsPortabilitySection />}
+            {activeCategory === 'externalAgents' && (
+              <div className="ui-scrollbar flex-1 overflow-y-auto p-6">
+                <div className="mb-4"><h2 className="text-lg font-semibold text-text-dark">{t('settings.externalAgents')}</h2><p className="mt-1 text-sm text-text-muted">{t('settings.externalAgentsDescription')}</p></div>
+                <ExternalAgentConnectionPanel projectId={externalAgentProject?.id ?? null} projectName={externalAgentProject?.name ?? null} tools={externalAgentTools} />
+              </div>
+            )}
             {activeCategory === 'customProviders' && (
               <div className="flex flex-1 flex-col overflow-hidden">
                 <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">

@@ -10,8 +10,12 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: tauri.invoke, isTauri: tauri.is
 vi.mock('@tauri-apps/api/event', () => ({ listen: tauri.listen }));
 
 import {
+  createExternalAgentConnection,
   diagnoseExternalAgentRuntimes,
+  inspectExternalAgentConnection,
   listenExternalAgentEvents,
+  replayExternalAgentPendingToolCalls,
+  revokeExternalAgentConnection,
   startExternalAgentSession,
 } from './externalAgent';
 
@@ -53,5 +57,29 @@ describe('external Agent Tauri commands', () => {
     await listenExternalAgentEvents(vi.fn(), protocolError);
     listener?.({ payload: { schemaVersion: 2 } });
     expect(protocolError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringMatching(/unsupported/i) }));
+  });
+
+  it('creates, inspects, and revokes a user-managed MCP connection without a runtime id', async () => {
+    tauri.invoke.mockResolvedValue({ schemaVersion: 1, status: 'ready' });
+    const request = {
+      projectId: 'project-1',
+      projectName: 'Opening sequence',
+      tools: [{
+        name: 'canvas_command',
+        description: 'Canvas only',
+        inputSchema: { type: 'object' },
+        requiresApproval: true,
+      }],
+    };
+    await createExternalAgentConnection(request);
+    await inspectExternalAgentConnection();
+    await revokeExternalAgentConnection('connection-1');
+    await replayExternalAgentPendingToolCalls();
+    expect(tauri.invoke).toHaveBeenNthCalledWith(1, 'create_external_agent_connection', { request });
+    expect(tauri.invoke).toHaveBeenNthCalledWith(2, 'inspect_external_agent_connection', undefined);
+    expect(tauri.invoke).toHaveBeenNthCalledWith(3, 'revoke_external_agent_connection', {
+      connectionId: 'connection-1',
+    });
+    expect(tauri.invoke).toHaveBeenNthCalledWith(4, 'replay_external_agent_pending_tool_calls', undefined);
   });
 });

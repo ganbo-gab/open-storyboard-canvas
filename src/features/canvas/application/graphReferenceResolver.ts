@@ -5,6 +5,9 @@ import {
   isExportImageNode,
   isImageEditNode,
   isJsonCardNode,
+  isPanoramaNode,
+  isStoryboardGenNode,
+  isStoryboardSplitNode,
   isTagGroupNode,
   isTagNode,
   isTextAnnotationNode,
@@ -21,6 +24,8 @@ export interface GraphReferenceItem {
   kind: GraphReferenceKind;
   /** The real upstream asset/content node. Tags never replace this identity. */
   sourceNodeId: string;
+  /** Stable identity for one media item when a canvas node contains several. */
+  sourceItemId?: string;
   /** The outer tag used by the consumer, when the reference traversed a tag. */
   viaTagNodeId?: string;
   label: string;
@@ -33,6 +38,25 @@ export interface GraphReferenceItem {
   audioUrl?: string;
   title: string;
   sourceTitle?: string;
+  groupNodeId?: string;
+  groupToken?: string;
+  groupTitle?: string;
+}
+
+export interface GraphReferenceGroup {
+  groupNodeId: string;
+  token: string;
+  title: string;
+  memberCount: number;
+}
+
+export function collapseTagGroupReferenceOptions<T extends GraphReferenceItem>(
+  references: T[],
+): T[] {
+  // A tag group is only a visual, space-saving wrapper. Consumers must see
+  // and select the same member references they would see if every member was
+  // connected directly; the group itself is never a prompt/reference item.
+  return references.slice();
 }
 
 export type TagGraphStatus =
@@ -99,54 +123,76 @@ function getTextContentForNode(node: CanvasNode, nodesById: Map<string, CanvasNo
   return '';
 }
 
-function extractReferenceFromNode(
+function extractReferencesFromNode(
   node: CanvasNode | undefined,
   nodesById: Map<string, CanvasNode>,
-): Omit<GraphReferenceItem, 'label' | 'token'> | null {
+): Array<Omit<GraphReferenceItem, 'label' | 'token'>> {
   if (!node) {
-    return null;
+    return [];
   }
 
   const title = getNodeTitle(node);
-  if (isUploadNode(node) || isImageEditNode(node) || isExportImageNode(node)) {
+  if (
+    isUploadNode(node)
+    || isImageEditNode(node)
+    || isExportImageNode(node)
+    || isStoryboardGenNode(node)
+    || isPanoramaNode(node)
+  ) {
     const imageUrl = node.data.imageUrl || node.data.previewImageUrl || '';
     if (!imageUrl) {
-      return null;
+      return [];
     }
-    return {
+    return [{
       kind: 'image',
       sourceNodeId: node.id,
       imageUrl,
       previewImageUrl: node.data.previewImageUrl ?? null,
       title,
-    };
+    }];
+  }
+
+  if (isStoryboardSplitNode(node)) {
+    return node.data.frames.flatMap((frame, index) => {
+      const imageUrl = frame.imageUrl || frame.previewImageUrl || '';
+      if (!imageUrl) return [];
+      const frameTitle = frame.note?.trim() || `第 ${index + 1} 帧`;
+      return [{
+        kind: 'image' as const,
+        sourceNodeId: node.id,
+        sourceItemId: frame.id || String(index),
+        imageUrl,
+        previewImageUrl: frame.previewImageUrl ?? null,
+        title: `${title} · ${frameTitle}`,
+      }];
+    });
   }
 
   if (isVideoNode(node)) {
     const videoUrl = node.data.localVideoUrl || node.data.videoUrl || '';
     if (!videoUrl) {
-      return null;
+      return [];
     }
-    return {
+    return [{
       kind: 'video',
       sourceNodeId: node.id,
       videoUrl,
       thumbnailUrl: node.data.thumbnailUrl ?? null,
       title,
-    };
+    }];
   }
 
   if (isAudioNode(node)) {
     const audioUrl = node.data.localAudioUrl || node.data.audioUrl || '';
     if (!audioUrl) {
-      return null;
+      return [];
     }
-    return {
+    return [{
       kind: 'audio',
       sourceNodeId: node.id,
       audioUrl,
       title,
-    };
+    }];
   }
 
   if (
@@ -156,17 +202,17 @@ function extractReferenceFromNode(
   ) {
     const content = getTextContentForNode(node, nodesById);
     if (!content) {
-      return null;
+      return [];
     }
-    return {
+    return [{
       kind: 'text',
       sourceNodeId: node.id,
       content,
       title,
-    };
+    }];
   }
 
-  return null;
+  return [];
 }
 
 function labelPrefixForKind(kind: GraphReferenceKind): string {
@@ -203,7 +249,7 @@ export function createGraphReferenceIndex(
   const disabledGroupIdsByTagId = new Map<string, string[]>();
   nodes.forEach((node) => {
     if (!isTagGroupNode(node) || node.data.enabled !== false) return;
-    node.data.memberTagIds.forEach((tagId) => {
+    [...(node.data.legacyMemberTagIds ?? []), ...(node.data.memberTagIds ?? [])].forEach((tagId) => {
       const groupIds = disabledGroupIdsByTagId.get(tagId);
       if (groupIds) groupIds.push(node.id);
       else disabledGroupIdsByTagId.set(tagId, [node.id]);
@@ -271,17 +317,17 @@ function resolveReferenceFromNode(
   index: GraphReferenceIndex,
   visitedTagIds: Set<string>,
   outerTag?: CanvasNode,
-): Omit<GraphReferenceItem, 'label' | 'token'> | null {
-  if (!node) return null;
+): Array<Omit<GraphReferenceItem, 'label' | 'token'>> {
+  if (!node) return [];
   if (!isTagNode(node)) {
-    const extracted = extractReferenceFromNode(node, index.nodesById);
-    if (!extracted || !outerTag) return extracted;
-    return {
-      ...extracted,
+    const extracted = extractReferencesFromNode(node, index.nodesById);
+    if (!outerTag) return extracted;
+    return extracted.map((reference) => ({
+      ...reference,
       viaTagNodeId: outerTag.id,
-      sourceTitle: extracted.title,
+      sourceTitle: reference.title,
       title: normalizedTagLabel(outerTag),
-    };
+    }));
   }
 
   if (
@@ -289,11 +335,11 @@ function resolveReferenceFromNode(
     || (index.disabledGroupIdsByTagId.get(node.id)?.length ?? 0) > 0
     || visitedTagIds.has(node.id)
   ) {
-    return null;
+    return [];
   }
 
   const incomingEdges = index.incomingEdgesByTarget.get(node.id) ?? [];
-  if (incomingEdges.length !== 1) return null;
+  if (incomingEdges.length !== 1) return [];
   const nextVisited = new Set(visitedTagIds);
   nextVisited.add(node.id);
   return resolveReferenceFromNode(
@@ -317,20 +363,19 @@ export function collectInputReferences(
     text: 0,
   };
   const tagLabelCounts = new Map<string, number>();
+  const groupTokenCounts = new Map<string, number>();
   const seen = new Set<string>();
   const references: GraphReferenceItem[] = [];
 
-  (index.incomingEdgesByTarget.get(nodeId) ?? []).forEach((edge) => {
-    const extracted = resolveReferenceFromNode(
-      index.nodesById.get(edge.source),
-      index,
-      new Set<string>(),
-    );
+  const appendReference = (extracted: Omit<GraphReferenceItem, 'label' | 'token'> | null) => {
     if (!extracted) return;
 
+    const sourceIdentity = extracted.sourceItemId
+      ? `${extracted.sourceNodeId}:${extracted.sourceItemId}`
+      : extracted.sourceNodeId;
     const dedupeKey = extracted.viaTagNodeId
-      ? `tag:${extracted.viaTagNodeId}:${extracted.kind}:${extracted.sourceNodeId}`
-      : `${extracted.kind}:${extracted.sourceNodeId}`;
+      ? `tag:${extracted.viaTagNodeId}:${extracted.kind}:${sourceIdentity}`
+      : `${extracted.kind}:${sourceIdentity}`;
     if (seen.has(dedupeKey)) return;
     seen.add(dedupeKey);
 
@@ -350,9 +395,98 @@ export function collectInputReferences(
       label,
       token: `@${label}`,
     });
+  };
+
+  (index.incomingEdgesByTarget.get(nodeId) ?? []).forEach((edge) => {
+    const source = index.nodesById.get(edge.source);
+    if (source && isTagGroupNode(source)) {
+      if (source.data.enabled === false) return;
+      const groupTitle = normalizedTagLabel(source);
+      const groupOccurrence = (groupTokenCounts.get(groupTitle) ?? 0) + 1;
+      groupTokenCounts.set(groupTitle, groupOccurrence);
+      const groupToken = `@${groupOccurrence === 1 ? groupTitle : `${groupTitle} ${groupOccurrence}`}`;
+      source.data.memberNodeIds.forEach((memberId) => {
+        extractReferencesFromNode(index.nodesById.get(memberId), index.nodesById)
+          .forEach((extracted) => appendReference({
+            ...extracted,
+            sourceTitle: extracted.title,
+            groupNodeId: source.id,
+            groupToken,
+            groupTitle,
+          }));
+      });
+      return;
+    }
+    resolveReferenceFromNode(source, index, new Set<string>()).forEach(appendReference);
   });
 
   return references;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Expands connected tag-group tokens in one regex pass. A single pass matters
+ * when one group name is a prefix of another (for example `@Hero` and
+ * `@Hero 2`): replacements must never be re-expanded by a later group.
+ */
+export function expandTagGroupTokensInPrompt(
+  prompt: string,
+  references: GraphReferenceItem[],
+): string {
+  const membersByToken = new Map<string, string[]>();
+  references.forEach((reference) => {
+    if (!reference.groupToken) return;
+    const members = membersByToken.get(reference.groupToken) ?? [];
+    members.push(reference.token);
+    membersByToken.set(reference.groupToken, members);
+  });
+  const tokens = Array.from(membersByToken.keys()).sort((left, right) => right.length - left.length);
+  if (tokens.length === 0) return prompt;
+  const matcher = new RegExp(`(${tokens.map(escapeRegExp).join('|')})(?![\\p{L}\\p{N}_])`, 'gu');
+  return prompt.replace(matcher, (token) => {
+    const members = membersByToken.get(token) ?? [];
+    return members.length > 0 ? members.join('、') : token;
+  });
+}
+
+/**
+ * Applies the same submit-time token cleanup for direct references and the
+ * legacy compact `@group` authoring token. Group expansion happens first so
+ * no group name or marker can survive into a provider prompt.
+ */
+export function normalizeReferenceTokensForSubmission(
+  prompt: string,
+  references: GraphReferenceItem[],
+): string {
+  return expandTagGroupTokensInPrompt(prompt, references)
+    .replace(/@(?=(?:图|视频|音频|文本)\d+)/g, '')
+    .trim();
+}
+
+export function collectInputReferenceGroups(
+  nodeId: string,
+  nodes: CanvasNode[],
+  edges: CanvasEdge[],
+): GraphReferenceGroup[] {
+  const groups = new Map<string, GraphReferenceGroup>();
+  collectInputReferences(nodeId, nodes, edges).forEach((reference) => {
+    if (!reference.groupNodeId || !reference.groupToken || !reference.groupTitle) return;
+    const existing = groups.get(reference.groupNodeId);
+    if (existing) {
+      existing.memberCount += 1;
+      return;
+    }
+    groups.set(reference.groupNodeId, {
+      groupNodeId: reference.groupNodeId,
+      token: reference.groupToken,
+      title: reference.groupTitle,
+      memberCount: 1,
+    });
+  });
+  return Array.from(groups.values());
 }
 
 export function collectInputImageUrls(

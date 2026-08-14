@@ -29,7 +29,9 @@ import {
 } from '@/features/canvas/application/canvasGraphSelectors';
 import {
   buildReferenceContextPrompt,
+  collapseTagGroupReferenceOptions,
   collectInputReferences,
+  normalizeReferenceTokensForSubmission,
 } from '@/features/canvas/application/graphReferenceResolver';
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
 import { resolveErrorContent, showErrorDialog } from '@/features/canvas/application/errorDialog';
@@ -417,12 +419,12 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     [currentInputSchema.images.enabled, currentInputSchema.images.max, incomingReferenceItems]
   );
   const schemaReferencePickerItems = useMemo(
-    () => incomingReferenceItems.filter((reference) => {
+    () => collapseTagGroupReferenceOptions(incomingReferenceItems.filter((reference) => {
       if (reference.kind === 'image') return currentInputSchema.images.enabled;
       if (reference.kind === 'video') return currentInputSchema.video.enabled;
       if (reference.kind === 'audio') return currentInputSchema.audio.enabled;
       return true;
-    }),
+    })),
     [currentInputSchema.audio.enabled, currentInputSchema.images.enabled, currentInputSchema.video.enabled, incomingReferenceItems]
   );
   const functionPickerItems = useMemo(() => (
@@ -698,7 +700,8 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     );
     const latestModelConfig = resolveVideoModelConfig(latestCatalog, latestData.modelConfig ?? resolvedModelConfig);
     const latestEntry = resolveConfigEntry(latestCatalog, latestModelConfig);
-    const basePrompt = latestPromptDraft.replace(/@(?=(?:图|视频|音频|文本)\d+)/g, '').trim();
+    const latestReferences = collectInputReferences(id, latestCanvasState.nodes, latestCanvasState.edges);
+    const basePrompt = normalizeReferenceTokensForSubmission(latestPromptDraft, latestReferences);
     let sourcePrompt = '';
     if (latestData.selectedPromptPresetId) {
       const selectedPreset = latestSettings.promptPresets.find((preset) => preset.id === latestData.selectedPromptPresetId);
@@ -729,7 +732,6 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         // Keep the user's prompt if camera prompt assembly fails.
       }
     }
-    const latestReferences = collectInputReferences(id, latestCanvasState.nodes, latestCanvasState.edges);
     const referenceContextPrompt = buildReferenceContextPrompt(latestReferences);
     const prompt = referenceContextPrompt
       ? `${referenceContextPrompt}\n\n${composedPrompt}`
@@ -1742,7 +1744,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         </div>
       </div>
 
-      {error && <div className="mt-1 shrink-0 text-xs text-red-400">{error}</div>}
+      {error && <div className="mt-1 shrink-0 text-xs text-red-700 dark:text-red-300">{error}</div>}
 
       <Handle
         type="target"

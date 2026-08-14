@@ -9,7 +9,16 @@ import {
 } from '../domain/canvasNodes';
 import { canvasCommandRegistry } from './canvasCommandService';
 import { validateCanvasConnection } from './canvasConnectionRules';
-import { collectInputReferences, inspectTagGraphState } from './graphReferenceResolver';
+import {
+  buildReferenceContextPrompt,
+  collapseTagGroupReferenceOptions,
+  collectInputReferenceGroups,
+  collectInputReferences,
+  expandTagGroupTokensInPrompt,
+  inspectTagGraphState,
+  normalizeReferenceTokensForSubmission,
+} from './graphReferenceResolver';
+import { getMenuNodeDefinitions, nodeCanStartManualConnection } from '../domain/nodeRegistry';
 import { migrateLegacyTagGraph } from './tagPersistenceMigration';
 
 function resetCanvas(): void {
@@ -41,6 +50,22 @@ function sourceNode(id = 'source'): CanvasNode {
   };
 }
 
+function textNode(id = 'text', content = 'Keep the character costume consistent.'): CanvasNode {
+  return {
+    id,
+    type: CANVAS_NODE_TYPES.textAnnotation,
+    position: { x: 0, y: 220 },
+    data: {
+      displayName: 'Direction note',
+      content,
+      fontSize: 16,
+      color: '#111827',
+      backgroundColor: '#ffffff',
+      textAlign: 'left',
+    },
+  };
+}
+
 function tagNode(id = 'tag', enabled = true): CanvasNode {
   return {
     id,
@@ -55,7 +80,7 @@ function tagNode(id = 'tag', enabled = true): CanvasNode {
   };
 }
 
-function tagGroupNode(id = 'tag-group', enabled = true, memberTagIds = ['tag']): CanvasNode {
+function tagGroupNode(id = 'tag-group', enabled = true, memberNodeIds = ['source']): CanvasNode {
   return {
     id,
     type: CANVAS_NODE_TYPES.tagGroup,
@@ -63,8 +88,11 @@ function tagGroupNode(id = 'tag-group', enabled = true, memberTagIds = ['tag']):
     data: {
       displayName: 'Characters',
       label: 'Characters',
+      schemaVersion: 2,
       enabled,
-      memberTagIds,
+      color: 'neutral',
+      shape: 'rounded',
+      memberNodeIds,
     },
   };
 }
@@ -93,6 +121,24 @@ function edge(id: string, source: string, target: string): CanvasEdge {
 }
 
 describe('safe tag graph rules', () => {
+  it('exposes tag groups as independent blank-canvas nodes while keeping generic groups separate', () => {
+    const menuTypes = getMenuNodeDefinitions().map((definition) => definition.type);
+    expect(menuTypes).toContain(CANVAS_NODE_TYPES.tagGroup);
+    expect(menuTypes).not.toContain(CANVAS_NODE_TYPES.group);
+  });
+
+  it('allows a tag group to start the same manual connection flow as normal material nodes', () => {
+    expect(nodeCanStartManualConnection(CANVAS_NODE_TYPES.tagGroup)).toBe(true);
+    expect(nodeCanStartManualConnection(CANVAS_NODE_TYPES.upload)).toBe(true);
+    expect(nodeCanStartManualConnection(CANVAS_NODE_TYPES.group)).toBe(false);
+    expect(validateCanvasConnection(
+      'tag-group',
+      'consumer',
+      [tagGroupNode(), consumerNode()],
+      [],
+    )).toMatchObject({ valid: true });
+  });
+
   it('rejects a second source and a tag cycle while treating exact duplicates as no-ops', () => {
     const nodes = [sourceNode('source-a'), sourceNode('source-b'), tagNode('tag-a'), tagNode('tag-b')];
     const edges = [
@@ -138,7 +184,164 @@ describe('safe tag graph rules', () => {
     }]);
     expect(inspectTagGraphState('tag', baseNodes, edges)).toMatchObject({ status: 'ready', sourceNodeId: 'source' });
     expect(collectInputReferences('consumer', [sourceNode(), tagNode('tag', false), tagGroupNode(), consumerNode()], edges)).toEqual([]);
-    expect(collectInputReferences('consumer', [sourceNode(), tagNode(), tagGroupNode('tag-group', false), consumerNode()], edges)).toEqual([]);
+    expect(collectInputReferences('consumer', [sourceNode(), tagNode(), {
+      ...tagGroupNode('tag-group', false),
+      data: { ...tagGroupNode('tag-group', false).data, legacyMemberTagIds: ['tag'] },
+    }, consumerNode()], edges)).toEqual([]);
+  });
+
+  it('shows every connected tag-group member as an ordinary @ reference option', () => {
+    const sourceA = sourceNode('portrait');
+    const sourceB = sourceNode('costume');
+    sourceA.data.displayName = 'Portrait';
+    sourceB.data.displayName = 'Costume';
+    const group = tagGroupNode('characters', true, ['portrait', 'costume']);
+    group.data.displayName = 'Hero references';
+    const references = collectInputReferences(
+      'consumer',
+      [sourceA, sourceB, group, consumerNode()],
+      [edge('group-consumer', 'characters', 'consumer')],
+    );
+
+    expect(references).toHaveLength(2);
+    expect(references.map((reference) => reference.label)).toEqual([
+      '图1',
+      '图2',
+    ]);
+    expect(collectInputReferenceGroups(
+      'consumer',
+      [sourceA, sourceB, group, consumerNode()],
+      [edge('group-consumer', 'characters', 'consumer')],
+    )).toEqual([{ groupNodeId: 'characters', token: '@Hero references', title: 'Hero references', memberCount: 2 }]);
+    expect(collapseTagGroupReferenceOptions(references).map(({ token, label }) => ({ token, label }))).toEqual([
+      { token: '@图1', label: '图1' },
+      { token: '@图2', label: '图2' },
+    ]);
+    expect(buildReferenceContextPrompt(references)).toBe('');
+  });
+
+  it('keeps generation references and prompt context identical to connecting members individually', () => {
+    const portrait = sourceNode('portrait');
+    const costume = sourceNode('costume');
+    const note = textNode();
+    portrait.data.displayName = 'Portrait';
+    costume.data.displayName = 'Costume';
+    const group = tagGroupNode('characters', true, [portrait.id, costume.id, note.id]);
+    group.data.displayName = 'Hero references';
+    const nodes = [portrait, costume, note, group, consumerNode()];
+    const groupedReferences = collectInputReferences(
+      'consumer',
+      nodes,
+      [edge('group-consumer', group.id, 'consumer')],
+    );
+    const directReferences = collectInputReferences(
+      'consumer',
+      nodes,
+      [
+        edge('portrait-consumer', portrait.id, 'consumer'),
+        edge('costume-consumer', costume.id, 'consumer'),
+        edge('note-consumer', note.id, 'consumer'),
+      ],
+    );
+    const outboundProjection = (references: typeof groupedReferences) => ({
+      media: references.map(({ kind, sourceNodeId, sourceItemId, imageUrl, videoUrl, audioUrl, content }) => ({
+        kind,
+        sourceNodeId,
+        sourceItemId,
+        imageUrl,
+        videoUrl,
+        audioUrl,
+        content,
+      })),
+      options: collapseTagGroupReferenceOptions(references).map(({ kind, sourceNodeId, label, token }) => ({
+        kind,
+        sourceNodeId,
+        label,
+        token,
+      })),
+      promptContext: buildReferenceContextPrompt(references),
+    });
+
+    expect(outboundProjection(groupedReferences)).toEqual(outboundProjection(directReferences));
+    expect(buildReferenceContextPrompt(groupedReferences)).not.toContain('标签组');
+    expect(normalizeReferenceTokensForSubmission('@Hero references', groupedReferences)).toBe(
+      normalizeReferenceTokensForSubmission('@图1、@图2、@文本1', directReferences),
+    );
+    expect(normalizeReferenceTokensForSubmission('@Hero references', groupedReferences)).toBe(
+      '图1、图2、文本1',
+    );
+  });
+
+  it('expands overlapping group names once without corrupting the longer token', () => {
+    const portrait = sourceNode('portrait');
+    const costume = sourceNode('costume');
+    portrait.data.displayName = 'Portrait';
+    costume.data.displayName = 'Costume';
+    const hero = tagGroupNode('hero', true, ['portrait']);
+    const heroTwo = tagGroupNode('hero-two', true, ['costume']);
+    hero.data.displayName = 'Hero';
+    heroTwo.data.displayName = 'Hero 2';
+    const references = collectInputReferences(
+      'consumer',
+      [portrait, costume, hero, heroTwo, consumerNode()],
+      [edge('hero-consumer', hero.id, 'consumer'), edge('hero-two-consumer', heroTwo.id, 'consumer')],
+    );
+
+    expect(expandTagGroupTokensInPrompt('@Hero 2 then @Hero; keep @Heroic unchanged', references)).toBe(
+      '@图2 then @图1; keep @Heroic unchanged',
+    );
+  });
+
+  it('projects every populated storyboard frame through one tag-group token', () => {
+    const storyboard: CanvasNode = {
+      id: 'sequence',
+      type: CANVAS_NODE_TYPES.storyboardSplit,
+      position: { x: 0, y: 0 },
+      data: {
+        displayName: 'Sequence',
+        aspectRatio: '16:9',
+        gridRows: 1,
+        gridCols: 3,
+        frames: [
+          { id: 'frame-a', imageUrl: 'https://example.invalid/a.png', note: 'Opening', order: 0 },
+          { id: 'frame-b', imageUrl: null, note: 'Missing', order: 1 },
+          { id: 'frame-c', imageUrl: 'https://example.invalid/c.png', note: 'Closing', order: 2 },
+        ],
+      },
+    };
+    const group = tagGroupNode('sequence-group', true, [storyboard.id]);
+    group.data.displayName = 'Shot sequence';
+    const references = collectInputReferences(
+      'consumer',
+      [storyboard, group, consumerNode()],
+      [edge('sequence-consumer', group.id, 'consumer')],
+    );
+
+    expect(references).toHaveLength(2);
+    expect(references.map((reference) => reference.sourceItemId)).toEqual(['frame-a', 'frame-c']);
+    expect(references.map((reference) => reference.imageUrl)).toEqual([
+      'https://example.invalid/a.png',
+      'https://example.invalid/c.png',
+    ]);
+    expect(expandTagGroupTokensInPrompt('Use @Shot sequence', references)).toBe(
+      'Use @图1、@图2',
+    );
+  });
+
+  it('only lets a tag group feed generation-capable nodes', () => {
+    const group = tagGroupNode();
+    expect(validateCanvasConnection(
+      group.id,
+      'consumer',
+      [group, consumerNode()],
+      [],
+    )).toMatchObject({ valid: true });
+    expect(validateCanvasConnection(
+      group.id,
+      'tag',
+      [group, tagNode()],
+      [],
+    )).toMatchObject({ valid: false, code: 'tag-group-target' });
   });
 });
 
@@ -220,7 +423,7 @@ describe('safe tag command transactions', () => {
     }, 'agent');
     expect(remove.ok).toBe(true);
     expect(useCanvasStore.getState().edges).toEqual([]);
-    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'tag-group')?.data).toMatchObject({ memberTagIds: [] });
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'tag-group')?.data).toMatchObject({ memberNodeIds: ['source'] });
   });
 
   it('commits a relation-editor replacement as one undoable transaction', () => {
@@ -301,5 +504,23 @@ describe('legacy tag persistence migration', () => {
 
     expect(migrated.edges).toEqual([edge('real-edge', 'source-a', 'tag')]);
     expect(migrated.diagnostics).toContainEqual(expect.objectContaining({ code: 'conflicting-source-id' }));
+  });
+
+  it('migrates legacy tag-group members to direct sources and preserves ambiguous ids', () => {
+    const legacyGroup = {
+      ...tagGroupNode(),
+      data: { displayName: 'Legacy group', label: 'Legacy group', enabled: true, memberTagIds: ['tag', 'missing-tag'] },
+    } as CanvasNode;
+    const migrated = migrateLegacyTagGraph(
+      [sourceNode(), tagNode(), legacyGroup],
+      [edge('source-tag', 'source', 'tag')],
+    );
+
+    expect(migrated.nodes.find((node) => node.id === 'tag-group')?.data).toMatchObject({
+      schemaVersion: 2,
+      memberNodeIds: ['source'],
+      unresolvedMemberIds: ['missing-tag'],
+    });
+    expect(migrated.diagnostics).toContainEqual(expect.objectContaining({ code: 'unresolved-group-member', sourceNodeId: 'missing-tag' }));
   });
 });

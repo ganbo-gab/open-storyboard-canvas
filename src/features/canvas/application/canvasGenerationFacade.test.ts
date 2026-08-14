@@ -68,4 +68,73 @@ describe('CanvasGenerationFacade job states', () => {
       { jobId: 'job-completed-1' },
     )).toBe('result-1');
   });
+
+  it('tracks only the newest result cohort for a reusable generation input', () => {
+    const source = {
+      id: 'source-1',
+      type: CANVAS_NODE_TYPES.imageEdit,
+      position: { x: 0, y: 0 },
+      data: {},
+    } as unknown as CanvasNode;
+    const staleRunning = {
+      id: 'old-result',
+      type: CANVAS_NODE_TYPES.exportImage,
+      position: { x: 0, y: 0 },
+      data: {
+        isGenerating: true,
+        generationJobState: 'running',
+        generationStartedAt: 100,
+      },
+    } as unknown as CanvasNode;
+    const latestSucceeded = {
+      id: 'new-result',
+      type: CANVAS_NODE_TYPES.exportImage,
+      position: { x: 0, y: 0 },
+      data: {
+        imageUrl: '/generated/new.png',
+        generationJobState: 'succeeded',
+        generationStartedAt: 200,
+      },
+    } as unknown as CanvasNode;
+    const edges = [
+      { id: 'old-edge', source: source.id, target: staleRunning.id },
+      { id: 'new-edge', source: source.id, target: latestSucceeded.id },
+    ] as any;
+
+    expect(facade().getStatus(
+      [source, staleRunning, latestSucceeded],
+      edges,
+      { nodeId: source.id },
+    )).toMatchObject({
+      status: 'succeeded',
+      resultNodeId: latestSucceeded.id,
+      resultNodeIds: [latestSucceeded.id],
+    });
+  });
+
+  it('keeps every result in the newest multi-image batch together', () => {
+    const source = {
+      id: 'source-batch',
+      type: CANVAS_NODE_TYPES.imageEdit,
+      position: { x: 0, y: 0 },
+      data: {},
+    } as unknown as CanvasNode;
+    const nodes = [
+      source,
+      ...['old', 'new-a', 'new-b'].map((id, index) => ({
+        id,
+        type: CANVAS_NODE_TYPES.exportImage,
+        position: { x: 0, y: 0 },
+        data: index === 0
+          ? { generationJobState: 'running', batchId: 'old-batch', generationStartedAt: 100 }
+          : { imageUrl: `/${id}.png`, generationJobState: 'succeeded', batchId: 'new-batch', generationStartedAt: 200 },
+      } as unknown as CanvasNode)),
+    ];
+    const edges = nodes.slice(1).map((node) => ({ id: `edge-${node.id}`, source: source.id, target: node.id })) as any;
+
+    expect(facade().getStatus(nodes, edges, { nodeId: source.id })).toMatchObject({
+      status: 'succeeded',
+      resultNodeIds: ['new-a', 'new-b'],
+    });
+  });
 });

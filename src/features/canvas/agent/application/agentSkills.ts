@@ -75,7 +75,7 @@ export const BUILTIN_AGENT_SKILLS: readonly SkillDefinitionV1[] = Object.freeze(
     summary: '编写可提交的生图与图片编辑提示词',
     activation: ['生图', '图片', '画面', '参考图', 'image prompt', 'generate image', 'edit image', 'reference image'],
     toolNamespaces: ['canvas.read', 'generation', 'prompting'],
-    instructions: '区分从零生成与图片编辑；固定主体身份、构图、镜头、光线、风格和禁止项，提交前明确模型、数量、比例及参考图用途。确定性的裁剪、标注和分镜切分使用 node.tool.run；高清、扩图、重绘、擦除和抠图依赖付费 AI 提交，当前不可通过 node.tool.run 调用，不要模拟 UI 点击或绕过持久任务边界。',
+    instructions: '区分从零生成与图片编辑；固定主体身份、构图、镜头、光线、风格和禁止项，提交前明确模型、数量、比例及参考图用途。从零生图必须调用 canvas_command 的 node.create，nodeType 只能写精确注册值 imageNode，configuration 写入 prompt、当前所选 modelId、aspectRatio、resolution；position 只是布局提示，不要自造 nodeId。只有创建结果 ok=true 后才可使用 output.references.nodeId 调用 generation.submit；generation.submit 的 input 只有非空 nodeIds，不接收 prompt。确定性的裁剪、标注和分镜切分使用 node.tool.run；高清、扩图、重绘、擦除和抠图依赖付费 AI 提交，当前不可通过 node.tool.run 调用，不要模拟 UI 点击或绕过持久任务边界。',
     examples: [{ input: '用角色参考图生成雨夜中景', outcome: '读取获批参考图 -> 生成身份一致提示词 -> 确认参数 -> 提交' }],
     evalCaseIds: ['image-prompt-director:identity-reference'],
   }),
@@ -111,7 +111,7 @@ export const BUILTIN_AGENT_SKILLS: readonly SkillDefinitionV1[] = Object.freeze(
     summary: '诊断尺寸、能力、供应商、网络和任务失败',
     activation: ['诊断', '报错', '失败', '问题', 'Issue', '429', '500', '超时', '尺寸', 'diagnose', 'error', 'failed', 'timeout'],
     toolNamespaces: ['diagnostics'],
-    instructions: '先用 application-logs 和 generation-jobs 读取同一份有界脱敏证据，再区分输入、配置、上游生成失败、结果取回失败、网络、应用缺陷或未知。只有 generation-jobs 返回明确 jobId、safeRecoveryAvailable=true 且有安全句柄时，才能提议 generation.recover；该命令仍需单独审批，只轮询/GET/本地保存，绝不能从日志文字解析 URL、索要密钥或重提付费 POST。恢复完成前不得声称成功。',
+    instructions: '先用 application-logs 和 generation-jobs 读取同一份有界脱敏证据，再区分输入、配置、上游生成失败、结果取回失败、网络、应用缺陷或未知。查询画布时 canvas.query 必须使用 input.scope（graph、nodes、edges、selection 之一），可选 nodeIds 和 limit；不存在 filter 字段。工具参数校验失败时按返回的精确契约最多纠正一次，不得用同一组无效参数反复调用。只有 generation-jobs 返回明确 jobId、safeRecoveryAvailable=true 且有安全句柄时，才能提议 generation.recover；该命令仍需单独审批，只轮询/GET/本地保存，绝不能从日志文字解析 URL、索要密钥或重提付费 POST。恢复完成前不得声称成功。',
     examples: [{ input: '4K 3:4 为什么超出 8294400 像素', outcome: '计算几何约束，区分临时规避、配置映射和通用软件修复' }],
     evalCaseIds: ['generation-diagnostics:issue-11', 'generation-diagnostics:unknown-timeout', 'generation-diagnostics:fetch-only-recovery'],
   }),
@@ -137,6 +137,12 @@ export const BUILTIN_AGENT_SKILLS: readonly SkillDefinitionV1[] = Object.freeze(
 
 export interface SkillRoutingContext {
   text: string;
+  /**
+   * Bounded recent user turns used only when `text` is clearly a continuation
+   * (for example "继续" or "16:9，2K"). Assistant prose is deliberately not
+   * included so tool examples in model replies cannot grant capabilities.
+   */
+  recentUserText?: string;
   attachmentKinds?: string[];
   selectedNodeTypes?: string[];
   errorCode?: string;
@@ -190,15 +196,20 @@ function selectedNodeBoost(skill: SkillDefinitionV1, context: SkillRoutingContex
 }
 
 export function routeAgentSkills(context: SkillRoutingContext, max = 3): SkillSelection[] {
-  const text = `${context.text} ${context.errorCode ?? ''}`.toLocaleLowerCase();
+  const currentText = `${context.text} ${context.errorCode ?? ''}`.toLocaleLowerCase();
+  const continuation = isLikelyTaskContinuation(context.text);
+  const recentText = continuation ? context.recentUserText?.trim().toLocaleLowerCase() ?? '' : '';
+  const text = recentText ? `${recentText}\n${currentText}` : currentText;
   const scored = BUILTIN_AGENT_SKILLS.map((skill) => {
+    const currentTermHits = skill.activation.filter((term) => currentText.includes(term.toLocaleLowerCase())).length;
     const termHits = skill.activation.filter((term) => text.includes(term.toLocaleLowerCase())).length;
     const errorBoost = context.errorCode && skill.id === 'generation-diagnostics' ? 4 : 0;
     const mediaBoost = attachmentBoost(skill, context);
     const nodeBoost = selectedNodeBoost(skill, context);
     const score = termHits + errorBoost + mediaBoost + nodeBoost;
     const signals = [
-      termHits ? `${termHits} 个领域词` : '',
+      currentTermHits ? `${currentTermHits} 个领域词` : '',
+      !currentTermHits && termHits && recentText ? `延续最近任务的 ${termHits} 个领域词` : '',
       errorBoost ? '错误码' : '',
       mediaBoost ? '图片附件' : '',
       nodeBoost ? '选中节点类型' : '',
@@ -213,6 +224,15 @@ export function routeAgentSkills(context: SkillRoutingContext, max = 3): SkillSe
     .filter((item) => item.score > 0)
     .sort((left, right) => right.score - left.score || left.skill.id.localeCompare(right.skill.id))
     .slice(0, Math.min(3, Math.max(1, max)));
+}
+
+function isLikelyTaskContinuation(value: string): boolean {
+  const text = value.trim();
+  if (!text || text.length > 160) return false;
+  if (/^(?:继续|默认|确认|执行|开始|可以|好的?|行|就这样|按这个|同意|批准|yes|ok|okay|continue|go ahead)[！!。.\s]*$/i.test(text)) {
+    return true;
+  }
+  return /(?:\b(?:1k|2k|4k|8k|fps)\b|\d+\s*(?::|比)\s*\d+|\d+\s*秒|上一步|刚才|上述|按前面|用这个|就这个|(?:看看|检查|查询).{0,8}(?:状态|进度|结果)|(?:现在)?(?:状态|进度|结果).{0,8}(?:怎么样|如何|呢|了|[？?])|(?:生成|任务|图片|视频|结果).{0,10}(?:完成|生成好|好了|成功|状态|进度|出来).{0,4}(?:吗|没有|没|了|[？?])?)/i.test(text);
 }
 
 export function buildSkillContext(context: SkillRoutingContext): {
@@ -247,9 +267,9 @@ export function resolveAgentToolPolicy(input: {
   if (input.skillContext.selections.length === 0) {
     return {
       mode: 'minimal',
-      toolKinds: ['canvas'],
+      toolKinds: [],
       deferredToolKinds: [],
-      reason: '未命中专用技能，仅保留需要逐次审批的最小画布命令入口。',
+      reason: '未命中画布任务信号，本轮作为普通对话或澄清轮次，不发送大型画布工具协议。',
     };
   }
 

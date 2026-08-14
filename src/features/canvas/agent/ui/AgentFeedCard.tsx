@@ -26,6 +26,9 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
+import remarkGfm from 'remark-gfm';
 import type { AgentBudgetDecision } from '../application/agentBudget';
 import {
   diagnosticBundleFileName,
@@ -35,6 +38,7 @@ import {
 } from '../application/agentDiagnostics';
 import { createAgentPlanStep, reviseAgentPlan, updateAgentPlanStep, type AgentPlanDraft } from '../application/agentPlan';
 import type { AgentFeedItem } from './agentPanelStore';
+import { generationProgressFromAgentOutput } from './agentFeedProjection';
 
 type ApprovalItem = Extract<AgentFeedItem, { kind: 'approval' }>;
 type PlanItem = Extract<AgentFeedItem, { kind: 'plan' }>;
@@ -44,6 +48,7 @@ interface Props {
   onApproval: (item: ApprovalItem, approve: boolean) => void;
   onLocate: (nodeIds: string[]) => void;
   onRestoreDraft: (message: string) => void;
+  onDiagnose: (message: string) => void;
   onPlanChange: (item: PlanItem, plan: AgentPlanDraft) => void;
   onPlanConfirm: (item: PlanItem) => void;
   onPlanCancel: (item: PlanItem) => void;
@@ -60,6 +65,33 @@ function stringify(value: unknown): string {
   }
 }
 
+export function normalizeCompactAgentMarkdown(value: string): string {
+  const segments = value.split(/(```[\s\S]*?```|`[^`\n]+`|https?:\/\/\S+)/g);
+  return segments.map((segment, index) => {
+    if (index % 2 === 1) return segment;
+    return segment
+      .replace(/\*\*([^*\n]+)\*\*(?=\S)/g, '**$1**\n')
+      .replace(/([^\n])\s+-\s+(?=[^\n])/g, '$1\n- ')
+      .replace(/([^\n])---(?=\S)/g, '$1\n\n---\n')
+      .replace(/：(?=(?:-|\d+\.|[A-Za-z][^\n]{0,20}:))/g, '：\n')
+      .replace(/\s+-\s+(?=(?:节点|文件|比例|分辨率|状态|生成|资产|原始|解决|结果|Node|File|Ratio|Resolution|Status))/gi, '\n- ');
+  }).join('');
+}
+
+function toolFailureText(item: Extract<AgentFeedItem, { kind: 'tool' }>): string | null {
+  if (item.status !== 'failed' && item.status !== 'warning' && item.status !== 'unknown') return null;
+  if (item.error?.trim()) return item.error.trim();
+  if (!item.output || typeof item.output !== 'object' || Array.isArray(item.output)) return null;
+  const record = item.output as Record<string, unknown>;
+  const error = record.error;
+  if (typeof error === 'string' && error.trim()) return error.trim();
+  if (error && typeof error === 'object' && !Array.isArray(error)) {
+    const message = (error as Record<string, unknown>).message;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+  }
+  return null;
+}
+
 function ApprovalCard({
   item,
   onApproval,
@@ -72,11 +104,29 @@ function ApprovalCard({
   onBudgetLimitChange: Props['onBudgetLimitChange'];
 }) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  const [cardExpanded, setCardExpanded] = useState(false);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState('');
   const expired = item.expiresAt <= Date.now() && item.status === 'pending';
   const status = expired ? 'expired' : item.status;
   const isDeciding = status === 'approving' || status === 'rejecting';
+  const isTerminal = ['approved', 'rejected', 'failed', 'expired'].includes(status);
+
+  if (isTerminal && !cardExpanded) {
+    return (
+      <button
+        type="button"
+        className="agent-feed-enter flex min-h-11 w-full items-center gap-2 rounded-[6px] border border-border-dark/60 bg-bg-dark/[0.45] px-3 py-2 text-left transition-[background-color,border-color] duration-150 hover:border-amber-500/30 hover:bg-amber-500/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+        onClick={() => setCardExpanded(true)}
+        aria-expanded="false"
+      >
+        <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-text-dark">{item.toolName}</span>
+        <span className="shrink-0 text-[11px] text-text-muted">{t(`canvasAgent.approvalStatus.${status}`)}</span>
+        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden="true" />
+      </button>
+    );
+  }
 
   return (
     <article
@@ -116,21 +166,33 @@ function ApprovalCard({
             ) : null}
           </div>
         </div>
+        {isTerminal ? (
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[4px] text-text-muted transition-colors duration-150 hover:bg-text-dark/[0.05] hover:text-text-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            onClick={() => setCardExpanded(false)}
+            aria-label={t('canvasAgent.collapseApproval')}
+            title={t('canvasAgent.collapseApproval')}
+            aria-expanded="true"
+          >
+            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        ) : null}
       </div>
 
       <button
         type="button"
         className="mt-2 inline-flex min-h-11 items-center gap-1 text-xs text-text-muted transition-colors duration-150 hover:text-text-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
-        onClick={() => setExpanded((value) => !value)}
-        aria-expanded={expanded}
+        onClick={() => setDetailsExpanded((value) => !value)}
+        aria-expanded={detailsExpanded}
       >
-        {expanded
+        {detailsExpanded
           ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
           : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
         {t('canvasAgent.viewDetails')}
       </button>
 
-      {expanded ? (
+      {detailsExpanded ? (
         <pre className="agent-disclosure-enter mt-2 max-h-48 overflow-auto rounded-[4px] bg-black/[0.08] p-2 text-[11px] leading-5 text-text-muted dark:bg-black/20">
           {stringify(item.arguments)}
         </pre>
@@ -366,7 +428,7 @@ function PlanCard({
   );
 }
 
-export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onPlanChange, onPlanConfirm, onPlanCancel, budgetDecision, onBudgetLimitChange, onRollback }: Props) {
+export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDiagnose, onPlanChange, onPlanConfirm, onPlanCancel, budgetDecision, onBudgetLimitChange, onRollback }: Props) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [diagnosticActionStatus, setDiagnosticActionStatus] = useState<'bundle-copied' | 'issue-copied' | 'downloaded' | 'failed' | null>(null);
@@ -410,13 +472,19 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onPl
   if (item.kind === 'message') {
     return (
       <div
-        className={`agent-feed-enter max-w-[94%] whitespace-pre-wrap rounded-[6px] px-3 py-2 text-sm leading-6 ${
+        className={`agent-feed-enter max-w-[96%] whitespace-pre-wrap rounded-[6px] px-2.5 py-2 text-[13px] leading-[1.65] ${
           item.role === 'user'
             ? 'ml-auto bg-accent/[0.12] text-text-dark'
             : 'border border-border-dark/60 bg-bg-dark/[0.55] text-text-dark'
         }`}
       >
-        {item.text}
+        {item.role === 'assistant' ? (
+          <div className="min-w-0 break-words [&_a]:text-accent [&_a]:underline [&_blockquote]:my-1.5 [&_blockquote]:border-l-2 [&_blockquote]:border-border-dark [&_blockquote]:pl-2.5 [&_code]:rounded [&_code]:bg-text-dark/[0.07] [&_code]:px-1 [&_code]:py-0.5 [&_h1]:mb-1.5 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mb-1 [&_h3]:text-[13px] [&_h3]:font-semibold [&_li]:my-0 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-0 [&_p+_p]:mt-2 [&_pre]:my-1.5 [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:rounded-[5px] [&_pre]:bg-text-dark/[0.07] [&_pre]:p-2 [&_strong]:font-semibold [&_table]:my-1.5 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border-dark [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border-dark [&_th]:px-2 [&_th]:py-1 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5">
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} skipHtml>
+              {normalizeCompactAgentMarkdown(item.text)}
+            </ReactMarkdown>
+          </div>
+        ) : item.text}
         {item.attachments?.length ? (
           <div className="mt-2 flex flex-wrap gap-1.5" aria-label={t('canvasAgent.attachments')}>
             {item.attachments.map((attachment) => (
@@ -475,14 +543,26 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onPl
           <span className="min-w-0 flex-1">{item.text}</span>
         </div>
         {item.status === 'error' && item.retryMessage ? (
-          <button
-            type="button"
-            className="mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-[4px] border border-current/25 px-2 transition-[background-color,transform] duration-150 hover:bg-red-500/[0.08] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 sm:min-h-9"
-            onClick={() => onRestoreDraft(item.retryMessage!)}
-          >
-            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-            {t('canvasAgent.restoreDraft')}
-          </button>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {item.diagnosticMessage ? (
+              <button
+                type="button"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-[4px] bg-red-600 px-2.5 font-medium text-white transition-[background-color,transform] duration-150 hover:bg-red-500 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 sm:min-h-9"
+                onClick={() => onDiagnose(item.diagnosticMessage!)}
+              >
+                <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+                {t('canvasAgent.diagnoseAndContinue')}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-[4px] border border-current/25 px-2 transition-[background-color,transform] duration-150 hover:bg-red-500/[0.08] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 sm:min-h-9"
+              onClick={() => onRestoreDraft(item.retryMessage!)}
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+              {t('canvasAgent.restoreDraft')}
+            </button>
+          </div>
         ) : null}
       </div>
     );
@@ -538,6 +618,8 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onPl
   }
 
   if (item.kind === 'tool') {
+    const failureText = toolFailureText(item);
+    const generationProgress = generationProgressFromAgentOutput(item.output);
     const diagnosticBundle = item.toolName === 'diagnostics' && item.status === 'succeeded'
       ? extractSafeDiagnosticBundlePreview(item.output)
       : null;
@@ -557,17 +639,26 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onPl
             ? t('canvasAgent.diagnosticExportFailed')
             : null;
     return (
-      <article className="agent-feed-enter rounded-[6px] border border-border-dark/60 bg-bg-dark/[0.45] text-xs">
+      <article className="agent-feed-enter rounded-[5px] border border-border-dark/55 bg-sky-500/[0.035] text-xs">
         <button
           type="button"
-          className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left transition-colors duration-150 hover:bg-text-dark/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+          className="flex min-h-9 w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors duration-150 hover:bg-text-dark/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
           onClick={() => setExpanded((value) => !value)}
           aria-expanded={expanded}
         >
           {item.status === 'executing'
             ? <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-accent" aria-hidden="true" />
-            : <Wrench className={`h-3.5 w-3.5 shrink-0 ${item.status === 'unknown' ? 'text-amber-600 dark:text-amber-300' : 'text-accent'}`} aria-hidden="true" />}
-          <span className="min-w-0 truncate font-medium text-text-dark">{item.toolName}</span>
+            : <Wrench className={`h-3.5 w-3.5 shrink-0 ${item.status === 'unknown' || item.status === 'warning' ? 'text-amber-600 dark:text-amber-300' : 'text-accent'}`} aria-hidden="true" />}
+          <span className="min-w-0 truncate font-medium text-text-dark">
+            {generationProgress
+              ? generationProgress.phase === 'accepted'
+                ? t('canvasAgent.generationSubmitted')
+                : t('canvasAgent.generationPollingShort', {
+                    attempt: generationProgress.attempt,
+                    max: generationProgress.maxAttempts,
+                  })
+              : item.toolName}
+          </span>
           <span className="ml-auto shrink-0 text-[11px] text-text-muted">
             {t(`canvasAgent.toolStatus.${item.status}`)}
           </span>
@@ -580,7 +671,38 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onPl
             {stringify(item.output ?? item.input ?? item.error)}
           </pre>
         ) : null}
-        {item.nodeIds?.length ? (
+        {failureText ? (
+          <div className={`mx-2 mb-2 flex items-start gap-1.5 rounded-[5px] border px-2.5 py-2 text-[11px] leading-5 ${item.status === 'unknown' || item.status === 'warning'
+            ? 'border-amber-500/30 bg-amber-500/[0.07] text-amber-800 dark:text-amber-200'
+            : 'border-red-500/30 bg-red-500/[0.07] text-red-700 dark:text-red-200'}`} role={item.status === 'failed' ? 'alert' : 'status'}>
+            <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 break-words">{failureText}</span>
+          </div>
+        ) : null}
+        {item.generationInputNodeIds?.length || item.generationResultNodeIds?.length ? (
+          <div className="m-2 flex flex-wrap gap-1.5">
+            {item.generationInputNodeIds?.length ? (
+              <button
+                type="button"
+                className="inline-flex min-h-11 items-center gap-1 rounded-[4px] px-2 text-text-dark transition-[background-color,transform] duration-150 hover:bg-text-dark/[0.05] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
+                onClick={() => onLocate(item.generationInputNodeIds!)}
+              >
+                <Crosshair className="h-3.5 w-3.5" aria-hidden="true" />
+                {t('canvasAgent.locateGenerationInput')}
+              </button>
+            ) : null}
+            {item.generationResultNodeIds?.length ? (
+              <button
+                type="button"
+                className="inline-flex min-h-11 items-center gap-1 rounded-[4px] bg-emerald-500/[0.08] px-2 text-emerald-700 transition-[background-color,transform] duration-150 hover:bg-emerald-500/[0.14] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 dark:text-emerald-200 sm:min-h-9"
+                onClick={() => onLocate(item.generationResultNodeIds!)}
+              >
+                <Crosshair className="h-3.5 w-3.5" aria-hidden="true" />
+                {t('canvasAgent.locateGenerationResult')}
+              </button>
+            ) : null}
+          </div>
+        ) : item.nodeIds?.length ? (
           <button
             type="button"
             className="m-2 inline-flex min-h-11 items-center gap-1 rounded-[4px] px-2 text-text-dark transition-[background-color,transform] duration-150 hover:bg-text-dark/[0.05] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"

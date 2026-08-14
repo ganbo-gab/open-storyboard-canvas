@@ -48,6 +48,8 @@ type GenerationData = {
   audioUrl?: unknown;
   rawContent?: unknown;
   content?: unknown;
+  batchId?: unknown;
+  generationStartedAt?: unknown;
 };
 
 function readString(value: unknown): string | null {
@@ -129,6 +131,30 @@ function findGenerationResultNodes(
     }
   });
   return nodes.filter((node) => resultIds.has(node.id) && isGenerationResultNode(node));
+}
+
+/**
+ * A reusable generation input can accumulate many historical result nodes.
+ * Status follow-through must describe the newest submitted cohort, otherwise
+ * one stale historical result can keep a newly completed Agent turn "running"
+ * until its outer timeout expires.
+ */
+function selectLatestGenerationResultCohort(resultNodes: CanvasNode[]): CanvasNode[] {
+  const latest = resultNodes[resultNodes.length - 1];
+  if (!latest) return [];
+  const latestData = latest.data as GenerationData;
+  const latestBatchId = readString(latestData.batchId);
+  if (latestBatchId) {
+    return resultNodes.filter((node) => readString((node.data as GenerationData).batchId) === latestBatchId);
+  }
+  const latestStartedAt = typeof latestData.generationStartedAt === 'number'
+    && Number.isFinite(latestData.generationStartedAt)
+    ? latestData.generationStartedAt
+    : null;
+  if (latestStartedAt !== null) {
+    return resultNodes.filter((node) => (node.data as GenerationData).generationStartedAt === latestStartedAt);
+  }
+  return [latest];
 }
 
 function aggregateSourceStatus(
@@ -233,7 +259,7 @@ export class CanvasGenerationFacade {
         return null;
       }
       if (resultNodes.length > 0) {
-        return aggregateSourceStatus(node, resultNodes);
+        return aggregateSourceStatus(node, selectLatestGenerationResultCohort(resultNodes));
       }
     }
     return projectNodeStatus(node);

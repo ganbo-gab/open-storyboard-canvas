@@ -115,6 +115,9 @@ export interface GroupNodeData extends NodeDisplayData {
 
 export const TAG_COLORS = ['neutral', 'amber', 'cyan', 'violet', 'rose'] as const;
 export type TagColor = (typeof TAG_COLORS)[number];
+export const TAG_GROUP_SHAPES = ['rectangle', 'rounded', 'frame'] as const;
+export type TagGroupShape = (typeof TAG_GROUP_SHAPES)[number];
+export type TagGroupMemberKind = 'image' | 'video' | 'text';
 
 export interface TagNodeData extends NodeDisplayData {
   label: string;
@@ -124,10 +127,53 @@ export interface TagNodeData extends NodeDisplayData {
 }
 
 export interface TagGroupNodeData extends NodeDisplayData {
+  schemaVersion: 2;
   label: string;
   enabled: boolean;
-  memberTagIds: string[];
+  color: TagColor;
+  shape: TagGroupShape;
+  memberNodeIds: string[];
+  /** Legacy ids that could not be resolved deterministically at load time. */
+  unresolvedMemberIds?: string[];
+  /** Compatibility link for legacy tag-mediated groups. */
+  legacyMemberTagIds?: string[];
+  /** Read-only compatibility field; V2 writers must use memberNodeIds. */
+  memberTagIds?: string[];
   [key: string]: unknown;
+}
+
+const TAG_GROUP_IMAGE_MEMBER_TYPES = new Set<CanvasNodeType>([
+  CANVAS_NODE_TYPES.upload,
+  CANVAS_NODE_TYPES.imageEdit,
+  CANVAS_NODE_TYPES.exportImage,
+  CANVAS_NODE_TYPES.storyboardSplit,
+  CANVAS_NODE_TYPES.storyboardGen,
+  CANVAS_NODE_TYPES.panorama,
+]);
+
+const TAG_GROUP_VIDEO_MEMBER_TYPES = new Set<CanvasNodeType>([
+  CANVAS_NODE_TYPES.video,
+]);
+
+const TAG_GROUP_TEXT_MEMBER_TYPES = new Set<CanvasNodeType>([
+  CANVAS_NODE_TYPES.aiText,
+  CANVAS_NODE_TYPES.textAnnotation,
+  CANVAS_NODE_TYPES.jsonCard,
+]);
+
+export function getTagGroupMemberKind(type: CanvasNodeType): TagGroupMemberKind | null {
+  if (TAG_GROUP_IMAGE_MEMBER_TYPES.has(type)) return 'image';
+  if (TAG_GROUP_VIDEO_MEMBER_TYPES.has(type)) return 'video';
+  if (TAG_GROUP_TEXT_MEMBER_TYPES.has(type)) return 'text';
+  return null;
+}
+
+export function isEligibleTagGroupMember(node: CanvasNode | null | undefined): boolean {
+  return Boolean(node && getTagGroupMemberKind(node.type));
+}
+
+export function isTagGroupShape(value: unknown): value is TagGroupShape {
+  return typeof value === 'string' && (TAG_GROUP_SHAPES as readonly string[]).includes(value);
 }
 
 export interface TextAnnotationNodeData extends NodeDisplayData {

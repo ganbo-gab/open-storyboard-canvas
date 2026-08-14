@@ -99,6 +99,123 @@ describe('AgentSessionRepository', () => {
     expect(repository.getRunStateForResume('run-1').id).toBe('run-1');
   });
 
+  it('stores full state only for resumable runs and compacts terminal payloads', () => {
+    const storage = new MemoryStorage();
+    const repository = new AgentSessionRepository(storage, () => 10, () => 'session-1');
+    repository.createSession({ projectId: 'project-1', modelRef: 'custom:p:m' });
+    const largeState = JSON.stringify({
+      trace: Array.from({ length: 2_000 }, (_, index) => `Agent event ${index}: canvas state checkpoint.`),
+    });
+    repository.saveRunState({
+      id: 'run-complete',
+      sessionId: 'session-1',
+      projectId: 'project-1',
+      status: 'completed',
+      serializedState: largeState,
+    });
+    repository.saveRunState({
+      id: 'run-pending',
+      sessionId: 'session-1',
+      projectId: 'project-1',
+      status: 'awaiting_approval',
+      serializedState: largeState,
+    });
+
+    expect(repository.getRunState('run-complete')?.serializedState).toBe('{}');
+    expect(repository.getRunState('run-pending')?.serializedState).toBe(largeState);
+  });
+
+  it('compacts legacy terminal RunState during repository hydration', () => {
+    const storage = new MemoryStorage();
+    storage.setItem('storyboard-copilot:canvas-agent:run-states:v1', JSON.stringify({
+      version: 1,
+      runStates: [{
+        id: 'run-old-complete',
+        sessionId: 'session-1',
+        projectId: 'project-1',
+        status: 'completed',
+        runtimeVersion: 1,
+        agentDefinitionVersion: 1,
+        commandSchemaVersion: 1,
+        serializedState: JSON.stringify({
+          trace: Array.from({ length: 2_000 }, (_, index) => `Legacy event ${index}: completed run checkpoint.`),
+        }),
+        createdAt: 1,
+        updatedAt: 2,
+      }],
+    }));
+
+    const repository = new AgentSessionRepository(storage);
+    expect(repository.getRunState('run-old-complete')?.serializedState).toBe('{}');
+    expect(storage.getItem('storyboard-copilot:canvas-agent:run-states:v1')?.length)
+      .toBeLessThan(1_000);
+  });
+
+  it('cancels stale resumable RunState during repository hydration', () => {
+    const storage = new MemoryStorage();
+    storage.setItem('storyboard-copilot:canvas-agent:run-states:v1', JSON.stringify({
+      version: 1,
+      runStates: [{
+        id: 'run-stale',
+        sessionId: 'session-1',
+        projectId: 'project-1',
+        status: 'awaiting_approval',
+        runtimeVersion: 1,
+        agentDefinitionVersion: 1,
+        commandSchemaVersion: 1,
+        serializedState: JSON.stringify({
+          events: Array.from({ length: 1_000 }, (_, index) => `Pending event ${index}`),
+        }),
+        createdAt: 1,
+        updatedAt: 2,
+      }],
+    }));
+
+    const repository = new AgentSessionRepository(storage, () => 30 * 60_000 + 3);
+    expect(repository.getRunState('run-stale')).toMatchObject({
+      status: 'cancelled',
+      serializedState: '{}',
+    });
+    expect(storage.getItem('storyboard-copilot:canvas-agent:run-states:v1')?.length)
+      .toBeLessThan(1_000);
+  });
+
+  it('cancels a resumable RunState lazily after a running repository ages it out', () => {
+    let now = 10;
+    const storage = new MemoryStorage();
+    const repository = new AgentSessionRepository(storage, () => now, () => 'session-1');
+    repository.createSession({ projectId: 'project-1', modelRef: 'custom:p:m' });
+    repository.saveRunState({
+      id: 'run-live',
+      sessionId: 'session-1',
+      projectId: 'project-1',
+      status: 'awaiting_approval',
+      serializedState: JSON.stringify({
+        events: Array.from({ length: 1_000 }, (_, index) => `Pending event ${index}`),
+      }),
+    });
+    now = 30 * 60_000 + 11;
+
+    expect(repository.getRunState('run-live')).toMatchObject({
+      status: 'cancelled',
+      serializedState: '{}',
+    });
+  });
+
+  it('keeps the current Agent usable in memory when persistent storage is full', async () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: () => { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    const repository = new AgentSessionRepository(storage, () => 10, () => 'session-1');
+    repository.createSession({ projectId: 'project-1', modelRef: 'custom:p:m' });
+    await repository.createSdkSession('session-1').addItems([{ role: 'user', content: 'hello' }]);
+
+    expect(repository.getSession('session-1')?.items).toEqual([{ role: 'user', content: 'hello' }]);
+  });
+
   it('rejects incompatible RunState versions instead of attempting a blind resume', () => {
     const storage = new MemoryStorage();
     storage.setItem('storyboard-copilot:canvas-agent:sessions:v1', JSON.stringify({

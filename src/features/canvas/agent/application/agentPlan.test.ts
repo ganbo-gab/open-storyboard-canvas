@@ -31,7 +31,8 @@ describe('agent editable plans', () => {
     expect(edited.revision).toBe(2);
     expect(compileAgentPlanMessage(edited)).toContain('1. [read] 只检查节点 A');
     expect(compileAgentPlanMessage(edited)).not.toContain('生成图片');
-    expect(compileAgentPlanMessage(edited)).toContain('still requires its normal SDK approval');
+    expect(compileAgentPlanMessage(edited)).toContain('current Manual/Auto execution policy');
+    expect(compileAgentPlanMessage(edited)).toContain('node-deletion approval');
   });
 
   it('reclassifies edits unless the user explicitly changes the effect', () => {

@@ -417,12 +417,12 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
           </button>
         </div>
       ) : uploadError ? (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-[var(--node-radius)] bg-[rgba(127,29,29,0.16)] px-4 text-red-200">
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-[var(--node-radius)] bg-red-500/[0.10] px-4 text-red-800 dark:bg-[rgba(127,29,29,0.16)] dark:text-red-200">
           <AlertTriangle className="h-7 w-7 opacity-90" />
           <span className="text-center text-[12px] font-medium leading-5">
             {t('node.upload.uploadFailed')}
           </span>
-          <span className="max-h-[76px] overflow-y-auto break-words text-center text-[11px] leading-5 text-red-200/90">
+          <span className="max-h-[76px] overflow-y-auto break-words text-center text-[11px] leading-5 text-red-800/90 dark:text-red-200/90">
             {uploadError}
           </span>
         </div>

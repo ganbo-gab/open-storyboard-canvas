@@ -19,6 +19,67 @@ export function nodeIdsFromAgentOutput(output: unknown): string[] {
   )));
 }
 
+export function generationLocateTargetsFromAgentOutput(output: unknown): {
+  inputNodeIds: string[];
+  resultNodeIds: string[];
+} {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    return { inputNodeIds: [], resultNodeIds: [] };
+  }
+  const record = output as Record<string, unknown>;
+  const followThrough = record.followThrough
+    && typeof record.followThrough === 'object'
+    && !Array.isArray(record.followThrough)
+    ? record.followThrough as Record<string, unknown>
+    : undefined;
+  const inputNodeIds = Array.isArray(followThrough?.inputNodeIds)
+    ? followThrough.inputNodeIds
+    : [];
+  const resultNodeIds = Array.isArray(followThrough?.resultNodeIds)
+    ? followThrough.resultNodeIds
+    : [];
+  return {
+    inputNodeIds: Array.from(new Set(inputNodeIds.filter(
+      (nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.trim().length > 0,
+    ))),
+    resultNodeIds: Array.from(new Set(resultNodeIds.filter(
+      (nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.trim().length > 0,
+    ))),
+  };
+}
+
+export interface AgentGenerationProgress {
+  phase: 'accepted' | 'polling';
+  attempt: number;
+  maxAttempts: number;
+  statuses: string[];
+}
+
+export function generationProgressFromAgentOutput(output: unknown): AgentGenerationProgress | null {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return null;
+  const record = output as Record<string, unknown>;
+  const followThrough = record.followThrough
+    && typeof record.followThrough === 'object'
+    && !Array.isArray(record.followThrough)
+    ? record.followThrough as Record<string, unknown>
+    : null;
+  if (!followThrough) return null;
+  if (followThrough.phase === 'accepted') {
+    return { phase: 'accepted', attempt: 0, maxAttempts: 0, statuses: [] };
+  }
+  if (followThrough.phase !== 'generation-follow-through') return null;
+  const attempt = typeof followThrough.attempt === 'number' && Number.isFinite(followThrough.attempt)
+    ? Math.max(1, Math.floor(followThrough.attempt))
+    : 1;
+  const maxAttempts = typeof followThrough.maxAttempts === 'number' && Number.isFinite(followThrough.maxAttempts)
+    ? Math.max(attempt, Math.floor(followThrough.maxAttempts))
+    : attempt;
+  const statuses = Array.isArray(followThrough.statuses)
+    ? followThrough.statuses.filter((status): status is string => typeof status === 'string')
+    : [];
+  return { phase: 'polling', attempt, maxAttempts, statuses };
+}
+
 export function executionReceiptFromAgentOutput(
   output: unknown,
 ): { receiptId?: string; rollbackToken?: string } {

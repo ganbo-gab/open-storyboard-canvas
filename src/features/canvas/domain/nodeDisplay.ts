@@ -17,7 +17,7 @@ export const DEFAULT_NODE_DISPLAY_NAME: Record<CanvasNodeType, string> = {
   [CANVAS_NODE_TYPES.textAnnotation]: '文本节点',
   [CANVAS_NODE_TYPES.jsonCard]: 'JSON 卡片',
   [CANVAS_NODE_TYPES.group]: '分组',
-  [CANVAS_NODE_TYPES.tag]: '标签',
+  [CANVAS_NODE_TYPES.tag]: '标签组',
   [CANVAS_NODE_TYPES.tagGroup]: '标签组',
   [CANVAS_NODE_TYPES.storyboardSplit]: '切割结果',
   [CANVAS_NODE_TYPES.storyboardGen]: '分镜生成',

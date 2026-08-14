@@ -33,13 +33,41 @@ describe('agent skill router', () => {
       skillContext: unmatched,
       supportsVision: true,
       supportsToolSearch: false,
-    })).toMatchObject({ mode: 'minimal', toolKinds: ['canvas'] });
+    })).toMatchObject({ mode: 'minimal', toolKinds: [] });
 
     const selected = buildSkillContext({ text: '帮我诊断 429 错误' });
     const allDetailTokens = BUILTIN_AGENT_SKILLS.reduce((sum, skill) => sum + skill.estimatedTokens, 0);
     expect(selected.selections).toHaveLength(1);
     expect(selected.estimatedTokens).toBeLessThan(allDetailTokens);
     expect(selected.instructions).not.toContain('操作导演台角色');
+  });
+
+  it('keeps the prior task tools for short parameter and confirmation continuations only', () => {
+    expect(buildSkillContext({
+      text: '16比9，2k，神里绫华',
+      recentUserText: '帮我生成图片吧',
+    }).selections.map((item) => item.skill.id)).toContain('image-prompt-director');
+    expect(buildSkillContext({
+      text: '继续',
+      recentUserText: '帮我生成图片吧\n16比9，2k，神里绫华\n默认',
+    }).selections.map((item) => item.skill.id)).toContain('image-prompt-director');
+    for (const statusQuestion of [
+      '你看看现在生成完成了吗',
+      '生成好了吗',
+      '看看状态',
+      '现在进度怎么样',
+      '结果出来了吗',
+      '图片生成了吗',
+    ]) {
+      expect(buildSkillContext({
+        text: statusQuestion,
+        recentUserText: '帮我生成图片吧，16比9，2k，神里绫华',
+      }).selections.map((item) => item.skill.id), statusQuestion).toContain('image-prompt-director');
+    }
+    expect(buildSkillContext({
+      text: '你好',
+      recentUserText: '帮我生成图片吧',
+    }).selections).toEqual([]);
   });
 
   it('derives equivalent local and tool-search permissions from selected skills', () => {

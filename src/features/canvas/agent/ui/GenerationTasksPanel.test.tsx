@@ -9,11 +9,10 @@ vi.mock('react-i18next', () => ({
 import { GenerationTasksPanel } from './GenerationTasksPanel';
 
 describe('GenerationTasksPanel', () => {
-  it('keeps Tasks and Logs inside the existing Agent task surface', () => {
+  it('keeps generation tasks contextual and leaves diagnostics outside the Agent', () => {
     const markup = renderToStaticMarkup(React.createElement(GenerationTasksPanel, { nodes: [] }));
-    expect(markup).toContain('generationJob.view.tasks');
-    expect(markup).toContain('generationJob.view.logs');
-    expect(markup).toContain('role="tablist"');
-    expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain('generationJob.taskPanelTitle');
+    expect(markup).not.toContain('generationJob.view.logs');
+    expect(markup).not.toContain('<select');
   });
 });

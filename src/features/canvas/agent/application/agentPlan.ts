@@ -104,7 +104,7 @@ export function compileAgentPlanMessage(plan: AgentPlanDraft): string {
   return [
     'The user reviewed and approved this execution plan. Follow the edited steps in order:',
     steps,
-    'Each tool call still requires its normal SDK approval. Do not treat plan approval as tool approval.',
+    'Each tool call follows the current Manual/Auto execution policy. Do not treat plan approval as a node-deletion approval.',
   ].join('\n');
 }
 

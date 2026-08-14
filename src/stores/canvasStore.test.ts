@@ -131,6 +131,33 @@ describe('canvasStore.addNodesBatch', () => {
   });
 });
 
+describe('canvasStore related-node placement', () => {
+  beforeEach(resetCanvasStore);
+
+  it('keeps a generated result near its input while avoiding occupied lanes', () => {
+    const source = {
+      id: 'generation-input',
+      type: CANVAS_NODE_TYPES.imageEdit,
+      position: { x: 0, y: 0 },
+      measured: { width: 460, height: 520 },
+      data: {},
+    } as CanvasNode;
+    useCanvasStore.setState({
+      nodes: [
+        source,
+        { ...source, id: 'right-top', position: { x: 500, y: 0 }, measured: { width: 420, height: 300 } },
+        { ...source, id: 'right-bottom', position: { x: 500, y: 330 }, measured: { width: 420, height: 300 } },
+        { ...source, id: 'below', position: { x: 0, y: 560 }, measured: { width: 360, height: 300 } },
+      ],
+    });
+
+    const position = useCanvasStore.getState().findNodePosition('generation-input', 384, 288);
+
+    expect(Math.hypot(position.x - 488, position.y)).toBeLessThan(1_500);
+    expect(position.y).toBeLessThan(1_800);
+  });
+});
+
 describe('canvasStore revision contract', () => {
   beforeEach(resetCanvasStore);
 

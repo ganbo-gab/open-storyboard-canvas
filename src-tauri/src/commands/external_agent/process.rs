@@ -38,7 +38,7 @@ impl LaunchTarget {
         command
     }
 
-    fn from_direct(path: PathBuf, runtime: ExternalAgentRuntime) -> Self {
+    pub(crate) fn from_direct(path: PathBuf, runtime: ExternalAgentRuntime) -> Self {
         Self {
             program: path,
             prefix_args: Vec::new(),

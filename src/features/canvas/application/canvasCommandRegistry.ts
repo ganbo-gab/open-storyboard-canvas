@@ -16,6 +16,7 @@ import {
   type CanvasTransactionResult,
 } from '../domain/canvasCommands';
 import {
+  CANVAS_AGENT_DIRECT_CREATE_NODE_TYPES,
   canCreateCanvasNodeDirectly,
   canvasNodeCapabilityManifest,
   type CanvasNodeCapabilityDeclaration,
@@ -23,6 +24,7 @@ import {
 import {
   CANVAS_NODE_TYPES,
   TAG_COLORS,
+  TAG_GROUP_SHAPES,
   isTagNode,
   type CanvasNodeType,
 } from '../domain/canvasNodes';
@@ -75,11 +77,54 @@ function objectSchema(
   return { type: 'object', additionalProperties: false, required, properties };
 }
 
-const stringField = (description: string) => ({ type: 'string' as const, description });
+const stringField = (description: string, values?: readonly string[]) => ({
+  type: 'string' as const,
+  description,
+  ...(values ? { enum: values } : {}),
+});
 const numberField = (description: string) => ({ type: 'number' as const, description });
 const booleanField = (description: string) => ({ type: 'boolean' as const, description });
-const arrayField = (description: string) => ({ type: 'array' as const, description });
-const objectField = (description: string) => ({ type: 'object' as const, description });
+const arrayField = (description: string, items?: CanvasJsonSchema['properties'][string]) => ({
+  type: 'array' as const,
+  description,
+  ...(items ? { items } : {}),
+});
+const objectField = (
+  description: string,
+  properties?: Record<string, CanvasJsonSchema['properties'][string]>,
+  required?: string[],
+  additionalProperties?: boolean,
+) => ({
+  type: 'object' as const,
+  description,
+  ...(properties ? { properties } : {}),
+  ...(required ? { required } : {}),
+  ...(additionalProperties !== undefined ? { additionalProperties } : {}),
+});
+
+const finitePositionField = objectField('Finite canvas position hint; the application may move it to nearby empty space.', {
+  x: numberField('Finite canvas X coordinate.'),
+  y: numberField('Finite canvas Y coordinate.'),
+}, ['x', 'y'], false);
+
+const createConfigurationField = objectField('Allowed create-time configuration. Use aspectRatio (not ratio) and resolution (not size).', {
+  displayName: stringField('Optional visible node title.'),
+  prompt: stringField('Generation prompt.'),
+  content: stringField('Text annotation content.'),
+  modelId: stringField('Exact configured catalog model id.'),
+  providerId: stringField('Optional configured text provider id.'),
+  aspectRatio: stringField('Requested ratio such as 16:9.'),
+  resolution: stringField('Requested resolution such as 2K.'),
+  duration: stringField('Requested video duration.'),
+  extraParams: objectField('Bounded model-specific parameters.', undefined, undefined, true),
+  openDirectorStudio: booleanField('Open Director Studio after creation.'),
+  directorStudioMode: stringField('Director Studio mode.', ['flat', 'panorama']),
+  enabled: booleanField('Whether a tag or tag group is enabled.'),
+  tagColor: stringField('Legacy tag color.', TAG_COLORS),
+  memberNodeIds: arrayField('Direct tag-group member node ids.', stringField('Canvas node id.')),
+  tagGroupColor: stringField('Tag-group color.', TAG_COLORS),
+  tagGroupShape: stringField('Tag-group shape.', TAG_GROUP_SHAPES),
+}, [], false);
 
 const EFFECTS: Record<CanvasCommandType, CanvasCommandEffect> = {
   'canvas.query': 'read',
@@ -100,6 +145,7 @@ const EFFECTS: Record<CanvasCommandType, CanvasCommandEffect> = {
   'director.record': 'generation',
   'tag.setColor': 'graph',
   'tagGroup.setMembers': 'graph',
+  'tagGroup.setAppearance': 'graph',
   'edge.connect': 'graph',
   'edge.disconnect': 'graph',
   'group.create': 'graph',
@@ -116,16 +162,22 @@ const EFFECTS: Record<CanvasCommandType, CanvasCommandEffect> = {
 
 const INPUT_SCHEMAS: Record<CanvasCommandType, CanvasJsonSchema> = {
   'canvas.query': objectSchema(['scope'], {
-    scope: stringField('Bounded projection to return.'),
+    scope: stringField('Bounded projection to return.', ['graph', 'nodes', 'edges', 'selection']),
     nodeIds: arrayField('Optional node id filter.'),
     limit: numberField('Maximum number of records.'),
   }),
   'node.create': objectSchema(['nodeType', 'position'], {
-    nodeType: stringField('Registered canvas node type.'),
-    position: objectField('Finite canvas position.'),
+    nodeType: stringField(
+      'Exact registered directly creatable canvas node type. For image generation use imageNode.',
+      CANVAS_AGENT_DIRECT_CREATE_NODE_TYPES,
+    ),
+    position: finitePositionField,
     nodeId: stringField('Optional caller-provided stable node id.'),
-    dimensions: objectField('Optional finite positive initial dimensions.'),
-    configuration: objectField('Allowed create-time node configuration.'),
+    dimensions: objectField('Optional finite positive initial dimensions.', {
+      width: numberField('Positive width.'),
+      height: numberField('Positive height.'),
+    }, ['width', 'height'], false),
+    configuration: createConfigurationField,
   }),
   'node.delete': objectSchema(['nodeIds'], { nodeIds: arrayField('Node ids to delete with descendants.') }),
   'node.rename': objectSchema(['nodeId', 'displayName'], {
@@ -216,9 +268,14 @@ const INPUT_SCHEMAS: Record<CanvasCommandType, CanvasJsonSchema> = {
     tagId: stringField('Tag node id.'),
     color: stringField('Registered semantic tag color.'),
   }),
-  'tagGroup.setMembers': objectSchema(['groupId', 'memberTagIds'], {
+  'tagGroup.setMembers': objectSchema(['groupId', 'memberNodeIds'], {
     groupId: stringField('Tag-group node id.'),
-    memberTagIds: arrayField('Explicit member tag node ids.'),
+    memberNodeIds: arrayField('Explicit direct image, video, and text member node ids.'),
+  }),
+  'tagGroup.setAppearance': objectSchema(['groupId'], {
+    groupId: stringField('Tag-group node id.'),
+    color: stringField('Registered semantic group color.'),
+    shape: stringField('rectangle, rounded, or frame.'),
   }),
   'edge.connect': objectSchema(['sourceNodeId', 'targetNodeId'], {
     sourceNodeId: stringField('Source node id.'),
@@ -287,6 +344,8 @@ function summarizeCommand(command: CanvasCommand): string {
       return `Update tag ${command.input.tagId} color.`;
     case 'tagGroup.setMembers':
       return `Update tag group ${command.input.groupId} membership.`;
+    case 'tagGroup.setAppearance':
+      return `Update tag group ${command.input.groupId} appearance.`;
     case 'generation.submit':
       return `Submit generation for ${command.input.nodeIds.length} node(s).`;
     case 'generation.recover':
@@ -437,9 +496,9 @@ function allowedCreateConfigurationKeys(nodeType: CanvasNodeType): Set<string> {
   switch (nodeType) {
     case CANVAS_NODE_TYPES.imageEdit:
     case CANVAS_NODE_TYPES.storyboardGen:
-      return new Set([...common, 'prompt', 'modelId', 'aspectRatio']);
+      return new Set([...common, 'prompt', 'modelId', 'aspectRatio', 'resolution', 'extraParams']);
     case CANVAS_NODE_TYPES.aiVideo:
-      return new Set([...common, 'prompt', 'modelId', 'aspectRatio']);
+      return new Set([...common, 'prompt', 'modelId', 'aspectRatio', 'resolution', 'duration', 'extraParams']);
     case CANVAS_NODE_TYPES.aiText:
       return new Set([...common, 'prompt', 'modelId', 'providerId']);
     case CANVAS_NODE_TYPES.aiAudio:
@@ -454,7 +513,7 @@ function allowedCreateConfigurationKeys(nodeType: CanvasNodeType): Set<string> {
     case CANVAS_NODE_TYPES.tag:
       return new Set([...common, 'enabled', 'tagColor']);
     case CANVAS_NODE_TYPES.tagGroup:
-      return new Set([...common, 'enabled', 'memberTagIds']);
+      return new Set([...common, 'enabled', 'memberNodeIds', 'tagGroupColor', 'tagGroupShape']);
     default:
       return new Set(common);
   }
@@ -497,6 +556,12 @@ function validateCreateConfiguration(
     validateString(value.providerId, 'configuration.providerId', errors);
   }
   if ('aspectRatio' in value) validateString(value.aspectRatio, 'configuration.aspectRatio', errors);
+  if ('resolution' in value) validateString(value.resolution, 'configuration.resolution', errors);
+  if ('duration' in value) validateString(value.duration, 'configuration.duration', errors);
+  if ('extraParams' in value) {
+    if (!isPlainRecord(value.extraParams)) errors.push('configuration.extraParams must be an object.');
+    else validateJsonConfiguration(value.extraParams, 'configuration.extraParams', errors);
+  }
   if ('openDirectorStudio' in value && typeof value.openDirectorStudio !== 'boolean') {
     errors.push('configuration.openDirectorStudio must be a boolean.');
   }
@@ -513,11 +578,17 @@ function validateCreateConfiguration(
   if ('tagColor' in value && !(TAG_COLORS as readonly unknown[]).includes(value.tagColor)) {
     errors.push(`configuration.tagColor must be one of: ${TAG_COLORS.join(', ')}.`);
   }
-  if ('memberTagIds' in value) {
-    validateStringArray(value.memberTagIds, 'configuration.memberTagIds', errors, true);
-    if (Array.isArray(value.memberTagIds) && value.memberTagIds.length > 100) {
-      errors.push('configuration.memberTagIds cannot exceed 100 items.');
+  if ('memberNodeIds' in value) {
+    validateStringArray(value.memberNodeIds, 'configuration.memberNodeIds', errors, true);
+    if (Array.isArray(value.memberNodeIds) && value.memberNodeIds.length > 100) {
+      errors.push('configuration.memberNodeIds cannot exceed 100 items.');
     }
+  }
+  if ('tagGroupColor' in value && !(TAG_COLORS as readonly unknown[]).includes(value.tagGroupColor)) {
+    errors.push(`configuration.tagGroupColor must be one of: ${TAG_COLORS.join(', ')}.`);
+  }
+  if ('tagGroupShape' in value && !(TAG_GROUP_SHAPES as readonly unknown[]).includes(value.tagGroupShape)) {
+    errors.push(`configuration.tagGroupShape must be one of: ${TAG_GROUP_SHAPES.join(', ')}.`);
   }
   if (nodeType === CANVAS_NODE_TYPES.aiVideo && 'aspectRatio' in value && !('modelId' in value)) {
     errors.push('AI video create configuration requires modelId when aspectRatio is provided.');
@@ -852,9 +923,21 @@ function validateCommandInput(
       break;
     case 'tagGroup.setMembers':
       validateString(command.input.groupId, 'groupId', errors);
-      validateStringArray(command.input.memberTagIds, 'memberTagIds', errors, true);
-      if (Array.isArray(command.input.memberTagIds) && command.input.memberTagIds.length > 100) {
-        errors.push('memberTagIds cannot exceed 100 items.');
+      validateStringArray(command.input.memberNodeIds, 'memberNodeIds', errors, true);
+      if (Array.isArray(command.input.memberNodeIds) && command.input.memberNodeIds.length > 100) {
+        errors.push('memberNodeIds cannot exceed 100 items.');
+      }
+      break;
+    case 'tagGroup.setAppearance':
+      validateString(command.input.groupId, 'groupId', errors);
+      if (command.input.color === undefined && command.input.shape === undefined) {
+        errors.push('At least one appearance field is required.');
+      }
+      if (command.input.color !== undefined && !(TAG_COLORS as readonly string[]).includes(command.input.color)) {
+        errors.push(`color must be one of: ${TAG_COLORS.join(', ')}.`);
+      }
+      if (command.input.shape !== undefined && !(TAG_GROUP_SHAPES as readonly string[]).includes(command.input.shape)) {
+        errors.push(`shape must be one of: ${TAG_GROUP_SHAPES.join(', ')}.`);
       }
       break;
     case 'edge.connect':
@@ -1252,7 +1335,10 @@ export class CanvasCommandRegistry {
         break;
       case 'tagGroup.setMembers':
         seedIds.add(command.input.groupId);
-        command.input.memberTagIds.forEach((tagId) => seedIds.add(tagId));
+        command.input.memberNodeIds.forEach((nodeId) => seedIds.add(nodeId));
+        break;
+      case 'tagGroup.setAppearance':
+        seedIds.add(command.input.groupId);
         break;
       case 'node.rename':
       case 'node.setPrompt':

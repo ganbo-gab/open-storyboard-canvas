@@ -29,11 +29,16 @@ export interface ChatCatalogEntry {
   notReadyReason?: string;
 }
 
-function resolveAgentProtocol(
+export function resolveAgentProtocol(
   provider: CustomProviderConfig,
   metadata: CustomProviderChatModelMetadata,
 ): ChatCatalogEntry['agentProtocol'] {
   if (metadata.agentProtocol) return metadata.agentProtocol;
+  const endpoint = provider.endpointPath?.trim().toLowerCase() ?? '';
+  if (/\/chat\/completions(?:$|[/?#])/.test(endpoint)) return 'openai-chat-completions';
+  if (/\/responses(?:$|[/?#])/.test(endpoint)) return 'openai-responses';
+  if (/\/messages(?:$|[/?#])/.test(endpoint)) return 'anthropic-messages';
+  if (/(?:generatecontent|streamgeneratecontent)(?:$|[/?#:])/.test(endpoint)) return 'google-gemini';
   const providerKind = typeof provider.extraParams?.providerKind === 'string'
     ? provider.extraParams.providerKind
     : '';

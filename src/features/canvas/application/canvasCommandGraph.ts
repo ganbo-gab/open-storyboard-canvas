@@ -6,6 +6,7 @@ import {
   type ImageSize,
   type CanvasNode,
   type CanvasNodeData,
+  isEligibleTagGroupMember,
   isTagGroupNode,
   isTagNode,
 } from '../domain/canvasNodes';
@@ -33,6 +34,7 @@ import {
   applyPanoramaUpdate,
   applyStoryboardUpdate,
 } from './canvasWorkflowCommands';
+import { findRelatedCanvasNodePositions } from './canvasNodePlacement';
 
 export const CANVAS_GRAPH_COMMAND_TYPES = new Set<CanvasCommand['type']>([
   'node.create',
@@ -49,11 +51,46 @@ export const CANVAS_GRAPH_COMMAND_TYPES = new Set<CanvasCommand['type']>([
   'director.update',
   'tag.setColor',
   'tagGroup.setMembers',
+  'tagGroup.setAppearance',
   'edge.connect',
   'edge.disconnect',
   'group.create',
   'group.ungroup',
 ]);
+
+function nodeCreationDimensions(command: Extract<CanvasCommand, { type: 'node.create' }>): { width: number; height: number } {
+  if (command.input.dimensions) return command.input.dimensions;
+  switch (command.input.nodeType) {
+    case CANVAS_NODE_TYPES.imageEdit: return { width: DEFAULT_NODE_WIDTH, height: 380 };
+    case CANVAS_NODE_TYPES.video: return { width: DEFAULT_NODE_WIDTH, height: 288 };
+    case CANVAS_NODE_TYPES.aiVideo: return { width: DEFAULT_NODE_WIDTH, height: 360 };
+    default: return { width: DEFAULT_NODE_WIDTH, height: 220 };
+  }
+}
+
+export function resolveAgentNodeCreationPosition(
+  command: Extract<CanvasCommand, { type: 'node.create' }>,
+  nodes: readonly CanvasNode[],
+): { x: number; y: number } {
+  const desired = command.input.position;
+  const size = nodeCreationDimensions(command);
+  const margin = 18;
+  const desiredCollides = nodes.some((node) => {
+    const style = node.style as { width?: unknown; height?: unknown } | undefined;
+    const width = node.measured?.width
+      ?? node.width
+      ?? (typeof style?.width === 'number' ? style.width : DEFAULT_NODE_WIDTH);
+    const height = node.measured?.height
+      ?? node.height
+      ?? (typeof style?.height === 'number' ? style.height : 220);
+    return desired.x < node.position.x + width + margin
+      && desired.x + size.width + margin > node.position.x
+      && desired.y < node.position.y + height + margin
+      && desired.y + size.height + margin > node.position.y;
+  });
+  if (!desiredCollides) return { ...desired };
+  return findRelatedCanvasNodePositions({ nodes, desired, size })[0] ?? { ...desired };
+}
 
 function impact(
   summary: string,
@@ -192,20 +229,30 @@ function createNodeData(command: Extract<CanvasCommand, { type: 'node.create' }>
     } else if (command.input.nodeType === CANVAS_NODE_TYPES.aiVideo) {
       data.modelConfig = {
         entryId: configuration.modelId,
-        duration: '5',
-        resolution: '720p',
+        duration: configuration.duration ?? '5',
+        resolution: configuration.resolution ?? '720p',
         aspectRatio: configuration.aspectRatio,
+        extraParams: cloneJsonValue(configuration.extraParams ?? {}),
       };
+      data.extraParams = cloneJsonValue(configuration.extraParams ?? {});
     } else if (
       command.input.nodeType === CANVAS_NODE_TYPES.imageEdit
       || command.input.nodeType === CANVAS_NODE_TYPES.storyboardGen
     ) {
+      const extraParams = {
+        ...cloneJsonValue(configuration.extraParams ?? {}),
+        ...(configuration.resolution ? { resolutionType: configuration.resolution } : {}),
+      };
       data.model = configuration.modelId;
       data.modelConfig = {
         entryId: configuration.modelId,
         ratio: configuration.aspectRatio ?? 'auto',
-        extraParams: {},
+        extraParams,
       };
+      data.extraParams = cloneJsonValue(extraParams);
+      if (configuration.resolution && (IMAGE_SIZES as readonly string[]).includes(configuration.resolution)) {
+        data.size = configuration.resolution as ImageSize;
+      }
     } else {
       data.model = configuration.modelId;
     }
@@ -249,8 +296,14 @@ function createNodeData(command: Extract<CanvasCommand, { type: 'node.create' }>
   if (configuration.tagColor !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.tag) {
     data.color = configuration.tagColor;
   }
-  if (configuration.memberTagIds !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.tagGroup) {
-    data.memberTagIds = uniqueNonEmpty(configuration.memberTagIds);
+  if (configuration.memberNodeIds !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.tagGroup) {
+    data.memberNodeIds = uniqueNonEmpty(configuration.memberNodeIds);
+  }
+  if (configuration.tagGroupColor !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.tagGroup) {
+    data.color = configuration.tagGroupColor;
+  }
+  if (configuration.tagGroupShape !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.tagGroup) {
+    data.shape = configuration.tagGroupShape;
   }
   return data as Partial<CanvasNodeData>;
 }
@@ -280,22 +333,27 @@ function applyCreateNode(
   }
   if (
     command.input.nodeType === CANVAS_NODE_TYPES.tagGroup
-    && command.input.configuration?.memberTagIds
+    && command.input.configuration?.memberNodeIds
   ) {
-    const invalidMemberId = uniqueNonEmpty(command.input.configuration.memberTagIds).find((tagId) => (
-      !draft.nodes.some((node) => node.id === tagId && node.type === CANVAS_NODE_TYPES.tag)
+    const invalidMemberId = uniqueNonEmpty(command.input.configuration.memberNodeIds).find((memberId) => (
+      !isEligibleTagGroupMember(draft.nodes.find((node) => node.id === memberId))
     ));
     if (invalidMemberId) {
-      return reject(`Tag ${invalidMemberId} does not exist.`, 'not_found');
+      return reject(`Node ${invalidMemberId} is not an eligible tag-group member.`, 'not_found');
     }
   }
   const node = nodeFactory.createNode(
     command.input.nodeType,
-    { ...command.input.position },
+    origin === 'agent'
+      ? resolveAgentNodeCreationPosition(command, draft.nodes)
+      : { ...command.input.position },
     createNodeData(command),
   );
   if (command.input.nodeId) {
     node.id = command.input.nodeId;
+  }
+  if (command.input.nodeType === CANVAS_NODE_TYPES.tagGroup) {
+    node.zIndex = -1;
   }
   if (command.input.dimensions) {
     node.measured = { ...command.input.dimensions };
@@ -340,10 +398,10 @@ function applyDeleteNodes(
     .filter((node) => !deletedIds.has(node.id))
     .map((node) => {
       if (!isTagGroupNode(node)) return node;
-      const memberTagIds = node.data.memberTagIds.filter((tagId) => !deletedIds.has(tagId));
-      return memberTagIds.length === node.data.memberTagIds.length
+      const memberNodeIds = node.data.memberNodeIds.filter((memberId) => !deletedIds.has(memberId));
+      return memberNodeIds.length === node.data.memberNodeIds.length
         ? node
-        : { ...node, data: { ...node.data, memberTagIds } };
+        : { ...node, data: { ...node.data, memberNodeIds } };
     });
   return success(
     {
@@ -687,7 +745,12 @@ function visibleTagMetadata(node: CanvasNode): Partial<CanvasNodeData> | null {
       displayName: node.data.displayName,
       label: node.data.label,
       enabled: node.data.enabled,
-      memberTagIds: [...node.data.memberTagIds],
+      color: node.data.color,
+      shape: node.data.shape,
+      schemaVersion: 2,
+      memberNodeIds: [...node.data.memberNodeIds],
+      unresolvedMemberIds: [...(node.data.unresolvedMemberIds ?? [])],
+      legacyMemberTagIds: [...(node.data.legacyMemberTagIds ?? [])],
     } as Partial<CanvasNodeData>;
   }
   return null;
@@ -778,25 +841,46 @@ function applySetTagGroupMembers(
   if (group.type !== CANVAS_NODE_TYPES.tagGroup) {
     return reject(`Node ${group.id} is not a tag group.`, 'unsupported_command');
   }
-  const memberTagIds = uniqueNonEmpty(command.input.memberTagIds);
-  const invalidMemberId = memberTagIds.find((tagId) => (
-    !draft.nodes.some((node) => node.id === tagId && node.type === CANVAS_NODE_TYPES.tag)
+  const memberNodeIds = uniqueNonEmpty(command.input.memberNodeIds);
+  const invalidMemberId = memberNodeIds.find((memberId) => (
+    !isEligibleTagGroupMember(draft.nodes.find((node) => node.id === memberId))
   ));
   if (invalidMemberId) {
-    return reject(`Tag ${invalidMemberId} does not exist.`, 'not_found');
+    return reject(`Node ${invalidMemberId} is not an eligible tag-group member.`, 'not_found');
   }
-  const changed = !areCanvasValuesEquivalent(group.data.memberTagIds, memberTagIds);
+  const changed = !areCanvasValuesEquivalent(group.data.memberNodeIds, memberNodeIds);
   const nodes = changed
     ? draft.nodes.map((node) => node.id === group.id
-      ? { ...node, data: { ...node.data, memberTagIds } as CanvasNodeData }
+      ? { ...node, data: { ...node.data, memberNodeIds, unresolvedMemberIds: [], legacyMemberTagIds: [] } as CanvasNodeData }
       : node)
     : draft.nodes;
   return success(
     { ...draft, nodes },
-    impact(`Update ${memberTagIds.length} member tag(s) for group ${group.id}.`, {
-      affectedNodeIds: [group.id, ...memberTagIds],
+    impact(`Update ${memberNodeIds.length} direct member(s) for group ${group.id}.`, {
+      affectedNodeIds: [group.id, ...memberNodeIds],
     }),
-    { references: { nodeId: group.id, nodeIds: [group.id, ...memberTagIds] } },
+    { references: { nodeId: group.id, nodeIds: [group.id, ...memberNodeIds] } },
+    changed,
+  );
+}
+
+function applySetTagGroupAppearance(
+  command: Extract<CanvasCommand, { type: 'tagGroup.setAppearance' }>,
+  draft: CanvasGraphDraft,
+): CanvasGraphCommandPreparation {
+  const group = draft.nodes.find((node) => node.id === command.input.groupId);
+  if (!group) return reject(`Node ${command.input.groupId} does not exist.`, 'not_found');
+  if (!isTagGroupNode(group)) return reject(`Node ${group.id} is not a tag group.`, 'unsupported_command');
+  const nextColor = command.input.color ?? group.data.color;
+  const nextShape = command.input.shape ?? group.data.shape;
+  const changed = nextColor !== group.data.color || nextShape !== group.data.shape;
+  const nodes = changed ? draft.nodes.map((node) => node.id === group.id
+    ? { ...node, data: { ...node.data, color: nextColor, shape: nextShape } as CanvasNodeData }
+    : node) : draft.nodes;
+  return success(
+    { ...draft, nodes },
+    impact(`Update appearance for tag group ${group.id}.`, { affectedNodeIds: [group.id] }),
+    { references: { nodeId: group.id, nodeIds: [group.id] } },
     changed,
   );
 }
@@ -1070,6 +1154,8 @@ export function applyCanvasGraphCommand(
       return applySetTagColor(command, draft);
     case 'tagGroup.setMembers':
       return applySetTagGroupMembers(command, draft);
+    case 'tagGroup.setAppearance':
+      return applySetTagGroupAppearance(command, draft);
     case 'edge.connect':
       return applyConnectEdge(command, draft);
     case 'edge.disconnect':

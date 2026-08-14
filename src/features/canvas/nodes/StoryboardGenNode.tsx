@@ -1642,7 +1642,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
         </div>
       )}
 
-      {error && <div className="mb-1.5 shrink-0 text-[10px] text-red-400">{error}</div>}
+      {error && <div className="mb-1.5 shrink-0 text-[10px] text-red-700 dark:text-red-300">{error}</div>}
 
       {/* AI Parameters */}
       <div

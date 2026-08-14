@@ -14,11 +14,13 @@ import type {
   AgentModelTurnResponse,
 } from '../domain/agentModel';
 import { AgentModelGatewayError } from './agentModelGateway';
+import { buildAgentProviderBody } from '../application/agentProviderRequestCodec';
 import {
   StoryboardAgentModel,
   StoryboardModelProvider,
   conservativeModelRetryPolicy,
   createCanvasAgent,
+  normalizeStoryboardAgentToolCalls,
   createStoryboardAgentRuntime,
   restoreStoryboardRunState,
   serializeStoryboardRunState,
@@ -49,6 +51,101 @@ const reference: AgentModelReference = {
     toolSearch: false,
   },
 };
+
+describe('Storyboard Agent top-level tool normalization', () => {
+  it('wraps CanvasCommand names in canvas_command and drops truly unknown top-level tools', () => {
+    const calls = normalizeStoryboardAgentToolCalls([
+      { callId: 'status', name: 'generation.status', arguments: '{"nodeId":"node-1"}' },
+      { callId: 'asset', name: 'asset.list', arguments: '{}' },
+      { callId: 'unknown', name: 'generation.magic', arguments: '{}' },
+    ]);
+    expect(calls).toEqual([
+      { callId: 'status', name: 'canvas_command', arguments: JSON.stringify({ type: 'generation.status', input: { nodeId: 'node-1' } }) },
+      { callId: 'asset', name: 'canvas_command', arguments: JSON.stringify({ type: 'asset.list', input: {} }) },
+    ]);
+  });
+
+  it('canonicalizes unambiguous image-node aliases without inventing ids or models', () => {
+    const [call] = normalizeStoryboardAgentToolCalls([{
+      callId: 'create-image',
+      name: 'canvas_command',
+      arguments: JSON.stringify({
+        type: 'node.create',
+        input: {
+          nodeType: 'imageEditNode',
+          position: { x: 0, y: 0 },
+          configuration: {
+            prompt: '美丽的少女',
+            modelId: 'agnes:image:image-2.1-flash',
+            ratio: '16:9',
+            size: '2k',
+          },
+        },
+      }),
+    }]);
+    expect(JSON.parse(call.arguments)).toEqual({
+      type: 'node.create',
+      input: {
+        nodeType: 'imageNode',
+        position: { x: 0, y: 0 },
+        configuration: {
+          prompt: '美丽的少女',
+          modelId: 'agnes:image:image-2.1-flash',
+          aspectRatio: '16:9',
+          resolution: '2K',
+        },
+      },
+    });
+    expect(JSON.parse(call.arguments).input).not.toHaveProperty('nodeId');
+  });
+
+  it('adds only the safe default position when node.create omits its layout hint', () => {
+    const [call] = normalizeStoryboardAgentToolCalls([{
+      callId: 'create-without-position',
+      name: 'canvas_command',
+      arguments: JSON.stringify({
+        type: 'node.create',
+        input: {
+          nodeType: 'imageNode',
+          configuration: {
+            prompt: '神里绫华站在樱花庭院中',
+            modelId: 'agnes:image:image-2.1-flash',
+            aspectRatio: '16:9',
+            resolution: '2K',
+          },
+        },
+      }),
+    }]);
+
+    expect(JSON.parse(call.arguments)).toEqual({
+      type: 'node.create',
+      input: {
+        nodeType: 'imageNode',
+        position: { x: 0, y: 0 },
+        configuration: {
+          prompt: '神里绫华站在樱花庭院中',
+          modelId: 'agnes:image:image-2.1-flash',
+          aspectRatio: '16:9',
+          resolution: '2K',
+        },
+      },
+    });
+    expect(JSON.parse(call.arguments).input).not.toHaveProperty('nodeId');
+  });
+
+  it('preserves an explicitly invalid position so registry validation still fails closed', () => {
+    const [call] = normalizeStoryboardAgentToolCalls([{
+      callId: 'create-invalid-position',
+      name: 'canvas_command',
+      arguments: JSON.stringify({
+        type: 'node.create',
+        input: { nodeType: 'imageNode', position: { x: 'left', y: 0 }, configuration: {} },
+      }),
+    }]);
+
+    expect(JSON.parse(call.arguments).input.position).toEqual({ x: 'left', y: 0 });
+  });
+});
 
 function modelRequest(overrides: Partial<ModelRequest> = {}): ModelRequest {
   return {
@@ -231,10 +328,26 @@ describe('OpenAI Agents SDK runtime adapter', () => {
     })).toMatchObject({ suggested: true, replaySafety: 'safe' });
     expect(model.getRetryAdvice({
       request: modelRequest(),
+      error: new AgentModelGatewayError('HTTP 429 Too Many Requests', 429, true, false),
+      stream: true,
+      attempt: 1,
+    })).toMatchObject({ suggested: true, replaySafety: 'safe' });
+    expect(model.getRetryAdvice({
+      request: modelRequest(),
       error: new AgentModelGatewayError('interrupted', 503, true, true),
       stream: true,
       attempt: 1,
     })).toMatchObject({ suggested: false, replaySafety: 'unsafe' });
+    expect(model.getRetryAdvice({
+      request: modelRequest(),
+      error: new AgentModelGatewayError('The quota has been exceeded.', 429, true, false),
+      stream: true,
+      attempt: 1,
+    })).toMatchObject({
+      suggested: false,
+      replaySafety: 'unsafe',
+      reason: expect.stringContaining('exhausted quota'),
+    });
     expect(conservativeModelRetryPolicy({
       attempt: 1,
       maxRetries: 1,
@@ -266,6 +379,73 @@ describe('OpenAI Agents SDK runtime adapter', () => {
       traceIncludeSensitiveData: false,
       modelSettings: { retry: { maxRetries: 1 } },
     });
+  });
+
+  it('keeps a greeting turn provider payload observable and bounded', async () => {
+    let captured: AgentModelTurnRequest | null = null;
+    const transport: AgentModelTransport = {
+      async getResponse(request) {
+        captured = request;
+        return {
+          responseId: 'greeting-response',
+          text: '你好！',
+          toolCalls: [],
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      },
+      async *getStreamedResponse() { throw new Error('unused'); },
+    };
+    const runtime = createStoryboardAgentRuntime({ resolveModel: () => reference, transport });
+    const context: CanvasAgentContext = { projectId: 'project-1', runId: 'greeting-payload-run' };
+    const agent = createCanvasAgent({
+      runtime,
+      context,
+      protocol: reference.capabilities.protocol,
+      supportsVision: reference.capabilities.vision,
+      skillContext: { text: '你好' },
+    });
+
+    await runtime.runner.run(agent, '你好', { context });
+
+    expect(captured).not.toBeNull();
+    const body = buildAgentProviderBody(captured!, false);
+    const serialized = JSON.stringify(body);
+    expect(captured!.tools).toEqual([]);
+    expect(serialized.length).toBeLessThan(8_000);
+  });
+
+  it('keeps structured canvas tools loaded across a short multi-turn continuation', async () => {
+    let captured: AgentModelTurnRequest | null = null;
+    const transport: AgentModelTransport = {
+      async getResponse(requestValue) {
+        captured = requestValue;
+        return {
+          responseId: 'continued-image-task',
+          text: '需要调用画布工具。',
+          toolCalls: [],
+          usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+        };
+      },
+      async *getStreamedResponse() { throw new Error('unused'); },
+    };
+    const runtime = createStoryboardAgentRuntime({ resolveModel: () => reference, transport });
+    const context: CanvasAgentContext = { projectId: 'project-1', runId: 'continued-image-run' };
+    const agent = createCanvasAgent({
+      runtime,
+      context,
+      executionMode: 'auto',
+      skillContext: {
+        text: '继续',
+        recentUserText: '帮我生成图片吧\n16比9，2k，神里绫华\n默认',
+      },
+    });
+
+    await runtime.runner.run(agent, '继续', { context });
+
+    const request = captured as AgentModelTurnRequest | null;
+    expect(request?.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['canvas_command']));
+    expect(request?.systemInstructions).toContain('当前是自动模式');
+    expect(request?.systemInstructions).toContain('不要先要求用户回复“继续”');
   });
 
   it('loads the SDK runtime once through the dynamic boundary', async () => {
@@ -359,12 +539,13 @@ describe('OpenAI Agents SDK runtime adapter', () => {
     canvasAgentApprovalStore.deleteRun(runId);
   });
 
-  it('polls an approved generation in the same run without a second interruption', async () => {
+  it('enforces bounded generation follow-through and returns both locate targets', async () => {
     const runId = 'sdk-generation-poll-run';
     const submitCallId = 'sdk-generation-submit';
     canvasAgentApprovalStore.deleteRun(runId);
     let modelCalls = 0;
     const commandTypes: string[] = [];
+    const toolOutputs: unknown[] = [];
     const transport: AgentModelTransport = {
       async getResponse() {
         modelCalls += 1;
@@ -379,20 +560,9 @@ describe('OpenAI Agents SDK runtime adapter', () => {
             usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
           };
         }
-        if (modelCalls === 2) {
-          return {
-            responseId: 'response-status',
-            toolCalls: [{
-              callId: 'sdk-generation-status',
-              name: 'canvas_command',
-              arguments: JSON.stringify({ type: 'generation.status', input: { nodeId: 'node-1' } }),
-            }],
-            usage: { inputTokens: 12, outputTokens: 4, totalTokens: 16 },
-          };
-        }
         return {
           responseId: 'response-final',
-          text: 'Generation is running.',
+          text: 'Generation completed.',
           toolCalls: [],
           usage: { inputTokens: 14, outputTokens: 4, totalTokens: 18 },
         };
@@ -406,6 +576,8 @@ describe('OpenAI Agents SDK runtime adapter', () => {
       projectId: 'project-1',
       runId,
       getCanvasRevision: () => 3,
+      generationFollowThrough: { maxAttempts: 3, initialDelayMs: 0, wait: async () => {} },
+      onToolEvent: (event) => { if (event.output) toolOutputs.push(event.output); },
       executeCanvasCommand: async (command) => {
         commandTypes.push(command.type);
         if (command.type === 'generation.submit') {
@@ -418,13 +590,16 @@ describe('OpenAI Agents SDK runtime adapter', () => {
             output: { references: { nodeIds: ['node-1'] }, value: { status: 'accepted' } },
           };
         }
+        const statusCalls = commandTypes.filter((type) => type === 'generation.status').length;
         return {
           ok: true as const,
           commandType: 'generation.status' as const,
           revisionBefore: 3,
           revisionAfter: 3,
           impact: { effect: 'read' as const, summary: 'status', affectedNodeIds: ['node-1'], affectedEdgeIds: [], creates: { nodes: 0, edges: 0, groups: 0 }, deletes: { nodes: 0, edges: 0, groups: 0 }, requiresExternalSideEffect: false },
-          output: { references: { nodeId: 'node-1' }, value: { status: 'running' } },
+          output: statusCalls <= 1
+            ? { references: { nodeId: 'node-1' }, value: { status: 'running' } }
+            : { references: { nodeId: 'node-1', nodeIds: ['node-1', 'result-1'] }, value: { status: 'succeeded', resultNodeId: 'result-1', resultNodeIds: ['result-1'] } },
         };
       },
     };
@@ -452,13 +627,14 @@ describe('OpenAI Agents SDK runtime adapter', () => {
     const completed = await runtime.runner.run(agent, interrupted.state, { context });
 
     expect(completed.interruptions).toHaveLength(0);
-    expect(completed.finalOutput).toBe('Generation is running.');
-    expect(commandTypes).toEqual(['generation.submit', 'generation.status']);
-    expect(modelCalls).toBe(3);
+    expect(completed.finalOutput).toBe('Generation completed.');
+    expect(commandTypes).toEqual(['generation.submit', 'generation.status', 'generation.status']);
+    expect(modelCalls).toBe(2);
+    expect(toolOutputs.some((output) => JSON.stringify(output).includes('"resultNodeIds":["result-1"]'))).toBe(true);
     expect(canvasAgentApprovalStore.listByRun(runId)).toHaveLength(1);
     expect(canvasAgentApprovalStore.getReceipt(
       createIdempotencyKey(runId, 'canvas_command', submitCallId),
-    )).toMatchObject({ status: 'accepted' });
+    )).toMatchObject({ status: 'succeeded' });
     canvasAgentApprovalStore.deleteRun(runId);
   });
 
@@ -534,8 +710,8 @@ describe('OpenAI Agents SDK runtime adapter', () => {
         };
       },
     };
-    const agent = createCanvasAgent({ runtime, context, skillContext: { text: 'Generate once and recover safely if the outcome is unknown' } });
-    const interrupted = await runtime.runner.run(agent, 'Generate once and recover safely if the outcome is unknown', { context });
+    const agent = createCanvasAgent({ runtime, context, skillContext: { text: 'Generate image once and recover safely if the outcome is unknown' } });
+    const interrupted = await runtime.runner.run(agent, 'Generate image once and recover safely if the outcome is unknown', { context });
     expect(interrupted.interruptions).toHaveLength(1);
 
     const approvalId = createApprovalId(runId, 'canvas_command', submitCallId);
@@ -566,6 +742,90 @@ describe('OpenAI Agents SDK runtime adapter', () => {
       status: 'accepted',
       safeRecovery: { kind: 'generation-status', nodeIds: ['node-1'], jobIds: ['job-1'] },
     });
+    canvasAgentApprovalStore.deleteRun(runId);
+  });
+
+  it('stops bounded follow-through at a recoverable unknown boundary without replaying submit', async () => {
+    const runId = 'sdk-generation-recoverable-boundary-run';
+    const submitCallId = 'sdk-generation-recoverable-submit';
+    canvasAgentApprovalStore.deleteRun(runId);
+    let modelCalls = 0;
+    let submitCalls = 0;
+    const toolEvents: Array<{ status: string; error?: string }> = [];
+    const transport: AgentModelTransport = {
+      async getResponse() {
+        modelCalls += 1;
+        return modelCalls === 1 ? {
+          responseId: 'recoverable-submit-response',
+          toolCalls: [{
+            callId: submitCallId,
+            name: 'canvas_command',
+            arguments: JSON.stringify({ type: 'generation.submit', input: { nodeIds: ['node-1'] } }),
+          }],
+          usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+        } : {
+          responseId: 'recoverable-final-response',
+          text: 'The existing task can be safely queried again.',
+          toolCalls: [],
+          usage: { inputTokens: 12, outputTokens: 4, totalTokens: 16 },
+        };
+      },
+      async *getStreamedResponse() { throw new Error('unused'); },
+    };
+    const runtime = createStoryboardAgentRuntime({ resolveModel: () => reference, transport });
+    const context: CanvasAgentContext = {
+      projectId: 'project-1',
+      runId,
+      getCanvasRevision: () => 3,
+      generationFollowThrough: { maxAttempts: 3, initialDelayMs: 0, wait: async () => {} },
+      onToolEvent: (event) => { toolEvents.push({ status: event.status, error: event.error }); },
+      executeCanvasCommand: async (command) => {
+        if (command.type === 'generation.submit') {
+          submitCalls += 1;
+          return {
+            ok: true as const,
+            commandType: 'generation.submit' as const,
+            revisionBefore: 3,
+            revisionAfter: 3,
+            impact: { effect: 'generation' as const, summary: 'submit', affectedNodeIds: ['node-1'], affectedEdgeIds: [], creates: { nodes: 0, edges: 0, groups: 0 }, deletes: { nodes: 0, edges: 0, groups: 0 }, requiresExternalSideEffect: true },
+            output: { references: { nodeIds: ['node-1'] }, value: { status: 'accepted' } },
+          };
+        }
+        return {
+          ok: true as const,
+          commandType: 'generation.status' as const,
+          revisionBefore: 3,
+          revisionAfter: 3,
+          impact: { effect: 'read' as const, summary: 'status', affectedNodeIds: ['node-1'], affectedEdgeIds: [], creates: { nodes: 0, edges: 0, groups: 0 }, deletes: { nodes: 0, edges: 0, groups: 0 }, requiresExternalSideEffect: false },
+          output: { references: { nodeId: 'node-1', jobId: 'job-1' }, value: { status: 'recoverable_wait', error: 'result lookup delayed' } },
+        };
+      },
+    };
+    const agent = createCanvasAgent({ runtime, context, skillContext: { text: 'Generate image once and follow through safely' } });
+    const interrupted = await runtime.runner.run(agent, 'Generate image once and follow through safely', { context });
+    const approvalId = createApprovalId(runId, 'canvas_command', submitCallId);
+    canvasAgentApprovalStore.put(createApprovalRecord({
+      id: approvalId,
+      runId,
+      projectId: context.projectId,
+      interruptionId: submitCallId,
+      requestFingerprint: await createAgentRequestFingerprint('canvas_command', {
+        type: 'generation.submit', input: { nodeIds: ['node-1'] },
+      }),
+      impact: { effect: 'external-submit', title: 'Generate', summary: 'Submit one generation', affectedNodeCount: 1, affectedEdgeCount: 0, externalSideEffect: true },
+      baseRevision: 3,
+    }));
+    canvasAgentApprovalExecution.decide(approvalId, true);
+    interrupted.state.approve(interrupted.state.getInterruptions()[0]);
+    await runtime.runner.run(agent, interrupted.state, { context });
+
+    expect(submitCalls).toBe(1);
+    expect(toolEvents[toolEvents.length - 1]).toMatchObject({
+      status: 'unknown',
+      error: expect.stringContaining('没有重复提交生成请求'),
+    });
+    expect(canvasAgentApprovalStore.getReceipt(createIdempotencyKey(runId, 'canvas_command', submitCallId)))
+      .toMatchObject({ status: 'accepted' });
     canvasAgentApprovalStore.deleteRun(runId);
   });
 
@@ -741,7 +1001,7 @@ describe('OpenAI Agents SDK runtime adapter', () => {
       skillContext: { text: '你好' },
     });
     await runtime.runner.run(minimalAgent, '你好', { context: minimalContext });
-    expect(requests[1].tools.map((candidate) => candidate.name)).toEqual(['canvas_command']);
+    expect(requests[1].tools.map((candidate) => candidate.name)).toEqual([]);
   });
 
   it('marks deferred namespaced tools only for a compatible Responses model', async () => {
@@ -819,5 +1079,127 @@ describe('OpenAI Agents SDK runtime adapter', () => {
       },
     });
     expect(requests[1].tools[0].namespace).toBeUndefined();
+  });
+
+  it('publishes exact canvas command contracts and the selected generation target to the model', async () => {
+    let captured: AgentModelTurnRequest | null = null;
+    const transport: AgentModelTransport = {
+      async getResponse(requestValue) {
+        captured = requestValue;
+        return {
+          responseId: 'generation-contract-response',
+          text: 'Done.',
+          toolCalls: [],
+          usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+        };
+      },
+      async *getStreamedResponse() { throw new Error('unused'); },
+    };
+    const runtime = createStoryboardAgentRuntime({ resolveModel: () => reference, transport });
+    const context: CanvasAgentContext = { projectId: 'project-1', runId: 'generation-contract-run' };
+    const agent = createCanvasAgent({
+      runtime,
+      context,
+      supportsVision: true,
+      protocol: 'openai-chat-completions',
+      skillContext: { text: '生成一张 16:9 的 2K 图片' },
+      generationPreferences: {
+        image: {
+          modelId: 'agnes:image:image-2.1-flash',
+          supportedRatios: ['16:9', '1:1'],
+          supportedResolutions: ['1K', '2K'],
+        },
+      },
+    });
+    await runtime.runner.run(agent, '生成一张 16:9 的 2K 图片', { context });
+
+    const request = captured as AgentModelTurnRequest | null;
+    const canvasTool = request?.tools.find((tool) => tool.name === 'canvas_command');
+    expect(canvasTool?.parameters).toMatchObject({
+      additionalProperties: false,
+      anyOf: expect.any(Array),
+      properties: {
+        input: {
+          description: expect.stringContaining('generation.submit { nodeIds:array }'),
+        },
+      },
+    });
+    const commandVariants = canvasTool?.parameters.anyOf as Array<Record<string, any>>;
+    expect(commandVariants.find((variant) => variant.title === 'generation.submit')).toMatchObject({
+      required: ['type', 'input'],
+      additionalProperties: false,
+      properties: {
+        type: { enum: ['generation.submit'] },
+        input: {
+          required: ['nodeIds'],
+          additionalProperties: false,
+          properties: { nodeIds: { type: 'array' } },
+        },
+      },
+    });
+    expect(commandVariants.find((variant) => variant.title === 'canvas.query')).toMatchObject({
+      required: ['type', 'input'],
+      additionalProperties: false,
+      properties: {
+        type: { enum: ['canvas.query'] },
+        input: {
+          required: ['scope'],
+          additionalProperties: false,
+          properties: {
+            scope: { type: 'string' },
+            nodeIds: { type: 'array' },
+            limit: { type: 'number' },
+          },
+        },
+      },
+    });
+    const generationInput = (commandVariants.find((variant) => variant.title === 'generation.submit')?.properties as Record<string, any>).input;
+    const queryInput = (commandVariants.find((variant) => variant.title === 'canvas.query')?.properties as Record<string, any>).input;
+    const createInput = (commandVariants.find((variant) => variant.title === 'node.create')?.properties as Record<string, any>).input;
+    expect(generationInput.properties).not.toHaveProperty('prompt');
+    expect(queryInput.properties).not.toHaveProperty('filter');
+    expect(queryInput.properties.scope.enum).toEqual(['graph', 'nodes', 'edges', 'selection']);
+    expect(createInput.properties.nodeType.enum).toContain('imageNode');
+    expect(createInput.properties.nodeType.enum).not.toContain('image');
+    expect(createInput.properties.position).toMatchObject({
+      required: ['x', 'y'],
+      additionalProperties: false,
+    });
+    expect(createInput.properties.configuration).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        prompt: { type: 'string' },
+        modelId: { type: 'string' },
+        aspectRatio: { type: 'string' },
+        resolution: { type: 'string' },
+      },
+    });
+    expect(request?.systemInstructions).toContain('精确注册值 imageNode');
+    expect(request?.systemInstructions).toContain('不要自造 nodeId');
+    expect(request?.systemInstructions).toContain('不能写成 Markdown');
+    expect(request?.systemInstructions).toContain('modelId=agnes:image:image-2.1-flash');
+    expect(request?.systemInstructions).toContain('generation.submit 不接收 prompt');
+    expect(request?.systemInstructions).toContain('禁止在正文输出 Reasoning Summary');
+    expect(request?.systemInstructions).toContain('状态查询和生成结果通常用一至三段中文');
+
+    for (const protocol of [
+      'openai-responses',
+      'openai-chat-completions',
+      'anthropic-messages',
+      'google-gemini',
+    ] as const) {
+      const body = buildAgentProviderBody({
+        ...request!,
+        model: {
+          ...request!.model,
+          capabilities: { ...request!.model.capabilities, protocol },
+        },
+      }, false);
+      const serialized = JSON.stringify(body);
+      expect(serialized).toContain('"anyOf"');
+      expect(serialized).toContain('"generation.submit"');
+      expect(serialized).toContain('"nodeIds"');
+      expect(serialized).not.toContain('"filter"');
+    }
   });
 });

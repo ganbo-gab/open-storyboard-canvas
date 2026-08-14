@@ -70,7 +70,11 @@ export function createLargeCanvasPerformanceFixture(): LargeCanvasPerformanceFix
       displayName: `Performance tag group ${index + 1}`,
       label: `Performance tag group ${index + 1}`,
       enabled: index !== TAG_GROUP_COUNT - 1,
-      memberTagIds: tagNodeIds.filter((_, tagIndex) => tagIndex % TAG_GROUP_COUNT === index),
+      schemaVersion: 2,
+      color: 'neutral',
+      shape: 'rounded',
+      memberNodeIds: [],
+      legacyMemberTagIds: tagNodeIds.filter((_, tagIndex) => tagIndex % TAG_GROUP_COUNT === index),
     },
   }));
 

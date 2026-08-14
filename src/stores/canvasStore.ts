@@ -35,6 +35,7 @@ import {
   isBlueprintNode,
   isTagColor,
   isTagGroupNode,
+  isTagGroupShape,
   isStoryboardSplitNode,
 } from '@/features/canvas/domain/canvasNodes';
 import {
@@ -56,6 +57,7 @@ import {
   resolveMinEdgeFittedSize,
   resolveSizeInsideTargetBox,
 } from '@/features/canvas/application/imageNodeSizing';
+import { findRelatedCanvasNodePositions } from '@/features/canvas/application/canvasNodePlacement';
 
 export type {
   ActiveToolDialog,
@@ -719,11 +721,26 @@ function normalizeNodes(rawNodes: CanvasNode[]): CanvasNode[] {
         groupData.label = label;
         groupData.displayName = label;
         groupData.enabled = groupData.enabled !== false;
-        groupData.memberTagIds = Array.isArray(groupData.memberTagIds)
-          ? Array.from(new Set(groupData.memberTagIds.filter((id): id is string => (
+        groupData.schemaVersion = 2;
+        groupData.color = isTagColor(groupData.color) ? groupData.color : 'neutral';
+        groupData.shape = isTagGroupShape(groupData.shape) ? groupData.shape : 'rounded';
+        groupData.memberNodeIds = Array.isArray(groupData.memberNodeIds)
+          ? Array.from(new Set(groupData.memberNodeIds.filter((id): id is string => (
               typeof id === 'string' && Boolean(id.trim())
             )).map((id) => id.trim())))
           : [];
+        groupData.unresolvedMemberIds = Array.isArray(groupData.unresolvedMemberIds)
+          ? Array.from(new Set(groupData.unresolvedMemberIds.filter((id): id is string => (
+              typeof id === 'string' && Boolean(id.trim())
+            )).map((id) => id.trim())))
+          : [];
+        groupData.legacyMemberTagIds = Array.isArray(groupData.legacyMemberTagIds)
+          ? Array.from(new Set(groupData.legacyMemberTagIds.filter((id): id is string => (
+              typeof id === 'string' && Boolean(id.trim())
+            )).map((id) => id.trim())))
+          : [];
+        delete groupData.memberTagIds;
+        delete groupData.tagIds;
       }
 
       if ('aspectRatio' in mergedData && !mergedData.aspectRatio) {
@@ -1042,18 +1059,6 @@ function isHeavyHistorySnapshot(snapshot: CanvasHistorySnapshot): boolean {
 function trimHistorySnapshots(snapshots: CanvasHistorySnapshot[]): CanvasHistorySnapshot[] {
   const limit = snapshots.some(isHeavyHistorySnapshot) ? MAX_HEAVY_HISTORY_STEPS : MAX_HISTORY_STEPS;
   return snapshots.length > limit ? snapshots.slice(-limit) : snapshots;
-}
-
-function getDerivedNodePosition(nodes: CanvasNode[], sourceNodeId: string): { x: number; y: number } {
-  const sourceNode = nodes.find((node) => node.id === sourceNodeId);
-  if (!sourceNode) {
-    return { x: 100, y: 100 };
-  }
-
-  return {
-    x: sourceNode.position.x + DEFAULT_NODE_WIDTH + 100,
-    y: sourceNode.position.y,
-  };
 }
 
 function resolveSelectedNodeId(selectedNodeId: string | null, nodes: CanvasNode[]): string | null {
@@ -1435,143 +1440,19 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     if (!sourceNode) {
       return { x: 100, y: 100 };
     }
-
-    // Helper to check if a position collides with existing nodes.
-    const collides = (x: number, y: number, width: number, height: number) => {
-      return state.nodes.some((node) => {
-        const nodeWidth = node.measured?.width ?? DEFAULT_NODE_WIDTH;
-        const nodeHeight = node.measured?.height ?? 200;
-        const margin = 8;
-        return (
-          x < node.position.x + nodeWidth + margin &&
-          x + width + margin > node.position.x &&
-          y < node.position.y + nodeHeight + margin &&
-          y + height + margin > node.position.y
-        );
-      });
-    };
-
-    const sourceWidth = sourceNode.measured?.width ?? DEFAULT_NODE_WIDTH;
-    const sourceHeight = sourceNode.measured?.height ?? 200;
-    const anchorX = sourceNode.position.x + sourceWidth + 28;
-    const anchorY = sourceNode.position.y;
-
-    const zoom = Math.max(0.01, state.currentViewport.zoom || 1);
-    const viewportWidth = state.canvasViewportSize.width;
-    const viewportHeight = state.canvasViewportSize.height;
-    const hasViewportBounds = viewportWidth > 0 && viewportHeight > 0;
-    const visibleBounds = hasViewportBounds
-      ? {
-          minX: -state.currentViewport.x / zoom,
-          minY: -state.currentViewport.y / zoom,
-          maxX: -state.currentViewport.x / zoom + viewportWidth / zoom,
-          maxY: -state.currentViewport.y / zoom + viewportHeight / zoom,
-        }
-      : null;
-
-    const overflowAmount = (x: number, y: number): number => {
-      if (!visibleBounds) {
-        return 0;
-      }
-      const overLeft = Math.max(0, visibleBounds.minX - x);
-      const overTop = Math.max(0, visibleBounds.minY - y);
-      const overRight = Math.max(0, x + newNodeWidth - visibleBounds.maxX);
-      const overBottom = Math.max(0, y + newNodeHeight - visibleBounds.maxY);
-      return overLeft + overTop + overRight + overBottom;
-    };
-
-    const stepX = Math.max(newNodeWidth + 12, 110);
-    const stepY = Math.max(Math.round(newNodeHeight * 0.35), 54);
-    const baseCandidates = [
-      { x: anchorX, y: anchorY },
-      { x: sourceNode.position.x, y: sourceNode.position.y + sourceHeight + 20 },
-      { x: sourceNode.position.x - newNodeWidth - 20, y: sourceNode.position.y },
-      { x: sourceNode.position.x, y: sourceNode.position.y - newNodeHeight - 20 },
-    ];
-
-    let bestInView: { x: number; y: number; score: number } | null = null;
-    let bestOutOfView: { x: number; y: number; score: number } | null = null;
-
-    const evaluateCandidate = (x: number, y: number) => {
-      if (collides(x, y, newNodeWidth, newNodeHeight)) {
-        return;
-      }
-
-      const dx = x - anchorX;
-      const dy = y - anchorY;
-      const distanceScore = Math.hypot(dx, dy);
-      const upwardPenalty = dy < 0 ? Math.abs(dy) * 0.25 : 0;
-      const overflow = overflowAmount(x, y);
-      const score = distanceScore + upwardPenalty + overflow * 1000;
-      const candidate = { x, y, score };
-
-      if (overflow === 0) {
-        if (!bestInView || score < bestInView.score) {
-          bestInView = candidate;
-        }
-      } else if (!bestOutOfView || score < bestOutOfView.score) {
-        bestOutOfView = candidate;
-      }
-    };
-
-    for (const base of baseCandidates) {
-      evaluateCandidate(base.x, base.y);
-    }
-
-    for (let ring = 1; ring <= 8; ring += 1) {
-      const offsets = [
-        { x: ring, y: 0 },
-        { x: ring, y: 1 },
-        { x: ring, y: -1 },
-        { x: 0, y: ring },
-        { x: 0, y: -ring },
-        { x: -ring, y: 0 },
-        { x: ring, y: 2 },
-        { x: ring, y: -2 },
-        { x: -ring, y: 1 },
-        { x: -ring, y: -1 },
-      ];
-      for (const offset of offsets) {
-        evaluateCandidate(anchorX + offset.x * stepX, anchorY + offset.y * stepY);
-      }
-    }
-
-    // If the local rings found a nearby out-of-view slot, prefer that over
-    // jumping to an unrelated visible corner. This keeps repeated batch
-    // generations clustered around their source node.
-    if (!bestInView && !bestOutOfView && visibleBounds) {
-      const padding = 8;
-      const minX = visibleBounds.minX + padding;
-      const maxX = visibleBounds.maxX - newNodeWidth - padding;
-      const minY = visibleBounds.minY + padding;
-      const maxY = visibleBounds.maxY - newNodeHeight - padding;
-
-      if (maxX >= minX && maxY >= minY) {
-        const scanStepX = Math.max(42, Math.round(newNodeWidth * 0.32));
-        const scanStepY = Math.max(42, Math.round(newNodeHeight * 0.32));
-
-        for (let y = minY; y <= maxY; y += scanStepY) {
-          for (let x = minX; x <= maxX; x += scanStepX) {
-            evaluateCandidate(x, y);
-          }
-        }
-
-        // Ensure boundary positions are also considered.
-        evaluateCandidate(minX, minY);
-        evaluateCandidate(maxX, minY);
-        evaluateCandidate(minX, maxY);
-        evaluateCandidate(maxX, maxY);
-      }
-    }
-
-    const resolvedCandidate = (bestInView || bestOutOfView) as
-      | { x: number; y: number; score: number }
-      | null;
-    if (resolvedCandidate) {
-      return { x: resolvedCandidate.x, y: resolvedCandidate.y };
-    }
-
-    return { x: anchorX + 2 * stepX, y: anchorY };
+    return findRelatedCanvasNodePositions({
+      nodes: state.nodes,
+      relatedNodeId: sourceNodeId,
+      desired: { x: sourceNode.position.x, y: sourceNode.position.y },
+      size: { width: newNodeWidth, height: newNodeHeight },
+      viewport: {
+        x: state.currentViewport.x,
+        y: state.currentViewport.y,
+        zoom: state.currentViewport.zoom,
+        width: state.canvasViewportSize.width,
+        height: state.canvasViewportSize.height,
+      },
+    })[0] ?? { x: 100, y: 100 };
   },
 
   findNodePositions: (sourceNodeId, count, newNodeWidth, newNodeHeight) => {
@@ -1581,96 +1462,33 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     if (!sourceNode || total === 0) {
       return [];
     }
-
-    const sourceWidth = sourceNode.measured?.width ?? DEFAULT_NODE_WIDTH;
-    const sourceHeight = sourceNode.measured?.height ?? 200;
-    const anchorX = sourceNode.position.x + sourceWidth + 28;
-    const anchorY = sourceNode.position.y;
-    const stepX = Math.max(newNodeWidth + 24, 140);
-    const stepY = Math.max(newNodeHeight + 24, Math.round(sourceHeight * 0.5), 120);
-    const margin = 8;
-    const reserved: { x: number; y: number; width: number; height: number }[] = [];
-
-    const collides = (x: number, y: number, width: number, height: number) => {
-      const overlaps = (
-        left: number,
-        top: number,
-        otherWidth: number,
-        otherHeight: number
-      ) => (
-        x < left + otherWidth + margin &&
-        x + width + margin > left &&
-        y < top + otherHeight + margin &&
-        y + height + margin > top
-      );
-
-      return state.nodes.some((node) => {
-        const nodeWidth = node.measured?.width ?? DEFAULT_NODE_WIDTH;
-        const nodeHeight = node.measured?.height ?? 200;
-        return overlaps(node.position.x, node.position.y, nodeWidth, nodeHeight);
-      }) || reserved.some((node) => overlaps(node.x, node.y, node.width, node.height));
-    };
-
-    const rowOffsets: number[] = [];
-    const maxRows = Math.max(12, total + 8);
-    for (let row = 0; row <= maxRows; row += 1) {
-      rowOffsets.push(row);
-      if (row > 0 && row <= 3) {
-        rowOffsets.push(-row);
-      }
-    }
-
-    const positions: { x: number; y: number }[] = [];
-    for (let index = 0; index < total; index += 1) {
-      let nextPosition: { x: number; y: number } | null = null;
-
-      for (let column = 0; column <= 4 && !nextPosition; column += 1) {
-        for (const row of rowOffsets) {
-          const x = anchorX + column * stepX;
-          const y = anchorY + row * stepY;
-          if (!collides(x, y, newNodeWidth, newNodeHeight)) {
-            nextPosition = { x, y };
-            break;
-          }
-        }
-      }
-
-      if (!nextPosition) {
-        const fallback = state.findNodePosition(sourceNodeId, newNodeWidth, newNodeHeight);
-        nextPosition = {
-          x: fallback.x + index * stepX,
-          y: fallback.y,
-        };
-        while (collides(nextPosition.x, nextPosition.y, newNodeWidth, newNodeHeight)) {
-          nextPosition = {
-            x: nextPosition.x + stepX,
-            y: nextPosition.y,
-          };
-        }
-      }
-
-      positions.push(nextPosition);
-      reserved.push({
-        ...nextPosition,
-        width: newNodeWidth,
-        height: newNodeHeight,
-      });
-    }
-
-    return positions;
+    return findRelatedCanvasNodePositions({
+      nodes: state.nodes,
+      relatedNodeId: sourceNodeId,
+      desired: { x: sourceNode.position.x, y: sourceNode.position.y },
+      size: { width: newNodeWidth, height: newNodeHeight },
+      count: total,
+      viewport: {
+        x: state.currentViewport.x,
+        y: state.currentViewport.y,
+        zoom: state.currentViewport.zoom,
+        width: state.canvasViewportSize.width,
+        height: state.canvasViewportSize.height,
+      },
+    });
   },
 
   addDerivedUploadNode: (sourceNodeId, imageUrl, aspectRatio, previewImageUrl) => {
     const state = get();
-    const position = getDerivedNodePosition(state.nodes, sourceNodeId);
     const sourceNode = state.nodes.find((node) => node.id === sourceNodeId);
     const resolvedAspectRatio = resolveDerivedAspectRatio(sourceNode, aspectRatio);
+    const derivedSize = resolveGeneratedImageNodeDimensions(resolvedAspectRatio);
+    const position = state.findNodePosition(sourceNodeId, derivedSize.width, derivedSize.height);
     const node = canvasNodeFactory.createNode(CANVAS_NODE_TYPES.upload, position, {
       imageUrl,
       previewImageUrl: previewImageUrl ?? null,
       aspectRatio: resolvedAspectRatio,
     });
-    const derivedSize = resolveGeneratedImageNodeDimensions(resolvedAspectRatio);
     node.width = derivedSize.width;
     node.height = derivedSize.height;
     node.style = {
@@ -1769,7 +1587,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   addStoryboardSplitNode: (sourceNodeId, rows, cols, frames, frameAspectRatio) => {
     const state = get();
-    const position = getDerivedNodePosition(state.nodes, sourceNodeId);
+    const position = state.findNodePosition(sourceNodeId, DEFAULT_NODE_WIDTH, 220);
     const resolvedFrameAspectRatio =
       frameAspectRatio ??
       frames.find((frame) => typeof frame.aspectRatio === 'string')?.aspectRatio ??
@@ -2098,10 +1916,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         .filter((node) => !deleteSet.has(node.id))
         .map((node) => {
           if (!isTagGroupNode(node)) return node;
-          const memberTagIds = node.data.memberTagIds.filter((tagId) => !deleteSet.has(tagId));
-          return memberTagIds.length === node.data.memberTagIds.length
+          const memberNodeIds = node.data.memberNodeIds.filter((memberId) => !deleteSet.has(memberId));
+          return memberNodeIds.length === node.data.memberNodeIds.length
             ? node
-            : { ...node, data: { ...node.data, memberTagIds } };
+            : { ...node, data: { ...node.data, memberNodeIds } };
         });
       const nextEdges = state.edges.filter(
         (edge) => !deleteSet.has(edge.source) && !deleteSet.has(edge.target)

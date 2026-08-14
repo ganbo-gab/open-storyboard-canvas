@@ -177,6 +177,10 @@ export function parseInputReferenceSignature(signature: string): GraphReferenceI
           videoUrl: typeof record.videoUrl === 'string' ? record.videoUrl : undefined,
           thumbnailUrl: typeof record.thumbnailUrl === 'string' ? record.thumbnailUrl : null,
           audioUrl: typeof record.audioUrl === 'string' ? record.audioUrl : undefined,
+          sourceTitle: typeof record.sourceTitle === 'string' ? record.sourceTitle : undefined,
+          groupNodeId: typeof record.groupNodeId === 'string' ? record.groupNodeId : undefined,
+          groupToken: typeof record.groupToken === 'string' ? record.groupToken : undefined,
+          groupTitle: typeof record.groupTitle === 'string' ? record.groupTitle : undefined,
         };
       })
       .filter((item): item is GraphReferenceItem => Boolean(item));

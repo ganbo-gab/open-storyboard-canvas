@@ -118,6 +118,22 @@ describe('CanvasCommandRegistry transactions', () => {
     expect(useCanvasStore.getState().edges).toEqual([]);
   });
 
+  it('moves Agent-created nodes to deterministic empty space when requested coordinates are occupied', async () => {
+    useCanvasStore.setState({
+      nodes: [{
+        id: 'occupied', type: CANVAS_NODE_TYPES.imageEdit, position: { x: 100, y: 100 },
+        measured: { width: 220, height: 380 }, data: { prompt: 'existing' },
+      }],
+      revision: 1,
+    });
+    const result = await canvasCommandRegistry.executeApproved({
+      type: 'node.create', version: CANVAS_COMMAND_VERSION,
+      input: { nodeType: CANVAS_NODE_TYPES.imageEdit, nodeId: 'agent-created', position: { x: 100, y: 100 } },
+    }, 1, 'agent');
+    expect(result.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'agent-created')?.position).not.toEqual({ x: 100, y: 100 });
+  });
+
   it('rolls back every draft change when a later command fails', () => {
     const result = canvasCommandRegistry.executeTransaction({
       id: 'rollback-test',
@@ -787,6 +803,52 @@ describe('CanvasCommandRegistry transactions', () => {
     });
     expect(useCanvasStore.getState().history.past).toHaveLength(3);
   });
+
+  it('creates and edits a direct-member tag group through versioned commands', async () => {
+    const seed = canvasCommandRegistry.executeTransaction({
+      id: 'tag-group-seed',
+      origin: 'ui',
+      expectedRevision: 0,
+      commands: [
+        { type: 'node.create', version: CANVAS_COMMAND_VERSION, input: { nodeType: CANVAS_NODE_TYPES.upload, nodeId: 'image', position: { x: 0, y: 0 } } },
+        { type: 'node.create', version: CANVAS_COMMAND_VERSION, input: { nodeType: CANVAS_NODE_TYPES.textAnnotation, nodeId: 'text', position: { x: 300, y: 0 }, configuration: { content: 'Scene note' } } },
+        {
+          type: 'node.create',
+          version: CANVAS_COMMAND_VERSION,
+          input: {
+            nodeType: CANVAS_NODE_TYPES.tagGroup,
+            nodeId: 'tag-group',
+            position: { x: -40, y: -40 },
+            dimensions: { width: 620, height: 260 },
+            configuration: { displayName: 'Scene assets', memberNodeIds: ['image', 'text'] },
+          },
+        },
+      ],
+    });
+    expect(seed.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'tag-group')?.data).toMatchObject({
+      schemaVersion: 2,
+      memberNodeIds: ['image', 'text'],
+      color: 'neutral',
+      shape: 'rounded',
+    });
+
+    const appearance = await canvasCommandRegistry.execute({
+      type: 'tagGroup.setAppearance',
+      version: CANVAS_COMMAND_VERSION,
+      input: { groupId: 'tag-group', color: 'violet', shape: 'frame' },
+    }, 'ui');
+    expect(appearance.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'tag-group')?.data).toMatchObject({ color: 'violet', shape: 'frame' });
+
+    const invalid = await canvasCommandRegistry.execute({
+      type: 'tagGroup.setMembers',
+      version: CANVAS_COMMAND_VERSION,
+      input: { groupId: 'tag-group', memberNodeIds: ['tag-group'] },
+    }, 'ui');
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'tag-group')?.data).toMatchObject({ memberNodeIds: ['image', 'text'] });
+  });
 });
 
 describe('CanvasCommandRegistry read and generation facades', () => {
@@ -1024,6 +1086,41 @@ describe('CanvasCommandRegistry read and generation facades', () => {
         value: { status: 'running' },
       },
     });
+  });
+
+  it('creates an image generation node with the selected model, ratio, and resolution in one approved command', async () => {
+    const result = await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: CANVAS_NODE_TYPES.imageEdit,
+        nodeId: 'agent-image-target',
+        position: { x: 40, y: 80 },
+        configuration: {
+          prompt: 'cinematic portrait',
+          modelId: 'agnes:image:gemini-2.1-flash-image-preview',
+          aspectRatio: '16:9',
+          resolution: '2K',
+        },
+      },
+    }, 'agent');
+
+    expect(result).toMatchObject({
+      ok: true,
+      output: { references: { nodeId: 'agent-image-target' } },
+    });
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'agent-image-target')?.data)
+      .toMatchObject({
+        prompt: 'cinematic portrait',
+        model: 'agnes:image:gemini-2.1-flash-image-preview',
+        requestAspectRatio: '16:9',
+        size: '2K',
+        modelConfig: {
+          entryId: 'agnes:image:gemini-2.1-flash-image-preview',
+          ratio: '16:9',
+          extraParams: { resolutionType: '2K' },
+        },
+      });
   });
 
   it('resolves generation status and result location through linked result nodes', async () => {

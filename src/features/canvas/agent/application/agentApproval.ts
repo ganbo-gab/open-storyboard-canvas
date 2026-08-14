@@ -7,7 +7,8 @@ import {
 } from '@/features/canvas/domain/canvasCommands';
 
 const APPROVAL_STORAGE_KEY = 'storyboard-copilot:canvas-agent:approval-ledger:v1';
-const MAX_LEDGER_RECORDS = 1_000;
+const MAX_LEDGER_RECORDS = 200;
+const MAX_LEDGER_WEBKIT_BYTES = 512 * 1024;
 
 export type AgentEffect = 'read' | 'canvas-write' | 'config-write' | 'external-submit';
 export type AgentApprovalStatus =
@@ -419,6 +420,56 @@ function parseEnvelope(raw: string | null): AgentApprovalEnvelopeV1 {
   }
 }
 
+function webKitStorageBytes(serialized: string): number {
+  // WebKit stores localStorage values as UTF-16. Counting JavaScript
+  // characters underestimates the actual quota cost by roughly 2x.
+  return serialized.length * 2;
+}
+
+function compactEnvelopeForStorage(
+  envelope: AgentApprovalEnvelopeV1,
+  now = Date.now(),
+  pruneExpired = false,
+): AgentApprovalEnvelopeV1 {
+  const safe = parseEnvelope(JSON.stringify(envelope));
+  const resumableStatuses = new Set<AgentApprovalStatus>([
+    'proposed',
+    'awaiting-approval',
+    'approved',
+    'executing',
+  ]);
+  const activeRecoveryRuns = new Set(safe.approvals
+    .filter((approval) => resumableStatuses.has(approval.status) && approval.expiresAt > now)
+    .map((approval) => approval.runId));
+  if (pruneExpired) {
+    safe.runRecoveries = safe.runRecoveries.filter((recovery) => activeRecoveryRuns.has(recovery.runId));
+  }
+  const isRemovable = (approval: AgentApprovalRecord) => (
+    approval.expiresAt <= now
+    && (approval.status === 'proposed'
+      || approval.status === 'awaiting-approval'
+      || approval.status === 'executing')
+  ) && !activeRecoveryRuns.has(approval.runId);
+  if (pruneExpired) {
+    safe.approvals = safe.approvals.filter((approval) => {
+      if (!isRemovable(approval)) return true;
+      safe.receipts = safe.receipts.filter((receipt) => receipt.approvalId !== approval.id);
+      return false;
+    });
+  }
+  let serialized = JSON.stringify(safe);
+  while (webKitStorageBytes(serialized) > MAX_LEDGER_WEBKIT_BYTES) {
+    const index = safe.approvals.findIndex((approval) => (
+      !activeRecoveryRuns.has(approval.runId)
+    ));
+    if (index < 0) break;
+    const [removed] = safe.approvals.splice(index, 1);
+    safe.receipts = safe.receipts.filter((receipt) => receipt.approvalId !== removed.id);
+    serialized = JSON.stringify(safe);
+  }
+  return safe;
+}
+
 function sanitizeReceipt<T>(receipt: AgentExecutionReceipt<T>): AgentExecutionReceipt<T> {
   return {
     ...receipt,
@@ -485,7 +536,12 @@ function receiptExecutionMetadata(output: unknown): Pick<AgentExecutionReceipt, 
 export class PersistentAgentApprovalStore implements AgentApprovalStore {
   private memory = emptyEnvelope();
 
-  constructor(private readonly storage: StorageLike | null = defaultStorage()) {}
+  constructor(
+    private storage: StorageLike | null = defaultStorage(),
+    private readonly now: () => number = () => Date.now(),
+  ) {
+    this.compactPersistedEnvelope();
+  }
 
   get(id: string): AgentApprovalRecord | undefined {
     const record = this.read().approvals.find((item) => item.id === id);
@@ -550,7 +606,15 @@ export class PersistentAgentApprovalStore implements AgentApprovalStore {
   }
 
   getRunRecovery(runId: string): AgentRunRecovery | undefined {
-    const recovery = this.read().runRecoveries.find((item) => item.runId === runId);
+    const envelope = this.read();
+    const recovery = envelope.runRecoveries.find((item) => item.runId === runId);
+    const activeApproval = envelope.approvals.some((approval) => (
+      approval.runId === runId && isApprovalActive(approval, this.now())
+    ));
+    if (recovery && !activeApproval) {
+      this.deleteRunRecovery(runId);
+      return undefined;
+    }
     return recovery ? clone(recovery) : undefined;
   }
 
@@ -589,13 +653,49 @@ export class PersistentAgentApprovalStore implements AgentApprovalStore {
   }
 
   private read(): AgentApprovalEnvelopeV1 {
-    return this.storage ? parseEnvelope(this.storage.getItem(APPROVAL_STORAGE_KEY)) : clone(this.memory);
+    if (!this.storage) return clone(this.memory);
+    try {
+      return parseEnvelope(this.storage.getItem(APPROVAL_STORAGE_KEY));
+    } catch {
+      this.storage = null;
+      return clone(this.memory);
+    }
   }
 
   private write(envelope: AgentApprovalEnvelopeV1): void {
-    const safe = parseEnvelope(JSON.stringify(envelope));
-    if (this.storage) this.storage.setItem(APPROVAL_STORAGE_KEY, JSON.stringify(safe));
-    else this.memory = clone(safe);
+    const safe = compactEnvelopeForStorage(envelope, this.now());
+    if (!this.storage) {
+      this.memory = clone(safe);
+      return;
+    }
+    try {
+      this.storage.setItem(APPROVAL_STORAGE_KEY, JSON.stringify(safe));
+    } catch {
+      this.memory = clone(safe);
+      this.storage = null;
+    }
+  }
+
+  private compactPersistedEnvelope(): void {
+    if (!this.storage) return;
+    let raw: string | null;
+    let safe: AgentApprovalEnvelopeV1;
+    try {
+      raw = this.storage.getItem(APPROVAL_STORAGE_KEY);
+      if (raw === null) return;
+      safe = compactEnvelopeForStorage(parseEnvelope(raw), this.now(), true);
+    } catch {
+      this.storage = null;
+      return;
+    }
+    const serialized = JSON.stringify(safe);
+    if (raw === serialized) return;
+    try {
+      this.storage.setItem(APPROVAL_STORAGE_KEY, serialized);
+    } catch {
+      this.memory = clone(safe);
+      this.storage = null;
+    }
   }
 }
 

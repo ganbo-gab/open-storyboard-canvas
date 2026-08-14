@@ -23,7 +23,7 @@ import {
   type OnConnectStartParams,
   type Viewport,
 } from '@xyflow/react';
-import { Boxes, ClipboardPaste, Copy, Group, ImagePlus, Play, Trash2, Ungroup } from 'lucide-react';
+import { Boxes, ClipboardPaste, Copy, Group, ImagePlus, Play, Tags, Trash2, Ungroup } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import '@xyflow/react/dist/style.css';
 
@@ -48,6 +48,7 @@ import { useCanvasWasdPan } from '@/features/canvas/hooks/useCanvasWasdPan';
 import { CanvasSideToolbar } from '@/features/canvas/CanvasSideToolbar';
 import {
   CANVAS_NODE_TYPES,
+  isEligibleTagGroupMember,
   isTagGroupNode,
   isTagNode,
   type CanvasEdge,
@@ -83,6 +84,7 @@ import {
 } from '@/features/canvas/application/canvasAssetCatalog';
 import {
   getConnectMenuNodeTypes,
+  nodeCanStartManualConnection,
   nodeHasSourceHandle,
   nodeHasTargetHandle,
 } from '@/features/canvas/domain/nodeRegistry';
@@ -794,14 +796,7 @@ function resolveAllowedNodeTypes(handleType: HandleType): CanvasNodeType[] {
 }
 
 function canNodeTypeBeManualConnectionSource(type: CanvasNodeType): boolean {
-  return type === CANVAS_NODE_TYPES.upload
-    || type === CANVAS_NODE_TYPES.imageEdit
-    || type === CANVAS_NODE_TYPES.exportImage
-    || type === CANVAS_NODE_TYPES.video
-    || type === CANVAS_NODE_TYPES.audio
-    || type === CANVAS_NODE_TYPES.aiText
-    || type === CANVAS_NODE_TYPES.textAnnotation
-    || type === CANVAS_NODE_TYPES.jsonCard;
+  return nodeCanStartManualConnection(type);
 }
 
 function getGeneratedTextForConnection(sourceNode: CanvasNode, nodes: CanvasNode[]): string {
@@ -1647,6 +1642,11 @@ export function Canvas() {
     },
     [selectedGroupChildNodes, selectedNodes]
   );
+  const selectedTagGroupMemberNodeIds = useMemo(
+    () => selectedNodes.filter(isEligibleTagGroupMember).map((node) => node.id),
+    [selectedNodes]
+  );
+  const excludedTagGroupSelectionCount = selectedNodeIds.length - selectedTagGroupMemberNodeIds.length;
   const batchToolbarSelectedCount = isSingleSelectedGroup
     ? Math.max(1, selectedGroupChildNodes.length)
     : selectedNodeIds.length;
@@ -2480,6 +2480,41 @@ export function Canvas() {
       if (result.ok) scheduleCanvasPersist(0);
     });
   }, [scheduleCanvasPersist, selectedNodeIds]);
+
+  const handleBatchTagGroup = useCallback(() => {
+    if (selectedTagGroupMemberNodeIds.length < 2) return;
+    const selectedIds = new Set(selectedTagGroupMemberNodeIds);
+    const selectedFlowNodes = reactFlowInstance.getNodes().filter((node) => selectedIds.has(node.id));
+    if (selectedFlowNodes.length < 2) return;
+    const bounds = reactFlowInstance.getNodesBounds(selectedFlowNodes);
+    const padding = 28;
+    const nodeId = createUiNodeId('tag-group');
+    void canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: CANVAS_NODE_TYPES.tagGroup,
+        nodeId,
+        position: { x: bounds.x - padding, y: bounds.y - padding },
+        dimensions: {
+          width: Math.max(420, Math.min(1400, bounds.width + padding * 2)),
+          height: Math.max(260, Math.min(1000, bounds.height + padding * 2)),
+        },
+        configuration: {
+          displayName: t('node.menu.tagGroup'),
+          memberNodeIds: selectedTagGroupMemberNodeIds,
+        },
+      },
+    }, 'ui').then((result) => {
+      if (!result.ok) return;
+      void canvasCommandRegistry.execute({
+        type: 'selection.set',
+        version: CANVAS_COMMAND_VERSION,
+        input: { nodeIds: [nodeId] },
+      }, 'ui');
+      scheduleCanvasPersist(0);
+    });
+  }, [reactFlowInstance, scheduleCanvasPersist, selectedTagGroupMemberNodeIds, t]);
 
   const handleBatchUngroup = useCallback(() => {
     void canvasCommandRegistry.execute({
@@ -4148,6 +4183,25 @@ export function Canvas() {
           >
             <Group className="h-3.5 w-3.5" />
             {t('canvas.batchToolbar.group')}
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-[var(--canvas-node-menu-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={selectedTagGroupMemberNodeIds.length < 2}
+            onClick={handleBatchTagGroup}
+            title={selectedTagGroupMemberNodeIds.length < 2
+              ? t('canvas.batchToolbar.tagGroupUnavailable')
+              : excludedTagGroupSelectionCount > 0
+                ? t('canvas.batchToolbar.tagGroupExcluded', { count: excludedTagGroupSelectionCount })
+                : t('canvas.batchToolbar.tagGroup')}
+          >
+            <Tags className="h-3.5 w-3.5" />
+            {t('canvas.batchToolbar.tagGroup')}
+            {excludedTagGroupSelectionCount > 0 ? (
+              <span className="rounded-full bg-amber-500/15 px-1 text-[10px] text-amber-700 dark:text-amber-300" aria-label={t('canvas.batchToolbar.tagGroupExcluded', { count: excludedTagGroupSelectionCount })}>
+                -{excludedTagGroupSelectionCount}
+              </span>
+            ) : null}
           </button>
           <button
             type="button"

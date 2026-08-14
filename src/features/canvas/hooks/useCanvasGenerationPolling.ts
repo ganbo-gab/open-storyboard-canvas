@@ -876,8 +876,10 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
         updateNodeData,
         statusRetryResultUrl
           ? { preserveRetryMetadata: true, retryResultUrl: statusRetryResultUrl, clearJobMetadata: true }
-          : status.status === 'unknown'
+          : status.status === 'unknown' || (status.status === 'not_found' && safeRecoveryAvailable)
             ? { preserveRetryMetadata: true, jobState: 'unknown' }
+          : safeRecoveryAvailable
+            ? { preserveRetryMetadata: true, jobState: 'recoverable_wait' }
           : isVideoNode && isRetriableVideoPollingError(errorMessage)
             ? { preserveRetryMetadata: true }
           : undefined,

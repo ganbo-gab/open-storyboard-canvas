@@ -40,6 +40,44 @@ export interface ExternalAgentSessionInfo {
   createdAt: number;
 }
 
+export type ExternalAgentConnectionStatus =
+  | 'disconnected'
+  | 'ready'
+  | 'connected'
+  | 'expired';
+
+export interface ExternalAgentProviderConfig {
+  format: 'toml' | 'json';
+  contents: string;
+  destinationMacos: string;
+  destinationWindows: string;
+}
+
+export interface ExternalAgentConnectionInfo {
+  schemaVersion: 1;
+  connectionId: string | null;
+  status: ExternalAgentConnectionStatus;
+  project: { id: string; name: string } | null;
+  scope: string[];
+  permissionMode: 'manual';
+  createdAt: number | null;
+  expiresAt: number | null;
+  connectedAt: number | null;
+  lastActivityAt: number | null;
+  callCount: number;
+  descriptorPath: string | null;
+  configs: {
+    codex: ExternalAgentProviderConfig;
+    claude: ExternalAgentProviderConfig;
+  } | null;
+}
+
+export interface CreateExternalAgentConnectionRequest {
+  projectId: string;
+  projectName: string;
+  tools: ExternalAgentToolDefinition[];
+}
+
 export interface ExternalAgentAttachment {
   referenceId: string;
   title: string;
@@ -205,6 +243,26 @@ export function resolveExternalAgentToolCall(
   request: ExternalAgentResolveToolCallRequest
 ): Promise<void> {
   return invokeExternalAgent('external_agent_resolve_tool_call', { request });
+}
+
+export function createExternalAgentConnection(
+  request: CreateExternalAgentConnectionRequest
+): Promise<ExternalAgentConnectionInfo> {
+  return invokeExternalAgent('create_external_agent_connection', { request });
+}
+
+export function inspectExternalAgentConnection(): Promise<ExternalAgentConnectionInfo> {
+  return invokeExternalAgent('inspect_external_agent_connection');
+}
+
+export function revokeExternalAgentConnection(
+  connectionId: string
+): Promise<ExternalAgentConnectionInfo> {
+  return invokeExternalAgent('revoke_external_agent_connection', { connectionId });
+}
+
+export function replayExternalAgentPendingToolCalls(): Promise<number> {
+  return invokeExternalAgent('replay_external_agent_pending_tool_calls');
 }
 
 export async function listenExternalAgentEvents(

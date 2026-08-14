@@ -66,6 +66,120 @@ describe('agent approval safety', () => {
     expect(restored.getReceipt(createIdempotencyKey('run', 'canvas_command', 'call'))?.output).toEqual({ apiKey: '[configured]', file: '[redacted-path]' });
   });
 
+  it('falls back to memory instead of surfacing localStorage quota as a model failure', () => {
+    const storage = {
+      getItem: () => null,
+      setItem: () => { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); },
+    };
+    const store = new PersistentAgentApprovalStore(storage);
+    store.put(approvedRecord());
+    store.putReceipt({
+      id: 'receipt',
+      executionId: 'execution',
+      approvalId: defaultApprovalId,
+      idempotencyKey: createIdempotencyKey('run', 'canvas_command', 'call'),
+      status: 'succeeded',
+      createdAt: 1,
+      updatedAt: 2,
+      output: { ok: true },
+    });
+
+    expect(store.get(defaultApprovalId)?.status).toBe('approved');
+    expect(store.getReceipt(createIdempotencyKey('run', 'canvas_command', 'call'))?.output)
+      .toEqual({ ok: true });
+  });
+
+  it('measures the approval ledger using WebKit UTF-16 quota bytes', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const store = new PersistentAgentApprovalStore(storage, () => 1_000);
+    for (let index = 0; index < 80; index += 1) {
+      store.put(approvedRecord({
+        id: createApprovalId(`run-${index}`, 'canvas_command', `call-${index}`),
+        runId: `run-${index}`,
+        interruptionId: `call-${index}`,
+        status: 'succeeded',
+        createdAt: index,
+        expiresAt: index + 1,
+        impact: {
+          effect: 'canvas-write',
+          title: 'Rename',
+          summary: `已完成操作 ${index} ${'画布记录'.repeat(1_000)}`,
+          affectedNodeCount: 1,
+          affectedEdgeCount: 0,
+          externalSideEffect: false,
+        },
+      }));
+    }
+
+    const serialized = values.get('storyboard-copilot:canvas-agent:approval-ledger:v1') ?? '';
+    expect(serialized.length * 2).toBeLessThanOrEqual(512 * 1024);
+  });
+
+  it('removes expired approval recovery payloads during hydration', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const first = new PersistentAgentApprovalStore(storage, () => 10);
+    first.putRunRecovery([approvedRecord({
+      status: 'awaiting-approval',
+      createdAt: 1,
+      expiresAt: 20,
+    })], {
+      runId: 'run',
+      projectId: 'project',
+      sessionId: 'session',
+      runtimeVersion: 1,
+      agentDefinitionVersion: 1,
+      commandSchemaVersion: 1,
+      serializedState: JSON.stringify({
+        events: Array.from({ length: 1_000 }, (_, index) => `Pending event ${index}`),
+      }),
+      createdAt: 1,
+    });
+    const before = values.get('storyboard-copilot:canvas-agent:approval-ledger:v1')?.length ?? 0;
+
+    const restored = new PersistentAgentApprovalStore(storage, () => 21);
+    const after = values.get('storyboard-copilot:canvas-agent:approval-ledger:v1')?.length ?? 0;
+    expect(restored.get(defaultApprovalId)).toBeUndefined();
+    expect(restored.getRunRecovery('run')).toBeUndefined();
+    expect(after).toBeLessThan(before);
+  });
+
+  it('removes an expired recovery lazily after a running application ages it out', () => {
+    let now = 10;
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const store = new PersistentAgentApprovalStore(storage, () => now);
+    store.putRunRecovery([approvedRecord({
+      status: 'awaiting-approval',
+      createdAt: 1,
+      expiresAt: 20,
+    })], {
+      runId: 'run',
+      projectId: 'project',
+      sessionId: 'session',
+      runtimeVersion: 1,
+      agentDefinitionVersion: 1,
+      commandSchemaVersion: 1,
+      serializedState: JSON.stringify({ currentTurn: [], approvals: ['call'] }),
+      createdAt: 1,
+    });
+    now = 21;
+
+    expect(store.getRunRecovery('run')).toBeUndefined();
+    expect(JSON.parse(values.get('storyboard-copilot:canvas-agent:approval-ledger:v1') ?? '{}')
+      .runRecoveries).toEqual([]);
+  });
+
   it('persists approvals and a resumable RunState in one recovery write', () => {
     const values = new Map<string, string>();
     let writes = 0;
