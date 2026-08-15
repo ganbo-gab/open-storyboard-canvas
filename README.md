@@ -6,7 +6,7 @@
 
 面向 AI 图片、视频与分镜创作的本地节点画布。
 
-[下载最新版](https://github.com/ganbo-gab/open-storyboard-canvas/releases/latest) · [使用与开发文档](docs/) · [报告问题](https://github.com/ganbo-gab/open-storyboard-canvas/issues)
+[下载最新版](https://github.com/ganbo-gab/open-storyboard-canvas/releases/latest) · [使用与开发文档](docs/) · [加入 QQ 群](#交流与反馈) · [报告问题](https://github.com/ganbo-gab/open-storyboard-canvas/issues)
 
 </div>
 
@@ -183,6 +183,14 @@ src-tauri/
   tauri.conf.json           # 桌面应用配置
 docs/                       # 使用、开发、发布与授权文档
 ```
+
+## 交流与反馈
+
+欢迎加入 Open Storyboard Canvas QQ 交流群，交流使用经验、反馈问题或提出功能建议：
+
+**QQ群：1025837759**
+
+遇到需要跟踪和复现的问题，也欢迎通过 [GitHub Issues](https://github.com/ganbo-gab/open-storyboard-canvas/issues) 提交。
 
 ## 贡献
 
