@@ -4243,6 +4243,69 @@ function buildVolcengineSeedanceVideoJsonBody(
   });
 }
 
+function buildMiniMaxH3VideoJsonBody(
+  cfg: CustomProviderConfig,
+  modelName: string,
+  request: GenerateRequest,
+): Record<string, unknown> {
+  const defaultRequestParams = resolveDefaultRequestParams(cfg);
+  const userExtra = { ...(request.extra_params ?? {}) } as Record<string, unknown>;
+  const seconds = resolveVideoSeconds(request, defaultRequestParams);
+  const aspectRatio = userExtra.ratio ?? userExtra.aspectRatio ?? userExtra.aspect_ratio ?? request.aspect_ratio;
+  const resolution = userExtra.resolutionType ?? userExtra.resolution ?? userExtra.size ?? request.size;
+  const images = (request.reference_images ?? []).filter((url) => typeof url === 'string' && url.trim());
+  const videos = (request.reference_videos ?? []).filter((url) => typeof url === 'string' && url.trim());
+  const audios = (request.reference_audios ?? []).filter((url) => typeof url === 'string' && url.trim());
+  delete userExtra.seconds;
+  delete userExtra.duration;
+  delete userExtra.size;
+  delete userExtra.resolution;
+  delete userExtra.resolutionType;
+  delete userExtra.aspect_ratio;
+  delete userExtra.aspectRatio;
+  delete userExtra.ratio;
+  delete userExtra.reference_images;
+  delete userExtra.reference_videos;
+  delete userExtra.reference_audios;
+  delete userExtra.input_reference;
+  delete userExtra.inputReference;
+  delete userExtra.videoInputSchema;
+
+  const useSubjectReferences = videos.length > 0 || audios.length > 0 || images.length >= 3;
+  const media: Array<Record<string, unknown>> = [];
+  if (useSubjectReferences) {
+    images.forEach((url) => {
+      media.push({ type: 'image_url', image_url: { url }, role: 'reference_image' });
+    });
+  } else if (images.length === 1) {
+    media.push({ type: 'image_url', image_url: { url: images[0] }, role: 'first_frame' });
+  } else if (images.length === 2) {
+    media.push({ type: 'image_url', image_url: { url: images[0] }, role: 'first_frame' });
+    media.push({ type: 'image_url', image_url: { url: images[1] }, role: 'last_frame' });
+  }
+  videos.forEach((url) => {
+    media.push({ type: 'video_url', video_url: { url }, role: 'reference_video' });
+  });
+  audios.forEach((url) => {
+    media.push({ type: 'audio_url', audio_url: { url }, role: 'reference_audio' });
+  });
+
+  return compactRecord({
+    model: modelName,
+    content: [
+      { type: 'text', text: request.prompt },
+      ...media,
+    ],
+    duration: seconds !== undefined ? Math.round(seconds) : undefined,
+    ratio: typeof aspectRatio === 'string' && aspectRatio.trim() && aspectRatio !== 'auto'
+      ? aspectRatio.trim()
+      : undefined,
+    resolution,
+    ...defaultRequestParams,
+    ...userExtra,
+  });
+}
+
 function buildVideoMultipartBody(
   cfg: CustomProviderConfig,
   modelName: string,
@@ -4268,7 +4331,8 @@ function buildVideoMultipartBody(
 }
 
 function resolveVideoRequestBodyMode(cfg: CustomProviderConfig): 'json' | 'multipart' {
-  if (modernProviderKind(cfg) === 'agnes-video') {
+  const providerKind = modernProviderKind(cfg);
+  if (providerKind === 'agnes-video' || providerKind === 'minimax-h3') {
     return 'json';
   }
   const rawMode = cfg.extraParams?.videoRequestBodyMode ?? cfg.extraParams?.requestBodyMode;
@@ -4293,6 +4357,9 @@ function buildVideoJsonBody(
   }
   if (providerKind === 'seedance-video') {
     return buildVolcengineSeedanceVideoJsonBody(cfg, modelName, request);
+  }
+  if (providerKind === 'minimax-h3') {
+    return buildMiniMaxH3VideoJsonBody(cfg, modelName, request);
   }
 
   const body = buildVideoRequestFields(cfg, modelName, request);

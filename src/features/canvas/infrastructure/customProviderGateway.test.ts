@@ -47,6 +47,7 @@ import {
 } from '@/features/canvas/application/customImageProviderConfig';
 import {
   buildCustomProviderRequestDebugPreview,
+  buildCustomVideoProviderRequestDebugPreview,
   classifyGenerationError,
   detectInlineImageAspectRatio,
   getCustomProviderJob,
@@ -1851,5 +1852,119 @@ describe('custom provider diagnostic source redaction', () => {
   it('summarizes remote and local sources without leaking query secrets or paths', () => {
     expect(summarizeMaterializedSourceForLog('https://cdn.example.com/result.png?token=secret')).toBe('[remote-url omitted]');
     expect(summarizeMaterializedSourceForLog('/Users/alice/private/result.png')).toBe('[local-file omitted]');
+  });
+});
+
+describe('MiniMax H3 video provider', () => {
+  function h3Provider(overrides: Partial<CustomProviderConfig> = {}): CustomProviderConfig {
+    return provider({
+      label: 'MiniMax H3',
+      mediaType: 'video',
+      baseUrl: 'https://api.minimaxi.com',
+      endpointPath: '/v2/video_generation',
+      models: ['MiniMax-H3'],
+      extraParams: {
+        providerKind: 'minimax-h3',
+        videoRequestBodyMode: 'json',
+        videoTaskIdPath: 'task_id',
+        videoStatusEndpointPath: '/v2/query/video_generation/{taskId}',
+        responseVideoPaths: ['task.content.url'],
+        videoStatusPath: 'task.status',
+        videoPollIntervalMs: 500,
+        videoPollTimeoutMs: 5000,
+      },
+      ...overrides,
+    });
+  }
+
+  it('builds official v2 content for text, first/last frame, and subject references', () => {
+    useCustomProvidersStore.getState().replaceAll([h3Provider()]);
+
+    const textOnly = buildCustomVideoProviderRequestDebugPreview({
+      prompt: 'a fox in snow',
+      model: 'custom:provider-1:MiniMax-H3',
+      size: '768P',
+      aspect_ratio: '16:9',
+      extra_params: { seconds: 6 },
+    });
+    expect(textOnly.url).toBe('https://api.minimaxi.com/v2/video_generation');
+    expect(textOnly.body).toEqual({
+      model: 'MiniMax-H3',
+      content: [{ type: 'text', text: 'a fox in snow' }],
+      duration: 6,
+      ratio: '16:9',
+      resolution: '768P',
+    });
+
+    const firstLast = buildCustomVideoProviderRequestDebugPreview({
+      prompt: 'walk',
+      model: 'custom:provider-1:MiniMax-H3',
+      size: '768P',
+      aspect_ratio: '16:9',
+      reference_images: ['https://cdn.example/first.png', 'https://cdn.example/last.png'],
+      extra_params: { seconds: 6 },
+    });
+    expect(firstLast.body).toMatchObject({
+      content: [
+        { type: 'text', text: 'walk' },
+        { type: 'image_url', image_url: { url: 'https://cdn.example/first.png' }, role: 'first_frame' },
+        { type: 'image_url', image_url: { url: 'https://cdn.example/last.png' }, role: 'last_frame' },
+      ],
+    });
+
+    const subjects = buildCustomVideoProviderRequestDebugPreview({
+      prompt: 'same character',
+      model: 'custom:provider-1:MiniMax-H3',
+      size: '768P',
+      aspect_ratio: '16:9',
+      reference_images: ['https://cdn.example/a.png', 'https://cdn.example/b.png', 'https://cdn.example/c.png'],
+      reference_videos: ['https://cdn.example/ref.mp4'],
+      extra_params: { seconds: 6 },
+    });
+    expect(subjects.body).toMatchObject({
+      content: [
+        { type: 'text', text: 'same character' },
+        { type: 'image_url', role: 'reference_image' },
+        { type: 'image_url', role: 'reference_image' },
+        { type: 'image_url', role: 'reference_image' },
+        { type: 'video_url', video_url: { url: 'https://cdn.example/ref.mp4' }, role: 'reference_video' },
+      ],
+    });
+  });
+
+  it('polls GET /v2/query/video_generation/{task_id} and reads task.content.url', async () => {
+    useCustomProvidersStore.getState().replaceAll([h3Provider()]);
+    customHttpRequestMock
+      .mockImplementationOnce(() => response(200, { task_id: '424010985738629' }))
+      .mockImplementationOnce(() => response(200, {
+        task: {
+          id: '424010985738629',
+          status: 'succeeded',
+          content: { url: 'https://cdn.example/video.mp4' },
+        },
+      }));
+    persistVideoSourceMock.mockResolvedValueOnce('/local/h3.mp4');
+
+    const job = await waitForTerminalJob(await submitCustomVideoJob({
+      prompt: 'a fox in snow',
+      model: 'custom:provider-1:MiniMax-H3',
+      size: '768P',
+      aspect_ratio: '16:9',
+      extra_params: { seconds: 6 },
+    }));
+
+    expect(job).toMatchObject({ status: 'succeeded', result: '/local/h3.mp4' });
+    expect(customHttpRequestMock.mock.calls[0][0]).toMatchObject({
+      method: 'POST',
+      url: 'https://api.minimaxi.com/v2/video_generation',
+      body: expect.objectContaining({
+        model: 'MiniMax-H3',
+        duration: 6,
+        resolution: '768P',
+      }),
+    });
+    expect(customHttpRequestMock.mock.calls[1][0].url).toBe(
+      'https://api.minimaxi.com/v2/query/video_generation/424010985738629',
+    );
   });
 });

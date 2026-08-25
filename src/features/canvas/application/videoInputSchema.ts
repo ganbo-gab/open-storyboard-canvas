@@ -287,6 +287,29 @@ export function defaultVideoInputSchemaForProviderKind(providerKind: unknown): V
       },
     });
   }
+  if (kind === 'minimax-h3') {
+    return normalizeVideoInputSchema({
+      images: {
+        enabled: true,
+        min: 0,
+        max: 9,
+        roles: ['reference', 'firstFrame', 'lastFrame'],
+        requireImageHost: false,
+      },
+      video: {
+        enabled: true,
+        min: 0,
+        max: 3,
+        field: 'content',
+      },
+      audio: {
+        enabled: true,
+        min: 0,
+        max: 3,
+        field: 'content',
+      },
+    });
+  }
   return cloneSchema(DEFAULT_VIDEO_INPUT_SCHEMA);
 }
 
