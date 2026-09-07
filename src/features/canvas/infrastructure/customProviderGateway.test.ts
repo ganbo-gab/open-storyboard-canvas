@@ -36,7 +36,11 @@ vi.mock('@/commands/image', async (importOriginal) => {
   };
 });
 
-import { useCustomProvidersStore, type CustomProviderConfig } from '@/stores/customProvidersStore';
+import {
+  CUSTOM_PROVIDER_PRESETS,
+  useCustomProvidersStore,
+  type CustomProviderConfig,
+} from '@/stores/customProvidersStore';
 import {
   DEFAULT_GENERATION_NETWORK_SETTINGS,
   useSettingsStore,
@@ -569,6 +573,77 @@ describe('custom provider submission safety', () => {
 });
 
 describe('custom provider image request contracts', () => {
+  it('builds the Atlas Cloud preset request without unsupported ratio or reference fields', () => {
+    const preset = CUSTOM_PROVIDER_PRESETS.find((item) => item.key === 'atlas_cloud_seedream');
+    expect(preset).toBeDefined();
+    useCustomProvidersStore.getState().replaceAll([provider({
+      ...preset!.template,
+      id: 'atlas-cloud',
+      apiKey: 'atlas-secret',
+    })]);
+
+    const preview = buildCustomProviderRequestDebugPreview({
+      prompt: 'wide storyboard establishing shot',
+      model: 'custom:atlas-cloud:bytedance/seedream-v5.0-lite',
+      size: '1024x1024',
+      aspect_ratio: '16:9',
+      reference_images: [`data:image/png;base64,${'a'.repeat(400)}`],
+      extra_params: { resolutionType: '2848*1600' },
+    });
+
+    expect(preview.url).toBe('https://api.atlascloud.ai/api/v1/model/generateImage');
+    expect(preview.body).toEqual({
+      model: 'bytedance/seedream-v5.0-lite',
+      prompt: 'wide storyboard establishing shot',
+      size: '2848*1600',
+      output_format: 'jpeg',
+    });
+    expect(JSON.stringify(preview)).not.toContain('atlas-secret');
+  });
+
+  it('polls the Atlas Cloud preset result without replaying the generation POST', async () => {
+    const preset = CUSTOM_PROVIDER_PRESETS.find((item) => item.key === 'atlas_cloud_seedream');
+    expect(preset).toBeDefined();
+    useCustomProvidersStore.getState().replaceAll([provider({
+      ...preset!.template,
+      id: 'atlas-cloud',
+      apiKey: 'atlas-secret',
+    })]);
+    customHttpRequestMock
+      .mockImplementationOnce(() => response(200, {
+        code: 200,
+        data: { id: 'atlas-task-1', status: 'created' },
+      }))
+      .mockImplementationOnce(() => response(200, {
+        code: 200,
+        data: { status: 'completed', outputs: ['https://cdn.example/atlas-result.jpeg'] },
+      }));
+    prepareNodeImageSourceWithHeadersMock.mockResolvedValueOnce({
+      imagePath: '/local/atlas-result.jpeg',
+      previewImagePath: '/local/atlas-result.preview.jpeg',
+      aspectRatio: '16:9',
+    });
+
+    const job = await waitForTerminalJob(await submitCustomProviderJob({
+      prompt: 'wide storyboard establishing shot',
+      model: 'custom:atlas-cloud:bytedance/seedream-v5.0-lite',
+      size: '2848*1600',
+      aspect_ratio: '16:9',
+      extra_params: { resolutionType: '2848*1600' },
+    }));
+
+    expect(job).toMatchObject({ status: 'succeeded', result: '/local/atlas-result.jpeg' });
+    expect(customHttpRequestMock).toHaveBeenCalledTimes(2);
+    expect(customHttpRequestMock.mock.calls[0][0]).toMatchObject({
+      method: 'POST',
+      url: 'https://api.atlascloud.ai/api/v1/model/generateImage',
+    });
+    expect(customHttpRequestMock.mock.calls[1][0]).toMatchObject({
+      method: 'GET',
+      url: 'https://api.atlascloud.ai/api/v1/model/result/atlas-task-1',
+    });
+  });
+
   it.each(['1K', '2K', '3K', '4K'])(
     'keeps Agnes Image 2.1 symbolic %s and sends ratio at the top level',
     (tier) => {
