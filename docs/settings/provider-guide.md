@@ -15,3 +15,9 @@
 3. 创建并复制密钥
 4. 将密钥填写到对应的供应商下面
 5. 开始用吧！
+
+## Atlas Cloud（可选）
+
+在“添加供应商”中选择 `Atlas Cloud Seedream` 预设，填写 Atlas Cloud API Key 后即可使用
+`bytedance/seedream-v5.0-lite`。该预设会提交一次异步生图任务并轮询结果，不会改变现有默认供应商；
+当前模型仅支持文生图，因此不会发送参考图字段。
