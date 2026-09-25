@@ -14,6 +14,7 @@ interface ProviderAvailabilityInput {
   builtInProviderIds: readonly string[];
   customProviders: readonly CustomProviderConfig[];
   dreaminaStatus?: DreaminaProviderStatus | null;
+  agnesApiKey?: string;
 }
 
 function hasText(value: unknown): value is string {
@@ -73,14 +74,16 @@ export function getConfiguredImageProviderCount({
   builtInProviderIds,
   customProviders,
   dreaminaStatus,
+  agnesApiKey,
 }: ProviderAvailabilityInput): number {
   const builtInCount = getConfiguredApiKeyCount(apiKeys, builtInProviderIds);
   const customCount = customProviders.filter((provider) => (
     isImageCustomProvider(provider) && hasConfiguredCustomProvider(provider)
   )).length;
   const dreaminaCount = dreaminaStatus?.loggedIn ? 1 : 0;
+  const agnesCount = hasText(agnesApiKey) ? 1 : 0;
 
-  return builtInCount + customCount + dreaminaCount;
+  return builtInCount + customCount + dreaminaCount + agnesCount;
 }
 
 export function hasConfiguredImageProvider(input: ProviderAvailabilityInput): boolean {
