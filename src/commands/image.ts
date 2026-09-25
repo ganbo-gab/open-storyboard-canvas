@@ -179,6 +179,9 @@ export async function loadImage(filePath: string): Promise<string> {
 }
 
 export async function persistImageSource(source: string): Promise<string> {
+  if (!isTauri()) {
+    return source;
+  }
   return await invoke('persist_image_source', { source });
 }
 
