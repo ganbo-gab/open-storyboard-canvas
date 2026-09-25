@@ -49,16 +49,17 @@ describe('CanvasAgentHeader', () => {
     const markup = render();
     expect(markup).toContain('Provider / Model');
     expect(markup).toContain('canvasAgent.newConversation');
-    expect(markup).toContain('canvasAgent.showCompletedTools');
+    expect(markup).toContain('canvasAgent.moreActions');
     expect(markup).toContain('canvasAgent.history');
-    expect(markup).toContain('canvasAgent.externalConnection');
     expect(markup).not.toContain('canvasAgent.runtime.codex');
     expect(markup).not.toContain('canvasAgent.runtime.claude');
-    expect(markup).not.toContain('canvasAgent.tasks');
+    expect(markup).toContain('canvasAgent.tasks');
+    expect(markup).toContain('canvasAgent.conversation');
   });
 
-  it('shows the task action only while canvas work is running', () => {
-    expect(render(2)).toContain('canvasAgent.tasks');
+  it('keeps Tasks reachable after generation finishes and badges active work', () => {
+    expect(render(0)).toContain('canvasAgent.tasks');
+    expect(render(2)).toContain('>2</span>');
   });
 
   it('shows concrete generation progress instead of generic thinking while polling', () => {

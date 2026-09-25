@@ -53,6 +53,7 @@ import {
   type AgentFeedItem,
 } from './agentPanelStore';
 import { useCanvasAgentAttachments } from './useCanvasAgentAttachments';
+import { isCanvasAgentRunCurrent } from './agentRunOwnership';
 
 type Props = { projectId: string };
 
@@ -169,6 +170,11 @@ export function CanvasAgentDock({ projectId }: Props) {
 
   const [draft, setDraft] = useState('');
   const attachmentState = useCanvasAgentAttachments(projectId);
+  const attachmentPickerRef = useRef({ open: false, close: () => {} });
+  attachmentPickerRef.current = {
+    open: attachmentState.isPickerOpen,
+    close: attachmentState.closePicker,
+  };
   const { attachments, imageAssets, hasMissingAttachments } = attachmentState;
   const [isRunning, setRunning] = useState(false);
   const [showNewItems, setShowNewItems] = useState(false);
@@ -181,6 +187,10 @@ export function CanvasAgentDock({ projectId }: Props) {
   ));
   const abortRef = useRef<AbortController | null>(null);
   const executionGateRef = useRef<CanvasAgentTurnGate>({ active: false });
+  const visibleProjectIdRef = useRef(projectId);
+  const previousProjectIdRef = useRef(projectId);
+  const runEpochRef = useRef(0);
+  visibleProjectIdRef.current = projectId;
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -233,6 +243,20 @@ export function CanvasAgentDock({ projectId }: Props) {
   }, []);
 
   useEffect(() => {
+    if (previousProjectIdRef.current !== projectId) {
+      previousProjectIdRef.current = projectId;
+      runEpochRef.current += 1;
+      abortRef.current?.abort();
+      abortRef.current = null;
+      releaseCanvasAgentTurn(executionGateRef.current);
+      setRunning(false);
+      setAutoModeConfirmOpen(false);
+      setExternalConnectionOpen(false);
+      streamMessageIdRef.current = null;
+      streamReasoningIdRef.current = null;
+      activeStatusIdRef.current = null;
+      toolFeedIdsRef.current.clear();
+    }
     setProject(projectId);
     const store = useCanvasAgentPanelStore.getState();
     const existing = new Set(store.feed.flatMap((item) => (
@@ -257,6 +281,11 @@ export function CanvasAgentDock({ projectId }: Props) {
     }
   }, [projectId, setProject]);
 
+  useEffect(() => () => {
+    runEpochRef.current += 1;
+    abortRef.current?.abort();
+  }, []);
+
   useEffect(() => {
     if (!selectedModelId && selectedEntry) setSelectedModelId(selectedEntry.id);
   }, [selectedEntry, selectedModelId, setSelectedModelId]);
@@ -279,14 +308,28 @@ export function CanvasAgentDock({ projectId }: Props) {
     (panel as HTMLElement & { inert?: boolean }).inert = !isOpen;
     if (!isOpen) return;
 
-    const focusTarget = isCompactViewport
-      ? closeRef.current
-      : panel.querySelector<HTMLElement>('textarea, input') ?? closeRef.current;
+    const focusTarget = isAutoModeConfirmOpen || isExternalConnectionOpen
+      ? panel.querySelector<HTMLElement>('[role="dialog"] button')
+      : isCompactViewport
+        ? closeRef.current
+        : panel.querySelector<HTMLElement>('textarea, input') ?? closeRef.current;
     focusTarget?.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        if (isExternalConnectionOpen) {
+          setExternalConnectionOpen(false);
+          return;
+        }
+        if (isAutoModeConfirmOpen) {
+          setAutoModeConfirmOpen(false);
+          return;
+        }
+        if (attachmentPickerRef.current.open) {
+          attachmentPickerRef.current.close();
+          return;
+        }
         setOpen(false);
         return;
       }
@@ -306,7 +349,7 @@ export function CanvasAgentDock({ projectId }: Props) {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isCompactViewport, isOpen, setOpen]);
+  }, [isAutoModeConfirmOpen, isCompactViewport, isExternalConnectionOpen, isOpen, setOpen]);
 
   useEffect(() => {
     if (isOpen) return;
@@ -339,7 +382,16 @@ export function CanvasAgentDock({ projectId }: Props) {
     if (atBottom) setShowNewItems(false);
   };
 
+  const isCurrentRun = (ownerEpoch: number) => isCanvasAgentRunCurrent({
+    ownerProjectId: projectId,
+    visibleProjectId: visibleProjectIdRef.current,
+    storedProjectId: useCanvasAgentPanelStore.getState().projectId,
+    ownerEpoch,
+    currentEpoch: runEpochRef.current,
+  });
+
   const pushFeed = (item: AgentFeedItem) => {
+    if (visibleProjectIdRef.current !== projectId || useCanvasAgentPanelStore.getState().projectId !== projectId) return;
     addFeedItem(item);
     if (!stickToBottomRef.current) setShowNewItems(true);
   };
@@ -469,6 +521,7 @@ export function CanvasAgentDock({ projectId }: Props) {
   const runtimeReady = Boolean(selectedEntry);
 
   const addResult = (result: Awaited<ReturnType<typeof runCanvasAgentTurn>>) => {
+    if (visibleProjectIdRef.current !== projectId || useCanvasAgentPanelStore.getState().projectId !== projectId) return;
     setActiveSessionId(result.sessionId);
     if (result.skillSelection.skillIds.length) {
       pushFeed({
@@ -519,6 +572,7 @@ export function CanvasAgentDock({ projectId }: Props) {
   const executeTurn = async (message: string) => {
     if (!message.trim() || !selectedEntry || isRunning || pendingCount > 0) return;
     if (!acquireCanvasAgentTurn(executionGateRef.current)) return;
+    const runEpoch = ++runEpochRef.current;
     const statusId = nextAgentFeedId('status');
     activeStatusIdRef.current = statusId;
     pushFeed({
@@ -529,7 +583,8 @@ export function CanvasAgentDock({ projectId }: Props) {
       createdAt: Date.now(),
     });
     setRunning(true);
-    abortRef.current = new AbortController();
+    const controller = new AbortController();
+    abortRef.current = controller;
     streamTextRef.current = '';
     streamReasoningRef.current = '';
 
@@ -573,11 +628,12 @@ export function CanvasAgentDock({ projectId }: Props) {
         },
         message,
         media: media.length ? media : undefined,
-        signal: abortRef.current.signal,
-        onTextDelta: updateStreamingMessage,
-        onReasoningDelta: updateStreamingReasoning,
-        onToolEvent: handleToolEvent,
+        signal: controller.signal,
+        onTextDelta: (delta) => { if (isCurrentRun(runEpoch)) updateStreamingMessage(delta); },
+        onReasoningDelta: (delta) => { if (isCurrentRun(runEpoch)) updateStreamingReasoning(delta); },
+        onToolEvent: (event) => { if (isCurrentRun(runEpoch)) handleToolEvent(event); },
       });
+      if (!isCurrentRun(runEpoch)) return;
       attachmentState.reset();
       updateFeedItem(statusId, {
         status: 'completed',
@@ -587,6 +643,7 @@ export function CanvasAgentDock({ projectId }: Props) {
       });
       addResult(result);
     } catch (error) {
+      if (!isCurrentRun(runEpoch)) return;
       const aborted = error instanceof DOMException && error.name === 'AbortError';
       const failure = classifyCanvasAgentFailure(error);
       const readableError = readableAgentFailure(error, t);
@@ -603,10 +660,12 @@ export function CanvasAgentDock({ projectId }: Props) {
       });
       finishStreaming();
     } finally {
-      activeStatusIdRef.current = null;
-      releaseCanvasAgentTurn(executionGateRef.current);
-      setRunning(false);
-      abortRef.current = null;
+      if (isCurrentRun(runEpoch)) {
+        activeStatusIdRef.current = null;
+        releaseCanvasAgentTurn(executionGateRef.current);
+        setRunning(false);
+        if (abortRef.current === controller) abortRef.current = null;
+      }
     }
   };
 
@@ -632,6 +691,7 @@ export function CanvasAgentDock({ projectId }: Props) {
       return;
     }
 
+    setActiveView('conversation');
     setDraft('');
     attachmentState.setError(null);
     stickToBottomRef.current = true;
@@ -681,6 +741,7 @@ export function CanvasAgentDock({ projectId }: Props) {
   ) => {
     if (!selectedEntry || item.status !== 'pending') return false;
     updateFeedItem(item.id, { status: approve ? 'approving' : 'rejecting' });
+    const runEpoch = manageRunningState ? ++runEpochRef.current : runEpochRef.current;
     if (manageRunningState) {
       setRunning(true);
       abortRef.current = new AbortController();
@@ -694,14 +755,16 @@ export function CanvasAgentDock({ projectId }: Props) {
         approve,
         model: selectedEntry,
         signal: controller.signal,
-        onToolEvent: handleToolEvent,
-        onTextDelta: updateStreamingMessage,
-        onReasoningDelta: updateStreamingReasoning,
+        onToolEvent: (event) => { if (isCurrentRun(runEpoch)) handleToolEvent(event); },
+        onTextDelta: (delta) => { if (isCurrentRun(runEpoch)) updateStreamingMessage(delta); },
+        onReasoningDelta: (delta) => { if (isCurrentRun(runEpoch)) updateStreamingReasoning(delta); },
       });
+      if (!isCurrentRun(runEpoch)) return false;
       updateFeedItem(item.id, { status: approve ? 'approved' : 'rejected' });
       addResult(result);
       return true;
     } catch (error) {
+      if (!isCurrentRun(runEpoch)) return false;
       const aborted = error instanceof DOMException && error.name === 'AbortError';
       const message = error instanceof Error ? error.message : String(error);
       const readableError = readableAgentFailure(error, t);
@@ -721,9 +784,9 @@ export function CanvasAgentDock({ projectId }: Props) {
       finishStreaming();
       return false;
     } finally {
-      if (manageRunningState) {
+      if (manageRunningState && isCurrentRun(runEpoch)) {
         setRunning(false);
-        abortRef.current = null;
+        if (abortRef.current === controller) abortRef.current = null;
       }
     }
   };
@@ -741,22 +804,27 @@ export function CanvasAgentDock({ projectId }: Props) {
     approve: boolean,
   ) => {
     if (!selectedEntry || isRunning || !items.length) return;
+    const runEpoch = ++runEpochRef.current;
     setRunning(true);
-    abortRef.current = new AbortController();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       for (const item of items) {
-        if (abortRef.current.signal.aborted) break;
+        if (!isCurrentRun(runEpoch) || controller.signal.aborted) break;
         const latest = useCanvasAgentPanelStore.getState().feed.find((candidate) => candidate.id === item.id);
         if (latest?.kind !== 'approval' || latest.status !== 'pending') continue;
         await resolveApprovalItem(latest, approve, false);
       }
     } finally {
-      setRunning(false);
-      abortRef.current = null;
+      if (isCurrentRun(runEpoch)) {
+        setRunning(false);
+        if (abortRef.current === controller) abortRef.current = null;
+      }
     }
   };
 
   const loadSession = (sessionId: string) => {
+    if (isRunning || executionGateRef.current.active || pendingCount > 0 || hasPendingPlan) return;
     const messages = getCanvasAgentSessionMessages(sessionId);
     if (!messages.length) return;
     replaceFeed(messages.map((message) => ({
@@ -774,7 +842,7 @@ export function CanvasAgentDock({ projectId }: Props) {
   };
 
   const startConversation = () => {
-    if (isRunning || pendingCount > 0) return;
+    if (isRunning || executionGateRef.current.active || pendingCount > 0 || hasPendingPlan) return;
     clearFeed();
     setActiveView('conversation');
     setDraft('');
@@ -852,6 +920,7 @@ export function CanvasAgentDock({ projectId }: Props) {
   const handleRollback = async (item: Extract<AgentFeedItem, { kind: 'tool' }>) => {
     if (!item.receiptId || item.rolledBackAt) return;
     const result = await rollbackAgentCanvasReceipt(item.receiptId, projectId);
+    if (visibleProjectIdRef.current !== projectId || useCanvasAgentPanelStore.getState().projectId !== projectId) return;
     if (result.ok) {
       updateFeedItem(item.id, { rolledBackAt: Date.now() });
       pushFeed({
@@ -992,6 +1061,7 @@ export function CanvasAgentDock({ projectId }: Props) {
           isRunning={isRunning}
           showCompletedTools={showCompletedTools}
           pendingCount={pendingCount}
+          hasPendingPlan={hasPendingPlan}
           showNewItems={showNewItems}
           scrollRef={feedScrollRef}
           onScroll={onFeedScroll}
@@ -1016,7 +1086,7 @@ export function CanvasAgentDock({ projectId }: Props) {
           }}
         />
 
-        {activeView !== 'tasks' ? (
+        {activeView === 'conversation' ? (
         <div className="relative shrink-0">
           {attachmentState.isPickerOpen ? (
             <CanvasAgentAttachmentPicker

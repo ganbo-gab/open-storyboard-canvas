@@ -15,15 +15,12 @@ function preserveMaterialColor<T extends { userData: Record<string, unknown> }>(
  *
  * Person figures use cartoon "big-head, stick-limb" proportions inspired
  * by the user-supplied reference image — a round head ~21% of total
- * height, slim capsule torso, and very thin limb capsules. The intent
- * matches a 2D stick-figure: commit fully to abstraction, eliminate
- * uncanny-valley territory by having no face or clothes, and let
- * silhouette + posture do most of the recognition work. Female presets
- * add only a small head-attached hair shell for identification.
+ * height, slim capsule torso, and thin limb capsules. The figure remains
+ * abstract; small face-direction marks, headwear, and torso cues make
+ * characters readable when they turn at working zoom.
  *
- * Per-preset variation = height, thickness scale, female hair, and
- * elder bind-pose stoop. Color is the user's choice and drives the
- * body material.
+ * Per-preset variation includes height, bulk, posture, hair, and a few
+ * accessories. The user's color still drives the body material.
  *
  * Skeleton tree (preserved across all visual rewrites so action
  * transforms keep working):
@@ -142,6 +139,8 @@ interface PresetTraits {
   bellyBulge?: boolean;
   /** Optional small hair shell attached to the head for authored character presets. */
   hairStyle?: 'shortBob' | 'shortCap' | 'longHair' | 'pigtails';
+  headwear?: 'hardhat' | 'serviceCap' | 'hood';
+  torsoCue?: 'coat' | 'vest';
   /** Small preserved-color silhouette cue for age-specific models. */
   ageCue?: 'cane' | 'backpack';
 }
@@ -347,6 +346,16 @@ function traitsForPreset(presetId: string | undefined): PresetTraits {
         hipScale: 1.08,
         hairStyle: 'longHair',
       };
+    case 'person-construction-worker':
+      return { ...DEFAULT_TRAITS, thicknessScale: 1.1, shoulderScale: 1.12, headwear: 'hardhat', torsoCue: 'vest' };
+    case 'person-medical-worker':
+      return { ...DEFAULT_TRAITS, thicknessScale: 0.88, hairStyle: 'shortBob', torsoCue: 'coat' };
+    case 'person-security-officer':
+      return { ...DEFAULT_TRAITS, shoulderScale: 1.18, thicknessScale: 1.08, headwear: 'serviceCap', torsoCue: 'vest' };
+    case 'person-stage-performer':
+      return { ...DEFAULT_TRAITS, heightMultiplier: 1.07, thicknessScale: 0.82, hairStyle: 'longHair' };
+    case 'person-raincoat':
+      return { ...DEFAULT_TRAITS, torsoTaper: 1.2, headwear: 'hood', torsoCue: 'coat' };
     default:
       return { ...DEFAULT_TRAITS };
   }
@@ -554,6 +563,30 @@ export function createPersonMeshGroup(
       );
       backpack.position.set(0, p.torsoH * 0.02, -p.torsoR * 0.92);
       torsoMesh.add(backpack);
+    }
+    if (traits.torsoCue === 'coat') {
+      const coatMat = preserveMaterialColor(new THREE.MeshStandardMaterial({
+        color: bodyColor.clone().lerp(new THREE.Color(0xf8fafc), 0.42),
+        roughness: 0.82,
+      }));
+      for (const side of [-1, 1]) {
+        const panel = new THREE.Mesh(
+          new THREE.BoxGeometry(p.torsoR * 0.65, p.torsoH * 0.82, p.torsoR * 0.25),
+          coatMat,
+        );
+        panel.position.set(side * p.torsoR * 0.52, -p.torsoH * 0.08, p.torsoR * 0.88);
+        torsoMesh.add(panel);
+      }
+    } else if (traits.torsoCue === 'vest') {
+      const stripeMat = createPreservedMaterial('#e2e8f0', { roughness: 0.7 });
+      for (const side of [-1, 1]) {
+        const stripe = new THREE.Mesh(
+          new THREE.BoxGeometry(p.torsoR * 0.22, p.torsoH * 0.75, p.torsoR * 0.15),
+          stripeMat,
+        );
+        stripe.position.set(side * p.torsoR * 0.55, p.torsoH * 0.02, p.torsoR * 0.95);
+        torsoMesh.add(stripe);
+      }
     }
   }
 
@@ -814,6 +847,41 @@ export function createPersonMeshGroup(
         tail.rotation.z = sx * 0.34;
         tail.scale.set(0.8, 1.0, 0.62);
         headGroup.add(tail);
+      }
+    }
+  }
+
+  if (showIdentityDetails) {
+    // Two simple face marks make the figure's facing direction readable
+    // when a route or procedural action rotates it at normal zoom.
+    const faceMat = createPreservedMaterial('#111827', { roughness: 0.9 });
+    for (const side of [-1, 1]) {
+      const eye = new THREE.Mesh(makeSphere(p.headR * 0.085, 8, 6), faceMat);
+      eye.position.set(side * p.headR * 0.34, p.headR * 0.11, p.headR * 0.94);
+      headGroup.add(eye);
+    }
+    if (traits.headwear) {
+      const hatMat = preserveMaterialColor(new THREE.MeshStandardMaterial({
+        color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.18),
+        roughness: 0.76,
+      }));
+      if (traits.headwear === 'hood') {
+        const hood = new THREE.Mesh(new THREE.TorusGeometry(p.headR * 1.02, p.headR * 0.17, 7, 20), hatMat);
+        hood.position.z = p.headR * 0.15;
+        headGroup.add(hood);
+      } else {
+        const dome = new THREE.Mesh(
+          makeSphere(p.headR * 1.13, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.48),
+          hatMat,
+        );
+        dome.position.y = p.headR * 0.1;
+        headGroup.add(dome);
+        const brim = new THREE.Mesh(
+          new THREE.BoxGeometry(p.headR * 2.1, p.headR * 0.15, p.headR * (traits.headwear === 'hardhat' ? 2.0 : 1.2)),
+          hatMat,
+        );
+        brim.position.set(0, p.headR * 0.13, p.headR * (traits.headwear === 'hardhat' ? 0.12 : 0.48));
+        headGroup.add(brim);
       }
     }
   }
@@ -1132,7 +1200,7 @@ function createPreservedMaterial(
     color,
     roughness: options.roughness ?? 0.64,
     metalness: options.metalness ?? 0.08,
-    emissive: options.emissive,
+    ...(options.emissive !== undefined ? { emissive: options.emissive } : {}),
     emissiveIntensity: options.emissiveIntensity ?? 0,
   }));
 }

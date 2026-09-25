@@ -80,6 +80,8 @@ export interface BlueprintSceneHandle {
   setExportMode: (enabled: boolean, size?: { width: number; height: number }) => void;
   enterPilot: () => void;
   exitPilot: () => void;
+  completeMotionRouteDraft: () => boolean;
+  cancelMotionRouteDraft: () => void;
 }
 
 export interface DirectorSceneCameraSnapshot {
@@ -94,6 +96,12 @@ export interface DirectorMotionRouteSelection {
   kind: 'camera' | 'object';
   trackId: string;
   keyframeId: string;
+}
+
+export interface DirectorMotionRouteDraft {
+  kind: 'camera' | 'object';
+  trackId: string;
+  method: 'points' | 'draw';
 }
 
 export interface BlueprintSceneExportOptions {
@@ -148,6 +156,9 @@ export interface BlueprintSceneProps {
     time: number,
     position: DirectorMotionVector3,
   ) => void;
+  motionRouteDraft?: DirectorMotionRouteDraft | null;
+  onMotionRouteDraftComplete?: (points: DirectorMotionVector3[]) => void;
+  onMotionRouteDraftCancel?: () => void;
   pilotActive?: boolean;
   onPilotActiveChange?: (active: boolean) => void;
   onPilotRecordCamera?: (snapshot: DirectorSceneCameraSnapshot) => void;
@@ -588,6 +599,9 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   onMotionRoutePointSelect,
   onMotionRoutePointMove,
   onMotionRoutePointInsert,
+  motionRouteDraft = null,
+  onMotionRouteDraftComplete,
+  onMotionRouteDraftCancel,
   pilotActive = false,
   onPilotActiveChange,
   onPilotRecordCamera,
@@ -620,6 +634,10 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   const ambientLightRef = useRef<any>(null);
   const mainLightRef = useRef<any>(null);
   const motionRoutesRef = useRef<any>(null);
+  const motionRouteDraftGroupRef = useRef<any>(null);
+  const motionRouteDraftPointsRef = useRef<DirectorMotionVector3[]>([]);
+  const motionRouteDraftRef = useRef(motionRouteDraft);
+  motionRouteDraftRef.current = motionRouteDraft;
   const motionPlaybackActiveRef = useRef(false);
   const exportModeRef = useRef(false);
   const exportSizeRef = useRef<{ width: number; height: number } | null>(null);
@@ -726,7 +744,9 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   // studio remains interactive while the camera and timeline settle.
   const meshDetail: 'full' | 'preview' = fullBleed && items.length > 24 ? 'preview' : 'full';
 
-  const hint = pointerMode === 'position'
+  const hint = motionRouteDraft
+    ? t(motionRouteDraft.method === 'draw' ? 'directorStudio.motion.route.hintDraw' : 'directorStudio.motion.route.hintPoints')
+    : pointerMode === 'position'
     ? t('directorStudio.scene.positionHint')
     : editMode
       ? t('directorStudio.scene.moveHint')
@@ -1284,6 +1304,80 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     requestRender();
   }, [motionRouteSelection, requestRender]);
 
+  const refreshMotionRouteDraftVisual = useCallback(() => {
+    const group = motionRouteDraftGroupRef.current;
+    if (!group) return;
+    group.children.slice().forEach((child: any) => {
+      group.remove(child);
+      child.geometry?.dispose();
+      child.material?.dispose();
+    });
+    const points = motionRouteDraftPointsRef.current;
+    const color = motionRouteDraftRef.current?.kind === 'camera' ? 0x67e8f9 : 0xfbbf24;
+    if (points.length >= 2) {
+      const geometry = new THREE.BufferGeometry().setFromPoints(points.map((point) => new THREE.Vector3(point.x, point.y + 0.06, point.z)));
+      const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color, depthTest: false }));
+      line.renderOrder = 22;
+      group.add(line);
+    }
+    points.forEach((point) => {
+      const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(0.075, 8, 6),
+        new THREE.MeshBasicMaterial({ color, depthTest: false }),
+      );
+      marker.position.set(point.x, point.y + 0.06, point.z);
+      marker.renderOrder = 23;
+      group.add(marker);
+    });
+    requestRender();
+  }, [requestRender]);
+
+  useEffect(() => {
+    motionRouteDraftPointsRef.current = [];
+    const scene = sceneRef.current;
+    if (!motionRouteDraft || !scene) return;
+    const group = new THREE.Group();
+    group.name = '__directorMotionRouteDraft';
+    scene.add(group);
+    motionRouteDraftGroupRef.current = group;
+    requestRender();
+    return () => {
+      group.children.slice().forEach((child: any) => {
+        child.geometry?.dispose();
+        child.material?.dispose();
+      });
+      scene.remove(group);
+      if (motionRouteDraftGroupRef.current === group) motionRouteDraftGroupRef.current = null;
+      motionRouteDraftPointsRef.current = [];
+      requestRender();
+    };
+  }, [motionRouteDraft?.kind, motionRouteDraft?.trackId, motionRouteDraft?.method, refreshMotionRouteDraftVisual, requestRender]);
+
+  const completeMotionRouteDraft = useCallback(() => {
+    if (!motionRouteDraftRef.current || motionRouteDraftPointsRef.current.length < 2) return false;
+    onMotionRouteDraftComplete?.([...motionRouteDraftPointsRef.current]);
+    motionRouteDraftPointsRef.current = [];
+    refreshMotionRouteDraftVisual();
+    return true;
+  }, [onMotionRouteDraftComplete, refreshMotionRouteDraftVisual]);
+
+  const cancelMotionRouteDraft = useCallback(() => {
+    motionRouteDraftPointsRef.current = [];
+    refreshMotionRouteDraftVisual();
+  }, [refreshMotionRouteDraftVisual]);
+
+  useEffect(() => {
+    if (!motionRouteDraft) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      cancelMotionRouteDraft();
+      onMotionRouteDraftCancel?.();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [cancelMotionRouteDraft, motionRouteDraft, onMotionRouteDraftCancel]);
+
   const commitTransformFromMesh = useCallback((itemId: string) => {
     const mesh = meshByIdRef.current.get(itemId);
     if (!mesh) return;
@@ -1478,7 +1572,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   // Pointer interactions
   // ---------------------------------------------------------------------
   const interactRef = useRef<{
-    mode: 'idle' | 'orbit' | 'pan' | 'drag' | 'routeDrag';
+    mode: 'idle' | 'orbit' | 'pan' | 'drag' | 'routeDrag' | 'routePoint' | 'routeDraw';
     dragItemId: string | null;
     dragLastPos3d: { x: number; y: number; z: number } | null;
     routeSelection: DirectorMotionRouteSelection | null;
@@ -1642,6 +1736,19 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveWidth, effectiveHeight]);
 
+  const appendMotionRouteDraftPoint = useCallback((lx: number, ly: number, minDistance = 0.04) => {
+    const hit = raycastGround(lx, ly, gridHeightRef.current);
+    if (!hit) return;
+    if (modeRef.current === 'panorama') clampPanoramaPointAtFixedY(hit);
+    const point = { x: hit.x, y: hit.y, z: hit.z };
+    const points = motionRouteDraftPointsRef.current;
+    const previous = points[points.length - 1];
+    if (previous && Math.hypot(point.x - previous.x, point.y - previous.y, point.z - previous.z) < minDistance) return;
+    if (points.length >= 192) return;
+    points.push(point);
+    refreshMotionRouteDraftVisual();
+  }, [raycastGround, refreshMotionRouteDraftVisual]);
+
   const getSuggestedInsertPosition = useCallback(() => {
     const centerGround = cameraRef.current
       ? raycastGround(effectiveWidth / 2, effectiveHeight / 2, gridHeightRef.current)
@@ -1790,6 +1897,18 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       return;
     }
     const local = getLocalXY(e);
+    const routeDraft = motionRouteDraftRef.current;
+    if (routeDraft && e.button === 0) {
+      try { hostElRef.current?.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      interactRef.current.mode = routeDraft.method === 'draw' ? 'routeDraw' : 'routePoint';
+      interactRef.current.pointerId = e.pointerId;
+      interactRef.current.lastX = local.x;
+      interactRef.current.lastY = local.y;
+      interactRef.current.moved = false;
+      if (routeDraft.method === 'draw') appendMotionRouteDraftPoint(local.x, local.y);
+      e.preventDefault();
+      return;
+    }
     if (isTransformControlPointerActive(local.x, local.y, e.button)) {
       interactRef.current.mode = 'idle';
       interactRef.current.dragItemId = null;
@@ -1840,13 +1959,21 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       e.preventDefault();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTransformControlPointerActive, onMotionRoutePointSelect, onSelectedItemChange, raycastItem, raycastMotionRoutePoint]);
+  }, [appendMotionRouteDraftPoint, isTransformControlPointerActive, onMotionRoutePointSelect, onSelectedItemChange, raycastItem, raycastMotionRoutePoint]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const st = interactRef.current;
     const local = getLocalXY(e);
     if (transformDraggingRef.current) {
       setCanvasCursor('grabbing');
+      return;
+    }
+    if (st.mode === 'routeDraw' || st.mode === 'routePoint') {
+      if (Math.hypot(local.x - st.lastX, local.y - st.lastY) > 2) st.moved = true;
+      st.lastX = local.x;
+      st.lastY = local.y;
+      if (st.mode === 'routeDraw') appendMotionRouteDraftPoint(local.x, local.y, 0.14);
+      setCanvasCursor('crosshair');
       return;
     }
     if (st.mode === 'drag' || st.mode === 'routeDrag' || st.mode === 'orbit') {
@@ -1960,6 +2087,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    appendMotionRouteDraftPoint,
     applyCamera,
     fullBleed,
     getPanoramaModeControlMultiplier,
@@ -1974,6 +2102,19 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     const host = hostElRef.current;
     if (host) {
       try { host.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    }
+    if (st.mode === 'routePoint' || st.mode === 'routeDraw') {
+      const local = getLocalXY(e);
+      if (st.mode === 'routePoint' && !st.moved) appendMotionRouteDraftPoint(local.x, local.y);
+      if (st.mode === 'routeDraw') {
+        appendMotionRouteDraftPoint(local.x, local.y, 0.04);
+        completeMotionRouteDraft();
+      }
+      st.mode = 'idle';
+      st.pointerId = null;
+      st.moved = false;
+      setCanvasCursor('crosshair');
+      return;
     }
     if (st.mode === 'drag' && st.dragItemId && st.dragLastPos3d) {
       const finalP = st.dragLastPos3d;
@@ -2025,9 +2166,15 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     st.pointerId = null;
     st.moved = false;
     setCanvasCursor(fullBleed ? 'grab' : 'default');
-  }, [fullBleed, onMotionRoutePointMove, onPointerModeChange, raycastGround, setCanvasCursor]);
+  }, [appendMotionRouteDraftPoint, completeMotionRouteDraft, fullBleed, onMotionRoutePointMove, onPointerModeChange, raycastGround, setCanvasCursor]);
 
   const handleDoubleClick = useCallback((event: React.MouseEvent) => {
+    if (motionRouteDraftRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      completeMotionRouteDraft();
+      return;
+    }
     if (pilotStateRef.current.active || pointerModeRef.current === 'position') return;
     const local = getLocalXY(event);
     if (raycastMotionRoutePoint(local.x, local.y)) return;
@@ -2041,7 +2188,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       segment.time,
       segment.position,
     );
-  }, [onMotionRoutePointInsert, raycastMotionRoutePoint, raycastMotionRouteSegment]);
+  }, [completeMotionRouteDraft, onMotionRoutePointInsert, raycastMotionRoutePoint, raycastMotionRouteSegment]);
 
   const handleWheel = useCallback((e: WheelEvent) => {
     if (transformDraggingRef.current) return;
@@ -2452,6 +2599,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     if (motionRoutesRef.current) motionRoutesRef.current.visible = enabled
       ? false
       : !motionPlaybackActiveRef.current && (previousVisibility?.motionRoutes ?? motionRoutesVisible);
+    if (motionRouteDraftGroupRef.current) motionRouteDraftGroupRef.current.visible = !enabled;
     if (!enabled) exportVisibilityRef.current = null;
     requestRender();
   }, [effectiveHeight, effectiveWidth, grid.visible, motionRoutesVisible, requestRender]);
@@ -2519,6 +2667,8 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       setExportMode={setExportMode}
       enterPilot={enterPilot}
       exitPilot={exitPilot}
+      completeMotionRouteDraft={completeMotionRouteDraft}
+      cancelMotionRouteDraft={cancelMotionRouteDraft}
       sceneRef={sceneRef}
       t={t}
       forwardRef={ref}
@@ -2572,6 +2722,8 @@ interface InternalsProps {
   setExportMode: (enabled: boolean, size?: { width: number; height: number }) => void;
   enterPilot: () => void;
   exitPilot: () => void;
+  completeMotionRouteDraft: () => boolean;
+  cancelMotionRouteDraft: () => void;
   sceneRef: React.MutableRefObject<any>;
   t: ReturnType<typeof useTranslation>['t'];
   forwardRef: React.Ref<BlueprintSceneHandle>;
@@ -2589,6 +2741,7 @@ function BlueprintSceneInternals({
   hint, mode, referenceImages, fullBleed,
   handleResetCamera, handleFitCamera, handleFocusItem, exportPng, getSuggestedInsertPosition,
   getCameraSnapshot, getCanvas, applyMotionFrame, setMotionPlaybackActive, renderFrame, setExportMode, enterPilot, exitPilot,
+  completeMotionRouteDraft, cancelMotionRouteDraft,
   t,
   forwardRef,
 }: InternalsProps) {
@@ -2606,7 +2759,9 @@ function BlueprintSceneInternals({
     setExportMode,
     enterPilot,
     exitPilot,
-  }), [applyMotionFrame, enterPilot, exitPilot, exportPng, getCameraSnapshot, getCanvas, getSuggestedInsertPosition, handleFitCamera, handleFocusItem, handleResetCamera, renderFrame, setExportMode, setMotionPlaybackActive]);
+    completeMotionRouteDraft,
+    cancelMotionRouteDraft,
+  }), [applyMotionFrame, cancelMotionRouteDraft, completeMotionRouteDraft, enterPilot, exitPilot, exportPng, getCameraSnapshot, getCanvas, getSuggestedInsertPosition, handleFitCamera, handleFocusItem, handleResetCamera, renderFrame, setExportMode, setMotionPlaybackActive]);
 
   const tree = (
     <div

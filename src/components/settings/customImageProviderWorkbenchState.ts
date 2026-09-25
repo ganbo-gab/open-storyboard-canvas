@@ -4,7 +4,7 @@ import {
 } from '@/features/canvas/application/customImageProviderConfig';
 import type { ImageRequestVariantV1, JsonTemplateValue } from '@/features/canvas/application/customImageProviderContract';
 
-export type CustomImageProviderCreationRoute = 'ai' | 'manual';
+export type CustomImageProviderCreationRoute = 'ai' | 'manual' | 'comfyui';
 
 export const CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS = [
   'connection',
@@ -43,6 +43,33 @@ export function createCustomImageProviderWorkbenchDraft(): CustomImageProviderDr
   };
 }
 
+export function createComfyUIProviderWorkbenchDraft(): CustomImageProviderDraft {
+  const draft = createEmptyCustomImageProviderDraft();
+  return {
+    ...draft,
+    label: 'ComfyUI',
+    baseUrl: 'http://127.0.0.1:8188',
+    endpointPath: '/prompt',
+    modelListEndpointPath: '',
+    apiStyle: 'comfyui',
+    responseFormat: 'generic',
+    models: ['workflow'],
+    extraParams: {
+      ...draft.extraParams,
+      allowNoApiKey: true,
+      auth: { mode: 'none' },
+      comfyui: {
+        workflow: {},
+        bindings: { images: [] },
+        outputNodeIds: [],
+        pollIntervalMs: 1500,
+        pollTimeoutMs: 600000,
+      },
+    },
+    imageRequestContract: { version: 1 },
+  };
+}
+
 export function splitWorkbenchValues(value: string): string[] {
   const seen = new Set<string>();
   return value
@@ -66,5 +93,7 @@ export function getImageToImageVariant(draft: CustomImageProviderDraft): ImageRe
     endpointPath: getTextToImageVariant(draft).endpointPath ?? '',
     method: getTextToImageVariant(draft).method ?? 'POST',
     bodyMode: getTextToImageVariant(draft).bodyMode ?? 'json',
+    imageFields: [{ name: 'image', mode: 'single', encoding: 'data-url' }],
+    responseImagePaths: getTextToImageVariant(draft).responseImagePaths ?? ['data[0].url'],
   };
 }

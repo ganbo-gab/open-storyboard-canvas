@@ -89,6 +89,11 @@ const peopleModels: Array<{
   { id: 'child-girl', displayName: '儿童-女', presetId: 'person-child-girl', color: '#fbcfe8', visualId: 'person-child-girl', bodyControls: { style: 'childlike' } },
   { id: 'teen-male', displayName: '青少年-男', presetId: 'person-teen-male', color: '#93c5fd', visualId: 'person-teen-male', bodyControls: { core: { height: 0.9, headScale: 1.08 }, arms: { thickness: 0.92 }, legs: { thickness: 0.92 } } },
   { id: 'teen-female', displayName: '青少年-女', presetId: 'person-teen-female', color: '#fda4af', visualId: 'person-teen-female', bodyControls: { core: { height: 0.88, headScale: 1.08 }, arms: { thickness: 0.88 }, legs: { thickness: 0.88 } } },
+  { id: 'construction-worker', displayName: '建筑工人', presetId: 'person-construction-worker', color: '#f59e0b', visualId: 'person-construction-worker', bodyControls: { style: 'strong' } },
+  { id: 'medical-worker', displayName: '医护人员', presetId: 'person-medical-worker', color: '#a7f3d0', visualId: 'person-medical-worker' },
+  { id: 'security-officer', displayName: '安保人员', presetId: 'person-security-officer', color: '#64748b', visualId: 'person-security-officer', bodyControls: { style: 'strong' } },
+  { id: 'stage-performer', displayName: '舞台表演者', presetId: 'person-stage-performer', color: '#e879f9', visualId: 'person-stage-performer', bodyControls: { style: 'slim' } },
+  { id: 'raincoat', displayName: '雨衣人物', presetId: 'person-raincoat', color: '#facc15', visualId: 'person-raincoat' },
 ];
 
 const propModels = [

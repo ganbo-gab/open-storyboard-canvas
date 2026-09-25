@@ -64,6 +64,7 @@ type Props = {
   isRunning: boolean;
   showCompletedTools: boolean;
   pendingCount: number;
+  hasPendingPlan: boolean;
   showNewItems: boolean;
   scrollRef: RefObject<HTMLDivElement>;
   onScroll: () => void;
@@ -90,6 +91,7 @@ export function CanvasAgentFeedViewport({
   isRunning,
   showCompletedTools,
   pendingCount,
+  hasPendingPlan,
   showNewItems,
   scrollRef,
   onScroll,
@@ -135,7 +137,7 @@ export function CanvasAgentFeedViewport({
             <div className="space-y-2">
               <button
                 type="button"
-                disabled={isRunning || pendingCount > 0}
+                disabled={isRunning || pendingCount > 0 || hasPendingPlan}
                 className="flex min-h-11 w-full items-center gap-2 rounded-[5px] border border-border-dark px-3 text-xs text-text-dark transition-[background-color,transform] duration-150 hover:bg-text-dark/[0.05] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                 onClick={onStartConversation}
               >
@@ -146,7 +148,8 @@ export function CanvasAgentFeedViewport({
                 <button
                   key={session.id}
                   type="button"
-                  className="w-full rounded-[5px] border border-border-dark/60 px-3 py-2.5 text-left transition-[background-color,border-color,transform] duration-150 hover:border-border-dark hover:bg-text-dark/[0.04] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                  disabled={isRunning || pendingCount > 0 || hasPendingPlan}
+                  className="w-full rounded-[5px] border border-border-dark/60 px-3 py-2.5 text-left transition-[background-color,border-color,transform] duration-150 hover:border-border-dark hover:bg-text-dark/[0.04] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                   onClick={() => onLoadSession(session.id)}
                 >
                   <div className="truncate text-xs text-text-dark">{session.title}</div>

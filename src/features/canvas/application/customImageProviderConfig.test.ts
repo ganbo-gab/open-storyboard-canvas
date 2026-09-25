@@ -41,6 +41,30 @@ function legacyProvider(overrides: Partial<CustomProviderConfig> = {}): CustomPr
 }
 
 describe('custom image provider config', () => {
+  it('keeps a video ComfyUI provider in the video catalog after repeated draft saves', () => {
+    const initial = legacyProvider({
+      mediaType: 'video',
+      apiStyle: 'comfyui',
+      extraParams: {
+        auth: { mode: 'none' },
+        comfyui: {
+          workflow: { '6': { class_type: 'CLIPTextEncode', inputs: { text: '' } } },
+          outputNodeIds: ['6'],
+        },
+      },
+    });
+    const firstDraft = customImageProviderConfigToDraft(initial);
+    const firstSave = customImageProviderDraftToConfig(firstDraft, initial.id).value!;
+    const secondDraft = customImageProviderConfigToDraft(firstSave);
+    const secondSave = customImageProviderDraftToConfig(secondDraft, initial.id).value!;
+
+    expect(firstDraft.mediaType).toBe('video');
+    expect(firstSave.mediaType).toBe('video');
+    expect(secondDraft.mediaType).toBe('video');
+    expect(secondSave.mediaType).toBe('video');
+    expect(secondSave.extraParams?.mediaType).toBe('video');
+  });
+
   it('lazily derives a versioned contract from legacy fields without changing endpoints', () => {
     const resolved = resolveCustomImageRequestContract(legacyProvider());
 

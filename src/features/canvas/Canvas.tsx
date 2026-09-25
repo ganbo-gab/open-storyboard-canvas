@@ -1026,6 +1026,7 @@ export function Canvas() {
   const navigateImageViewer = useCanvasStore((state) => state.navigateImageViewer);
   const apiKeys = useSettingsStore((state) => state.apiKeys);
   const dreaminaStatus = useSettingsStore((state) => state.dreaminaStatus);
+  const agnesApiKey = useSettingsStore((state) => state.agnesApiKey);
   const canvasMouseBindings = useSettingsStore((state) => state.canvasMouseBindings);
   const enableCanvasWasdPan = useSettingsStore((state) => state.enableCanvasWasdPan);
   const canvasWasdPanSensitivity = useSettingsStore((state) => state.canvasWasdPanSensitivity);
@@ -1038,8 +1039,9 @@ export function Canvas() {
       builtInProviderIds: providerIds,
       customProviders,
       dreaminaStatus,
+      agnesApiKey,
     }),
-    [apiKeys, customProviders, dreaminaStatus, providerIds]
+    [agnesApiKey, apiKeys, customProviders, dreaminaStatus, providerIds]
   );
   const canvasAssets = useMemo(
     () => (isAssetPanelOpen

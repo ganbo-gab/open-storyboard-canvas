@@ -77,6 +77,16 @@ import {
   resolveRequestBodyHints,
   type CustomProviderBodyMode,
 } from './customProviderTransport';
+import {
+  checkComfyUIConnection,
+  ComfyUIExecutionError,
+  isComfyUIProvider,
+  parseComfyUIConfig,
+  pollComfyUIWorkflow,
+  submitComfyUIWorkflow,
+  validateComfyUIRequest,
+  type ComfyUITransport,
+} from './comfyuiGateway';
 
 // Custom providers go through a native Tauri/reqwest bridge instead of the
 // WebView's browser fetch. Many aggregators do not expose permissive CORS
@@ -189,7 +199,17 @@ function cachedJobContext(
 }
 
 function generationConfigFingerprint(cfg: CustomProviderConfig, model: string): string {
-  const basis = [cfg.id, model, cfg.baseUrl, cfg.endpointPath ?? '', cfg.apiStyle].join('|');
+  const basis = [
+    cfg.id,
+    model,
+    cfg.baseUrl,
+    cfg.endpointPath ?? '',
+    cfg.apiStyle,
+    ...(isComfyUIProvider(cfg) ? [
+      stableSerialize(cfg.extraParams?.comfyui),
+      stableSerialize(sanitizeCompatibilityFingerprintValue(cfg.queryParams ?? {})),
+    ] : []),
+  ].join('|');
   let hash = 2166136261;
   for (let index = 0; index < basis.length; index += 1) {
     hash ^= basis.charCodeAt(index);
@@ -1885,6 +1905,46 @@ function buildRequestHeaders(
   return headers;
 }
 
+function createComfyUITransport(
+  cfg: CustomProviderConfig,
+  network?: Readonly<GenerationNetworkSettings>,
+): ComfyUITransport {
+  const request = async (
+    path: string,
+    method: 'GET' | 'POST',
+    bodyMode: 'json' | 'multipart',
+    body?: unknown,
+    multipart?: CustomHttpMultipartBody,
+  ): Promise<unknown> => {
+    const url = buildProviderUrl(
+      cfg.baseUrl,
+      path,
+      appendConfiguredAuthQuery(cfg, cfg.queryParams ?? {}),
+    );
+    const response = await requestJson(url, {
+      method,
+      bodyMode,
+      headers: buildRequestHeaders(cfg, bodyMode, method),
+      body,
+      multipart,
+      timeoutMs: method === 'GET' ? RESULT_POLL_REQUEST_TIMEOUT_MS : resolveGenerationRequestTimeoutMs(cfg),
+      networkRetryAttempts: method === 'GET' ? RESULT_POLL_NETWORK_RETRY_ATTEMPTS : 0,
+      ...(path === '/prompt' && method === 'POST'
+        ? { networkErrorPrefix: GENERATION_SUBMIT_NETWORK_ERROR_PREFIX }
+        : {}),
+      network,
+    });
+    return response.parsed;
+  };
+  return {
+    json: (path, method, body) => request(path, method, 'json', body),
+    multipart: (path, body) => request(path, 'POST', 'multipart', undefined, body),
+    // Media materializers attach query authentication only for this same
+    // origin. Keep URLs saved in jobs free of secrets.
+    url: (path, query) => buildProviderUrl(cfg.baseUrl, path, query),
+  };
+}
+
 function chatProviderKind(cfg: CustomProviderConfig): string {
   return typeof cfg.extraParams?.providerKind === 'string' ? cfg.extraParams.providerKind : '';
 }
@@ -2522,15 +2582,35 @@ function buildImageRequestExecutionPlan(
   };
 }
 
-export function buildCustomProviderRequestDebugPreview(
+export function buildCustomProviderRequestDebugPreviewForConfig(
+  cfg: CustomProviderConfig,
+  model: string,
   request: GenerateRequest,
 ): CustomProviderRequestDebugPreview {
-  const resolved = resolveProviderAndModel(request.model);
-  if (!resolved) {
-    throw new Error('未找到对应的自定义服务商配置');
+  if (isComfyUIProvider(cfg)) {
+    const config = parseComfyUIConfig(cfg);
+    validateComfyUIRequest(config, request);
+    return {
+      providerLabel: cfg.label,
+      providerId: cfg.id,
+      modelId: request.model,
+      modelName: model,
+      method: 'POST',
+      bodyMode: 'json',
+      url: maskDebugUrl(buildProviderUrl(
+        cfg.baseUrl,
+        '/prompt',
+        appendConfiguredAuthQuery(cfg, cfg.queryParams ?? {}),
+      )),
+      headers: summarizeDebugHeaders(buildRequestHeaders(cfg, 'json', 'POST')),
+      body: {
+        workflowNodeCount: Object.keys(config.workflow).length,
+        promptBinding: config.bindings.prompt ?? 'auto',
+        referenceImageCount: request.reference_images?.length ?? 0,
+        outputNodeIds: config.outputNodeIds,
+      },
+    };
   }
-
-  const { cfg, model } = resolved;
   const plan = buildImageRequestExecutionPlan(cfg, model, request);
   const { method, bodyMode, url, headers, body, multipart, imageOutputDiagnostic } = plan;
 
@@ -2565,6 +2645,16 @@ export function buildCustomProviderRequestDebugPreview(
   };
 }
 
+export function buildCustomProviderRequestDebugPreview(
+  request: GenerateRequest,
+): CustomProviderRequestDebugPreview {
+  const resolved = resolveProviderAndModel(request.model);
+  if (!resolved) {
+    throw new Error('未找到对应的自定义服务商配置');
+  }
+  return buildCustomProviderRequestDebugPreviewForConfig(resolved.cfg, resolved.model, request);
+}
+
 export function buildCustomVideoProviderRequestDebugPreview(
   request: GenerateRequest,
 ): CustomProviderRequestDebugPreview {
@@ -2574,6 +2664,9 @@ export function buildCustomVideoProviderRequestDebugPreview(
   }
 
   const { cfg, model } = resolved;
+  if (isComfyUIProvider(cfg)) {
+    return buildCustomProviderRequestDebugPreviewForConfig(cfg, model, request);
+  }
   const method = cfg.httpMethod ?? 'POST';
   const bodyMode = resolveVideoRequestBodyMode(cfg);
   const headers = buildRequestHeaders(cfg, bodyMode, method);
@@ -3314,7 +3407,7 @@ async function runCustomProviderJob(
     });
     const cachedExternalTaskId = cache.get(jobId)?.external_task_id;
     const safeHandle = Boolean(cachedExternalTaskId);
-    const upstreamTerminal = err instanceof RemoteGenerationFailedError;
+    const upstreamTerminal = err instanceof RemoteGenerationFailedError || err instanceof ComfyUIExecutionError;
     const ambiguous = isAmbiguousSubmissionError(err);
     const error = formatUnknownError(err);
     const status = upstreamTerminal
@@ -3414,6 +3507,19 @@ function buildAuthenticatedImageFetchHeaders(cfg: CustomProviderConfig): Record<
   return buildRequestHeaders(cfg, 'json', 'GET');
 }
 
+function withComfyUIResultQuery(cfg: CustomProviderConfig, source: string): string {
+  if (!isComfyUIProvider(cfg) || !shouldForwardProviderCredentials(cfg.baseUrl, source)) return source;
+  try {
+    const url = new URL(source);
+    Object.entries(cfg.queryParams ?? {}).forEach(([key, value]) => {
+      if (key.trim() && !url.searchParams.has(key)) url.searchParams.set(key, value);
+    });
+    return url.toString();
+  } catch {
+    return source;
+  }
+}
+
 interface MaterializedGeneratedImageSource {
   imageSource: string;
   aspectRatio?: string;
@@ -3457,11 +3563,12 @@ async function materializeGeneratedImageSourceDetails(
   const mayForwardCredentials = shouldForwardProviderCredentials(cfg.baseUrl, imageSource);
   const safeHeaders = mayForwardCredentials ? authHeaders : {};
   const auth = resolveCustomProviderAuth(cfg);
+  const resultSource = withComfyUIResultQuery(cfg, imageSource);
   const authenticatedImageSource = auth.mode === 'query' && cfg.apiKey.trim() && mayForwardCredentials
-    ? appendQueryParams(imageSource, {
+    ? appendQueryParams(resultSource, {
       [auth.name]: configuredApiKeyValue(cfg, auth.prefix),
     })
-    : imageSource;
+    : resultSource;
   try {
     const prepared = await prepareNodeImageSourceWithHeaders(
       authenticatedImageSource,
@@ -4349,6 +4456,9 @@ async function sendVideoGenerationRequest(
   request: GenerateRequest,
   network?: Readonly<GenerationNetworkSettings>,
 ): Promise<unknown> {
+  if (isComfyUIProvider(cfg)) {
+    return await submitComfyUIWorkflow(parseComfyUIConfig(cfg), request, createComfyUITransport(cfg, network));
+  }
   const method = cfg.httpMethod ?? 'POST';
   if (cfg.extraParams?.requiresDedicatedVideoGateway === true) {
     throw new Error(`${cfg.label} 的视频格式需要专用 gateway 组装请求体，当前模板仅保存官方字段元数据，不能直接提交。`);
@@ -4379,6 +4489,7 @@ async function sendVideoGenerationRequest(
 }
 
 function resolveVideoStatusEndpointPath(cfg: CustomProviderConfig): string {
+  if (isComfyUIProvider(cfg)) return '/history/{taskId}';
   const configured = typeof cfg.extraParams?.videoStatusEndpointPath === 'string'
     ? cfg.extraParams.videoStatusEndpointPath.trim()
     : '';
@@ -4415,6 +4526,11 @@ async function resolveGeneratedVideoSource(
   parsed: unknown,
   network?: Readonly<GenerationNetworkSettings>,
 ): Promise<string | null> {
+  if (isComfyUIProvider(cfg)) {
+    const promptId = extractTaskId(parsed);
+    if (!promptId) throw new Error('ComfyUI 提交响应没有 prompt_id，不能查询结果。');
+    return await pollComfyUIWorkflow(parseComfyUIConfig(cfg), promptId, 'video', createComfyUITransport(cfg, network));
+  }
   const unwrappedParsed = unwrapProviderPayload(parsed);
   const direct =
     extractFirstVideoSource(cfg, parsed)
@@ -4438,6 +4554,9 @@ async function pollGeneratedVideoTask(
   taskId: string,
   network?: Readonly<GenerationNetworkSettings>,
 ): Promise<string> {
+  if (isComfyUIProvider(cfg)) {
+    return await pollComfyUIWorkflow(parseComfyUIConfig(cfg), taskId, 'video', createComfyUITransport(cfg, network));
+  }
   const statusPath = typeof cfg.extraParams?.videoStatusPath === 'string' ? cfg.extraParams.videoStatusPath : 'status';
   const errorPath = typeof cfg.extraParams?.videoErrorPath === 'string' ? cfg.extraParams.videoErrorPath : 'error';
   const pendingValues = normalizeAsyncStatusValues(
@@ -4555,11 +4674,12 @@ async function materializeGeneratedVideoSource(
 
   const mayForwardCredentials = shouldForwardProviderCredentials(cfg.baseUrl, videoSource);
   const auth = resolveCustomProviderAuth(cfg);
+  const resultSource = withComfyUIResultQuery(cfg, videoSource);
   const authenticatedVideoSource = auth.mode === 'query' && cfg.apiKey.trim() && mayForwardCredentials
-    ? appendQueryParams(videoSource, {
+    ? appendQueryParams(resultSource, {
       [auth.name]: configuredApiKeyValue(cfg, auth.prefix),
     })
-    : videoSource;
+    : resultSource;
   try {
     return await persistVideoSource(
       authenticatedVideoSource,
@@ -4726,7 +4846,7 @@ async function runCustomVideoJob(
     }
     const cachedExternalTaskId = cache.get(jobId)?.external_task_id;
     const safeHandle = Boolean(cachedExternalTaskId);
-    const upstreamTerminal = err instanceof RemoteGenerationFailedError;
+    const upstreamTerminal = err instanceof RemoteGenerationFailedError || err instanceof ComfyUIExecutionError;
     const ambiguous = isAmbiguousSubmissionError(err);
     const error = formatUnknownError(err);
     const status = upstreamTerminal
@@ -5041,6 +5161,9 @@ async function sendGenerationRequest(
   timeoutMs?: number,
   network?: Readonly<GenerationNetworkSettings>,
 ): Promise<unknown> {
+  if (isComfyUIProvider(cfg)) {
+    return await submitComfyUIWorkflow(parseComfyUIConfig(cfg), request, createComfyUITransport(cfg, network));
+  }
   const plan = buildImageRequestExecutionPlan(cfg, model, request);
   const { method, bodyMode, body, multipart: configuredMultipart, url, headers, explicitContract } = plan;
   if (bodyMode === 'signed') {
@@ -5190,7 +5313,7 @@ function extractTaskId(payload: unknown): string | null {
   const unwrapped = unwrapProviderPayload(payload);
   if (!unwrapped || typeof unwrapped !== 'object' || Array.isArray(unwrapped)) return null;
   const record = unwrapped as Record<string, unknown>;
-  const candidates = [record.id, record.task_id, record.taskId, record.job_id, record.jobId, record.request_id, record.requestId, record.name];
+  const candidates = [record.prompt_id, record.id, record.task_id, record.taskId, record.job_id, record.jobId, record.request_id, record.requestId, record.name];
   const found = candidates.find((value) => typeof value === 'string' && value.trim());
   return typeof found === 'string' ? found.trim() : null;
 }
@@ -5456,6 +5579,11 @@ async function resolveGeneratedImageUrl(
   hasExplicitContract = false,
   network?: Readonly<GenerationNetworkSettings>,
 ): Promise<string | null> {
+  if (isComfyUIProvider(cfg)) {
+    const promptId = extractTaskId(parsed);
+    if (!promptId) throw new Error('ComfyUI 提交响应没有 prompt_id，不能查询结果。');
+    return await pollComfyUIWorkflow(parseComfyUIConfig(cfg), promptId, 'image', createComfyUITransport(cfg, network));
+  }
   const unwrappedParsed = unwrapProviderPayload(parsed);
   const direct =
     extractFirstImageUrl(cfg, parsed, responseImagePaths)
@@ -5565,7 +5693,14 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<Gene
     }
 
     if (!remoteSource) {
-      if (job.media_type === 'video') {
+      if (isComfyUIProvider(cfg)) {
+        remoteSource = await pollComfyUIWorkflow(
+          parseComfyUIConfig(cfg),
+          taskId,
+          job.media_type === 'video' ? 'video' : 'image',
+          createComfyUITransport(cfg, network),
+        );
+      } else if (job.media_type === 'video') {
         remoteSource = await pollGeneratedVideoTask(cfg, taskId, network);
       } else {
         const asyncConfig = resolveAsyncTaskConfig(cfg);
@@ -5610,17 +5745,18 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<Gene
     return getCustomProviderJob(job.job_id);
   } catch (error) {
     const message = formatUnknownError(error);
+    const terminal = error instanceof ComfyUIExecutionError;
     cache.set(job.job_id, {
       ...job,
-      status: 'recoverable_wait',
+      status: terminal ? 'failed' : 'recoverable_wait',
       result: job.result ?? null,
       error: message,
     });
     await persistRecoveryJobUpdate(job.job_id, {
-      status: 'recoverable_wait',
+      status: terminal ? 'failed' : 'recoverable_wait',
       phase: job.result_url ? 'materialize' : 'polling',
       error: message,
-      errorCategory: classifyGenerationError(error),
+      errorCategory: terminal ? 'provider' : classifyGenerationError(error),
     });
     return getCustomProviderJob(job.job_id);
   }
@@ -6715,6 +6851,14 @@ export async function testCustomProviderConnectivity(
   }
   if (!cfg.baseUrl?.trim()) {
     return { ok: false, errorMessage: '未填写 API 根地址' };
+  }
+  if (isComfyUIProvider(cfg)) {
+    try {
+      await checkComfyUIConnection(createComfyUITransport(cfg));
+      return { ok: true, status: 200, text: 'ComfyUI 服务已连接；没有提交生成任务。' };
+    } catch (error) {
+      return { ok: false, errorMessage: `ComfyUI 连接失败：${formatUnknownError(error)}` };
+    }
   }
   const modelName = testModelId ?? cfg.models?.[0] ?? 'default';
   const request = {

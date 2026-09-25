@@ -6,6 +6,7 @@ import {
   Eye,
   EyeOff,
   Pause,
+  Pencil,
   Play,
   Plus,
   Repeat2,
@@ -19,6 +20,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import type { BlueprintItem, DirectorMotionProjectV1 } from '@/features/canvas/domain/canvasNodes';
+import type { DirectorMotionRouteDraft } from './BlueprintScene';
 import { DIRECTOR_CAMERA_PRESETS, type DirectorCameraPresetId } from '@/features/canvas/application/directorMotion';
 import {
   DirectorMotionInspector,
@@ -30,6 +32,7 @@ type Props = {
   height: number;
   project: DirectorMotionProjectV1;
   items: BlueprintItem[];
+  selectedItemId: string | null;
   timeSource: {
     subscribe: (listener: () => void) => () => void;
     getSnapshot: () => number;
@@ -42,6 +45,7 @@ type Props = {
   showRoutes: boolean;
   previewMode: 'route' | 'shot';
   pilotActive: boolean;
+  routeDraft: DirectorMotionRouteDraft | null;
   onTimeChange: (time: number) => void;
   onTogglePlayback: () => void;
   onGoToStart: () => void;
@@ -61,6 +65,9 @@ type Props = {
   onOpenActionLibrary: () => void;
   onOpenExport: () => void;
   onApplyCameraPreset: (presetId: DirectorCameraPresetId) => void;
+  onStartRouteDraft: (draft: DirectorMotionRouteDraft) => void;
+  onFinishRouteDraft: () => void;
+  onCancelRouteDraft: () => void;
   onClose: () => void;
 };
 
@@ -97,6 +104,7 @@ type TrackRow = {
   label: string;
   keyframes: Array<{ id: string; time: number }>;
   onAdd: () => void;
+  routeKind?: DirectorMotionRouteDraft['kind'];
 };
 
 type DragState = {
@@ -113,12 +121,14 @@ export const DirectorTimeline = memo(function DirectorTimeline({
   height,
   project,
   items,
+  selectedItemId,
   timeSource,
   playbackSource,
   selection,
   showRoutes,
   previewMode,
   pilotActive,
+  routeDraft,
   onTimeChange,
   onTogglePlayback,
   onGoToStart,
@@ -138,6 +148,9 @@ export const DirectorTimeline = memo(function DirectorTimeline({
   onOpenActionLibrary,
   onOpenExport,
   onApplyCameraPreset,
+  onStartRouteDraft,
+  onFinishRouteDraft,
+  onCancelRouteDraft,
   onClose,
 }: Props) {
   const { t } = useTranslation();
@@ -155,6 +168,7 @@ export const DirectorTimeline = memo(function DirectorTimeline({
       label: t('directorStudio.motion.timeline.camera'),
       keyframes: project.cameraTrack,
       onAdd: onAddCameraKeyframe,
+      routeKind: 'camera',
     }];
     items.forEach((item) => {
       result.push({
@@ -164,6 +178,7 @@ export const DirectorTimeline = memo(function DirectorTimeline({
         label: item.label,
         keyframes: project.objectTracks[item.id] ?? [],
         onAdd: () => onAddObjectKeyframe(item.id),
+        routeKind: item.category === 'person' ? 'object' : undefined,
       });
       if (item.category === 'person') {
         result.push({
@@ -340,7 +355,11 @@ export const DirectorTimeline = memo(function DirectorTimeline({
         >
           <option value="">{t('directorStudio.motion.cameraPresets.title')}</option>
           {DIRECTOR_CAMERA_PRESETS.map((preset) => (
-            <option key={preset.id} value={preset.id}>{t(preset.labelKey)}</option>
+            <option
+              key={preset.id}
+              value={preset.id}
+              disabled={preset.id === 'follow-actor-route' && !items.some((item) => item.id === selectedItemId && item.category === 'person' && (project.objectTracks[item.id]?.length ?? 0) >= 2)}
+            >{t(preset.labelKey)}</option>
           ))}
         </select>
         <div className="ml-auto flex items-center gap-1">
@@ -364,6 +383,23 @@ export const DirectorTimeline = memo(function DirectorTimeline({
         </div>
       </div>
 
+      {routeDraft ? (
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-amber-300/15 bg-amber-300/7 px-3 text-[10px] text-amber-100/85">
+          <Route className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">
+            {t(routeDraft.method === 'draw' ? 'directorStudio.motion.route.hintDraw' : 'directorStudio.motion.route.hintPoints')}
+          </span>
+          {routeDraft.method === 'points' ? (
+            <button type="button" onClick={onFinishRouteDraft} className="rounded bg-amber-200 px-2.5 py-1 font-medium text-black hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-100/70">
+              {t('directorStudio.motion.route.finish')}
+            </button>
+          ) : null}
+          <button type="button" onClick={onCancelRouteDraft} className="rounded border border-amber-200/30 px-2.5 py-1 hover:bg-amber-200/10 focus:outline-none focus:ring-2 focus:ring-amber-100/70">
+            {t('directorStudio.motion.route.cancel')}
+          </button>
+        </div>
+      ) : null}
+
       <div className="flex min-h-0 flex-1">
         <div className="ui-scrollbar min-w-0 flex-1 overflow-y-auto">
           <div className="sticky top-0 z-10 flex h-6 border-b border-white/8 bg-[#0b1012]">
@@ -385,6 +421,26 @@ export const DirectorTimeline = memo(function DirectorTimeline({
               <div className="flex w-[128px] shrink-0 items-center gap-1 border-r border-white/8 px-2 md:w-[176px]">
                 {row.kind === 'camera' ? <Camera className="h-3 w-3 text-sky-300/72" /> : row.kind === 'action' ? <Sparkles className="h-3 w-3 text-amber-300/72" /> : <UserRound className="h-3 w-3 text-white/42" />}
                 <span className="min-w-0 flex-1 truncate text-[9px] text-white/58" title={row.label}>{row.label}</span>
+                {row.routeKind ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => { if (row.routeKind) onStartRouteDraft({ kind: row.routeKind, trackId: row.trackId, method: 'points' }); }}
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded focus:outline-none focus:ring-1 focus:ring-accent/70 ${routeDraft?.trackId === row.trackId && routeDraft.method === 'points' ? 'bg-amber-300/25 text-amber-100' : 'text-white/38 hover:bg-white/10 hover:text-white'}`}
+                      title={t('directorStudio.motion.route.point')}
+                      aria-label={`${row.label} · ${t('directorStudio.motion.route.point')}`}
+                      aria-pressed={routeDraft?.trackId === row.trackId && routeDraft.method === 'points'}
+                    ><Route className="h-3 w-3" /></button>
+                    <button
+                      type="button"
+                      onClick={() => { if (row.routeKind) onStartRouteDraft({ kind: row.routeKind, trackId: row.trackId, method: 'draw' }); }}
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded focus:outline-none focus:ring-1 focus:ring-accent/70 ${routeDraft?.trackId === row.trackId && routeDraft.method === 'draw' ? 'bg-amber-300/25 text-amber-100' : 'text-white/38 hover:bg-white/10 hover:text-white'}`}
+                      title={t('directorStudio.motion.route.draw')}
+                      aria-label={`${row.label} · ${t('directorStudio.motion.route.draw')}`}
+                      aria-pressed={routeDraft?.trackId === row.trackId && routeDraft.method === 'draw'}
+                    ><Pencil className="h-3 w-3" /></button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   onClick={row.onAdd}
@@ -431,6 +487,7 @@ export const DirectorTimeline = memo(function DirectorTimeline({
         </div>
         <DirectorMotionInspector
           project={project}
+          items={items}
           selection={selection}
           onPatch={onPatchKeyframe}
           onDuplicate={onDuplicateKeyframe}

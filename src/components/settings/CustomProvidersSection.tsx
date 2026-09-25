@@ -9,6 +9,7 @@ import {
   useCustomProvidersStore,
   type CustomProviderConfig,
 } from '@/stores/customProvidersStore';
+import { hasCustomProviderCredential } from '@/features/canvas/application/providerAvailability';
 import {
   fetchCustomProviderModels,
   testCustomChatProviderConnectivity,
@@ -57,6 +58,11 @@ const PRESET_RESOLUTIONS = ['auto', '512x512', '768x768', '1024x1024', '1536x102
 const HTTP_METHODS = ['POST', 'GET'] as const;
 const RESPONSE_FORMATS = ['openai-images', 'url-array', 'data-url', 'generic'] as const;
 const API_STYLE_HELP: Record<string, { title: string; body: string; warning?: string }> = {
+  comfyui: {
+    title: 'ComfyUI',
+    body: '通过 API Format 工作流提交到本地或云端 ComfyUI，支持参考图上传、历史轮询和结果恢复。',
+    warning: '连接测试只读取 /system_stats 或 /queue，不会提交生图任务。',
+  },
   'openai-compatible': {
     title: 'OpenAI-compatible',
     body: '按 Images API 的 JSON 结构发送 model、prompt、size、aspect_ratio，并默认用 Bearer Key 鉴权。',
@@ -113,6 +119,12 @@ function providerKindLabel(provider: CustomProviderConfig): {
   labelKey?: 'settings.imageProviderConfig.preset' | 'settings.imageProviderConfig.fullCustom';
   className: string;
 } {
+  if (provider.apiStyle === 'comfyui') {
+    return {
+      label: 'ComfyUI',
+      className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+    };
+  }
   if (isChatCustomProvider(provider)) {
     return {
       label: '文本对话',
@@ -803,7 +815,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
     }
     if (mode === 'list') {
       setPendingEditId(id);
-      onRequestAdd?.(isChatCustomProvider(p) ? 'chat' : isVideoCustomProvider(p) ? 'video' : (isModernProviderConfig(p) ? 'new' : 'old'));
+      onRequestAdd?.(p.apiStyle === 'comfyui' ? 'old' : isChatCustomProvider(p) ? 'chat' : isVideoCustomProvider(p) ? 'video' : (isModernProviderConfig(p) ? 'new' : 'old'));
     }
   }, [providers, mode, onRequestAdd, setPendingEditId, setFormDraft]);
 
@@ -1760,9 +1772,9 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                     <button
                       type="button"
                       onClick={() => { void handleTestSavedProvider(p); }}
-                      disabled={isVideo || isTestingThisProvider || !p.apiKey.trim() || !p.baseUrl.trim()}
+                      disabled={(isVideo && p.apiStyle !== 'comfyui') || isTestingThisProvider || (!hasCustomProviderCredential(p)) || !p.baseUrl.trim()}
                       className="inline-flex items-center gap-1 rounded-md bg-white/5 px-2.5 py-1 text-[11px] text-text-dark hover:bg-white/10 disabled:opacity-40"
-                      title={isVideo ? '视频配置暂不走图片连通测试' : isChat ? '用这条已保存配置发一次文本对话测试请求' : '用这条已保存配置发一次测试请求'}
+                      title={p.apiStyle === 'comfyui' ? '只读检查 ComfyUI 服务，不提交生成任务' : isVideo ? '视频配置暂不走图片连通测试' : isChat ? '用这条已保存配置发一次文本对话测试请求' : '用这条已保存配置发一次测试请求'}
                     >
                       {isTestingThisProvider ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plug className="h-3 w-3" />}
                       {isTestingThisProvider ? '测试中' : '测试连通'}

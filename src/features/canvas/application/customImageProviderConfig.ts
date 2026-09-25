@@ -396,7 +396,7 @@ export function customImageProviderConfigToDraft(provider: CustomProviderConfig)
   return {
     ...provider,
     id: provider.id,
-    mediaType: 'image',
+    mediaType: provider.apiStyle === 'comfyui' && provider.mediaType === 'video' ? 'video' : 'image',
     endpointPath: provider.endpointPath ?? '',
     modelListEndpointPath: provider.modelListEndpointPath ?? '/models',
     httpMethod: provider.httpMethod ?? 'POST',
@@ -479,7 +479,7 @@ export function customImageProviderDraftFromUnknown(
   const value: CustomImageProviderDraft = {
     ...baseDraft,
     id: typeof input.id === 'string' && input.id.trim() ? input.id.trim() : baseDraft.id,
-    mediaType: 'image',
+    mediaType: input.apiStyle === 'comfyui' && input.mediaType === 'video' ? 'video' : 'image',
     label: String(input.label ?? baseDraft.label ?? ''),
     baseUrl: String(input.baseUrl ?? baseDraft.baseUrl ?? ''),
     endpointPath,
@@ -524,10 +524,12 @@ export function customImageProviderDraftToConfig(
     return { value: null, issues };
   }
 
+  const mediaType = draft.apiStyle === 'comfyui' && draft.mediaType === 'video' ? 'video' : 'image';
+
   const extraParams = writeCustomImageRequestContract(
     {
       ...(draft.extraParams ?? {}),
-      mediaType: 'image',
+      mediaType,
       supportedRatios: uniqueStrings(draft.supportedRatios, DEFAULT_RATIOS),
     },
     normalizedContract.value,
@@ -541,7 +543,7 @@ export function customImageProviderDraftToConfig(
     value: {
       id: draft.id ?? fallbackId,
       label: draft.label.trim() || '未命名配置',
-      mediaType: 'image',
+      mediaType,
       baseUrl: normalizeProviderBaseUrl(draft.baseUrl),
       endpointPath: configuredEndpoint,
       modelListEndpointPath: normalizeProviderEndpointPath(draft.modelListEndpointPath ?? ''),

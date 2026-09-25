@@ -25,6 +25,7 @@ import {
   type CustomImageProviderDraft,
   type CustomImageProviderFieldIssue,
 } from '@/features/canvas/application/customImageProviderConfig';
+import { parseComfyUIConfig, suggestComfyUIBindings, suggestComfyUIOutputNodes, validateComfyUIRequest } from '@/features/canvas/infrastructure/comfyuiGateway';
 import {
   normalizeCustomImageRequestContract,
   type ImageFieldEncoding,
@@ -33,6 +34,7 @@ import {
   type ImageRequestMethod,
 } from '@/features/canvas/application/customImageProviderContract';
 import {
+  buildCustomProviderRequestDebugPreviewForConfig,
   testCustomProviderConnectivity,
   type CustomProviderTestResult,
 } from '@/features/canvas/infrastructure/customProviderGateway';
@@ -45,6 +47,7 @@ import { CustomProviderConfigAssistantDialog } from './CustomProviderConfigAssis
 import {
   CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS,
   createCustomImageProviderWorkbenchDraft,
+  createComfyUIProviderWorkbenchDraft,
   getImageToImageVariant,
   getTextToImageVariant,
   splitWorkbenchValues,
@@ -180,13 +183,45 @@ export function CustomImageProviderWorkbench() {
   const [pollingRequestBodyText, setPollingRequestBodyText] = useState('');
   const [contractText, setContractText] = useState('{\n  "version": 1\n}');
   const [contractIssues, setContractIssues] = useState<CustomImageProviderFieldIssue[]>([]);
+  const [comfyWorkflowText, setComfyWorkflowText] = useState('{}');
+  const [comfyBindingsText, setComfyBindingsText] = useState('{\n  "images": []\n}');
+  const [comfyOutputsText, setComfyOutputsText] = useState('[]');
 
-  const currentStep = CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS[stepIndex];
+  const isComfyRoute = route === 'comfyui' || draft.apiStyle === 'comfyui';
+  const visibleSteps: readonly CustomImageProviderWorkbenchStep[] = isComfyRoute
+    ? ['connection', 'capabilities', 'review']
+    : CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS;
+  const currentStep = visibleSteps[Math.min(stepIndex, visibleSteps.length - 1)];
   const textVariant = useMemo(() => getTextToImageVariant(draft), [draft]);
   const imageVariant = useMemo(() => getImageToImageVariant(draft), [draft]);
   const auth = useMemo(() => readAuth(draft), [draft]);
   const imageEnabled = Boolean(draft.imageRequestContract.imageToImage);
   const asyncTask = textVariant.asyncTask ?? {};
+  const requestPreviews = useMemo(() => {
+    if (!draft.baseUrl.trim()) return null;
+    const result = customImageProviderDraftToConfig(draft, draft.id ?? 'preview-provider');
+    if (!result.value) return { error: formatIssues(result.issues) };
+    const model = draft.models[0]?.trim() || 'example-model';
+    const sample = {
+      prompt: 'preview prompt',
+      model: `custom:${result.value.id}:${model}`,
+      size: '1024x1024',
+      aspect_ratio: '1:1',
+    };
+    try {
+      return {
+        text: buildCustomProviderRequestDebugPreviewForConfig(result.value, model, sample),
+        image: imageEnabled
+          ? buildCustomProviderRequestDebugPreviewForConfig(result.value, model, {
+            ...sample,
+            reference_images: ['data:image/png;base64,iVBORw0KGgo='],
+          })
+          : null,
+      };
+    } catch (previewError) {
+      return { error: previewError instanceof Error ? previewError.message : String(previewError) };
+    }
+  }, [draft, imageEnabled]);
 
   const hydrateDraft = (nextDraft: CustomImageProviderDraft, nextRoute: CustomImageProviderCreationRoute) => {
     setDraft(nextDraft);
@@ -200,6 +235,17 @@ export function CustomImageProviderWorkbench() {
     setDefaultParamsText(jsonText(nextDraft.defaultRequestParams ?? {}));
     setPollingRequestBodyText(jsonText(getTextToImageVariant(nextDraft).asyncTask?.requestBody));
     setContractText(stringifyCustomImageRequestContract(nextDraft.imageRequestContract));
+    const comfy = nextDraft.extraParams?.comfyui;
+    if (comfy && typeof comfy === 'object' && !Array.isArray(comfy)) {
+      const record = comfy as Record<string, unknown>;
+      setComfyWorkflowText(jsonText(record.workflow ?? {}));
+      setComfyBindingsText(jsonText(record.bindings ?? { images: [] }));
+      setComfyOutputsText(jsonText(record.outputNodeIds ?? []));
+    } else {
+      setComfyWorkflowText('{}');
+      setComfyBindingsText('{\n  "images": []\n}');
+      setComfyOutputsText('[]');
+    }
     setContractIssues([]);
     setError('');
     setSaved(false);
@@ -209,8 +255,10 @@ export function CustomImageProviderWorkbench() {
   useEffect(() => {
     if (!pendingEditId) return;
     const provider = providers.find((item) => item.id === pendingEditId);
-    if (!provider || !isImageCustomProvider(provider) || isPresetImageProvider(provider)) return;
-    hydrateDraft(customImageProviderConfigToDraft(provider), 'manual');
+    if (!provider || (!isImageCustomProvider(provider) && provider.apiStyle !== 'comfyui') || isPresetImageProvider(provider)) return;
+    const editDraft = customImageProviderConfigToDraft(provider);
+    if (provider.apiStyle === 'comfyui') editDraft.mediaType = provider.mediaType;
+    hydrateDraft(editDraft, provider.apiStyle === 'comfyui' ? 'comfyui' : 'manual');
     setPendingEditId(null);
   }, [pendingEditId, providers, setPendingEditId]);
 
@@ -274,6 +322,29 @@ export function CustomImageProviderWorkbench() {
             },
           }
         : normalizedTextVariant;
+      let nextExtraParams = { ...draft.extraParams };
+      let nextDraftApiStyle = draft.apiStyle;
+      if (isComfyRoute) {
+        const workflow = parseCustomImageProviderJsonRecord(comfyWorkflowText, t('settings.customProviders.workbench.fields.comfyWorkflow'));
+        const bindings = parseCustomImageProviderJsonRecord(comfyBindingsText, t('settings.customProviders.workbench.fields.comfyBindings'));
+        const outputNodeIds = optionalJsonValue(comfyOutputsText);
+        if (!Array.isArray(outputNodeIds) || outputNodeIds.some((entry) => typeof entry !== 'string' || !entry.trim())) {
+          throw new Error(t('settings.customProviders.workbench.errors.comfyOutputs'));
+        }
+        nextExtraParams = {
+          ...nextExtraParams,
+          allowNoApiKey: auth.mode === 'none',
+          auth: nextExtraParams.auth,
+          comfyui: {
+            workflow,
+            bindings,
+            outputNodeIds,
+            pollIntervalMs: Number(nextExtraParams.comfyui && typeof nextExtraParams.comfyui === 'object' ? (nextExtraParams.comfyui as Record<string, unknown>).pollIntervalMs : 1500) || 1500,
+            pollTimeoutMs: Number(nextExtraParams.comfyui && typeof nextExtraParams.comfyui === 'object' ? (nextExtraParams.comfyui as Record<string, unknown>).pollTimeoutMs : 600000) || 600000,
+          },
+        };
+        nextDraftApiStyle = 'comfyui';
+      }
       const rawContract = {
         ...draft.imageRequestContract,
         textToImage,
@@ -288,6 +359,12 @@ export function CustomImageProviderWorkbench() {
       }
       const nextDraft: CustomImageProviderDraft = {
         ...draft,
+        apiStyle: nextDraftApiStyle,
+        endpointPath: isComfyRoute ? '/prompt' : draft.endpointPath,
+        modelListEndpointPath: isComfyRoute ? '' : draft.modelListEndpointPath,
+        responseFormat: isComfyRoute ? 'generic' : draft.responseFormat,
+        models: isComfyRoute && draft.models.length === 0 ? ['workflow'] : draft.models,
+        extraParams: nextExtraParams,
         extraHeaders,
         queryParams,
         defaultRequestParams,
@@ -310,7 +387,7 @@ export function CustomImageProviderWorkbench() {
       return;
     }
     setGeneratedByAi(false);
-    hydrateDraft(createCustomImageProviderWorkbenchDraft(), 'manual');
+    hydrateDraft(nextRoute === 'comfyui' ? createComfyUIProviderWorkbenchDraft() : createCustomImageProviderWorkbenchDraft(), nextRoute);
   };
 
   const handleAiApply = (nextDraft: CustomImageProviderDraft) => {
@@ -327,7 +404,7 @@ export function CustomImageProviderWorkbench() {
       if (!normalized.value || issues.length > 0) return;
       const nextDraft = { ...draft, imageRequestContract: normalized.value };
       hydrateDraft(nextDraft, route ?? 'manual');
-      setStepIndex(CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS.length - 1);
+      setStepIndex(visibleSteps.length - 1);
     } catch (contractError) {
       setContractIssues([{
         path: 'imageRequestContract',
@@ -343,6 +420,29 @@ export function CustomImageProviderWorkbench() {
     if (!result.value) {
       setError(formatIssues(result.issues));
       return null;
+    }
+    if (isComfyRoute) {
+      try {
+        const comfyConfig = parseComfyUIConfig(result.value);
+        validateComfyUIRequest(comfyConfig, {
+          prompt: 'preview prompt',
+          model: `custom:${result.value.id}:${result.value.models[0] ?? 'workflow'}`,
+          size: '1024x1024',
+          aspect_ratio: '1:1',
+          reference_images: [],
+        });
+        result.value.extraParams = {
+          ...result.value.extraParams,
+          videoInputSchema: normalizedDraft.mediaType === 'video' ? {
+            images: { enabled: true, min: 0, max: 9, roles: ['reference', 'firstFrame', 'lastFrame', 'keyframe'], requireImageHost: false },
+            video: { enabled: false, min: 0, max: 0, field: '' },
+            audio: { enabled: false, min: 0, max: 0, field: '' },
+          } : undefined,
+        };
+      } catch (configError) {
+        setError(configError instanceof Error ? configError.message : String(configError));
+        return null;
+      }
     }
     return result.value;
   };
@@ -367,14 +467,14 @@ export function CustomImageProviderWorkbench() {
     if (draft.id) updateProvider(draft.id, config);
     else addProvider(config);
     hydrateDraft(customImageProviderConfigToDraft(config), route ?? 'manual');
-    setStepIndex(CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS.length - 1);
+    setStepIndex(visibleSteps.length - 1);
     setSaved(true);
   };
 
   const moveStep = (direction: -1 | 1) => {
     if (direction > 0 && !normalizeFragmentState()) return;
     setStepIndex((current) => Math.min(
-      CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS.length - 1,
+      visibleSteps.length - 1,
       Math.max(0, current + direction),
     ));
   };
@@ -420,6 +520,58 @@ export function CustomImageProviderWorkbench() {
         <JsonField label={t('settings.customProviders.workbench.fields.extraHeaders')} help={t('settings.customProviders.workbench.help.extraHeaders')} value={extraHeadersText} onChange={setExtraHeadersText} />
         <JsonField label={t('settings.customProviders.workbench.fields.queryParams')} help={t('settings.customProviders.workbench.help.queryParams')} value={queryParamsText} onChange={setQueryParamsText} />
       </div>
+      {isComfyRoute && (
+        <div className="mt-4 space-y-3 rounded-lg border border-accent/25 bg-accent/5 p-3">
+          <div>
+            <div className="text-xs font-semibold text-text-dark">{t('settings.customProviders.workbench.comfyTitle')}</div>
+            <p className="mt-1 text-[11px] leading-5 text-text-muted">{t('settings.customProviders.workbench.comfyDescription')}</p>
+          </div>
+          <label className="block text-xs font-medium text-text-muted">
+            {t('settings.customProviders.workbench.fields.comfyOutputType')}
+            <UiSelect
+              className="mt-1.5 h-9"
+              value={draft.mediaType === 'video' ? 'video' : 'image'}
+              onChange={(event) => updateDraft((current) => ({ ...current, mediaType: event.target.value === 'video' ? 'video' : 'image' }))}
+            >
+              <option value="image">{t('settings.customProviders.workbench.comfyOutputImage')}</option>
+              <option value="video">{t('settings.customProviders.workbench.comfyOutputVideo')}</option>
+            </UiSelect>
+          </label>
+          <label className="block text-xs font-medium text-text-muted">
+            {t('settings.customProviders.workbench.fields.comfyImportFile')}
+            <input
+              type="file"
+              accept=".json,application/json"
+              className="mt-1.5 block w-full rounded-lg border border-border-dark bg-bg-dark px-3 py-2 text-xs text-text-dark file:mr-3 file:rounded file:border-0 file:bg-accent/15 file:px-2 file:py-1 file:text-accent"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (!file) return;
+                if (file.size > 8 * 1024 * 1024) {
+                  setError(t('settings.customProviders.workbench.errors.comfyFileTooLarge'));
+                  return;
+                }
+                void file.text().then((source) => {
+                  const parsed = JSON.parse(source) as unknown;
+                  const bindings = suggestComfyUIBindings(parsed);
+                  const outputs = suggestComfyUIOutputNodes(parsed);
+                  setComfyWorkflowText(JSON.stringify(parsed, null, 2));
+                  setComfyBindingsText(JSON.stringify(bindings, null, 2));
+                  setComfyOutputsText(JSON.stringify(outputs, null, 2));
+                  setError('');
+                  setSaved(false);
+                }).catch((importError) => {
+                  setError(importError instanceof Error ? importError.message : String(importError));
+                });
+              }}
+            />
+          </label>
+          <JsonField label={t('settings.customProviders.workbench.fields.comfyWorkflow')} help={t('settings.customProviders.workbench.help.comfyWorkflow')} value={comfyWorkflowText} onChange={setComfyWorkflowText} />
+          <div className="grid gap-3 lg:grid-cols-2">
+            <JsonField label={t('settings.customProviders.workbench.fields.comfyBindings')} help={t('settings.customProviders.workbench.help.comfyBindings')} value={comfyBindingsText} onChange={setComfyBindingsText} />
+            <JsonField label={t('settings.customProviders.workbench.fields.comfyOutputs')} help={t('settings.customProviders.workbench.help.comfyOutputs')} value={comfyOutputsText} onChange={setComfyOutputsText} />
+          </div>
+        </div>
+      )}
     </StepSurface>
   );
 
@@ -472,6 +624,12 @@ export function CustomImageProviderWorkbench() {
               {t('settings.customProviders.workbench.fields.bodyMode')}
               <UiSelect className="mt-1.5 h-9" value={imageVariant.bodyMode ?? 'json'} onChange={(event) => updateImageVariant({ bodyMode: event.target.value as ImageRequestBodyMode })}>
                 {BODY_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+              </UiSelect>
+            </label>
+            <label className="block text-xs font-medium text-text-muted">
+              {t('settings.customProviders.workbench.fields.method')}
+              <UiSelect className="mt-1.5 h-9" value={imageVariant.method ?? 'POST'} onChange={(event) => updateImageVariant({ method: event.target.value as ImageRequestMethod })}>
+                {METHODS.map((method) => <option key={method} value={method}>{method}</option>)}
               </UiSelect>
             </label>
             <label className="block text-xs font-medium text-text-muted">
@@ -622,13 +780,13 @@ export function CustomImageProviderWorkbench() {
   );
 
   const renderReviewStep = () => (
-    <StepSurface title={t('settings.customProviders.workbench.stepTitles.review')} description={t('settings.customProviders.workbench.stepDescriptions.review')}>
+    <StepSurface title={t('settings.customProviders.workbench.stepTitles.review')} description={t(isComfyRoute ? 'settings.customProviders.workbench.comfyReviewDescription' : 'settings.customProviders.workbench.stepDescriptions.review')}>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {([
           ['label', draft.label || '—'],
           ['baseUrl', draft.baseUrl || '—'],
           ['models', String(draft.models.length)],
-          ['requestVariants', imageEnabled ? 'T2I + I2I' : 'T2I'],
+          ['requestVariants', isComfyRoute ? `ComfyUI ${draft.mediaType === 'video' ? 'Video' : 'Image'}` : imageEnabled ? 'T2I + I2I' : 'T2I'],
         ] as const).map(([key, value]) => (
           <div key={key} className="rounded-lg border border-border-dark bg-surface-dark px-3 py-2">
             <div className="text-[10px] text-text-muted">{t(`settings.customProviders.workbench.review.${key}`)}</div>
@@ -636,7 +794,7 @@ export function CustomImageProviderWorkbench() {
           </div>
         ))}
       </div>
-      <div className="mt-4">
+      {!isComfyRoute && <div className="mt-4">
         <CustomImageProviderContractEditor
           value={contractText}
           issues={contractIssues}
@@ -644,10 +802,38 @@ export function CustomImageProviderWorkbench() {
           onChange={(value) => { setContractText(value); setContractIssues([]); }}
           onApply={handleApplyContract}
         />
-      </div>
+      </div>}
+      {requestPreviews && (
+        <div className="mt-4 rounded-lg border border-border-dark bg-surface-dark p-3">
+          <div className="text-xs font-semibold text-text-dark">{t('settings.customProviders.workbench.requestPreviewTitle')}</div>
+          <p className="mt-1 text-[11px] leading-5 text-text-muted">{t('settings.customProviders.workbench.requestPreviewHelp')}</p>
+          {'error' in requestPreviews ? (
+            <p className="mt-2 whitespace-pre-wrap text-[11px] text-amber-300">{requestPreviews.error}</p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {([
+                [t(isComfyRoute ? 'settings.customProviders.workbench.comfyPreview' : 'settings.customProviders.workbench.previewText'), requestPreviews.text],
+                ...(requestPreviews.image ? [[t('settings.customProviders.workbench.previewImage'), requestPreviews.image] as const] : []),
+              ] as const).map(([label, preview]) => (
+                <details key={label} className="rounded-md border border-border-dark bg-bg-dark px-3 py-2">
+                  <summary className="cursor-pointer text-xs font-medium text-text-dark">
+                    {label} · {preview.method} · {preview.bodyMode}
+                  </summary>
+                  <pre className="ui-scrollbar mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-4 text-text-muted">{JSON.stringify({
+                    url: preview.url,
+                    headers: preview.headers,
+                    body: preview.body,
+                    multipart: preview.multipart,
+                  }, null, 2)}</pre>
+                </details>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {testResult && (
         <div className={`mt-4 rounded-lg border px-3 py-2 text-xs ${testResult.ok ? 'border-emerald-500/25 bg-emerald-500/5 text-emerald-300' : 'border-red-500/25 bg-red-500/5 text-red-300'}`}>
-          {testResult.ok ? t('settings.customProviders.workbench.testPassed') : testResult.errorMessage}
+          {testResult.ok ? (testResult.text || t('settings.customProviders.workbench.testPassed')) : testResult.errorMessage}
         </div>
       )}
       {saved && (
@@ -657,9 +843,10 @@ export function CustomImageProviderWorkbench() {
         </div>
       )}
       <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <p className="mr-auto self-center text-[11px] text-amber-300/80">{t(isComfyRoute ? 'settings.customProviders.workbench.comfyTestNotice' : 'settings.customProviders.workbench.testCostNotice')}</p>
         <UiButton type="button" variant="muted" size="sm" disabled={testing} onClick={() => { void handleTest(); }}>
           {testing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="mr-1.5 h-3.5 w-3.5" />}
-          {testing ? t('settings.customProviders.workbench.testing') : t('settings.customProviders.workbench.test')}
+          {testing ? t('settings.customProviders.workbench.testing') : t(isComfyRoute ? 'settings.customProviders.workbench.comfyTest' : 'settings.customProviders.workbench.test')}
         </UiButton>
         <UiButton type="button" variant="primary" size="sm" onClick={handleSave}>
           {t('settings.customProviders.workbench.save')}
@@ -692,7 +879,7 @@ export function CustomImageProviderWorkbench() {
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-text-dark">
             {route === 'ai' && <Sparkles className="h-4 w-4 text-accent" />}
-            {t('settings.customProviders.workbench.title')}
+            {t(isComfyRoute ? 'settings.customProviders.workbench.comfyTitle' : 'settings.customProviders.workbench.title')}
           </div>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-text-muted">
             {generatedByAi ? t('settings.customProviders.workbench.aiDraftNotice') : t('settings.customProviders.workbench.description')}
@@ -704,7 +891,7 @@ export function CustomImageProviderWorkbench() {
       </div>
 
       <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
-        {CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS.map((step, index) => (
+        {visibleSteps.map((step, index) => (
           <button
             key={step}
             type="button"
@@ -726,7 +913,7 @@ export function CustomImageProviderWorkbench() {
           <ChevronLeft className="mr-1 h-3.5 w-3.5" />
           {t('settings.customProviders.workbench.previous')}
         </UiButton>
-        {stepIndex < CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS.length - 1 && (
+        {stepIndex < visibleSteps.length - 1 && (
           <UiButton type="button" variant="primary" size="sm" onClick={() => moveStep(1)}>
             {t('settings.customProviders.workbench.next')}
             <ChevronRight className="ml-1 h-3.5 w-3.5" />

@@ -5,11 +5,14 @@ import {
   DIRECTOR_PROCEDURAL_ACTIONS,
   DIRECTOR_STATIC_POSES,
   createDirectorCameraPresetTrack,
+  createDirectorCameraRouteTrack,
+  createDirectorObjectRouteTrack,
   createEmptyDirectorMotionProject,
   deleteDirectorMotionClip,
   normalizeDirectorMotionProject,
   sampleDirectorMotion,
   sampleDirectorProceduralAction,
+  timeDirectorRoutePoints,
 } from './directorMotion';
 
 describe('director motion schema', () => {
@@ -92,11 +95,12 @@ describe('director motion sampling', () => {
     expect(sampleDirectorMotion(project, 2).objects.item.position.x).toBe(4);
   });
 
-  it('samples all six procedural actions and a looping custom clip', () => {
-    expect(DIRECTOR_PROCEDURAL_ACTIONS).toHaveLength(6);
+  it('samples distinct procedural actions and a looping custom clip', () => {
+    expect(DIRECTOR_PROCEDURAL_ACTIONS.length).toBeGreaterThanOrEqual(13);
     DIRECTOR_PROCEDURAL_ACTIONS.forEach((action) => {
       expect(sampleDirectorProceduralAction(action.id, action.durationSeconds / 3)).toBeTruthy();
     });
+    expect(sampleDirectorProceduralAction('clap', 0.55)).not.toEqual(sampleDirectorProceduralAction('walk-back', 0.55));
     expect(DIRECTOR_STATIC_POSES.length).toBeGreaterThanOrEqual(20);
 
     const project: DirectorMotionProjectV1 = {
@@ -190,6 +194,132 @@ describe('director motion sampling', () => {
       expect(track[0].time).toBe(0);
       expect(track[track.length - 1].time).toBe(8);
     });
+  });
+
+  it('converts clicked routes to distance-paced editable V1 tracks', () => {
+    const item = { id: 'actor', label: 'Actor', color: '#fff', x: 0, y: 0, category: 'person', pos3d: { x: 0, y: 0.3, z: 0 } } as BlueprintItem;
+    const points = [
+      { x: 0, y: 0.3, z: 0 },
+      { x: 1, y: 0.3, z: 0 },
+      { x: 1, y: 0.3, z: 0 },
+      { x: 4, y: 0.3, z: 0 },
+    ];
+    const timed = timeDirectorRoutePoints(points, 2, 10);
+    expect(timed.map((frame) => frame.time)).toEqual([2, 4, 10]);
+    const track = createDirectorObjectRouteTrack(points, item, 2, 10);
+    expect(track).toHaveLength(3);
+    expect(track.every((frame) => frame.orientToPath)).toBe(true);
+    const project = { ...createEmptyDirectorMotionProject(10), objectTracks: { actor: track } };
+    expect(sampleDirectorMotion(project, 4, [item]).objects.actor.position.x).toBeCloseTo(1);
+    expect(normalizeDirectorMotionProject(JSON.parse(JSON.stringify(project))).objectTracks.actor).toEqual(track);
+  });
+
+  it('keeps path-facing orientation continuous through a turn and respects a yaw offset', () => {
+    const actor = { id: 'actor', label: 'Actor', color: '#fff', x: 0, y: 0, category: 'person' } as BlueprintItem;
+    const track = createDirectorObjectRouteTrack([
+      { x: 0, y: 0, z: 0 },
+      { x: 0, y: 0, z: 2 },
+      { x: 2, y: 0, z: 2 },
+    ], actor, 0, 8).map((frame) => ({ ...frame, rotation: { ...frame.rotation, y: 0.2 } }));
+    const project = { ...createEmptyDirectorMotionProject(8), objectTracks: { actor: track } };
+    const justBefore = sampleDirectorMotion(project, 3.99, [actor]).objects.actor.rotation.y;
+    const atTurn = sampleDirectorMotion(project, 4, [actor]).objects.actor.rotation.y;
+    const justAfter = sampleDirectorMotion(project, 4.01, [actor]).objects.actor.rotation.y;
+    expect(atTurn).toBeCloseTo(Math.PI / 4 + 0.2, 3);
+    expect(Math.abs(atTurn - justBefore)).toBeLessThan(0.02);
+    expect(Math.abs(justAfter - atTurn)).toBeLessThan(0.02);
+  });
+
+  it('bounds freehand keyframes and preserves a camera route target', () => {
+    const points = Array.from({ length: 300 }, (_, index) => ({ x: index * 0.1, y: 0, z: Math.sin(index / 10) }));
+    const camera = { target: { x: 2, y: 1, z: 3 }, fov: 48, trackTargetId: 'actor', trackTargetBodyPart: 'head' };
+    const track = createDirectorCameraRouteTrack(points, camera, 0, 8);
+    expect(track).toHaveLength(48);
+    expect(track[0].time).toBe(0);
+    expect(track[track.length - 1].time).toBeCloseTo(8);
+    expect(track.every((frame) => frame.trackTargetId === 'actor' && frame.trackTargetBodyPart === 'head')).toBe(true);
+    expect(timeDirectorRoutePoints([{ x: 0, y: 0, z: 0 }, { x: Number.NaN, y: 0, z: 0 }], 0, 8)).toEqual([]);
+  });
+
+  it('maintains walking and camera speed through dense hand-drawn route points', () => {
+    const actor = { id: 'actor', label: 'Actor', color: '#fff', x: 0, y: 0, category: 'person' } as BlueprintItem;
+    const points = Array.from({ length: 96 }, (_, index) => ({ x: index * 0.1, y: 0, z: 0 }));
+    const objectTrack = createDirectorObjectRouteTrack(points, actor, 0, 8);
+    const cameraTrack = createDirectorCameraRouteTrack(points, { target: { x: 0, y: 1, z: 0 }, fov: 45 }, 0, 8);
+    const followTrack = createDirectorCameraPresetTrack('follow-actor-route', 8, actor, objectTrack);
+    expect(objectTrack).toHaveLength(48);
+    expect(objectTrack.every((frame) => frame.easing === 'linear')).toBe(true);
+    expect(cameraTrack.every((frame) => frame.easing === 'linear')).toBe(true);
+    expect(followTrack.every((frame) => frame.easing === 'linear')).toBe(true);
+
+    const crossingTime = objectTrack[24].time;
+    const delta = Math.min(
+      crossingTime - objectTrack[23].time,
+      objectTrack[25].time - crossingTime,
+    ) * 0.2;
+    const expectedSpeed = 9.5 / 8;
+    for (const track of [cameraTrack, followTrack]) {
+      const project = { ...createEmptyDirectorMotionProject(8), objectTracks: { actor: objectTrack }, cameraTrack: track };
+      const before = sampleDirectorMotion(project, crossingTime - delta, [actor]);
+      const middle = sampleDirectorMotion(project, crossingTime, [actor]);
+      const after = sampleDirectorMotion(project, crossingTime + delta, [actor]);
+      const actorSpeedBefore = (middle.objects.actor.position.x - before.objects.actor.position.x) / delta;
+      const actorSpeedAfter = (after.objects.actor.position.x - middle.objects.actor.position.x) / delta;
+      const cameraSpeedBefore = ((middle.camera?.position.x ?? 0) - (before.camera?.position.x ?? 0)) / delta;
+      const cameraSpeedAfter = ((after.camera?.position.x ?? 0) - (middle.camera?.position.x ?? 0)) / delta;
+      for (const speed of [actorSpeedBefore, actorSpeedAfter, cameraSpeedBefore, cameraSpeedAfter]) {
+        expect(speed).toBeCloseTo(expectedSpeed, 2);
+      }
+    }
+  });
+
+  it('builds a behind-the-actor follow shot from a saved person route', () => {
+    const actor = { id: 'actor', label: 'Actor', color: '#fff', x: 0, y: 0, category: 'person' } as BlueprintItem;
+    const route = createDirectorObjectRouteTrack([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 4 }], actor, 0, 8);
+    const cameraTrack = createDirectorCameraPresetTrack('follow-actor-route', 8, actor, route);
+    const project = { ...createEmptyDirectorMotionProject(8), cameraTrack, objectTracks: { actor: route } };
+    const frame = sampleDirectorMotion(project, 4, [actor]);
+    expect(frame.camera?.position.z).toBeCloseTo(-2.2);
+    expect(frame.camera?.target).toEqual({ x: 0, y: 1.05, z: 2 });
+    expect(frame.camera?.trackTargetId).toBe('actor');
+  });
+
+  it('orbits outside an actor at a route reversal instead of crossing through them', () => {
+    const actor = { id: 'actor', label: 'Actor', color: '#fff', x: 0, y: 0, category: 'person' } as BlueprintItem;
+    const route = createDirectorObjectRouteTrack([
+      { x: 0, y: 0, z: 0 },
+      { x: 0, y: 0, z: 4 },
+      { x: 0, y: 0, z: 0 },
+    ], actor, 0, 8);
+    const cameraTrack = createDirectorCameraPresetTrack('follow-actor-route', 8, actor, route);
+    const project = { ...createEmptyDirectorMotionProject(8), cameraTrack, objectTracks: { actor: route } };
+    expect(Math.abs(cameraTrack[1].position.x)).toBeGreaterThan(3);
+    for (let index = 0; index <= 80; index += 1) {
+      const frame = sampleDirectorMotion(project, index / 10, [actor]);
+      const camera = frame.camera!.position;
+      const position = frame.objects.actor.position;
+      expect(Math.hypot(camera.x - position.x, camera.z - position.z)).toBeGreaterThan(2.5);
+      expect(frame.camera?.trackTargetId).toBe('actor');
+    }
+  });
+
+  it('stays beside the actor through consecutive route reversals', () => {
+    const actor = { id: 'actor', label: 'Actor', color: '#fff', x: 0, y: 0, category: 'person' } as BlueprintItem;
+    const route = createDirectorObjectRouteTrack([
+      { x: 0, y: 0, z: 0 },
+      { x: 0, y: 0, z: 4 },
+      { x: 0, y: 0, z: 0 },
+      { x: 0, y: 0, z: 4 },
+    ], actor, 0, 8);
+    const cameraTrack = createDirectorCameraPresetTrack('follow-actor-route', 8, actor, route);
+    const project = { ...createEmptyDirectorMotionProject(8), cameraTrack, objectTracks: { actor: route } };
+
+    for (let index = 0; index <= 80; index += 1) {
+      const frame = sampleDirectorMotion(project, index / 10, [actor]);
+      const camera = frame.camera!.position;
+      const position = frame.objects.actor.position;
+      expect(Math.hypot(camera.x - position.x, camera.z - position.z)).toBeGreaterThan(2.5);
+    }
   });
 
   it('deletes custom clips and every action keyframe that references them', () => {

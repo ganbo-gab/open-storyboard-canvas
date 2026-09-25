@@ -27,6 +27,7 @@ export function ProjectManager() {
   const providerIds = useMemo(() => listModelProviders().map((provider) => provider.id), []);
   const apiKeys = useSettingsStore((state) => state.apiKeys);
   const dreaminaStatus = useSettingsStore((state) => state.dreaminaStatus);
+  const agnesApiKey = useSettingsStore((state) => state.agnesApiKey);
   const customProviders = useCustomProvidersStore((state) => state.providers);
   const hasConfiguredProvider = useMemo(
     () => hasConfiguredImageProvider({
@@ -34,8 +35,9 @@ export function ProjectManager() {
       builtInProviderIds: providerIds,
       customProviders,
       dreaminaStatus,
+      agnesApiKey,
     }),
-    [apiKeys, customProviders, dreaminaStatus, providerIds]
+    [agnesApiKey, apiKeys, customProviders, dreaminaStatus, providerIds]
   );
 
   const {

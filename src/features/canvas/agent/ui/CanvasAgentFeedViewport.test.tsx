@@ -24,6 +24,40 @@ const approval = (id: string) => ({
 });
 
 describe('CanvasAgentFeedViewport approval queue', () => {
+  it('disables history session switching during a turn, approval, or pending plan', () => {
+    const renderHistory = (isRunning: boolean, pendingCount: number, hasPendingPlan: boolean) => renderToStaticMarkup(React.createElement(CanvasAgentFeedViewport, {
+      projectId: 'project',
+      activeView: 'history',
+      nodes: [],
+      displayedFeed: [],
+      sessions: [{ id: 'session-1', title: 'Previous', updatedAt: 1 }],
+      isRunning,
+      showCompletedTools: false,
+      pendingCount,
+      hasPendingPlan,
+      showNewItems: false,
+      scrollRef: { current: null },
+      onScroll: noop,
+      onStartConversation: noop,
+      onLoadSession: noop,
+      onApproval: noop,
+      onBatchApproval: noop,
+      onLocate: noop,
+      onRestoreDraft: noop,
+      onDiagnose: noop,
+      onPlanChange: noop,
+      onPlanConfirm: noop,
+      onPlanCancel: noop,
+      onRollback: noop,
+      onJumpToLatest: noop,
+    } as any));
+    expect(renderHistory(false, 0, false)).toContain('Previous');
+    expect(renderHistory(false, 0, false)).not.toMatch(/disabled=""[^>]*>\s*<div class="truncate text-xs text-text-dark">Previous/);
+    for (const markup of [renderHistory(true, 0, false), renderHistory(false, 1, false), renderHistory(false, 0, true)]) {
+      expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>\s*<div class="truncate text-xs text-text-dark">Previous/);
+    }
+  });
+
   it('groups completed tools per user turn while keeping live and failed tools visible', () => {
     const feed = [
       { id: 'u1', kind: 'message', role: 'user', text: 'one', createdAt: 1 },

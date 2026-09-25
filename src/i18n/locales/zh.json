@@ -42,6 +42,8 @@
     "history": "历史",
     "activity": "活动",
     "tasks": "任务",
+    "navigation": "Agent 视图导航",
+    "moreActions": "更多操作",
     "scopeNotice": "手动模式逐项确认；自动模式仅删除节点需要确认",
     "runtime": {
       "title": "Agent 运行方式",
@@ -803,10 +805,17 @@
         "currentTime": "当前时间", "duration": "总时长", "routePreview": "看路线", "shotPreview": "看成片",
         "showRoutes": "显示运动路线", "hideRoutes": "隐藏运动路线", "addKeyframe": "添加关键帧"
       },
+      "route": {
+        "point": "逐点绘制轨迹", "draw": "手绘轨迹", "finish": "完成轨迹", "cancel": "取消绘制",
+        "hintPoints": "在地面上依次点击，添加轨迹点；完成后可拖动关键帧调整。",
+        "hintDraw": "按住鼠标在地面上绘制轨迹；完成后可在时间轴中微调。"
+      },
       "inspector": {
         "title": "运动参数", "empty": "选中关键帧后可编辑。", "time": "时间", "easing": "插值",
         "linear": "线性", "smooth": "平滑", "fov": "视场角", "orientToPath": "面向行进方向",
-        "duplicate": "复制", "delete": "删除关键帧"
+        "duplicate": "复制", "delete": "删除关键帧", "position": "位置", "yaw": "朝向",
+        "targetMode": "镜头看向", "fixedTarget": "固定目标", "targetBodyPart": "跟随部位",
+        "head": "头部", "torso": "躯干", "feet": "脚部"
       },
       "library": {
         "title": "动作库", "poses": "静态姿势", "actions": "可播放动作", "clips": "自定义动作",
@@ -820,7 +829,8 @@
       },
       "cameraPresets": {
         "title": "运镜模板", "cinematicPush": "电影慢推", "characterFollow": "人物跟拍",
-        "fastChase": "快速追拍", "productOrbit": "产品环绕", "craneRise": "摇臂升起", "lateralDolly": "横向移镜"
+        "fastChase": "快速追拍", "productOrbit": "产品环绕", "craneRise": "摇臂升起", "lateralDolly": "横向移镜",
+        "followActorRoute": "沿人物路线跟拍"
       },
       "export": {
         "title": "参考视频", "needsCamera": "至少添加两个摄影机关键帧才能导出。",
@@ -831,7 +841,9 @@
         "canvasNodeName": "导演台参考视频", "addToCanvasFailed": "录制视频添加到画布失败。"
       },
       "actions": {
-        "walk": "行走", "run": "奔跑", "squatRise": "蹲起", "stepOver": "跨步", "jump": "跳跃", "wave": "挥手"
+        "walk": "行走", "run": "奔跑", "squatRise": "蹲起", "stepOver": "跨步", "jump": "跳跃", "wave": "挥手",
+        "idleBreath": "站立呼吸", "turnLook": "转身张望", "clap": "鼓掌", "phone": "接电话",
+        "walkBack": "后退行走", "sideStep": "侧步移动", "bow": "鞠躬"
       },
       "poses": {
         "standNeutral": "自然站立", "standAttention": "立正", "leanForward": "身体前倾", "leanBack": "身体后仰",
@@ -1822,20 +1834,35 @@
       },
       "workbench": {
         "chooseTitle": "选择创建方式",
-        "chooseDescription": "两种方式都会进入同一个配置工作台；这里不提供协议预设，也不会执行脚本或插件代码。",
+        "chooseDescription": "选择 AI 辅助、手动 HTTP 契约或 ComfyUI 工作流；所有配置都可编辑，不执行脚本或插件代码。",
         "aiRouteTitle": "让 AI 生成配置",
         "aiRouteDescription": "粘贴供应商公开文档，由已配置的文本模型生成可编辑草稿。",
         "manualRouteTitle": "手动搭建配置",
-        "manualRouteDescription": "按连接、请求、图片、响应、能力逐步组合完整 HTTP 契约。",
+        "manualRouteDescription": "按连接、请求、图片、响应、能力逐步组合完整 HTTP 契约；可让文生图和图生图使用同一端点或不同字段。",
+        "comfyRouteTitle": "连接 ComfyUI",
+        "comfyRouteDescription": "导入 API 工作流，连接本地或云端 ComfyUI；参考图上传、任务轮询和结果恢复由应用处理。",
         "title": "全自定义图片模型工作台",
         "description": "每一步只处理一类问题；最后统一检查、测试并保存。",
+        "comfyTitle": "ComfyUI API 工作流",
+        "comfyDescription": "请在 ComfyUI 开启 Dev Mode 后使用“Save (API Format)”导出工作流。可选填写节点绑定；留空时应用会从常见节点自动推断。",
+        "comfyOutputImage": "图片输出",
+        "comfyOutputVideo": "视频输出",
+        "comfyTest": "只读测试连接",
+        "comfyTestNotice": "连接测试只查询 ComfyUI 状态，不提交生成任务。",
+        "comfyReviewDescription": "核对工作流输出类型和请求预览；连接测试只读，确认后保存。",
         "aiDraftNotice": "AI 已生成草稿，请逐步检查端点、字段、图片编码、比例映射和响应路径。",
         "backToChoice": "重新选择创建方式",
         "previous": "上一步",
         "next": "下一步",
-        "test": "测试连通",
+        "test": "试生成（可能计费）",
         "testing": "测试中...",
         "testPassed": "请求成功，已找到可用图片结果。",
+        "testCostNotice": "试生成会向服务商提交真实生图请求，可能产生费用。",
+        "requestPreviewTitle": "实际请求预览",
+        "requestPreviewHelp": "使用示例提示词和示例图片计算最终请求；密钥与图片内容已脱敏，预览不会发送请求。",
+        "previewText": "文生图",
+        "previewImage": "图生图",
+        "comfyPreview": "工作流提交",
         "save": "保存配置",
         "saved": "配置已保存到“我的配置”。",
         "steps": {
@@ -1903,7 +1930,12 @@
           "models": "模型列表",
           "modelListEndpointPath": "模型列表 endpoint（可选）",
           "supportedModelVersions": "模型版本 / 变体（可选）",
-          "note": "使用说明（可选）"
+          "note": "使用说明（可选）",
+          "comfyWorkflow": "ComfyUI API 工作流 JSON",
+          "comfyBindings": "ComfyUI 节点绑定 JSON",
+          "comfyOutputs": "输出节点 ID JSON 数组",
+          "comfyOutputType": "工作流输出类型",
+          "comfyImportFile": "导入 API 工作流文件"
         },
         "authModes": {
           "bearer": "Authorization: Bearer",
@@ -1918,7 +1950,14 @@
           "defaultParams": "作为 {{extra.foo}} 的数据源，也会保留给兼容请求层。",
           "imageBodyTemplate": "图片通过下方图片字段注入，模板不需要重复粘贴 base64。",
           "ratioMappings": "例如 {\"16:9\":{\"size\":\"3840x2160\",\"fields\":{\"input.ratio\":\"wide\"}}}。",
-          "pollingRequestBody": "轮询接口需要 POST 请求体时，可在字符串值中使用 {taskId}。"
+          "pollingRequestBody": "轮询接口需要 POST 请求体时，可在字符串值中使用 {taskId}。",
+          "comfyWorkflow": "只接受 API Format 工作流，不接受画布 nodes/links 文件。不要把图片或模型文件内嵌进 JSON。",
+          "comfyBindings": "例如 {\"prompt\":{\"nodeId\":\"6\",\"input\":\"text\"},\"images\":[{\"nodeId\":\"10\",\"input\":\"image\"}]}。",
+          "comfyOutputs": "例如 [\"9\"]；留空数组时会从 SaveImage/SaveVideo 节点推断。"
+        },
+        "errors": {
+          "comfyOutputs": "ComfyUI 输出节点必须是非空字符串数组。",
+          "comfyFileTooLarge": "ComfyUI 工作流文件超过 8 MiB，请移除内嵌媒体后再导入。"
         },
         "review": {
           "label": "配置",

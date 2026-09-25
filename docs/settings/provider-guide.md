@@ -15,3 +15,7 @@
 3. 创建并复制密钥
 4. 将密钥填写到对应的供应商下面
 5. 开始用吧！
+
+自建中转站或 NewAPI 渠道请求格式不同？参阅[中转站生图兼容配置](image-relay-compatibility.md)，按实际 API 文档设置文生图、图生图端点与请求体。
+
+本地或云端 ComfyUI 请参阅[ComfyUI 连接指南](comfyui-guide.md)，导入 API 格式工作流并配置节点映射。

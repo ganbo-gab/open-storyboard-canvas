@@ -13,8 +13,10 @@ import type {
 import {
   DIRECTOR_STATIC_POSE_MAP,
   createClipFromActionTrack,
+  createDirectorCameraRouteTrack,
   createDirectorCameraPresetTrack,
   createDirectorMotionId,
+  createDirectorObjectRouteTrack,
   createObjectKeyframeFromItem,
   deleteDirectorMotionClip,
   normalizeDirectorMotionProject,
@@ -34,6 +36,7 @@ import {
 } from '@/features/canvas/application/directorVideoRecording';
 import type {
   BlueprintSceneHandle,
+  DirectorMotionRouteDraft,
   DirectorMotionRouteSelection,
   DirectorSceneCameraSnapshot,
 } from './BlueprintScene';
@@ -71,6 +74,7 @@ export function useDirectorStudioMotion({
   const [motionSelection, setMotionSelection] = useState<DirectorKeyframeSelection | null>(null);
   const [motionShowRoutes, setMotionShowRoutes] = useState(true);
   const [motionPreviewMode, setMotionPreviewMode] = useState<'route' | 'shot'>('shot');
+  const [motionRouteDraft, setMotionRouteDraft] = useState<DirectorMotionRouteDraft | null>(null);
   const [pilotActive, setPilotActive] = useState(false);
   const [pilotTargetId, setPilotTargetId] = useState<string | null>(null);
   const [actionLibraryOpen, setActionLibraryOpen] = useState(false);
@@ -255,10 +259,49 @@ export function useDirectorStudioMotion({
   }, [motionProject.actionTracks, updateMotionProject]);
 
   const applyCameraPreset = useCallback((presetId: DirectorCameraPresetId) => {
-    const track = createDirectorCameraPresetTrack(presetId, motionProject.durationSeconds, selectedItem);
+    if (presetId === 'follow-actor-route' && (
+      !selectedItem || selectedItem.category !== 'person' || (motionProject.objectTracks[selectedItem.id]?.length ?? 0) < 2
+    )) return;
+    const track = createDirectorCameraPresetTrack(
+      presetId,
+      motionProject.durationSeconds,
+      selectedItem,
+      selectedItem ? motionProject.objectTracks[selectedItem.id] : undefined,
+    );
     updateMotionProject((project) => ({ ...project, cameraTrack: track }));
     setMotionSelection(null);
-  }, [motionProject.durationSeconds, selectedItem, updateMotionProject]);
+  }, [motionProject.durationSeconds, motionProject.objectTracks, selectedItem, updateMotionProject]);
+
+  const completeMotionRouteDraft = useCallback((points: DirectorMotionVector3[]) => {
+    const draft = motionRouteDraft;
+    if (!draft || points.length < 2) return;
+    const startTime = Math.min(motionTimeRef.current, Math.max(0, motionProject.durationSeconds - 0.5));
+    updateMotionProject((project) => {
+      if (draft.kind === 'camera') {
+        const camera = editorRef.current?.getCameraSnapshot();
+        if (!camera) return project;
+        const routePoints = points.map((point) => ({ ...point, y: camera.position.y }));
+        const route = createDirectorCameraRouteTrack(routePoints, camera, startTime, project.durationSeconds);
+        if (route.length < 2) return project;
+        return { ...project, cameraTrack: [
+          ...project.cameraTrack.filter((frame) => frame.time < startTime - 0.025),
+          ...route,
+        ] };
+      }
+      const item = latestDataRef.current.items.find((candidate) => candidate.id === draft.trackId);
+      if (!item || item.category !== 'person') return project;
+      const baseY = item.pos3d?.y ?? 0;
+      const routePoints = points.map((point) => ({ ...point, y: baseY }));
+      const route = createDirectorObjectRouteTrack(routePoints, item, startTime, project.durationSeconds);
+      if (route.length < 2) return project;
+      return { ...project, objectTracks: { ...project.objectTracks, [item.id]: [
+        ...(project.objectTracks[item.id] ?? []).filter((frame) => frame.time < startTime - 0.025),
+        ...route,
+      ] } };
+    });
+    setMotionSelection(null);
+    setMotionRouteDraft(null);
+  }, [editorRef, motionProject.durationSeconds, motionRouteDraft, updateMotionProject]);
 
   const setMotionTimeAndApply = useCallback((time: number) => {
     const nextTime = Math.min(motionProject.durationSeconds, Math.max(0, time));
@@ -394,6 +437,28 @@ export function useDirectorStudioMotion({
     editorRef.current?.setMotionPlaybackActive(false);
   }, [editorRef]);
 
+  const startMotionRouteDraft = useCallback((draft: DirectorMotionRouteDraft) => {
+    if (motionRouteDraft?.kind === draft.kind && motionRouteDraft.trackId === draft.trackId && motionRouteDraft.method === draft.method) {
+      editorRef.current?.cancelMotionRouteDraft();
+      setMotionRouteDraft(null);
+      return;
+    }
+    setMotionPlaying(false);
+    setMotionSelection(null);
+    setMotionRouteDraft(draft);
+    setPreviewModeAndApply('route');
+    setMotionShowRoutes(true);
+  }, [editorRef, motionRouteDraft, setMotionPlaying, setPreviewModeAndApply]);
+
+  const finishMotionRouteDraft = useCallback(() => {
+    editorRef.current?.completeMotionRouteDraft();
+  }, [editorRef]);
+
+  const cancelMotionRouteDraft = useCallback(() => {
+    editorRef.current?.cancelMotionRouteDraft();
+    setMotionRouteDraft(null);
+  }, [editorRef]);
+
   const toggleCameraPilot = useCallback(() => {
     if (pilotActive) editorRef.current?.exitPilot();
     else editorRef.current?.enterPilot();
@@ -467,9 +532,10 @@ export function useDirectorStudioMotion({
 
   const stopMotionActivity = useCallback(() => {
     setMotionPlaying(false);
+    cancelMotionRouteDraft();
     videoExportAbortRef.current?.abort();
     editorRef.current?.exitPilot();
-  }, [editorRef, setMotionPlaying]);
+  }, [cancelMotionRouteDraft, editorRef, setMotionPlaying]);
 
   return {
     motionProject,
@@ -480,6 +546,7 @@ export function useDirectorStudioMotion({
     motionSelection, setMotionSelection,
     motionShowRoutes, setMotionShowRoutes,
     motionPreviewMode,
+    motionRouteDraft,
     pilotActive, setPilotActive,
     pilotTargetId, setPilotTargetId,
     actionLibraryOpen, setActionLibraryOpen,
@@ -507,6 +574,10 @@ export function useDirectorStudioMotion({
     duplicateMotionClip,
     deleteMotionClip,
     applyCameraPreset,
+    startMotionRouteDraft,
+    finishMotionRouteDraft,
+    cancelMotionRouteDraft,
+    completeMotionRouteDraft,
     setMotionTimeAndApply,
     selectMotionRouteKeyframe,
     moveMotionRouteKeyframe,

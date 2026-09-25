@@ -1205,6 +1205,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     motionShowRoutes,
     setMotionShowRoutes,
     motionPreviewMode,
+    motionRouteDraft,
     pilotActive,
     setPilotActive,
     pilotTargetId,
@@ -1238,6 +1239,10 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     duplicateMotionClip,
     deleteMotionClip,
     applyCameraPreset,
+    startMotionRouteDraft,
+    finishMotionRouteDraft,
+    cancelMotionRouteDraft,
+    completeMotionRouteDraft,
     setMotionTimeAndApply,
     selectMotionRouteKeyframe,
     moveMotionRouteKeyframe,
@@ -3163,6 +3168,9 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                 onMotionRoutePointSelect={selectMotionRouteKeyframe}
                 onMotionRoutePointMove={moveMotionRouteKeyframe}
                 onMotionRoutePointInsert={insertMotionRouteKeyframe}
+                motionRouteDraft={motionRouteDraft}
+                onMotionRouteDraftComplete={completeMotionRouteDraft}
+                onMotionRouteDraftCancel={cancelMotionRouteDraft}
                 pilotActive={pilotActive}
                 onPilotActiveChange={setPilotActive}
                 onPilotRecordCamera={recordPilotCamera}
@@ -4146,12 +4154,14 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
               height={motionTimelineHeight}
               project={motionProject}
               items={data.items}
+              selectedItemId={selectedItemId}
               timeSource={motionTimeSource}
               playbackSource={playbackSource}
               selection={motionSelection}
               showRoutes={motionShowRoutes}
               previewMode={motionPreviewMode}
               pilotActive={pilotActive}
+              routeDraft={motionRouteDraft}
               onTimeChange={setMotionTimeAndApply}
               onTogglePlayback={() => setMotionPlaying((value) => !value)}
               onGoToStart={() => { setMotionPlaying(false); setMotionTimeAndApply(0); }}
@@ -4173,6 +4183,9 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
               onOpenActionLibrary={() => setActionLibraryOpen(true)}
               onOpenExport={openVideoExport}
               onApplyCameraPreset={applyCameraPreset}
+              onStartRouteDraft={startMotionRouteDraft}
+              onFinishRouteDraft={finishMotionRouteDraft}
+              onCancelRouteDraft={cancelMotionRouteDraft}
               onClose={() => setTimelineOpen(false)}
             />
           ) : null}

@@ -47,6 +47,7 @@ import {
 } from '@/features/canvas/application/customImageProviderConfig';
 import {
   buildCustomProviderRequestDebugPreview,
+  buildCustomProviderRequestDebugPreviewForConfig,
   classifyGenerationError,
   detectInlineImageAspectRatio,
   getCustomProviderJob,
@@ -129,6 +130,104 @@ async function waitForTerminalJob(jobId: string) {
 }
 
 describe('custom provider submission safety', () => {
+  const comfyWorkflow = {
+    '6': { class_type: 'CLIPTextEncode', inputs: { text: 'old' } },
+    '9': { class_type: 'SaveImage', inputs: { images: ['6', 0] } },
+  };
+  const comfyProvider = (mediaType: 'image' | 'video' = 'image') => provider({
+    mediaType,
+    baseUrl: 'http://127.0.0.1:8188/comfy',
+    endpointPath: '/prompt',
+    apiKey: '',
+    apiStyle: 'comfyui',
+    models: ['workflow'],
+    extraParams: {
+      auth: { mode: 'none' },
+      comfyui: { workflow: comfyWorkflow, outputNodeIds: ['9'], pollIntervalMs: 500, pollTimeoutMs: 5000 },
+    },
+  });
+
+  it('submits a ComfyUI image workflow once, polls its durable prompt id, then downloads the result', async () => {
+    useCustomProvidersStore.getState().replaceAll([comfyProvider()]);
+    customHttpRequestMock
+      .mockImplementationOnce(() => response(200, { prompt_id: 'prompt-1' }))
+      .mockImplementationOnce(() => response(200, {
+        'prompt-1': { outputs: { '9': { images: [{ filename: 'final.png', subfolder: '', type: 'output' }] } } },
+      }));
+    prepareNodeImageSourceWithHeadersMock.mockResolvedValueOnce({ imagePath: '/local/final.png', aspectRatio: '1:1' });
+
+    const result = await waitForTerminalJob(await submitCustomProviderJob({
+      prompt: 'a mountain', model: 'custom:provider-1:workflow', size: '1024x1024', aspect_ratio: '1:1',
+    }));
+
+    expect(result.status).toBe('succeeded');
+    expect(result.result).toBe('/local/final.png');
+    expect(result.external_task_id).toBe('prompt-1');
+    expect(customHttpRequestMock).toHaveBeenCalledTimes(2);
+    expect(customHttpRequestMock.mock.calls[0][0]).toMatchObject({
+      url: 'http://127.0.0.1:8188/comfy/prompt',
+      method: 'POST',
+      body: { prompt: expect.objectContaining({ '6': { class_type: 'CLIPTextEncode', inputs: { text: 'a mountain' } } }) },
+    });
+    expect(customHttpRequestMock.mock.calls[1][0].url).toBe('http://127.0.0.1:8188/comfy/history/prompt-1');
+    expect(prepareNodeImageSourceWithHeadersMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8188/comfy/view?filename=final.png&subfolder=&type=output',
+      {},
+      512,
+      expect.objectContaining({ configuredProviderOrigin: 'http://127.0.0.1:8188' }),
+    );
+  });
+
+  it('uses the ComfyUI video path and materializes a playable output without another submit', async () => {
+    useCustomProvidersStore.getState().replaceAll([comfyProvider('video')]);
+    customHttpRequestMock
+      .mockImplementationOnce(() => response(200, { prompt_id: 'prompt-video' }))
+      .mockImplementationOnce(() => response(200, {
+        'prompt-video': { outputs: { '9': { gifs: [{ filename: 'clip.mp4', subfolder: '', type: 'output' }] } } },
+      }));
+    persistVideoSourceMock.mockResolvedValueOnce('/local/clip.mp4');
+
+    const result = await waitForTerminalJob(await submitCustomVideoJob({
+      prompt: 'a moving mountain', model: 'custom:provider-1:workflow', size: '1280x720', aspect_ratio: '16:9',
+    }));
+
+    expect(result.status).toBe('succeeded');
+    expect(result.result).toBe('/local/clip.mp4');
+    expect(result.external_task_id).toBe('prompt-video');
+    expect(customHttpRequestMock.mock.calls.filter(([request]) => request.method === 'POST')).toHaveLength(1);
+    expect(persistVideoSourceMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8188/comfy/view?filename=clip.mp4&subfolder=&type=output',
+      {},
+      expect.objectContaining({ configuredProviderOrigin: 'http://127.0.0.1:8188' }),
+    );
+  });
+
+  it('applies configured ComfyUI query routing to /view only when downloading, not in the durable result URL', async () => {
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
+    useCustomProvidersStore.getState().replaceAll([provider({
+      ...comfyProvider(),
+      queryParams: { tenant: 'studio-a', access_token: 'private-token' },
+    })]);
+    customHttpRequestMock
+      .mockImplementationOnce(() => response(200, { prompt_id: 'prompt-query' }))
+      .mockImplementationOnce(() => response(200, {
+        'prompt-query': { outputs: { '9': { images: [{ filename: 'final.png', subfolder: '', type: 'output' }] } } },
+      }));
+    prepareNodeImageSourceWithHeadersMock.mockResolvedValueOnce({ imagePath: '/local/final.png', aspectRatio: '1:1' });
+
+    const result = await waitForTerminalJob(await submitCustomProviderJob({
+      prompt: 'a mountain', model: 'custom:provider-1:workflow', size: '1024x1024', aspect_ratio: '1:1',
+    }));
+
+    expect(result.status).toBe('succeeded');
+    const downloadUrl = prepareNodeImageSourceWithHeadersMock.mock.calls[0][0] as string;
+    expect(downloadUrl).toContain('tenant=studio-a');
+    expect(downloadUrl).toContain('access_token=private-token');
+    const completed = updateGenerationJobMock.mock.calls.find(([update]) => update.status === 'succeeded')?.[0];
+    expect(completed?.resultUrl).toContain('/view?filename=final.png');
+    expect(completed?.resultUrl).not.toContain('private-token');
+  });
+
   it.each([
     ['proxy tunnel failed', 'proxy'],
     ['dns resolve failed', 'dns'],
@@ -569,6 +668,48 @@ describe('custom provider submission safety', () => {
 });
 
 describe('custom provider image request contracts', () => {
+  it('previews an unsaved relay contract with its own image endpoint and redacted credentials', () => {
+    const draftProvider = provider({
+      id: 'draft-relay',
+      apiKey: 'private-relay-key',
+      extraParams: {
+        imageRequestContract: {
+          version: 1,
+          textToImage: {
+            endpointPath: '/images/generations',
+            bodyMode: 'json',
+            bodyTemplate: { model: '{{model}}', prompt: '{{prompt}}' },
+          },
+          imageToImage: {
+            endpointPath: '/images/generations',
+            bodyMode: 'json',
+            bodyTemplate: { model: '{{model}}', prompt: '{{prompt}}' },
+            imageFields: [{ name: 'image', mode: 'array', encoding: 'data-url' }],
+          },
+        },
+      },
+    });
+    const preview = buildCustomProviderRequestDebugPreviewForConfig(draftProvider, 'gpt-image-2', {
+      prompt: 'draw',
+      model: 'custom:draft-relay:gpt-image-2',
+      size: '1024x1024',
+      aspect_ratio: '1:1',
+      reference_images: [
+        'data:image/png;base64,AAAA',
+        'data:image/png;base64,BBBB',
+      ],
+    });
+
+    expect(preview.url).toBe('https://example.com/v1/images/generations');
+    expect(preview.body).toMatchObject({
+      model: 'gpt-image-2',
+      prompt: 'draw',
+      image: ['data:image/png;base64,[base64 4 chars]', 'data:image/png;base64,[base64 4 chars]'],
+    });
+    expect(JSON.stringify(preview)).not.toContain('private-relay-key');
+    expect(customHttpRequestMock).not.toHaveBeenCalled();
+  });
+
   it.each(['1K', '2K', '3K', '4K'])(
     'keeps Agnes Image 2.1 symbolic %s and sends ratio at the top level',
     (tier) => {

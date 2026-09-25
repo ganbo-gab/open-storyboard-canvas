@@ -71,7 +71,8 @@ export type DirectorCameraPresetId =
   | 'fast-chase'
   | 'product-orbit'
   | 'crane-rise'
-  | 'lateral-dolly';
+  | 'lateral-dolly'
+  | 'follow-actor-route';
 
 const EMPTY_POSE: BlueprintActionPose = {};
 
@@ -113,6 +114,13 @@ export const DIRECTOR_PROCEDURAL_ACTIONS: readonly DirectorProceduralActionDefin
   { id: 'step-over', labelKey: 'directorStudio.motion.actions.stepOver', durationSeconds: 1.5 },
   { id: 'jump', labelKey: 'directorStudio.motion.actions.jump', durationSeconds: 1.25 },
   { id: 'wave', labelKey: 'directorStudio.motion.actions.wave', durationSeconds: 1.4 },
+  { id: 'idle-breath', labelKey: 'directorStudio.motion.actions.idleBreath', durationSeconds: 2.6 },
+  { id: 'turn-look', labelKey: 'directorStudio.motion.actions.turnLook', durationSeconds: 2.2 },
+  { id: 'clap', labelKey: 'directorStudio.motion.actions.clap', durationSeconds: 1.1 },
+  { id: 'phone', labelKey: 'directorStudio.motion.actions.phone', durationSeconds: 2.1 },
+  { id: 'walk-back', labelKey: 'directorStudio.motion.actions.walkBack', durationSeconds: 1.2 },
+  { id: 'side-step', labelKey: 'directorStudio.motion.actions.sideStep', durationSeconds: 1.3 },
+  { id: 'bow', labelKey: 'directorStudio.motion.actions.bow', durationSeconds: 2.4 },
 ] as const;
 
 export const DIRECTOR_CAMERA_PRESETS: readonly DirectorCameraPresetDefinition[] = [
@@ -122,6 +130,7 @@ export const DIRECTOR_CAMERA_PRESETS: readonly DirectorCameraPresetDefinition[] 
   { id: 'product-orbit', labelKey: 'directorStudio.motion.cameraPresets.productOrbit' },
   { id: 'crane-rise', labelKey: 'directorStudio.motion.cameraPresets.craneRise' },
   { id: 'lateral-dolly', labelKey: 'directorStudio.motion.cameraPresets.lateralDolly' },
+  { id: 'follow-actor-route', labelKey: 'directorStudio.motion.cameraPresets.followActorRoute' },
 ] as const;
 
 function asRecord(value: unknown): UnknownRecord | null {
@@ -507,6 +516,22 @@ export function sampleDirectorProceduralAction(actionId: string, timeSeconds: nu
         rightElbow: { x: -1.05 + wave * 0.2 },
         head: { y: wave * 0.08 },
       };
+    case 'idle-breath':
+      return { torso: { x: wave * 0.018 }, leftShoulder: { z: -0.06 - wave * 0.025 }, rightShoulder: { z: 0.06 + wave * 0.025 }, scaleY: 1 + wave * 0.012 };
+    case 'turn-look':
+      return { head: { y: wave * 0.58 }, torso: { x: -0.025 }, rightShoulder: { x: -0.12 } };
+    case 'clap':
+      return { leftShoulder: { x: -1.1, z: -0.5 - positiveWave * 0.48 }, rightShoulder: { x: -1.1, z: 0.5 + positiveWave * 0.48 }, leftElbow: { x: -0.8 }, rightElbow: { x: -0.8 } };
+    case 'phone':
+      return { rightShoulder: { x: -0.68, z: 0.23 }, rightElbow: { x: -1.85 + wave * 0.05 }, head: { y: -0.12 + wave * 0.04 }, leftShoulder: { x: -0.08 } };
+    case 'walk-back':
+      return { leftHip: { x: -wave * 0.48 }, rightHip: { x: wave * 0.48 }, leftKnee: { x: Math.max(0, wave) * 0.55 }, rightKnee: { x: Math.max(0, -wave) * 0.55 }, leftShoulder: { x: wave * 0.35 }, rightShoulder: { x: -wave * 0.35 }, groupY: Math.abs(wave) * 0.02 };
+    case 'side-step':
+      return { leftHip: { z: -0.18 - wave * 0.24 }, rightHip: { z: 0.18 + wave * 0.24 }, leftKnee: { x: positiveWave * 0.3 }, rightKnee: { x: (1 - positiveWave) * 0.3 }, leftShoulder: { z: -0.28 }, rightShoulder: { z: 0.28 }, groupY: Math.abs(wave) * 0.025 };
+    case 'bow': {
+      const bend = Math.sin(phase * Math.PI) ** 2;
+      return { torso: { x: -bend * 0.78 }, head: { x: bend * 0.12 }, leftShoulder: { x: -bend * 0.2 }, rightShoulder: { x: -bend * 0.2 } };
+    }
     default:
       return {};
   }
@@ -554,20 +579,19 @@ function sampleActionTrack(
 function sampleObjectTrack(track: DirectorObjectKeyframe[], time: number): SampledDirectorObjectState | null {
   const segment = findSegment(track, time);
   if (!segment) return null;
-  const { from, to, amount, rawAmount } = segment;
+  const { from, to, amount } = segment;
   let rotation = slerpEuler(from.rotation, to.rotation, amount);
-  if ((from.orientToPath || to.orientToPath) && segment.fromIndex !== segment.toIndex) {
-    const previous = track[Math.max(0, segment.fromIndex - 1)] ?? from;
-    const next = track[Math.min(track.length - 1, segment.toIndex + 1)] ?? to;
-    const tangent = new THREE.Vector3(
-      next.position.x - previous.position.x,
-      0,
-      next.position.z - previous.position.z,
-    );
-    if (tangent.lengthSq() > 0.000001) {
-      const pathRotation = { x: rotation.x, y: Math.atan2(tangent.x, tangent.z), z: rotation.z };
-      rotation = slerpEuler(rotation, pathRotation, easeProgress(Math.min(1, rawAmount * 2), 'smooth'));
-    }
+  if (from.orientToPath || to.orientToPath) {
+    const headingAt = (index: number) => {
+      const previous = track[Math.max(0, index - 1)].position;
+      const next = track[Math.min(track.length - 1, index + 1)].position;
+      const dx = next.x - previous.x;
+      const dz = next.z - previous.z;
+      return dx * dx + dz * dz > 0.000001 ? Math.atan2(dx, dz) : null;
+    };
+    const fromYaw = from.orientToPath ? (headingAt(segment.fromIndex) ?? 0) + from.rotation.y : from.rotation.y;
+    const toYaw = to.orientToPath ? (headingAt(segment.toIndex) ?? 0) + to.rotation.y : to.rotation.y;
+    rotation = slerpEuler({ ...from.rotation, y: fromYaw }, { ...to.rotation, y: toYaw }, amount);
   }
   return {
     position: lerpVector(from.position, to.position, amount),
@@ -725,6 +749,94 @@ export function createObjectKeyframeFromItem(
   };
 }
 
+/** Convert authored floor points to evenly paced V1 keyframes by travelled distance. */
+export function timeDirectorRoutePoints(
+  points: readonly DirectorMotionVector3[],
+  startTime: number,
+  durationSeconds: number,
+): Array<{ position: DirectorMotionVector3; time: number }> {
+  const valid: DirectorMotionVector3[] = [];
+  for (const point of points) {
+    if (![point.x, point.y, point.z].every(Number.isFinite)) continue;
+    const previous = valid[valid.length - 1];
+    if (previous && Math.hypot(point.x - previous.x, point.y - previous.y, point.z - previous.z) < 0.04) continue;
+    valid.push({ x: point.x, y: point.y, z: point.z });
+  }
+  if (valid.length < 2) return [];
+
+  // Freehand strokes can contain hundreds of pointer samples. Bound the saved
+  // track while retaining the clicked endpoints and distance-based timing.
+  const cumulative = [0];
+  for (let index = 1; index < valid.length; index += 1) {
+    const a = valid[index - 1];
+    const b = valid[index];
+    cumulative.push(cumulative[index - 1] + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
+  }
+  const totalDistance = cumulative[cumulative.length - 1];
+  if (totalDistance <= 0) return [];
+  const route = valid.length <= 48 ? valid : Array.from({ length: 48 }, (_, index) => {
+    const targetDistance = totalDistance * index / 47;
+    let segment = 1;
+    while (segment < cumulative.length - 1 && cumulative[segment] < targetDistance) segment += 1;
+    const from = valid[segment - 1];
+    const to = valid[segment];
+    const fraction = (targetDistance - cumulative[segment - 1]) / Math.max(0.000001, cumulative[segment] - cumulative[segment - 1]);
+    return lerpVector(from, to, fraction);
+  });
+  const routeStart = clamp(finiteNumber(startTime, 0), 0, durationSeconds);
+  const remaining = Math.max(0, durationSeconds - routeStart);
+  if (remaining <= 0.001) return [];
+  const savedDistance = route.slice(1).reduce((sum, point, index) => {
+    const previous = route[index];
+    return sum + Math.hypot(point.x - previous.x, point.y - previous.y, point.z - previous.z);
+  }, 0);
+  let distance = 0;
+  return route.map((position, index) => {
+    if (index > 0) {
+      const previous = route[index - 1];
+      distance += Math.hypot(position.x - previous.x, position.y - previous.y, position.z - previous.z);
+    }
+    return { position, time: routeStart + remaining * distance / savedDistance };
+  });
+}
+
+export function createDirectorObjectRouteTrack(
+  points: readonly DirectorMotionVector3[],
+  item: BlueprintItem,
+  startTime: number,
+  durationSeconds: number,
+): DirectorObjectKeyframe[] {
+  const base = createObjectKeyframeFromItem(item, 0);
+  return timeDirectorRoutePoints(points, startTime, durationSeconds).map(({ position, time }) => ({
+    ...base,
+    id: createDirectorMotionId('object-route'),
+    time,
+    // Timing already accounts for distance; smoothing every short segment
+    // would bring the actor to a stop at each point in a freehand stroke.
+    easing: 'linear',
+    position,
+    orientToPath: true,
+  }));
+}
+
+export function createDirectorCameraRouteTrack(
+  points: readonly DirectorMotionVector3[],
+  camera: { target: DirectorMotionVector3; fov: number; trackTargetId?: string | null; trackTargetBodyPart?: string | null },
+  startTime: number,
+  durationSeconds: number,
+): DirectorCameraKeyframe[] {
+  return timeDirectorRoutePoints(points, startTime, durationSeconds).map(({ position, time }) => ({
+    id: createDirectorMotionId('camera-route'),
+    time,
+    easing: 'linear',
+    position,
+    target: { ...camera.target },
+    fov: camera.fov,
+    trackTargetId: camera.trackTargetId ?? null,
+    trackTargetBodyPart: camera.trackTargetBodyPart ?? null,
+  }));
+}
+
 function cameraKeyframe(
   id: string,
   time: number,
@@ -740,6 +852,7 @@ export function createDirectorCameraPresetTrack(
   presetId: DirectorCameraPresetId,
   durationSeconds: number,
   targetItem?: BlueprintItem | null,
+  targetRoute?: readonly DirectorObjectKeyframe[],
 ): DirectorCameraKeyframe[] {
   const duration = clamp(durationSeconds, DIRECTOR_MOTION_MIN_DURATION_SECONDS, DIRECTOR_MOTION_MAX_DURATION_SECONDS);
   const targetPosition = targetItem ? ensurePos3d(targetItem) : { x: 0, y: 0, z: 0 };
@@ -780,6 +893,50 @@ export function createDirectorCameraPresetTrack(
         cameraKeyframe(id('start'), 0, { x: target.x - 6, y: target.y + 1, z: target.z + 5 }, target, 44),
         cameraKeyframe(id('end'), duration, { x: target.x + 6, y: target.y + 1, z: target.z + 5 }, target, 44),
       ];
+    case 'follow-actor-route': {
+      const route = targetRoute && targetRoute.length >= 2
+        ? targetRoute
+        : [
+            { time: 0, position: targetPosition },
+            { time: duration, position: targetPosition },
+          ];
+      let previousOffset: { x: number; z: number } | null = null;
+      return route.map((frame, index) => {
+        const previous = route[Math.max(0, index - 1)].position;
+        const next = route[Math.min(route.length - 1, index + 1)].position;
+        const incoming = { x: frame.position.x - previous.x, z: frame.position.z - previous.z };
+        const outgoing = { x: next.x - frame.position.x, z: next.z - frame.position.z };
+        const incomingLength = Math.hypot(incoming.x, incoming.z);
+        const outgoingLength = Math.hypot(outgoing.x, outgoing.z);
+        const isReversal = incomingLength > 0.001 && outgoingLength > 0.001
+          && (incoming.x * outgoing.x + incoming.z * outgoing.z) / (incomingLength * outgoingLength) < -0.8;
+        const yaw = Math.atan2(next.x - previous.x, next.z - previous.z);
+        // At a U-turn the averaged tangent collapses to zero. Keep the
+        // lateral waypoint on the side nearest the previous camera offset,
+        // including when the actor reverses more than once.
+        const lateral = isReversal
+          ? { x: incoming.z / incomingLength * 4.2, z: -incoming.x / incomingLength * 4.2 }
+          : null;
+        const behind = lateral
+          ? previousOffset && lateral.x * previousOffset.x + lateral.z * previousOffset.z < 0
+            ? { x: -lateral.x, z: -lateral.z }
+            : lateral
+          : { x: -Math.sin(yaw) * 4.2, z: -Math.cos(yaw) * 4.2 };
+        previousOffset = behind;
+        return {
+          ...cameraKeyframe(
+            id(String(index)),
+            clamp(frame.time, 0, duration),
+            { x: frame.position.x + behind.x, y: frame.position.y + 2.1, z: frame.position.z + behind.z },
+            { x: frame.position.x, y: frame.position.y + 1.05, z: frame.position.z },
+            42,
+            targetItem?.id,
+          ),
+          easing: 'linear' as const,
+          trackTargetBodyPart: 'torso',
+        };
+      });
+    }
   }
 }
 

@@ -42,6 +42,8 @@
     "history": "History",
     "activity": "Activity",
     "tasks": "Tasks",
+    "navigation": "Agent views",
+    "moreActions": "More actions",
     "scopeNotice": "Manual confirms each action; Auto only confirms node deletion",
     "runtime": {
       "title": "Agent runtime",
@@ -804,10 +806,17 @@
         "shotPreview": "Final camera view", "showRoutes": "Show motion routes", "hideRoutes": "Hide motion routes",
         "addKeyframe": "Add keyframe"
       },
+      "route": {
+        "point": "Place Route Points", "draw": "Draw Route", "finish": "Finish Route", "cancel": "Cancel Drawing",
+        "hintPoints": "Click the ground to add route points. Drag keyframes afterward to refine the path.",
+        "hintDraw": "Hold the mouse button and draw on the ground. Refine the result in the timeline."
+      },
       "inspector": {
         "title": "Motion Inspector", "empty": "Select a keyframe to edit it.", "time": "Time",
         "easing": "Interpolation", "linear": "Linear", "smooth": "Smooth", "fov": "Field of view",
-        "orientToPath": "Face travel direction", "duplicate": "Duplicate", "delete": "Delete keyframe"
+        "orientToPath": "Face travel direction", "duplicate": "Duplicate", "delete": "Delete keyframe",
+        "position": "Position", "yaw": "Heading", "targetMode": "Camera Target", "fixedTarget": "Fixed Target",
+        "targetBodyPart": "Track Body Part", "head": "Head", "torso": "Torso", "feet": "Feet"
       },
       "library": {
         "title": "Action Library", "poses": "Static Poses", "actions": "Playable Actions", "clips": "Custom Clips",
@@ -821,7 +830,8 @@
       },
       "cameraPresets": {
         "title": "Camera Route", "cinematicPush": "Cinematic Push", "characterFollow": "Character Follow",
-        "fastChase": "Fast Chase", "productOrbit": "Product Orbit", "craneRise": "Crane Rise", "lateralDolly": "Lateral Dolly"
+        "fastChase": "Fast Chase", "productOrbit": "Product Orbit", "craneRise": "Crane Rise", "lateralDolly": "Lateral Dolly",
+        "followActorRoute": "Follow Actor Route"
       },
       "export": {
         "title": "Reference Video", "needsCamera": "Add at least two camera keyframes before exporting.",
@@ -833,7 +843,9 @@
         "addToCanvasFailed": "Could not add the recorded video to the canvas."
       },
       "actions": {
-        "walk": "Walk", "run": "Run", "squatRise": "Squat and Rise", "stepOver": "Step Over", "jump": "Jump", "wave": "Wave"
+        "walk": "Walk", "run": "Run", "squatRise": "Squat and Rise", "stepOver": "Step Over", "jump": "Jump", "wave": "Wave",
+        "idleBreath": "Idle Breathing", "turnLook": "Turn and Look", "clap": "Clap", "phone": "Phone Call",
+        "walkBack": "Walk Backward", "sideStep": "Side Step", "bow": "Bow"
       },
       "poses": {
         "standNeutral": "Neutral Stand", "standAttention": "Stand at Attention", "leanForward": "Lean Forward",
@@ -1826,20 +1838,35 @@
       },
       "workbench": {
         "chooseTitle": "Choose a creation method",
-        "chooseDescription": "Both methods enter the same workbench. This area contains no protocol presets and never runs scripts or plugin code.",
+        "chooseDescription": "Choose AI assistance, a manual HTTP contract, or a ComfyUI workflow. All settings remain editable; scripts and plugins are never executed.",
         "aiRouteTitle": "Generate with AI",
         "aiRouteDescription": "Paste public provider documentation and use a configured text model to create an editable draft.",
         "manualRouteTitle": "Build manually",
-        "manualRouteDescription": "Compose a complete HTTP contract step by step: connection, request, images, response, and capabilities.",
+        "manualRouteDescription": "Compose an HTTP contract step by step. Text and image requests may share an endpoint or use different fields.",
+        "comfyRouteTitle": "Connect ComfyUI",
+        "comfyRouteDescription": "Import an API workflow for a local or cloud ComfyUI server. Uploads, polling, and recovery are handled by the app.",
         "title": "Fully Custom Image Model Workbench",
         "description": "Each step addresses one task. Review, test, and save at the end.",
+        "comfyTitle": "ComfyUI API Workflow",
+        "comfyDescription": "Enable Dev Mode in ComfyUI and export with “Save (API Format)”. Bindings are optional; common nodes can be inferred automatically.",
+        "comfyOutputImage": "Image Output",
+        "comfyOutputVideo": "Video Output",
+        "comfyTest": "Read-only Connection Test",
+        "comfyTestNotice": "The connection test only reads ComfyUI status and does not submit a generation task.",
+        "comfyReviewDescription": "Review the workflow output type and request preview. The connection test is read-only; then save.",
         "aiDraftNotice": "AI created this draft. Review endpoints, fields, image encoding, ratio mappings, and response paths step by step.",
         "backToChoice": "Choose another method",
         "previous": "Previous",
         "next": "Next",
-        "test": "Test Connection",
+        "test": "Test Generation (May Cost)",
         "testing": "Testing...",
         "testPassed": "The request succeeded and returned a usable image result.",
+        "testCostNotice": "This test sends a real generation request to the provider and may incur charges.",
+        "requestPreviewTitle": "Actual Request Preview",
+        "requestPreviewHelp": "Builds the final request with sample text and an image. Keys and image data are hidden; preview sends nothing.",
+        "previewText": "Text to Image",
+        "previewImage": "Image to Image",
+        "comfyPreview": "Workflow Submission",
         "save": "Save Configuration",
         "saved": "Configuration saved under My Configurations.",
         "steps": {
@@ -1907,7 +1934,12 @@
           "models": "Model List",
           "modelListEndpointPath": "Model List Endpoint (Optional)",
           "supportedModelVersions": "Model Versions / Variants (Optional)",
-          "note": "Usage Notes (Optional)"
+          "note": "Usage Notes (Optional)",
+          "comfyWorkflow": "ComfyUI API Workflow JSON",
+          "comfyBindings": "ComfyUI Node Bindings JSON",
+          "comfyOutputs": "Output Node IDs JSON Array",
+          "comfyOutputType": "Workflow Output Type",
+          "comfyImportFile": "Import API Workflow File"
         },
         "authModes": {
           "bearer": "Authorization: Bearer",
@@ -1922,7 +1954,14 @@
           "defaultParams": "Provides {{extra.foo}} values and remains available to compatibility request paths.",
           "imageBodyTemplate": "Images are injected through the explicit image fields; do not paste base64 into this template.",
           "ratioMappings": "For example {\"16:9\":{\"size\":\"3840x2160\",\"fields\":{\"input.ratio\":\"wide\"}}}.",
-          "pollingRequestBody": "Use {taskId} in string values when the polling endpoint requires a POST body."
+          "pollingRequestBody": "Use {taskId} in string values when the polling endpoint requires a POST body.",
+          "comfyWorkflow": "Only API Format workflows are supported, not canvas nodes/links exports. Do not embed images or model files in JSON.",
+          "comfyBindings": "For example {\"prompt\":{\"nodeId\":\"6\",\"input\":\"text\"},\"images\":[{\"nodeId\":\"10\",\"input\":\"image\"]}.",
+          "comfyOutputs": "For example [\"9\"]. Leave it empty to infer SaveImage/SaveVideo nodes."
+        },
+        "errors": {
+          "comfyOutputs": "ComfyUI output node IDs must be a non-empty string array.",
+          "comfyFileTooLarge": "The ComfyUI workflow is larger than 8 MiB. Remove embedded media before importing."
         },
         "review": {
           "label": "Configuration",
