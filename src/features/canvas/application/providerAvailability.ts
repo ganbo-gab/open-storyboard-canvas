@@ -101,3 +101,8 @@ export function getConfiguredChatProviderCount({
 export function hasConfiguredChatProvider(input: Pick<ProviderAvailabilityInput, 'customProviders'>): boolean {
   return getConfiguredChatProviderCount(input) > 0;
 }
+
+/** The global onboarding hint covers every custom media type, not just images. */
+export function hasConfiguredAnyProvider(input: ProviderAvailabilityInput): boolean {
+  return hasConfiguredImageProvider(input) || input.customProviders.some(hasConfiguredCustomProvider);
+}

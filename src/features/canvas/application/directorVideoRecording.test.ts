@@ -8,6 +8,52 @@ import {
   type DirectorRecordingPlatform,
 } from './directorVideoRecording';
 
+function createSteppedRecordingPlatform() {
+  let now = 0;
+  let nextHandle = 0;
+  const frames = new Map<number, FrameRequestCallback>();
+  const stopTrack = vi.fn();
+  const stopRecorder = vi.fn();
+  const recorder = {
+    mimeType: 'video/webm',
+    state: 'inactive',
+    ondataavailable: null as ((event: { data: Blob }) => void) | null,
+    onstop: null as (() => void) | null,
+    onerror: null as (() => void) | null,
+    start() { recorder.state = 'recording'; },
+    stop() {
+      stopRecorder();
+      recorder.state = 'inactive';
+      recorder.ondataavailable?.({ data: new Blob(['video'], { type: recorder.mimeType }) });
+      recorder.onstop?.();
+    },
+  };
+  const platform: DirectorRecordingPlatform = {
+    now: () => now,
+    scheduleFrame: (callback) => {
+      const handle = ++nextHandle;
+      frames.set(handle, callback);
+      return handle;
+    },
+    cancelFrame: (handle) => { frames.delete(handle); },
+    captureStream: () => ({ getTracks: () => [{ stop: stopTrack }] }),
+    createRecorder: () => recorder,
+  };
+  return {
+    platform, recorder, stopRecorder, stopTrack,
+    pendingFrameCount: () => frames.size,
+    async advanceFrame(milliseconds: number) {
+      const pending = frames.entries().next().value;
+      if (!pending) throw new Error('No recording frame is scheduled');
+      const [handle, callback] = pending;
+      frames.delete(handle);
+      now += milliseconds;
+      callback(now);
+      await Promise.resolve();
+    },
+  };
+}
+
 describe('Director Studio recording capability', () => {
   it('prefers real MP4 support and falls back to WebM with an honest extension', () => {
     expect(selectDirectorVideoFormat((mime) => mime === 'video/mp4')).toEqual({
@@ -74,6 +120,69 @@ describe('Director Studio recording capability', () => {
     expect(renderedTimes[renderedTimes.length - 1]).toBe(0.1);
     expect(cleanModes).toEqual([true, false]);
     expect(stopTrack).toHaveBeenCalledOnce();
+  });
+
+  it('starts the captured timeline at zero after a delayed first recording frame', async () => {
+    const harness = createSteppedRecordingPlatform();
+    const capturedTimes: number[] = [];
+    const recording = recordDirectorVideo({
+      canvas: {} as HTMLCanvasElement,
+      durationSeconds: 8,
+      resolution: '720p',
+      fps: 24,
+      format: { mimeType: 'video/webm', extension: 'webm' },
+      platform: harness.platform,
+      renderAtTime: (time) => {
+        if (harness.recorder.state === 'recording') capturedTimes.push(time);
+      },
+      setCleanExportMode: () => undefined,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await harness.advanceFrame(5000);
+    expect(capturedTimes).toEqual([0]);
+    for (let second = 1; second <= 8; second += 1) await harness.advanceFrame(1000);
+    expect(capturedTimes).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(harness.stopRecorder).not.toHaveBeenCalled();
+    await harness.advanceFrame(16);
+    expect(harness.stopRecorder).not.toHaveBeenCalled();
+    await harness.advanceFrame(16);
+    await recording;
+    expect(harness.stopRecorder).toHaveBeenCalledOnce();
+    expect(harness.stopTrack).toHaveBeenCalledOnce();
+    expect(harness.pendingFrameCount()).toBe(0);
+  });
+
+  it('cancels and cleans up while the endpoint is waiting to be captured', async () => {
+    const harness = createSteppedRecordingPlatform();
+    const controller = new AbortController();
+    const cleanModes: boolean[] = [];
+    const recording = recordDirectorVideo({
+      canvas: {} as HTMLCanvasElement,
+      durationSeconds: 1,
+      resolution: '720p',
+      fps: 24,
+      format: { mimeType: 'video/webm', extension: 'webm' },
+      platform: harness.platform,
+      signal: controller.signal,
+      renderAtTime: () => undefined,
+      setCleanExportMode: (enabled) => { cleanModes.push(enabled); },
+    });
+    const rejection = expect(recording).rejects.toBeInstanceOf(DirectorRecordingCancelledError);
+    await Promise.resolve();
+    await Promise.resolve();
+    await harness.advanceFrame(16);
+    await harness.advanceFrame(1000);
+    await harness.advanceFrame(16);
+    expect(harness.stopRecorder).not.toHaveBeenCalled();
+
+    controller.abort();
+    await rejection;
+    expect(harness.stopRecorder).toHaveBeenCalledOnce();
+    expect(harness.stopTrack).toHaveBeenCalledOnce();
+    expect(harness.pendingFrameCount()).toBe(0);
+    expect(cleanModes).toEqual([true, false]);
   });
 
   it('restores clean export state when cancelled before capture starts', async () => {
@@ -172,7 +281,7 @@ describe('Director Studio recording capability', () => {
       platform: {
         now: () => now,
         scheduleFrame: (callback) => {
-          now = 100;
+          now += 100;
           queueMicrotask(() => callback(now));
           return 1;
         },

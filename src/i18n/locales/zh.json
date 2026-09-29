@@ -1,4 +1,36 @@
 {
+  "minimaxH3": {
+    "requestStructureHelp": "此预设按 MiniMax 官方 V2 格式自动构建请求，无需配置字段映射或请求体模板。请选择 MiniMax-H3，设置支持的时长、分辨率和比例；图片输入模式在视频节点参数中选择。",
+    "hint": "MiniMax H3 官方 · 文生视频、首尾帧、多模态参考",
+    "note": "MiniMax H3 V2：4–15 秒、768P / 2K，默认 5 秒 / 768P。视频节点参数中可选参考、首帧、尾帧或首尾帧。帧模式不能混入参考视频或音频。纯文本需选择明确比例。使用 MiniMax API Key，与 ComfyUI 的凭证分开配置。",
+    "errors": {
+      "model": "此预设仅支持 MiniMax-H3，请选择该模型或另建供应商配置。",
+      "prompt": "MiniMax H3 需要 1–7000 字符的非空提示词。",
+      "duration": "MiniMax H3 时长须为 4–15 秒的整数。",
+      "resolution": "MiniMax H3 分辨率须为 768P 或 2K。",
+      "ratio": "MiniMax H3 支持 adaptive、21:9、16:9、4:3、1:1、3:4 或 9:16。",
+      "textRatio": "MiniMax H3 纯文本生成需选择明确的画面比例，不能使用 adaptive。",
+      "mode": "请选择支持的图片模式：参考、首帧、尾帧或首尾帧。",
+      "frames": "首帧或尾帧模式需要且仅需 1 张图；首尾帧模式需要且仅需 2 张图，按首帧、尾帧顺序连接。",
+      "mixed": "MiniMax H3 帧模式不能混入参考视频或音频，请切换参考模式或移除这些输入。",
+      "limits": "MiniMax H3 最多支持 9 张参考图、3 段视频、3 段音频，素材总数不超过 12。",
+      "media": "MiniMax H3 素材须为 HTTP(S) URL 或对应类型的 Base64 data URL，不能直接发送本地路径或 blob URL。",
+      "bodySize": "MiniMax H3 请求超过 64 MB，请改用公开素材 URL 或缩小参考文件。"
+    }
+  },
+  "videoInputModes": {
+    "limitErrors": {
+      "images": "当前连接了 {{count}} 张参考图，此模型最多支持 {{max}} 张。请移除多余图片后再生成。",
+      "video": "当前连接了 {{count}} 段参考视频，此模型最多支持 {{max}} 段。请移除多余视频后再生成。",
+      "audio": "当前连接了 {{count}} 段参考音频，此模型最多支持 {{max}} 段。请移除多余音频后再生成。"
+    },
+    "label": "图片输入模式",
+    "reference": "参考 / 纯文本",
+    "firstFrame": "首帧",
+    "lastFrame": "尾帧",
+    "frames": "首尾帧",
+    "hint": "帧模式按连接顺序使用图片，输出比例由图片决定。参考模式可组合图片、视频和音频。"
+  },
   "app": {
     "title": "开源画布",
     "subtitle": "Open Storyboard Canvas"
@@ -650,6 +682,7 @@
   },
   "directorStudio": {
     "title": "导演台",
+    "studioMode": { "label": "工作模式", "director": "导演台", "previs": "预演台" },
     "open": "打开",
     "openFullscreen": "打开全屏导演台",
     "saveProject": "保存工程",
@@ -798,12 +831,126 @@
       "enter": "进入导演台"
     },
     "resolutionNote": "当前版本按选中画幅导出截图；1440p 与 4K 会基于当前视口放大输出。",
+    "previs": {
+      "tools": "预演工具",
+      "select": "选择",
+      "selectHelp": "点击人物或物体选中；拖动空白处环绕场景",
+      "move": "移动",
+      "moveHelp": "拖动场景中的红绿蓝坐标轴，改变选中对象的位置",
+      "rotate": "旋转",
+      "rotateHelp": "拖动三轴圆环，调整选中对象的朝向",
+      "scale": "缩放",
+      "scaleHelp": "拖动三轴手柄，调整选中对象的大小",
+      "selectFirst": "先在场景或右侧图层中选择一个对象",
+      "draw": "绘制",
+      "drawHelp": "为 {{name}} 绘制路径：按住鼠标在地面拖动，松开后生成时间轴片段",
+      "points": "标记",
+      "pointsHelp": "为 {{name}} 标记路径：在地面依次点击，再点完成轨迹",
+      "routePersonOnly": "请选中人物，或选择摄影机后再绘制路径",
+      "person": "人物",
+      "personHelp": "在场景中添加一个人物，再为它绘制路径和添加动作",
+      "models": "模型库",
+      "modelsHelp": "打开模型库，选择人物、物品或场景模型",
+      "camera": "摄影机",
+      "cameraHelp": "选中摄影机，绘制运镜路径或应用运镜模板",
+      "actions": "动作库",
+      "actionsHelp": "为选中人物添加行走、奔跑等本地动作",
+      "lighting": "灯光",
+      "lightingHelp": "调整主光、环境光、方向和颜色",
+      "help": "教程",
+      "helpDescription": "查看预演台的四步操作方法",
+      "routeViewHelp": "从外部观察人物、摄影机和运动路径",
+      "shotViewHelp": "从摄影机视角检查最终构图和运镜",
+      "followHelp": "先选择一个已有路径的人物",
+      "drawingFor": "正在为 {{name}} 绘制路径",
+      "navigationHint": "拖动空白处环绕 · 右键拖动平移 · 滚轮缩放",
+      "currentTarget": "当前：{{name}}",
+      "helpTitle": "从人物到一段预演",
+      "helpStep1": "点击左侧“人物”添加角色，或从右侧场景图层选择已有角色。",
+      "helpStep2": "点击“绘制路径”在地面拖动，或用“标记路径”逐点点击。完成后，底部会出现路径片段。",
+      "helpStep3": "拖动片段改开始时间、拖两端改时长。点编号关键帧后，在右侧调整位置和时间；用动作库添加动作。",
+      "helpStep4": "选择摄影机绘制镜头路径或应用运镜模板。点击播放检查运动，切到“看成片”检查构图，再录制预演视频。",
+      "undo": "撤销",
+      "record": "录制",
+      "follow": "跟拍人物",
+      "focus": "聚焦",
+      "timeline": {
+        "playHelp": "播放当前路线与动作。聚焦时间刻度后按空格也可播放或暂停。",
+        "pauseHelp": "暂停预演，保留当前时间以便调整镜头或动作。",
+        "startHelp": "回到第 0 秒，查看镜头与人物的初始位置。",
+        "loopHelp": "到达总时长后自动从头播放；再次点击关闭循环。",
+        "snap": "吸附",
+        "snapHelp": "拖动时按 24 帧/秒对齐时间；按住 Alt 可临时关闭吸附。",
+        "zoomOut": "缩小时间轴",
+        "zoomOutHelp": "缩小时间刻度，查看更长的路线和更多关键帧。",
+        "zoomIn": "放大时间轴",
+        "zoomInHelp": "放大时间刻度，分开相邻关键帧以便精确拖动。",
+        "fit": "适应",
+        "fitHelp": "将完整项目时长放入当前时间轴宽度。",
+        "selectTrackHelp": "选择“{{name}}”，在右侧检查和编辑它的关键帧。",
+        "addActionHelp": "在当前时间记录该人物的动作；可在右侧选择或修改动作。",
+        "addKeyframeHelp": "在当前时间记录该对象的位置与朝向，形成可编辑的关键帧。",
+        "routeHelp": "拖动整条路线平移时间，两端把手调整时长；方向键微调，Shift 加方向键移动 10 帧。",
+        "startHandleHelp": "拖动左侧把手调整开始时间，按比例压缩或拉长整条路线。",
+        "endHelp": "拖动右侧把手调整结束时间，按比例压缩或拉长整条路线。",
+        "actionHelp": "{{name}}：拖动动作条调整开始时间；动作持续到下一动作或项目结尾。",
+        "keyframeHelp": "拖动调整时间；左右方向键移动 1 帧，Shift 加方向键移动 10 帧。",
+        "emptyTrack": "点击左侧 + 记录关键帧，或在场景中绘制路线",
+        "emptyAction": "点击左侧 + 记录动作，或从左侧动作库中选择",
+        "speed": "预览速度",
+        "speedHelp": "改变预览播放速度；导出视频仍按项目原始时长播放。",
+        "keyframeCount": "{{count}} 帧 · 放大",
+        "keyframeCountAria": "放大查看“{{name}}”的 {{count}} 个关键帧",
+        "keyframeCountHelp": "放大并定位到轨道开头，便于逐个选择关键帧。密集标记只在选中、悬停或聚焦时显示编号；最高放大 16 倍，也可从右侧列表选择。"
+      },
+      "sceneAndProperties": "场景与属性",
+      "sceneObjects": "场景对象",
+      "addPersonHelp": "在场景中添加并选中人物，随后可绘制路线或添加动作。",
+      "openModelsHelp": "浏览本地人物、道具和场景模型，添加到当前场景。",
+      "selectCameraHelp": "查看相机路线；可从当前视角添加关键帧。",
+      "selectObjectHelp": "选择 {{name}}，编辑名称、颜色和空间变换。",
+      "backToObjectHelp": "返回当前对象的名称、颜色和空间属性。",
+      "objectProperties": "对象属性",
+      "cameraEmpty": "相机还没有运动。先调整场景视角并添加关键帧，或用左侧工具绘制相机路线。",
+      "addCameraKey": "记录当前机位",
+      "addCameraKeyHelp": "将当前相机的位置、朝向和视野记录到时间线当前时刻。",
+      "objectRouteEmpty": "用左侧路线工具为此对象设置移动路径。",
+      "editRoute": "编辑移动路线",
+      "editRouteHelp": "查看此对象的路线时长、关键帧位置与朝向。",
+      "openActionsHelp": "为选中的人物选择本地姿势、动态动作或已保存片段。",
+      "editActions": "编辑动作时间",
+      "editActionsHelp": "选择动作关键帧，调整开始时间或删除动作。",
+      "deleteObject": "删除对象",
+      "deleteObjectHelp": "从当前场景中移除此对象及其运动轨道。",
+      "followObject": "跟随 {{name}}",
+      "duplicateFrameHelp": "复制选中的关键帧，可继续调整时间和属性。",
+      "toggleSidebar": "场景与属性",
+      "toggleSidebarHelp": "收起或展开右侧面板，腾出更多场景空间"
+    },
     "motion": {
+      "guide": {
+        "selectPerson": "先在场景或左侧元素栏选择人物；也可直接画镜头路线",
+        "selectedPerson": "已选中 {{name}}，可以画轨迹或添加动作",
+        "addPerson": "添加人物",
+        "personRoute": "人物逐点轨迹",
+        "drawPersonRoute": "人物手绘轨迹",
+        "cameraRoute": "镜头逐点轨迹",
+        "drawCameraRoute": "镜头手绘轨迹",
+        "addAction": "添加人物动作",
+        "followPerson": "镜头跟拍人物",
+        "emptyTracks": "添加或选中人物后，这里会出现人物轨道和动作轨道。可先用上方按钮绘制镜头路线。"
+      },
       "timeline": {
         "title": "时间轴", "camera": "摄影机", "actionTrack": "{{name}} · 动作", "tracks": "轨道",
         "play": "播放", "pause": "暂停", "goToStart": "回到开头", "loop": "循环播放",
         "currentTime": "当前时间", "duration": "总时长", "routePreview": "看路线", "shotPreview": "看成片",
-        "showRoutes": "显示运动路线", "hideRoutes": "隐藏运动路线", "addKeyframe": "添加关键帧"
+        "showRoutes": "显示运动路线", "hideRoutes": "隐藏运动路线", "addKeyframe": "添加关键帧",
+        "routeClip": "路径 {{start}}–{{end}} 秒", "routeClipAria": "{{name}} 的路径，{{start}} 到 {{end}} 秒",
+        "routeClipHelp": "拖动路径片段可调整开始时间；拖动两端可调整时长",
+        "trimStart": "调整路径起点", "trimEnd": "调整路径终点",
+        "keyframeAria": "{{name}} 第 {{index}} 个关键帧，{{time}} 秒", "actionClip": "动作",
+        "scrubHelp": "拖动刻度尺定位时间；方向键逐帧移动，Shift 加方向键移动 10 帧",
+        "resize": "拖动调整时间轴高度"
       },
       "route": {
         "point": "逐点绘制轨迹", "draw": "手绘轨迹", "finish": "完成轨迹", "cancel": "取消绘制",
@@ -815,7 +962,11 @@
         "linear": "线性", "smooth": "平滑", "fov": "视场角", "orientToPath": "面向行进方向",
         "duplicate": "复制", "delete": "删除关键帧", "position": "位置", "yaw": "朝向",
         "targetMode": "镜头看向", "fixedTarget": "固定目标", "targetBodyPart": "跟随部位",
-        "head": "头部", "torso": "躯干", "feet": "脚部"
+        "head": "头部", "torso": "躯干", "feet": "脚部",
+        "trackSummary": "{{count}} 个关键帧", "keyframes": "关键帧列表", "keyframeNumber": "关键帧 {{index}}",
+        "emptyTrack": "在时间轴上绘制路径或添加关键帧后，即可在这里调整。",
+        "clipStart": "片段开始", "clipEnd": "片段结束",
+        "clipHelp": "也可直接拖动时间轴上的路径片段和两端把手。"
       },
       "library": {
         "title": "动作库", "poses": "静态姿势", "actions": "可播放动作", "clips": "自定义动作",
@@ -825,7 +976,9 @@
         "delete": "删除动作", "timeAt": "应用到 {{time}}秒", "untitledClip": "未命名动作"
       },
       "pilot": {
-        "enter": "掌镜", "exit": "退出掌镜", "active": "掌镜模式", "noTarget": "未锁定目标"
+        "enter": "自由运镜", "exit": "退出自由运镜", "active": "自由运镜中", "noTarget": "未锁定目标",
+        "help": "像摄影师一样移动镜头；按 Enter 将当前镜头位置记入时间轴。",
+        "controls": "WASD 移动 · 鼠标转向 · Enter 记录镜头 · F 锁定人物 · Esc 退出"
       },
       "cameraPresets": {
         "title": "运镜模板", "cinematicPush": "电影慢推", "characterFollow": "人物跟拍",
@@ -833,7 +986,7 @@
         "followActorRoute": "沿人物路线跟拍"
       },
       "export": {
-        "title": "参考视频", "needsCamera": "至少添加两个摄影机关键帧才能导出。",
+        "title": "导出预演视频", "needsCamera": "至少添加两个摄影机关键帧才能导出。",
         "resolution": "分辨率", "fps": "帧率", "duration": "时长", "format": "格式", "unsupported": "不可用",
         "recording": "正在录制纯净场景", "remaining": "预计剩余 {{seconds}}秒", "complete": "{{format}} 录制完成",
         "start": "开始录制", "cancel": "取消录制", "save": "保存到磁盘", "addToCanvas": "添加到画布",
@@ -1314,6 +1467,7 @@
       "payloadDebugHint": "这里展示将发送给网关 / 供应商的请求内容，不是图片预览。API Key、Authorization、query secret 与 base64 / data URL 已脱敏或摘要；此预览只构建请求，不会提交生成。"
     },
     "aiVideo": {
+      "workflow": "由工作流决定",
       "promptPlaceholder": "描述视频内容、镜头运动、动作节奏；输入 @ 可引用已连接图片",
       "promptRequired": "请输入视频提示词",
       "noVideoProvider": "请先在「设置 → 我的配置 → 视频生成」中添加可用的视频供应商。",
@@ -1809,6 +1963,37 @@
         "chat": "Responses、Chat Completions、Anthropic、Gemini"
       }
     },
+    "comfyui": {
+      "description": "选用常见工作流模板，或导入自己的 API 格式工作流；本机和云端服务都可以连接。",
+      "newConnection": "新建连接",
+      "savedConnections": "已有 ComfyUI 连接",
+      "edit": "编辑",
+      "setupDescription": "先选工作流，再填写服务地址和模型文件；高级节点映射按需展开。",
+      "connectionTitle": "工作流与连接",
+      "connectionDescription": "选模板后填写地址。模板只用 ComfyUI 内置节点；自定义工作流可导入图片或视频流程。",
+      "chooseWorkflow": "选择工作流",
+      "templates": {
+        "text-to-image": { "title": "基础文生图", "description": "提示词、尺寸和种子自动写入工作流。" },
+        "image-to-image": { "title": "参考图重绘", "description": "上传一张参考图，再按提示词重新生成。" },
+        "minimax-h3-local": {"title": "MiniMax H3 本地视频", "description": "导入已在服务器跑通的 H3 API 工作流，自动映射时长与画幅。"},
+        "custom": { "title": "自定义工作流", "description": "导入 API 格式 JSON，可选择图片或视频输出。" }
+      },
+      "h3LocalHelp": "先在 ComfyUI 安装 H3 本地模型及节点，并确认工作流可生成视频，再导入 API JSON。需包含 MiniMaxH3ImageToVideo 或 MiniMaxH3ReferenceToVideo 和视频保存节点。5–15 秒按 24fps 对齐；无需 MiniMax API Key。此入口不支持 Comfy Partner 计费节点，请使用官方直连渠道。",
+      "h3WorkflowRequired": "请导入包含本地 MiniMax H3 节点的 API 工作流；Comfy Partner/API 节点不适用于此入口。",
+      "durations": "可选时长（秒；需要 duration 绑定）",
+      "ratios": "可选比例（需要 aspectRatio 绑定）",
+      "videoBindingsHelp": "通用视频只有配置对应绑定的选项才会生效；未绑定则保留工作流值。本地 H3 自动使用 5–15 秒、768P 和预设画幅。参考图按绑定数组顺序替换服务器图片，不支持从画布上传视频或音频。",
+      "checkpoint": "模型文件名",
+      "loadCheckpoints": "读取服务器模型",
+      "checkpointHelp": "选择服务器返回的模型文件，或按 ComfyUI 中的文件名手动填写。",
+      "checkpointRequired": "请先选择或填写模型文件名。",
+      "noCheckpoints": "服务器没有返回可用模型；可以手动填写模型文件名。",
+      "advanced": "高级：工作流 JSON、节点映射与请求参数",
+      "displayTitle": "画布中如何显示",
+      "displayDescription": "给这条工作流起一个容易辨认的名字，之后可从画布模型列表中选择。",
+      "canvasName": "工作流名称",
+      "steps": { "connection": "工作流与连接", "capabilities": "画布显示", "review": "检查并保存" }
+    },
     "customProviders": {
       "assistant": {
         "open": "让 AI 配置",
@@ -1834,7 +2019,7 @@
       },
       "workbench": {
         "chooseTitle": "选择创建方式",
-        "chooseDescription": "选择 AI 辅助、手动 HTTP 契约或 ComfyUI 工作流；所有配置都可编辑，不执行脚本或插件代码。",
+        "chooseDescription": "选择 AI 辅助或手动 HTTP 契约；ComfyUI 请使用设置左侧的独立入口。",
         "aiRouteTitle": "让 AI 生成配置",
         "aiRouteDescription": "粘贴供应商公开文档，由已配置的文本模型生成可编辑草稿。",
         "manualRouteTitle": "手动搭建配置",

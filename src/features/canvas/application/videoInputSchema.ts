@@ -1,3 +1,5 @@
+import { MINIMAX_H3_INPUT_SCHEMA } from './minimaxH3';
+
 export type VideoReferenceRole = 'reference' | 'firstFrame' | 'lastFrame' | 'keyframe';
 
 export interface VideoImageInputSchema {
@@ -15,10 +17,25 @@ export interface VideoMediaInputSchema {
   field: string;
 }
 
+export type VideoImageMode = 'reference' | 'firstFrame' | 'lastFrame' | 'frames';
+
 export interface VideoInputSchema {
+  imageModes?: VideoImageMode[];
   images: VideoImageInputSchema;
   video: VideoMediaInputSchema;
   audio: VideoMediaInputSchema;
+}
+
+export function getVideoReferenceOverflow(
+  schema: VideoInputSchema,
+  counts: Record<'images' | 'video' | 'audio', number>,
+): { kind: 'images' | 'video' | 'audio'; count: number; max: number } | null {
+  for (const kind of ['images', 'video', 'audio'] as const) {
+    if (schema[kind].enabled && counts[kind] > schema[kind].max) {
+      return { kind, count: counts[kind], max: schema[kind].max };
+    }
+  }
+  return null;
 }
 
 const MAX_REFERENCE_IMAGES = 30;
@@ -70,6 +87,7 @@ function cloneSchema(schema: VideoInputSchema): VideoInputSchema {
     },
     video: { ...schema.video },
     audio: { ...schema.audio },
+    ...(schema.imageModes ? { imageModes: [...schema.imageModes] } : {}),
   };
 }
 
@@ -145,11 +163,18 @@ export function normalizeVideoInputSchema(
     images: normalizeImageSchema(raw.images, base.images),
     video: normalizeMediaSchema(raw.video, base.video),
     audio: normalizeMediaSchema(raw.audio, base.audio),
+    ...(base.imageModes ? { imageModes: base.imageModes } : {}),
+    ...(Array.isArray(raw.imageModes) ? {
+      imageModes: raw.imageModes.filter((mode): mode is VideoImageMode =>
+        typeof mode === 'string' && ['reference', 'firstFrame', 'lastFrame', 'frames'].includes(mode)
+      ),
+    } : {}),
   };
 }
 
 export function defaultVideoInputSchemaForProviderKind(providerKind: unknown): VideoInputSchema {
   const kind = typeof providerKind === 'string' ? providerKind.trim().toLowerCase() : '';
+  if (kind === 'minimax-h3') return cloneSchema(MINIMAX_H3_INPUT_SCHEMA);
   if (kind === 'agnes-video') {
     return normalizeVideoInputSchema({
       images: {

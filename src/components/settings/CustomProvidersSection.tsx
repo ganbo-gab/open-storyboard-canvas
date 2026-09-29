@@ -50,7 +50,7 @@ interface CustomProvidersSectionProps {
   mode?: SectionMode;
   /** Callback for `list` mode — lets the host switch the sidebar to the add tab
    *  when the user clicks "+ 新增配置" from an empty list. */
-  onRequestAdd?: (target?: 'new' | 'old' | 'video' | 'chat') => void;
+  onRequestAdd?: (target?: 'new' | 'old' | 'video' | 'chat' | 'comfyui') => void;
 }
 
 const PRESET_RATIOS = ['21:9', '16:9', '4:1', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16', '2:1'] as const;
@@ -815,7 +815,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
     }
     if (mode === 'list') {
       setPendingEditId(id);
-      onRequestAdd?.(p.apiStyle === 'comfyui' ? 'old' : isChatCustomProvider(p) ? 'chat' : isVideoCustomProvider(p) ? 'video' : (isModernProviderConfig(p) ? 'new' : 'old'));
+      onRequestAdd?.(p.apiStyle === 'comfyui' ? 'comfyui' : isChatCustomProvider(p) ? 'chat' : isVideoCustomProvider(p) ? 'video' : (isModernProviderConfig(p) ? 'new' : 'old'));
     }
   }, [providers, mode, onRequestAdd, setPendingEditId, setFormDraft]);
 

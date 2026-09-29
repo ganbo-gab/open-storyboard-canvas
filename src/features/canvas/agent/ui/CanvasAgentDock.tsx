@@ -767,6 +767,7 @@ export function CanvasAgentDock({ projectId }: Props) {
       if (!isCurrentRun(runEpoch)) return false;
       const aborted = error instanceof DOMException && error.name === 'AbortError';
       const message = error instanceof Error ? error.message : String(error);
+      const failure = classifyCanvasAgentFailure(error);
       const readableError = readableAgentFailure(error, t);
       const terminal = /\u5931\u6548|\u5df2\u5904\u7406|expired|conflict|\u4e0d\u4e00\u81f4|\u9879\u76ee\u5df2\u5207\u6362/i.test(message);
       updateFeedItem(item.id, { status: aborted ? 'pending' : terminal ? 'expired' : 'failed' });
@@ -778,7 +779,7 @@ export function CanvasAgentDock({ projectId }: Props) {
           ? t('canvasAgent.cancelled')
           : readableError,
         retryMessage: aborted ? undefined : item.summary,
-        diagnosticMessage: aborted ? undefined : diagnosticPrompt(readableError, item.summary),
+        diagnosticMessage: aborted || !failure.canSelfDiagnose ? undefined : diagnosticPrompt(readableError, item.summary),
         createdAt: Date.now(),
       });
       finishStreaming();

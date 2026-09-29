@@ -228,6 +228,69 @@ describe('custom provider submission safety', () => {
     expect(completed?.resultUrl).not.toContain('private-token');
   });
 
+  it('keeps a confirmed terminal failure terminal when its database update fails', async () => {
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
+    useCustomProvidersStore.getState().replaceAll([comfyProvider()]);
+    getGenerationJobRecordMock.mockResolvedValue({
+      job_id: 'terminal-storage-error', provider_id: 'provider-1', model_id: 'workflow', media_type: 'image',
+      status: 'recoverable_wait', external_task_id: 'remote-terminal', resumable: true, network_route: 'system',
+    });
+    customHttpRequestMock.mockImplementationOnce(() => response(200, { 'remote-terminal': {
+      status: { status_str: 'error', completed: false, messages: [['execution_error', { exception_message: 'Node rejected' }]] },
+    } }));
+    updateGenerationJobMock.mockRejectedValue(new Error('disk full'));
+    expect(await recoverCustomProviderJob('terminal-storage-error')).toMatchObject({ status: 'failed', resumable: false, error_category: 'storage' });
+    expect(customHttpRequestMock).toHaveBeenCalledTimes(1);
+    expect(customHttpRequestMock.mock.calls[0][0].method).toBe('GET');
+  });
+
+  it.each(['image', 'video'] as const)('awaits first %s success persistence before publishing completion', async (mediaType) => {
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
+    useCustomProvidersStore.getState().replaceAll([comfyProvider(mediaType)]);
+    const filename = mediaType === 'image' ? 'result.png' : 'result.mp4';
+    customHttpRequestMock
+      .mockImplementationOnce(() => response(200, { prompt_id: 'durable-first-success' }))
+      .mockImplementationOnce(() => response(200, { 'durable-first-success': {
+        status: { completed: true, status_str: 'success' },
+        outputs: { '9': { images: [{ filename, subfolder: '', type: 'output' }] } },
+      } }));
+    prepareNodeImageSourceWithHeadersMock.mockResolvedValue({ imagePath: '/local/result.png', aspectRatio: '1:1' });
+    persistVideoSourceMock.mockResolvedValue('/local/result.mp4');
+    let release!: () => void;
+    const pendingSuccess = new Promise<void>((resolve) => { release = resolve; });
+    updateGenerationJobMock.mockImplementation((update) => update.status === 'succeeded' ? pendingSuccess : Promise.resolve());
+    const request = { prompt: 'test', model: 'custom:provider-1:workflow', size: '1024x1024', aspect_ratio: '1:1' };
+    const jobId = await (mediaType === 'image' ? submitCustomProviderJob(request) : submitCustomVideoJob(request));
+    await vi.waitFor(() => expect(updateGenerationJobMock.mock.calls.some(([update]) => update.status === 'succeeded')).toBe(true));
+    expect(getCustomProviderJob(jobId).status).not.toBe('succeeded');
+    release();
+    expect((await waitForTerminalJob(jobId)).status).toBe('succeeded');
+    expect(customHttpRequestMock.mock.calls.filter(([request]) => request.method === 'POST')).toHaveLength(1);
+  });
+
+  it.each(['image', 'video'] as const)('keeps a safe handle when first %s success persistence fails', async (mediaType) => {
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
+    useCustomProvidersStore.getState().replaceAll([comfyProvider(mediaType)]);
+    const filename = mediaType === 'image' ? 'result.png' : 'result.mp4';
+    customHttpRequestMock
+      .mockImplementationOnce(() => response(200, { prompt_id: 'durable-storage-failure' }))
+      .mockImplementationOnce(() => response(200, { 'durable-storage-failure': {
+        status: { completed: true, status_str: 'success' },
+        outputs: { '9': { images: [{ filename, subfolder: '', type: 'output' }] } },
+      } }));
+    prepareNodeImageSourceWithHeadersMock.mockResolvedValue({ imagePath: '/local/result.png', aspectRatio: '1:1' });
+    persistVideoSourceMock.mockResolvedValue('/local/result.mp4');
+    updateGenerationJobMock.mockImplementation((update) => update.status === 'succeeded'
+      ? Promise.reject(new Error('disk full')) : Promise.resolve());
+    const request = { prompt: 'test', model: 'custom:provider-1:workflow', size: '1024x1024', aspect_ratio: '1:1' };
+    const jobId = await (mediaType === 'image' ? submitCustomProviderJob(request) : submitCustomVideoJob(request));
+    await vi.waitFor(() => expect(getCustomProviderJob(jobId)).toMatchObject({
+      status: 'recoverable_wait', error_category: 'storage', external_task_id: 'durable-storage-failure', resumable: true,
+    }));
+    expect(getCustomProviderJob(jobId).result_url).toContain('/view?');
+    expect(customHttpRequestMock.mock.calls.filter(([request]) => request.method === 'POST')).toHaveLength(1);
+  });
+
   it.each([
     ['proxy tunnel failed', 'proxy'],
     ['dns resolve failed', 'dns'],
@@ -235,6 +298,9 @@ describe('custom provider submission safety', () => {
     ['request timed out', 'timeout'],
     ['HTTP 429', 'http'],
     ['response JSON parse failed', 'response-parse'],
+    ['响应解析失败', 'response-parse'],
+    ['域名解析失败', 'dns'],
+    ['无法解析主机', 'dns'],
     ['download failed', 'download'],
   ])('classifies %s diagnostics', (message, category) => {
     expect(classifyGenerationError(new Error(message))).toBe(category);
@@ -1797,6 +1863,7 @@ describe('custom provider image edit compatibility negotiation', () => {
     ['response content-type HTTP 400', () => response(400, {
       error: 'upstream response content-type text/html after processing',
     }), 'failed'],
+    ...['upstream response missing image file', 'response contains unsupported field output', 'upstream result model missing', '上游响应缺少图片文件', '生成完成，但未提供图片', 'upstream returned missing image file', 'generation completed but missing file'].map((message) => [message, () => response(400, { error: message }), 'failed'] as const),
     ['no generated image HTTP 400', () => response(400, {
       error: 'no image was generated by the upstream service',
     }), 'failed'],

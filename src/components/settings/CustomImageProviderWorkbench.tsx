@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Download,
   FlaskConical,
   Loader2,
   Sparkles,
@@ -25,7 +26,19 @@ import {
   type CustomImageProviderDraft,
   type CustomImageProviderFieldIssue,
 } from '@/features/canvas/application/customImageProviderConfig';
-import { parseComfyUIConfig, suggestComfyUIBindings, suggestComfyUIOutputNodes, validateComfyUIRequest } from '@/features/canvas/infrastructure/comfyuiGateway';
+import {
+  createComfyUIWorkflowTemplate,
+  getComfyUITemplateCheckpoint,
+  getComfyUIReferenceRequirements,
+  getComfyUIVideoCapabilities,
+  isLocalH3Workflow,
+  parseComfyUIConfig,
+  suggestComfyUIBindings,
+  suggestComfyUIOutputNodes,
+  validateComfyUIRequest,
+  withComfyUITemplateCheckpoint,
+  type ComfyUITemplateId,
+} from '@/features/canvas/infrastructure/comfyuiGateway';
 import {
   normalizeCustomImageRequestContract,
   type ImageFieldEncoding,
@@ -35,6 +48,7 @@ import {
 } from '@/features/canvas/application/customImageProviderContract';
 import {
   buildCustomProviderRequestDebugPreviewForConfig,
+  listCustomComfyUICheckpoints,
   testCustomProviderConnectivity,
   type CustomProviderTestResult,
 } from '@/features/canvas/infrastructure/customProviderGateway';
@@ -48,9 +62,11 @@ import {
   CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS,
   createCustomImageProviderWorkbenchDraft,
   createComfyUIProviderWorkbenchDraft,
+  createWorkbenchPreviewRequest,
   getImageToImageVariant,
   getTextToImageVariant,
   splitWorkbenchValues,
+  updateFirstWorkbenchImageField,
   type CustomImageProviderCreationRoute,
   type CustomImageProviderWorkbenchStep,
 } from './customImageProviderWorkbenchState';
@@ -158,16 +174,23 @@ function JsonField({ label, help, value, onChange, className = '' }: JsonFieldPr
   );
 }
 
-export function CustomImageProviderWorkbench() {
+interface CustomImageProviderWorkbenchProps {
+  initialRoute?: 'comfyui';
+}
+
+type ComfyUIWorkflowChoice = ComfyUITemplateId | 'custom' | 'minimax-h3-local';
+
+export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProviderWorkbenchProps) {
   const { t } = useTranslation();
+  const initialComfyDraft = useMemo(() => createComfyUIProviderWorkbenchDraft(), []);
   const providers = useCustomProvidersStore((state) => state.providers);
   const pendingEditId = useCustomProvidersStore((state) => state.pendingEditId);
   const addProvider = useCustomProvidersStore((state) => state.addProvider);
   const updateProvider = useCustomProvidersStore((state) => state.updateProvider);
   const setPendingEditId = useCustomProvidersStore((state) => state.setPendingEditId);
-  const [route, setRoute] = useState<CustomImageProviderCreationRoute | null>(null);
+  const [route, setRoute] = useState<CustomImageProviderCreationRoute | null>(initialRoute ?? null);
   const [stepIndex, setStepIndex] = useState(0);
-  const [draft, setDraft] = useState<CustomImageProviderDraft>(() => createCustomImageProviderWorkbenchDraft());
+  const [draft, setDraft] = useState<CustomImageProviderDraft>(() => initialRoute === 'comfyui' ? initialComfyDraft : createCustomImageProviderWorkbenchDraft());
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [generatedByAi, setGeneratedByAi] = useState(false);
   const [error, setError] = useState('');
@@ -183,11 +206,19 @@ export function CustomImageProviderWorkbench() {
   const [pollingRequestBodyText, setPollingRequestBodyText] = useState('');
   const [contractText, setContractText] = useState('{\n  "version": 1\n}');
   const [contractIssues, setContractIssues] = useState<CustomImageProviderFieldIssue[]>([]);
-  const [comfyWorkflowText, setComfyWorkflowText] = useState('{}');
-  const [comfyBindingsText, setComfyBindingsText] = useState('{\n  "images": []\n}');
-  const [comfyOutputsText, setComfyOutputsText] = useState('[]');
+  const initialComfy = initialComfyDraft.extraParams.comfyui as Record<string, unknown>;
+  const [comfyWorkflowText, setComfyWorkflowText] = useState(() => jsonText(initialComfy.workflow));
+  const [comfyBindingsText, setComfyBindingsText] = useState(() => jsonText(initialComfy.bindings));
+  const [comfyOutputsText, setComfyOutputsText] = useState(() => jsonText(initialComfy.outputNodeIds));
+  const [comfyChoice, setComfyChoice] = useState<ComfyUIWorkflowChoice>(initialRoute === 'comfyui' ? 'text-to-image' : 'custom');
+  const [availableCheckpoints, setAvailableCheckpoints] = useState<string[]>([]);
+  const [loadingCheckpoints, setLoadingCheckpoints] = useState(false);
 
   const isComfyRoute = route === 'comfyui' || draft.apiStyle === 'comfyui';
+  const checkpointName = useMemo(() => {
+    try { return getComfyUITemplateCheckpoint(JSON.parse(comfyWorkflowText) as unknown); }
+    catch { return ''; }
+  }, [comfyWorkflowText]);
   const visibleSteps: readonly CustomImageProviderWorkbenchStep[] = isComfyRoute
     ? ['connection', 'capabilities', 'review']
     : CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS;
@@ -202,16 +233,11 @@ export function CustomImageProviderWorkbench() {
     const result = customImageProviderDraftToConfig(draft, draft.id ?? 'preview-provider');
     if (!result.value) return { error: formatIssues(result.issues) };
     const model = draft.models[0]?.trim() || 'example-model';
-    const sample = {
-      prompt: 'preview prompt',
-      model: `custom:${result.value.id}:${model}`,
-      size: '1024x1024',
-      aspect_ratio: '1:1',
-    };
     try {
+      const sample = createWorkbenchPreviewRequest(result.value, model);
       return {
         text: buildCustomProviderRequestDebugPreviewForConfig(result.value, model, sample),
-        image: imageEnabled
+        image: imageEnabled && result.value.apiStyle !== 'comfyui'
           ? buildCustomProviderRequestDebugPreviewForConfig(result.value, model, {
             ...sample,
             reference_images: ['data:image/png;base64,iVBORw0KGgo='],
@@ -238,10 +264,13 @@ export function CustomImageProviderWorkbench() {
     const comfy = nextDraft.extraParams?.comfyui;
     if (comfy && typeof comfy === 'object' && !Array.isArray(comfy)) {
       const record = comfy as Record<string, unknown>;
+      const savedChoice = record.templateId;
+      setComfyChoice(savedChoice === 'text-to-image' || savedChoice === 'image-to-image' || savedChoice === 'minimax-h3-local' ? savedChoice : 'custom');
       setComfyWorkflowText(jsonText(record.workflow ?? {}));
       setComfyBindingsText(jsonText(record.bindings ?? { images: [] }));
       setComfyOutputsText(jsonText(record.outputNodeIds ?? []));
     } else {
+      setComfyChoice('custom');
       setComfyWorkflowText('{}');
       setComfyBindingsText('{\n  "images": []\n}');
       setComfyOutputsText('[]');
@@ -250,6 +279,7 @@ export function CustomImageProviderWorkbench() {
     setError('');
     setSaved(false);
     setTestResult(null);
+    setAvailableCheckpoints([]);
   };
 
   useEffect(() => {
@@ -339,6 +369,7 @@ export function CustomImageProviderWorkbench() {
             workflow,
             bindings,
             outputNodeIds,
+            templateId: comfyChoice,
             pollIntervalMs: Number(nextExtraParams.comfyui && typeof nextExtraParams.comfyui === 'object' ? (nextExtraParams.comfyui as Record<string, unknown>).pollIntervalMs : 1500) || 1500,
             pollTimeoutMs: Number(nextExtraParams.comfyui && typeof nextExtraParams.comfyui === 'object' ? (nextExtraParams.comfyui as Record<string, unknown>).pollTimeoutMs : 600000) || 600000,
           },
@@ -390,6 +421,54 @@ export function CustomImageProviderWorkbench() {
     hydrateDraft(nextRoute === 'comfyui' ? createComfyUIProviderWorkbenchDraft() : createCustomImageProviderWorkbenchDraft(), nextRoute);
   };
 
+  const chooseComfyWorkflow = (choice: ComfyUIWorkflowChoice) => {
+    setComfyChoice(choice);
+    setAvailableCheckpoints([]);
+    const template = choice === 'custom' || choice === 'minimax-h3-local'
+      ? { workflow: {}, bindings: { images: [] }, outputNodeIds: [] }
+      : createComfyUIWorkflowTemplate(choice);
+    setComfyWorkflowText(jsonText(template.workflow));
+    setComfyBindingsText(jsonText(template.bindings));
+    setComfyOutputsText(jsonText(template.outputNodeIds));
+    updateDraft((current) => ({
+      ...current,
+      mediaType: choice === 'minimax-h3-local' ? 'video' : 'image',
+      models: [choice === 'minimax-h3-local' ? 'minimax-h3-local' : 'workflow'],
+      supportedResolutions: choice === 'minimax-h3-local' ? ['768P'] : [],
+      extraParams: {
+        ...current.extraParams,
+        comfyui: { ...template, templateId: choice, pollIntervalMs: 1500, pollTimeoutMs: 600000 },
+      },
+    }));
+    setStepIndex(0);
+  };
+
+  const changeComfyCheckpoint = (name: string) => {
+    try {
+      setComfyWorkflowText(jsonText(withComfyUITemplateCheckpoint(JSON.parse(comfyWorkflowText) as unknown, name)));
+      setError('');
+      setSaved(false);
+    } catch (checkpointError) {
+      setError(checkpointError instanceof Error ? checkpointError.message : String(checkpointError));
+    }
+  };
+
+  const fetchComfyCheckpoints = async () => {
+    const config = buildConfig();
+    if (!config) return;
+    setLoadingCheckpoints(true);
+    try {
+      const checkpoints = await listCustomComfyUICheckpoints(config);
+      setAvailableCheckpoints(checkpoints);
+      if (checkpoints.length === 0) setError(t('settings.comfyui.noCheckpoints'));
+      else setError('');
+    } catch (checkpointError) {
+      setError(checkpointError instanceof Error ? checkpointError.message : String(checkpointError));
+    } finally {
+      setLoadingCheckpoints(false);
+    }
+  };
+
   const handleAiApply = (nextDraft: CustomImageProviderDraft) => {
     setGeneratedByAi(true);
     setAssistantOpen(false);
@@ -424,20 +503,20 @@ export function CustomImageProviderWorkbench() {
     if (isComfyRoute) {
       try {
         const comfyConfig = parseComfyUIConfig(result.value);
+        if (comfyChoice === 'minimax-h3-local' && !isLocalH3Workflow(comfyConfig.workflow)) {
+          throw new Error(t('settings.comfyui.h3WorkflowRequired'));
+        }
+        const referenceRequirements = getComfyUIReferenceRequirements(comfyConfig);
         validateComfyUIRequest(comfyConfig, {
           prompt: 'preview prompt',
           model: `custom:${result.value.id}:${result.value.models[0] ?? 'workflow'}`,
-          size: '1024x1024',
-          aspect_ratio: '1:1',
-          reference_images: [],
+          size: isLocalH3Workflow(comfyConfig.workflow) ? '768P' : normalizedDraft.mediaType === 'video' ? 'workflow' : '1024x1024',
+          aspect_ratio: 'auto',
+          reference_images: Array.from({ length: referenceRequirements.min }, () => 'data:image/png;base64,AAAA'),
         });
         result.value.extraParams = {
           ...result.value.extraParams,
-          videoInputSchema: normalizedDraft.mediaType === 'video' ? {
-            images: { enabled: true, min: 0, max: 9, roles: ['reference', 'firstFrame', 'lastFrame', 'keyframe'], requireImageHost: false },
-            video: { enabled: false, min: 0, max: 0, field: '' },
-            audio: { enabled: false, min: 0, max: 0, field: '' },
-          } : undefined,
+          videoInputSchema: normalizedDraft.mediaType === 'video' ? getComfyUIVideoCapabilities(comfyConfig).inputSchema : undefined,
         };
       } catch (configError) {
         setError(configError instanceof Error ? configError.message : String(configError));
@@ -462,6 +541,11 @@ export function CustomImageProviderWorkbench() {
   };
 
   const handleSave = () => {
+    if (isComfyRoute && (comfyChoice === 'text-to-image' || comfyChoice === 'image-to-image') && !checkpointName) {
+      setStepIndex(0);
+      setError(t('settings.comfyui.checkpointRequired'));
+      return;
+    }
     const config = buildConfig();
     if (!config) return;
     if (draft.id) updateProvider(draft.id, config);
@@ -481,9 +565,28 @@ export function CustomImageProviderWorkbench() {
 
   const renderConnectionStep = () => (
     <StepSurface
-      title={t('settings.customProviders.workbench.stepTitles.connection')}
-      description={t('settings.customProviders.workbench.stepDescriptions.connection')}
+      title={t(isComfyRoute ? 'settings.comfyui.connectionTitle' : 'settings.customProviders.workbench.stepTitles.connection')}
+      description={t(isComfyRoute ? 'settings.comfyui.connectionDescription' : 'settings.customProviders.workbench.stepDescriptions.connection')}
     >
+      {isComfyRoute && (
+        <div className="mb-5">
+          <div className="mb-2 text-xs font-semibold text-text-dark">{t('settings.comfyui.chooseWorkflow')}</div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {(['text-to-image', 'image-to-image', 'minimax-h3-local', 'custom'] as const).map((choice) => (
+              <button
+                key={choice}
+                type="button"
+                onClick={() => chooseComfyWorkflow(choice)}
+                aria-pressed={comfyChoice === choice}
+                className={`min-h-[84px] rounded-lg border p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-accent/60 ${comfyChoice === choice ? 'border-accent/70 bg-accent/10' : 'border-border-dark bg-surface-dark hover:border-accent/40'}`}
+              >
+                <span className="block text-xs font-semibold text-text-dark">{t(`settings.comfyui.templates.${choice}.title`)}</span>
+                <span className="mt-1 block text-[11px] leading-4 text-text-muted">{t(`settings.comfyui.templates.${choice}.description`)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="grid gap-3 lg:grid-cols-2">
         <label className="block text-xs font-medium text-text-muted">
           {t('settings.customProviders.workbench.fields.label')}
@@ -491,7 +594,7 @@ export function CustomImageProviderWorkbench() {
         </label>
         <label className="block text-xs font-medium text-text-muted">
           {t('settings.customProviders.workbench.fields.baseUrl')}
-          <UiInput className="mt-1.5 font-mono" value={draft.baseUrl} onChange={(event) => updateDraft((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="https://api.example.com/v1" />
+          <UiInput className="mt-1.5 font-mono" value={draft.baseUrl} onChange={(event) => updateDraft((current) => ({ ...current, baseUrl: event.target.value }))} placeholder={isComfyRoute ? 'http://127.0.0.1:8188' : 'https://api.example.com/v1'} />
         </label>
         <label className="block text-xs font-medium text-text-muted">
           {t('settings.customProviders.workbench.fields.authMode')}
@@ -517,16 +620,12 @@ export function CustomImageProviderWorkbench() {
             <UiInput className="mt-1.5 font-mono" value={auth.prefix} onChange={(event) => updateAuth({ prefix: event.target.value })} placeholder="Token" />
           </label>
         )}
-        <JsonField label={t('settings.customProviders.workbench.fields.extraHeaders')} help={t('settings.customProviders.workbench.help.extraHeaders')} value={extraHeadersText} onChange={setExtraHeadersText} />
-        <JsonField label={t('settings.customProviders.workbench.fields.queryParams')} help={t('settings.customProviders.workbench.help.queryParams')} value={queryParamsText} onChange={setQueryParamsText} />
+        {!isComfyRoute && <JsonField label={t('settings.customProviders.workbench.fields.extraHeaders')} help={t('settings.customProviders.workbench.help.extraHeaders')} value={extraHeadersText} onChange={setExtraHeadersText} />}
+        {!isComfyRoute && <JsonField label={t('settings.customProviders.workbench.fields.queryParams')} help={t('settings.customProviders.workbench.help.queryParams')} value={queryParamsText} onChange={setQueryParamsText} />}
       </div>
       {isComfyRoute && (
-        <div className="mt-4 space-y-3 rounded-lg border border-accent/25 bg-accent/5 p-3">
-          <div>
-            <div className="text-xs font-semibold text-text-dark">{t('settings.customProviders.workbench.comfyTitle')}</div>
-            <p className="mt-1 text-[11px] leading-5 text-text-muted">{t('settings.customProviders.workbench.comfyDescription')}</p>
-          </div>
-          <label className="block text-xs font-medium text-text-muted">
+        <div className="mt-5 space-y-4 rounded-lg border border-border-dark bg-surface-dark p-4">
+          {comfyChoice === 'minimax-h3-local' ? <p className="text-xs leading-5 text-text-muted">{t('settings.comfyui.h3LocalHelp')}</p> : comfyChoice === 'custom' ? <label className="block text-xs font-medium text-text-muted">
             {t('settings.customProviders.workbench.fields.comfyOutputType')}
             <UiSelect
               className="mt-1.5 h-9"
@@ -536,8 +635,21 @@ export function CustomImageProviderWorkbench() {
               <option value="image">{t('settings.customProviders.workbench.comfyOutputImage')}</option>
               <option value="video">{t('settings.customProviders.workbench.comfyOutputVideo')}</option>
             </UiSelect>
-          </label>
-          <label className="block text-xs font-medium text-text-muted">
+          </label> : (
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+              <label className="block text-xs font-medium text-text-muted">
+                {t('settings.comfyui.checkpoint')}
+                <UiInput className="mt-1.5 font-mono" aria-label={t('settings.comfyui.checkpoint')} value={checkpointName} list="comfyui-checkpoint-options" onChange={(event) => changeComfyCheckpoint(event.target.value)} placeholder="model.safetensors" />
+                <datalist id="comfyui-checkpoint-options">{availableCheckpoints.map((name) => <option key={name} value={name} />)}</datalist>
+              </label>
+              <UiButton type="button" variant="muted" size="sm" disabled={loadingCheckpoints} onClick={() => { void fetchComfyCheckpoints(); }}>
+                {loadingCheckpoints ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1 h-3.5 w-3.5" />}
+                {t('settings.comfyui.loadCheckpoints')}
+              </UiButton>
+              <p className="text-[11px] leading-4 text-text-muted sm:col-span-2">{t('settings.comfyui.checkpointHelp')}</p>
+            </div>
+          )}
+          {(comfyChoice === 'custom' || comfyChoice === 'minimax-h3-local') && <label className="block text-xs font-medium text-text-muted">
             {t('settings.customProviders.workbench.fields.comfyImportFile')}
             <input
               type="file"
@@ -557,6 +669,9 @@ export function CustomImageProviderWorkbench() {
                   setComfyWorkflowText(JSON.stringify(parsed, null, 2));
                   setComfyBindingsText(JSON.stringify(bindings, null, 2));
                   setComfyOutputsText(JSON.stringify(outputs, null, 2));
+                  const localH3 = isLocalH3Workflow(parsed);
+                  setComfyChoice(localH3 || comfyChoice === 'minimax-h3-local' ? 'minimax-h3-local' : 'custom');
+                  if (localH3) updateDraft((current) => ({ ...current, mediaType: 'video', models: ['minimax-h3-local'], supportedResolutions: ['768P'] }));
                   setError('');
                   setSaved(false);
                 }).catch((importError) => {
@@ -564,12 +679,19 @@ export function CustomImageProviderWorkbench() {
                 });
               }}
             />
-          </label>
-          <JsonField label={t('settings.customProviders.workbench.fields.comfyWorkflow')} help={t('settings.customProviders.workbench.help.comfyWorkflow')} value={comfyWorkflowText} onChange={setComfyWorkflowText} />
-          <div className="grid gap-3 lg:grid-cols-2">
-            <JsonField label={t('settings.customProviders.workbench.fields.comfyBindings')} help={t('settings.customProviders.workbench.help.comfyBindings')} value={comfyBindingsText} onChange={setComfyBindingsText} />
-            <JsonField label={t('settings.customProviders.workbench.fields.comfyOutputs')} help={t('settings.customProviders.workbench.help.comfyOutputs')} value={comfyOutputsText} onChange={setComfyOutputsText} />
-          </div>
+          </label>}
+          <details key={comfyChoice} open={comfyChoice === 'custom' || comfyChoice === 'minimax-h3-local' ? true : undefined} className="rounded-lg border border-border-dark bg-bg-dark/45 px-3 py-2">
+            <summary className="cursor-pointer text-xs font-medium text-text-dark">{t('settings.comfyui.advanced')}</summary>
+            <div className="mt-3 space-y-3">
+              <JsonField label={t('settings.customProviders.workbench.fields.comfyWorkflow')} help={t('settings.customProviders.workbench.help.comfyWorkflow')} value={comfyWorkflowText} onChange={setComfyWorkflowText} />
+              <div className="grid gap-3 lg:grid-cols-2">
+                <JsonField label={t('settings.customProviders.workbench.fields.comfyBindings')} help={t('settings.customProviders.workbench.help.comfyBindings')} value={comfyBindingsText} onChange={setComfyBindingsText} />
+                <JsonField label={t('settings.customProviders.workbench.fields.comfyOutputs')} help={t('settings.customProviders.workbench.help.comfyOutputs')} value={comfyOutputsText} onChange={setComfyOutputsText} />
+                <JsonField label={t('settings.customProviders.workbench.fields.extraHeaders')} help={t('settings.customProviders.workbench.help.extraHeaders')} value={extraHeadersText} onChange={setExtraHeadersText} />
+                <JsonField label={t('settings.customProviders.workbench.fields.queryParams')} help={t('settings.customProviders.workbench.help.queryParams')} value={queryParamsText} onChange={setQueryParamsText} />
+              </div>
+            </div>
+          </details>
         </div>
       )}
     </StepSurface>
@@ -634,17 +756,17 @@ export function CustomImageProviderWorkbench() {
             </label>
             <label className="block text-xs font-medium text-text-muted">
               {t('settings.customProviders.workbench.fields.imageFieldName')}
-              <UiInput className="mt-1.5 font-mono" value={imageField.name} onChange={(event) => updateImageVariant({ imageFields: [{ ...imageField, name: event.target.value }] })} />
+              <UiInput className="mt-1.5 font-mono" value={imageField.name} onChange={(event) => updateImageVariant({ imageFields: updateFirstWorkbenchImageField(imageVariant, { name: event.target.value }) })} />
             </label>
             <label className="block text-xs font-medium text-text-muted">
               {t('settings.customProviders.workbench.fields.imageFieldMode')}
-              <UiSelect className="mt-1.5 h-9" value={imageField.mode} onChange={(event) => updateImageVariant({ imageFields: [{ ...imageField, mode: event.target.value as ImageFieldMode }] })}>
+              <UiSelect className="mt-1.5 h-9" value={imageField.mode} onChange={(event) => updateImageVariant({ imageFields: updateFirstWorkbenchImageField(imageVariant, { mode: event.target.value as ImageFieldMode }) })}>
                 {IMAGE_FIELD_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
               </UiSelect>
             </label>
             <label className="block text-xs font-medium text-text-muted">
               {t('settings.customProviders.workbench.fields.imageEncoding')}
-              <UiSelect className="mt-1.5 h-9" value={imageField.encoding ?? 'data-url'} onChange={(event) => updateImageVariant({ imageFields: [{ ...imageField, encoding: event.target.value as ImageFieldEncoding }] })}>
+              <UiSelect className="mt-1.5 h-9" value={imageField.encoding ?? 'data-url'} onChange={(event) => updateImageVariant({ imageFields: updateFirstWorkbenchImageField(imageVariant, { encoding: event.target.value as ImageFieldEncoding }) })}>
                 {IMAGE_ENCODINGS.map((encoding) => <option key={encoding} value={encoding}>{encoding}</option>)}
               </UiSelect>
             </label>
@@ -754,7 +876,31 @@ export function CustomImageProviderWorkbench() {
     </StepSurface>
   );
 
-  const renderCapabilitiesStep = () => (
+  const renderCapabilitiesStep = () => isComfyRoute ? (
+    <StepSurface title={t('settings.comfyui.displayTitle')} description={t('settings.comfyui.displayDescription')}>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <label className="block text-xs font-medium text-text-muted">
+          {t('settings.comfyui.canvasName')}
+          <UiInput className="mt-1.5" value={draft.models[0] ?? ''} onChange={(event) => updateDraft((current) => ({ ...current, models: [event.target.value] }))} />
+        </label>
+        <label className="block text-xs font-medium text-text-muted">
+          {t('settings.customProviders.workbench.fields.supportedResolutions')}
+          <UiInput className="mt-1.5" value={(draft.supportedResolutions ?? []).join(', ')} onChange={(event) => updateDraft((current) => ({ ...current, supportedResolutions: splitWorkbenchValues(event.target.value) }))} placeholder="1024x1024, 1024x768" />
+        </label>
+        {draft.mediaType === 'video' && <>
+          <label className="block text-xs font-medium text-text-muted">
+            {t('settings.comfyui.durations')}
+            <UiInput className="mt-1.5" value={Array.isArray(draft.extraParams.supportedDurations) ? draft.extraParams.supportedDurations.join(', ') : ''} onChange={(event) => updateDraft((current) => ({ ...current, extraParams: { ...current.extraParams, supportedDurations: splitWorkbenchValues(event.target.value) } }))} placeholder="5, 10, 15" />
+          </label>
+          <label className="block text-xs font-medium text-text-muted">
+            {t('settings.comfyui.ratios')}
+            <UiInput className="mt-1.5" value={Array.isArray(draft.extraParams.supportedRatios) ? draft.extraParams.supportedRatios.join(', ') : ''} onChange={(event) => updateDraft((current) => ({ ...current, extraParams: { ...current.extraParams, supportedRatios: splitWorkbenchValues(event.target.value) } }))} placeholder="16:9, 9:16" />
+          </label>
+          <p className="text-[11px] leading-4 text-text-muted lg:col-span-2">{t('settings.comfyui.videoBindingsHelp')}</p>
+        </>}
+      </div>
+    </StepSurface>
+  ) : (
     <StepSurface title={t('settings.customProviders.workbench.stepTitles.capabilities')} description={t('settings.customProviders.workbench.stepDescriptions.capabilities')}>
       <div className="grid gap-3 lg:grid-cols-2">
         <label className="block text-xs font-medium text-text-muted">
@@ -882,12 +1028,12 @@ export function CustomImageProviderWorkbench() {
             {t(isComfyRoute ? 'settings.customProviders.workbench.comfyTitle' : 'settings.customProviders.workbench.title')}
           </div>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-text-muted">
-            {generatedByAi ? t('settings.customProviders.workbench.aiDraftNotice') : t('settings.customProviders.workbench.description')}
+            {generatedByAi ? t('settings.customProviders.workbench.aiDraftNotice') : t(isComfyRoute ? 'settings.comfyui.setupDescription' : 'settings.customProviders.workbench.description')}
           </p>
         </div>
-        <UiButton type="button" variant="ghost" size="sm" onClick={() => { setRoute(null); setGeneratedByAi(false); setError(''); }}>
+        {!initialRoute && <UiButton type="button" variant="ghost" size="sm" onClick={() => { setRoute(null); setGeneratedByAi(false); setError(''); }}>
           {t('settings.customProviders.workbench.backToChoice')}
-        </UiButton>
+        </UiButton>}
       </div>
 
       <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
@@ -899,7 +1045,7 @@ export function CustomImageProviderWorkbench() {
             className={`rounded-lg border px-3 py-2 text-left transition-colors ${index === stepIndex ? 'border-accent/60 bg-accent/10' : index < stepIndex ? 'border-emerald-500/25 bg-emerald-500/5' : 'border-border-dark bg-bg-dark hover:border-accent/35'}`}
           >
             <div className={`text-[10px] ${index <= stepIndex ? 'text-accent' : 'text-text-muted'}`}>{String(index + 1).padStart(2, '0')}</div>
-            <div className="mt-0.5 text-xs font-medium text-text-dark">{t(`settings.customProviders.workbench.steps.${step}`)}</div>
+            <div className="mt-0.5 text-xs font-medium text-text-dark">{t(isComfyRoute ? `settings.comfyui.steps.${step}` : `settings.customProviders.workbench.steps.${step}`)}</div>
           </button>
         ))}
       </div>

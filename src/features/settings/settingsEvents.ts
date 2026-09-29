@@ -5,6 +5,7 @@ export type SettingsCategory =
   | 'providersOld'
   | 'providersChat'
   | 'customProviders'
+  | 'comfyui'
   | 'dreamina'
   | 'agnes'
   | 'imageHosting'

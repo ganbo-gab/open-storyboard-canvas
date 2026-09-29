@@ -119,6 +119,7 @@ Open Storyboard Canvas 把参考素材、提示词、AI 生图/生视频、分�
 - [供应商设置指南](docs/settings/provider-guide.md)
 - [ComfyUI 连接指南](docs/settings/comfyui-guide.md)
 - [中转站生图兼容配置](docs/settings/image-relay-compatibility.md)
+- [导演台与预演台操作说明](docs/director-previsualization.md)
 
 ## 数据、隐私与费用
 

@@ -800,6 +800,26 @@ export function timeDirectorRoutePoints(
   });
 }
 
+/** Move or stretch a whole authored track while keeping its spatial keyframes intact. */
+export function retimeDirectorTrack<T extends { time: number }>(
+  track: readonly T[],
+  startTime: number,
+  endTime: number,
+  durationSeconds: number,
+): T[] {
+  if (track.length < 2 || ![startTime, endTime, durationSeconds].every(Number.isFinite)) return [...track];
+  const first = track[0].time;
+  const last = track[track.length - 1].time;
+  if (last - first < 0.001 || durationSeconds < 0.1) return [...track];
+  const minimumSpan = Math.min(0.1, durationSeconds);
+  const nextStart = clamp(startTime, 0, durationSeconds - minimumSpan);
+  const nextEnd = clamp(endTime, nextStart + minimumSpan, durationSeconds);
+  return track.map((keyframe) => ({
+    ...keyframe,
+    time: nextStart + (keyframe.time - first) / (last - first) * (nextEnd - nextStart),
+  }));
+}
+
 export function createDirectorObjectRouteTrack(
   points: readonly DirectorMotionVector3[],
   item: BlueprintItem,

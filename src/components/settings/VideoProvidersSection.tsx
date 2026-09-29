@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+import { MINIMAX_H3_PRESET } from '@/features/canvas/application/minimaxH3';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Plus, Save, Trash2 } from 'lucide-react';
 
@@ -25,6 +27,8 @@ interface VideoModelDraft {
 
 interface VideoProviderTemplate {
   key: string;
+  hintKey?: string;
+  noteKey?: string;
   label: string;
   hint: string;
   labelValue: string;
@@ -359,6 +363,26 @@ const VIDEO_PROVIDER_TEMPLATES: VideoProviderTemplate[] = [
   },
 ];
 
+const h3 = MINIMAX_H3_PRESET.template;
+VIDEO_PROVIDER_TEMPLATES.push({
+  key: MINIMAX_H3_PRESET.key,
+  label: h3.label,
+  labelValue: h3.label,
+  hint: '',
+  hintKey: MINIMAX_H3_PRESET.hint,
+  note: '',
+  noteKey: h3.note,
+  baseUrl: h3.baseUrl,
+  endpointPath: h3.endpointPath,
+  modelListEndpointPath: '',
+  apiStyle: h3.apiStyle,
+  models: h3.models.map((id) => ({ id, description: 'MiniMax H3' })),
+  durations: h3.extraParams.supportedDurations,
+  aspectRatios: h3.extraParams.supportedRatios,
+  resolutions: h3.supportedResolutions,
+  extraParams: h3.extraParams,
+});
+
 const DEFAULT_VIDEO_PROVIDER_TEMPLATE = VIDEO_PROVIDER_TEMPLATES[0];
 
 function templateByKey(key: string): VideoProviderTemplate {
@@ -554,6 +578,7 @@ function updateSchemaAudio(
 }
 
 export const VideoProvidersSection = memo(function VideoProvidersSection() {
+  const { t } = useTranslation();
   const providers = useCustomProvidersStore((state) => state.providers);
   const pendingEditId = useCustomProvidersStore((state) => state.pendingEditId);
   const addProvider = useCustomProvidersStore((state) => state.addProvider);
@@ -584,6 +609,8 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
   const [videoRequestBodyTemplateText, setVideoRequestBodyTemplateText] = useState('{}');
   const [videoRequestBodyHints, setVideoRequestBodyHints] = useState<VideoRequestBodyHintDraft>(EMPTY_VIDEO_REQUEST_BODY_HINTS);
   const [templateExtraParams, setTemplateExtraParams] = useState<Record<string, unknown>>(DEFAULT_VIDEO_PROVIDER_TEMPLATE.extraParams);
+  const usesOfficialH3Composer = String(templateExtraParams.providerKind ?? '').trim().toLowerCase()
+    === MINIMAX_H3_PRESET.template.extraParams.providerKind;
   const [providerNote, setProviderNote] = useState(DEFAULT_VIDEO_PROVIDER_TEMPLATE.note);
   const [apiKey, setApiKey] = useState('');
   const [models, setModels] = useState<VideoModelDraft[]>(DEFAULT_VIDEO_PROVIDER_TEMPLATE.models);
@@ -644,7 +671,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
     setHttpMethod('POST');
     setApiStyle(template.apiStyle);
     applyExtraParamsToForm(template.extraParams);
-    setProviderNote(template.note);
+    setProviderNote(template.noteKey ? t(template.noteKey) : template.note);
     setApiKey('');
     setModels(template.models);
     setNewModelId('');
@@ -657,7 +684,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
     setCustomAspectRatio('');
     setCustomResolution('');
     setDefaultParamsText(stringifyJsonObject(template.extraParams.defaultRequestParams));
-  }, [applyExtraParamsToForm]);
+  }, [applyExtraParamsToForm, t]);
 
   useEffect(() => {
     if (!pendingEditId) return;
@@ -728,11 +755,11 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
     setResolutions(template.resolutions);
     applyExtraParamsToForm(template.extraParams);
     setInputSchema(schemaFromExtra(template.extraParams));
-    setProviderNote(template.note);
+    setProviderNote(template.noteKey ? t(template.noteKey) : template.note);
     setDefaultParamsText(stringifyJsonObject(template.extraParams.defaultRequestParams));
     setNewModelId('');
     setNewModelDescription('');
-  }, [applyExtraParamsToForm]);
+  }, [applyExtraParamsToForm, t]);
 
   const handleSave = useCallback(() => {
     const cleanModels = models.filter((model) => model.id.trim()).map((model) => ({
@@ -888,10 +915,10 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
             type="button"
             onClick={() => handleApplyTemplate(template.key)}
             className="rounded-lg border border-border-dark bg-bg-dark p-3 text-left transition-colors hover:border-accent/55 hover:bg-accent/5"
-            title={template.hint}
+            title={template.hintKey ? t(template.hintKey) : template.hint}
           >
             <div className="text-xs font-medium text-text-dark">{template.label}</div>
-            <div className="mt-1 text-[11px] leading-4 text-text-muted">{template.hint}</div>
+            <div className="mt-1 text-[11px] leading-4 text-text-muted">{template.hintKey ? t(template.hintKey) : template.hint}</div>
           </button>
         ))}
       </div>
@@ -968,6 +995,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
             <span className="text-xs font-medium text-text-muted">请求体模式</span>
             <select
               value={videoRequestBodyMode}
+              disabled={usesOfficialH3Composer}
               onChange={(event) => setVideoRequestBodyMode(event.target.value === 'multipart' ? 'multipart' : 'json')}
               className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
             >
@@ -977,7 +1005,11 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
           </label>
         </div>
 
-        <div className="mt-4 rounded-lg border border-border-dark bg-surface-dark p-3">
+        {usesOfficialH3Composer ? (
+          <p className="mt-4 rounded-lg border border-border-dark bg-surface-dark p-3 text-xs leading-5 text-text-muted">
+            {t('minimaxH3.requestStructureHelp')}
+          </p>
+        ) : <div className="mt-4 rounded-lg border border-border-dark bg-surface-dark p-3">
           <div className="text-xs font-medium text-text-muted">自定义请求体映射</div>
           <div className="mt-1 text-[11px] leading-4 text-text-muted">
             字段支持点路径，例如 values.duration。留空表示不发送该字段；若使用下面的请求体模板 JSON，则模板优先。
@@ -1057,7 +1089,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
               <div className="mt-1 text-[10px] text-red-300">{parsedVideoRequestBodyTemplate.error}</div>
             )}
           </details>
-        </div>
+        </div>}
 
         <div className="mt-4 rounded-lg border border-border-dark bg-surface-dark p-3">
           <div className="text-xs font-medium text-text-muted">异步任务 / 轮询解析</div>

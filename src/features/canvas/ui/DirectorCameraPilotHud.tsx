@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef } from 'react';
-import { Circle, Crosshair, Flag, Radio, Target, X } from 'lucide-react';
+import { Circle, Crosshair, Radio, Target, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 type Props = {
@@ -11,6 +11,7 @@ type Props = {
     getSnapshot: () => number;
   };
   targetLabel?: string | null;
+  bottomOffset?: number;
   onExit: () => void;
 };
 
@@ -20,6 +21,7 @@ export const DirectorCameraPilotHud = memo(function DirectorCameraPilotHud({
   currentTime,
   timeSource,
   targetLabel,
+  bottomOffset = 250,
   onExit,
 }: Props) {
   const { t } = useTranslation();
@@ -45,11 +47,10 @@ export const DirectorCameraPilotHud = memo(function DirectorCameraPilotHud({
         {recording ? <span className="flex items-center gap-1 text-red-200"><Circle className="h-2 w-2 fill-current" />REC</span> : null}
         <button type="button" onClick={onExit} className="ml-1 flex h-6 w-6 items-center justify-center rounded text-white/55 hover:bg-white/12 hover:text-white focus:outline-none focus:ring-2 focus:ring-accent/70" title={t('directorStudio.motion.pilot.exit')} aria-label={t('directorStudio.motion.pilot.exit')}><X className="h-3.5 w-3.5" /></button>
       </div>
-      <div className="absolute bottom-[246px] left-1/2 flex -translate-x-1/2 items-center gap-2 rounded border border-white/10 bg-black/45 px-2.5 py-1 text-[9px] text-white/55 backdrop-blur">
+      <div className="absolute left-1/2 flex max-w-[calc(100%-24px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded border border-white/15 bg-[#1b3437]/92 px-3 py-1.5 text-[10px] text-white/75 backdrop-blur" style={{ bottom: bottomOffset }}>
         <span className="flex items-center gap-1"><Target className="h-3 w-3" />{targetLabel ?? t('directorStudio.motion.pilot.noTarget')}</span>
         <span className="text-white/28">·</span>
-        <span className="flex items-center gap-1"><Flag className="h-3 w-3" />Enter</span>
-        <span className="text-white/28">·</span><span>F</span><span className="text-white/28">·</span><span>Esc</span>
+        <span>{t('directorStudio.motion.pilot.controls')}</span>
       </div>
     </div>
   );

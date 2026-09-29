@@ -563,6 +563,15 @@ export function createDirectorFloorHitTarget() {
   return floor;
 }
 
+function requestPilotPointerLock(canvas: HTMLCanvasElement, onFailure: () => void): void {
+  try {
+    const pending = canvas.requestPointerLock?.();
+    if (pending && typeof pending.catch === 'function') void pending.catch(onFailure);
+  } catch {
+    onFailure();
+  }
+}
+
 function setRingAppearance(ring: any, color: number, opacity: number) {
   const material = ring?.material as any;
   if (!material) return;
@@ -608,6 +617,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   onPilotTargetChange,
 }, ref) {
   const { t } = useTranslation();
+  const previsTheme = motionProject !== undefined;
   const panoramaControlSensitivity = useSettingsStore((s) => s.panoramaControlSensitivity);
   const panoramaControlSensitivityMultiplier =
     getPanoramaControlSensitivityMultiplier(panoramaControlSensitivity);
@@ -1056,6 +1066,19 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     requestRender();
   }, [grid, requestRender]);
 
+  useEffect(() => {
+    // Previsualization's docked editing regions use a neutral stage so colored
+    // routes and selection handles remain distinct from the ground.
+    const palette = previsTheme
+      ? [0x050607, 0x15191d, 0x30383d, 0x875249, 0x3b7568]
+      : [DIRECTOR_GRID_PALETTE.floor, DIRECTOR_GRID_PALETTE.minor, DIRECTOR_GRID_PALETTE.major, DIRECTOR_GRID_PALETTE.axisX, DIRECTOR_GRID_PALETTE.axisZ];
+    gridRef.current?.children.forEach((child: { material?: { color?: { setHex: (value: number) => void } } }, index: number) => {
+      if (palette[index] !== undefined) child.material?.color?.setHex(palette[index]);
+    });
+    if (sceneRef.current) sceneRef.current.background = new THREE.Color(previsTheme ? '#0b0d10' : DIRECTOR_SCENE_BACKGROUND);
+    requestRender();
+  }, [previsTheme, requestRender]);
+
   // Fullscreen viewport size tracking
   useEffect(() => {
     if (!isFullscreen) return;
@@ -1230,14 +1253,14 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     ) => {
       const points = keyframes.map((keyframe) => new THREE.Vector3(
         keyframe.position.x,
-        keyframe.position.y + 0.03,
+        (kind === 'camera' ? gridHeightRef.current : keyframe.position.y) + 0.03,
         keyframe.position.z,
       ));
       if (points.length >= 2) {
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
         const material = dashed
-          ? new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.7, dashSize: 0.18, gapSize: 0.12 })
-          : new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 });
+          ? new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.95, dashSize: 0.22, gapSize: 0.1 })
+          : new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95 });
         const line = new THREE.Line(geometry, material);
         line.userData.directorRouteTrack = { kind, trackId, keyframes };
         if (dashed) line.computeLineDistances();
@@ -1245,11 +1268,11 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       }
       keyframes.forEach((keyframe, index) => {
         const marker = new THREE.Mesh(
-          new THREE.SphereGeometry(0.1, 12, 8),
+          new THREE.SphereGeometry(0.16, 14, 10),
           new THREE.MeshBasicMaterial({
             color,
             transparent: true,
-            opacity: 0.9,
+            opacity: 1,
             depthTest: false,
           }),
         );
@@ -1285,7 +1308,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       scene.remove(routes);
       if (motionRoutesRef.current === routes) motionRoutesRef.current = null;
     };
-  }, [motionProject, motionRoutesVisible, requestRender]);
+  }, [grid.height, motionProject, motionRoutesVisible, requestRender]);
 
   useEffect(() => {
     const routes = motionRoutesRef.current;
@@ -1297,9 +1320,9 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
         && motionRouteSelection.kind === point.kind
         && motionRouteSelection.trackId === point.trackId
         && motionRouteSelection.keyframeId === point.keyframeId;
-      object.scale.setScalar(selected ? 1.4 : 1);
+      object.scale.setScalar(selected ? 1.55 : 1);
       object.material.color.setHex(selected ? 0xffffff : point.color);
-      object.material.opacity = selected ? 1 : 0.9;
+      object.material.opacity = 1;
     });
     requestRender();
   }, [motionRouteSelection, requestRender]);
@@ -1504,7 +1527,8 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     const ringScale = Math.max(0.82, Math.min(2.8, getItemHeight(item) * Math.max(itemScale.x, itemScale.z) * 0.54));
     setRingAppearance(ring, DIRECTOR_GRID_PALETTE.selection, 0.96);
     ring.scale.setScalar(ringScale);
-    ring.position.set(p.x, gridHeightRef.current + 0.02, p.z);
+    const displayedPosition = meshByIdRef.current.get(item.id)?.position ?? p;
+    ring.position.set(displayedPosition.x, gridHeightRef.current + 0.02, displayedPosition.z);
     ring.visible = true;
     requestRender();
   }, [items, selectedItemId, requestRender]);
@@ -1667,9 +1691,12 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       const from = data.keyframes[index];
       const to = data.keyframes[index + 1];
       const line = new THREE.Line3(
-        new THREE.Vector3(from.position.x, from.position.y + 0.03, from.position.z),
-        new THREE.Vector3(to.position.x, to.position.y + 0.03, to.position.z),
+        new THREE.Vector3(from.position.x, (data.kind === 'camera' ? gridHeightRef.current : from.position.y) + 0.03, from.position.z),
+        new THREE.Vector3(to.position.x, (data.kind === 'camera' ? gridHeightRef.current : to.position.y) + 0.03, to.position.z),
       );
+      // A vertical camera move collapses to one point in the ground view.
+      // It has no projected segment to split; edit its height in the inspector.
+      if (line.start.distanceToSquared(line.end) < 0.000001) continue;
       const amount = line.closestPointToPointParameter((hit as any).point, true);
       const closest = line.at(amount, new THREE.Vector3());
       const distance = closest.distanceTo((hit as any).point);
@@ -1892,7 +1919,10 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (!rendererRef.current) return;
     if (pilotStateRef.current.active) {
-      (rendererRef.current.domElement as HTMLCanvasElement).requestPointerLock?.();
+      requestPilotPointerLock(rendererRef.current.domElement as HTMLCanvasElement, () => {
+        pilotStateRef.current.active = false;
+        onPilotActiveChange?.(false);
+      });
       e.preventDefault();
       return;
     }
@@ -1935,7 +1965,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
         interactRef.current.mode = 'routeDrag';
         interactRef.current.routeSelection = routePoint.selection;
         interactRef.current.routeDragObject = routePoint.object;
-        interactRef.current.routePlaneY = routePoint.position.y;
+        interactRef.current.routePlaneY = routePoint.selection.kind === 'camera' ? gridHeightRef.current : routePoint.position.y;
         interactRef.current.routeLastPosition = null;
         onMotionRoutePointSelect?.(routePoint.selection, routePoint.time);
         e.preventDefault();
@@ -1959,7 +1989,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       e.preventDefault();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appendMotionRouteDraftPoint, isTransformControlPointerActive, onMotionRoutePointSelect, onSelectedItemChange, raycastItem, raycastMotionRoutePoint]);
+  }, [appendMotionRouteDraftPoint, isTransformControlPointerActive, onMotionRoutePointSelect, onPilotActiveChange, onSelectedItemChange, raycastItem, raycastMotionRoutePoint]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const st = interactRef.current;
@@ -2065,8 +2095,13 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       const point = raycastGround(local.x, local.y, st.routePlaneY);
       if (point) {
         if (modeRef.current === 'panorama') clampPanoramaPointAtFixedY(point);
-        const position = { x: point.x, y: point.y, z: point.z };
-        st.routeDragObject.position.set(position.x, position.y + 0.03, position.z);
+        // Camera paths are edited as a ground projection while retaining the
+        // authored camera altitude, which remains editable in the inspector.
+        const altitude = st.routeSelection.kind === 'camera'
+          ? st.routeDragObject.userData.directorRoutePoint.position.y
+          : point.y;
+        const position = { x: point.x, y: altitude, z: point.z };
+        st.routeDragObject.position.set(position.x, st.routePlaneY + 0.03, position.z);
         const routeLine = motionRoutesRef.current?.children.find((child: any) => {
           const track = child.userData?.directorRouteTrack;
           return track?.kind === st.routeSelection?.kind && track?.trackId === st.routeSelection?.trackId;
@@ -2077,7 +2112,7 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
         )) ?? -1;
         const positions = routeLine?.geometry?.getAttribute('position');
         if (pointIndex >= 0 && positions) {
-          positions.setXYZ(pointIndex, position.x, position.y + 0.03, position.z);
+          positions.setXYZ(pointIndex, position.x, st.routePlaneY + 0.03, position.z);
           positions.needsUpdate = true;
           routeLine.computeLineDistances?.();
         }
@@ -2507,6 +2542,9 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
       mesh.position.set(sampled.position.x, sampled.position.y + poseYOffset, sampled.position.z);
       mesh.rotation.set(baseRotation.x + sampled.rotation.x, baseRotation.y + sampled.rotation.y, baseRotation.z + sampled.rotation.z);
       mesh.scale.set(baseScale.x * sampled.scale.x, baseScale.y * sampled.scale.y, baseScale.z * sampled.scale.z);
+      if (itemId === selectedItemIdRef.current && selectionRingRef.current) {
+        selectionRingRef.current.position.set(sampled.position.x, gridHeightRef.current + 0.02, sampled.position.z);
+      }
     });
     const camera = cameraRef.current;
     if (camera && previewMode === 'route' && motionPreviewModeRef.current === 'shot' && routePreviewCameraRef.current) {
@@ -2618,8 +2656,11 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
     }
     pilotStateRef.current.yaw = Math.atan2(direction.x, direction.z);
     pilotStateRef.current.pitch = Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1));
-    canvas.requestPointerLock?.();
     onPilotActiveChange?.(true);
+    requestPilotPointerLock(canvas, () => {
+      pilotStateRef.current.active = false;
+      onPilotActiveChange?.(false);
+    });
   }, [onPilotActiveChange]);
 
   const exitPilot = useCallback(() => {

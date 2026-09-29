@@ -1,4 +1,36 @@
 {
+  "minimaxH3": {
+    "requestStructureHelp": "This preset builds requests using the official MiniMax V2 format. Field mappings and body templates are unnecessary. Select MiniMax-H3 and configure supported durations, resolutions and ratios; choose the image input mode in the video node parameters.",
+    "hint": "Official MiniMax H3 · text, frames and multimodal references",
+    "note": "MiniMax H3 V2: 4–15 seconds, 768P / 2K; default 5 seconds / 768P. Select Reference, First frame, Last frame or First + last frames in the video node parameters. Frames cannot be mixed with reference video/audio. Text-only requests require a concrete aspect ratio. Uses a MiniMax API key; ComfyUI credentials are separate.",
+    "errors": {
+      "model": "This preset supports MiniMax-H3 only. Select MiniMax-H3 or use a separate provider configuration.",
+      "prompt": "MiniMax H3 requires a non-empty prompt of at most 7,000 characters.",
+      "duration": "MiniMax H3 duration must be an integer from 4 to 15 seconds.",
+      "resolution": "MiniMax H3 resolution must be 768P or 2K.",
+      "ratio": "MiniMax H3 supports adaptive, 21:9, 16:9, 4:3, 1:1, 3:4 or 9:16.",
+      "textRatio": "Text-only MiniMax H3 needs a concrete aspect ratio; adaptive cannot be used.",
+      "mode": "Select a supported image mode: Reference, First frame, Last frame or First + last frames.",
+      "frames": "First/last frame mode needs exactly one image; First + last frames needs exactly two, in that order.",
+      "mixed": "MiniMax H3 frame mode cannot include reference video or audio. Choose Reference mode or remove those inputs.",
+      "limits": "MiniMax H3 accepts at most 9 reference images, 3 videos, 3 audio clips and 12 media items in total.",
+      "media": "MiniMax H3 media must be an HTTP(S) URL or a matching Base64 data URL. Local paths and blob URLs cannot be sent.",
+      "bodySize": "MiniMax H3 request exceeds 64 MB. Use public media URLs or reduce reference files."
+    }
+  },
+  "videoInputModes": {
+    "limitErrors": {
+      "images": "{{count}} reference images are connected, but this model supports up to {{max}}. Remove the extra images before generating.",
+      "video": "{{count}} reference videos are connected, but this model supports up to {{max}}. Remove the extra videos before generating.",
+      "audio": "{{count}} reference audio clips are connected, but this model supports up to {{max}}. Remove the extra audio clips before generating."
+    },
+    "label": "Image input mode",
+    "reference": "Reference / text only",
+    "firstFrame": "First frame",
+    "lastFrame": "Last frame",
+    "frames": "First + last frames",
+    "hint": "Frames use connected images in order and determine the output ratio. Reference mode can combine images, video and audio."
+  },
   "app": {
     "title": "Open Storyboard Canvas",
     "subtitle": "AI storyboard canvas"
@@ -650,6 +682,7 @@
   },
   "directorStudio": {
     "title": "Director Studio",
+    "studioMode": { "label": "Workspace mode", "director": "Director", "previs": "Previsualization" },
     "open": "Open",
     "openFullscreen": "Open fullscreen Director Studio",
     "saveProject": "Save Project",
@@ -798,13 +831,127 @@
       "enter": "Enter Studio"
     },
     "resolutionNote": "This version exports by the selected frame; 1440p and 4K scale from the current viewport.",
+    "previs": {
+      "tools": "Previsualization tools",
+      "select": "Select",
+      "selectHelp": "Click a character or object to select it; drag empty space to orbit the scene",
+      "move": "Move",
+      "moveHelp": "Drag the red, green, or blue axis to move the selected object",
+      "rotate": "Rotate",
+      "rotateHelp": "Drag an axis ring to turn the selected object",
+      "scale": "Scale",
+      "scaleHelp": "Drag the axis handles to resize the selected object",
+      "selectFirst": "Select an object in the scene or Layers first",
+      "draw": "Draw path",
+      "drawHelp": "Draw a path for {{name}} by dragging on the ground; release to create a timeline clip",
+      "points": "Mark path",
+      "pointsHelp": "Click points on the ground for {{name}}, then choose Finish route",
+      "routePersonOnly": "Select a character or the camera before drawing a path",
+      "person": "Character",
+      "personHelp": "Add a character, then give it a path and an action",
+      "models": "Models",
+      "modelsHelp": "Choose a character, prop, or environment from the model library",
+      "camera": "Camera",
+      "cameraHelp": "Select the camera to draw a path or apply a camera preset",
+      "actions": "Actions",
+      "actionsHelp": "Add a local walk, run, or other action to the selected character",
+      "lighting": "Lighting",
+      "lightingHelp": "Adjust the main and ambient lights, direction, and color",
+      "help": "How to use",
+      "helpDescription": "See the four steps for creating a previsualization",
+      "routeViewHelp": "Observe characters, the camera, and paths from outside",
+      "shotViewHelp": "Check composition and motion through the camera",
+      "followHelp": "First select a character with an existing path",
+      "drawingFor": "Drawing a path for {{name}}",
+      "navigationHint": "Drag to orbit · Right-drag to pan · Scroll to zoom",
+      "currentTarget": "Selected: {{name}}",
+      "helpTitle": "From a character to a preview",
+      "helpStep1": "Add a character with the left toolbar, or select an existing character in Layers on the right.",
+      "helpStep2": "Choose Draw path and drag on the ground, or use Mark path to click points. The result appears as a clip in the timeline.",
+      "helpStep3": "Drag the clip to move it or its ends to change duration. Select numbered keyframes to edit position and time on the right; use Actions to add motion.",
+      "helpStep4": "Select the camera and draw a camera path or choose a preset. Play to review motion, switch to Camera view for composition, then record your preview.",
+      "undo": "Undo",
+      "record": "Record",
+      "follow": "Follow actor",
+      "focus": "Focus",
+      "timeline": {
+        "playHelp": "Play the routes and actions. Focus the ruler and press Space to play or pause.",
+        "pauseHelp": "Pause the preview at the current time to adjust the shot or action.",
+        "startHelp": "Return to 0 seconds to inspect the initial camera and character positions.",
+        "loopHelp": "Restart playback automatically at the end. Click again to disable looping.",
+        "snap": "Snap",
+        "snapHelp": "Snap drags to 24 frames per second. Hold Alt to move freely.",
+        "zoomOut": "Zoom out timeline",
+        "zoomOutHelp": "Show a longer time range and more keyframes.",
+        "zoomIn": "Zoom in timeline",
+        "zoomInHelp": "Spread nearby keyframes apart for precise time adjustments.",
+        "fit": "Fit",
+        "fitHelp": "Fit the entire project duration in the timeline width.",
+        "selectTrackHelp": "Select {{name}} to inspect and edit its keyframes on the right.",
+        "addActionHelp": "Record this person’s action at the current time; choose or edit it on the right.",
+        "addKeyframeHelp": "Record this object’s position and orientation as a keyframe at the current time.",
+        "routeHelp": "Drag to move the whole route in time; drag either end to change its duration. Arrow keys adjust one frame; Shift adjusts ten.",
+        "startHandleHelp": "Drag the left handle to change the start time and proportionally retime the whole route.",
+        "endHelp": "Drag the right handle to change the end time and proportionally retime the whole route.",
+        "actionHelp": "{{name}}: drag to change its start time. The action lasts until the next action or project end.",
+        "keyframeHelp": "Drag to change time. Arrow keys move one frame; Shift plus arrows moves ten.",
+        "emptyTrack": "Click + on the left to record a keyframe, or draw a route in the scene",
+        "emptyAction": "Click + to record an action, or choose one from the action library",
+        "speed": "Preview speed",
+        "speedHelp": "Change preview speed. Exported video keeps the original project timing.",
+        "keyframeCount": "Keys: {{count}} · zoom",
+        "keyframeCountAria": "Zoom to the {{count}} keyframes in {{name}}",
+        "keyframeCountHelp": "Zoom to the track start to select individual keyframes. Dense markers show numbers on selection, hover or focus. Zoom is limited to 16×; all frames are also available in the right-hand list."
+      },
+      "sceneAndProperties": "Scene and properties",
+      "sceneObjects": "Scene objects",
+      "addPersonHelp": "Add and select a person, then draw a route or add an action.",
+      "openModelsHelp": "Browse local people, props, and environment models to add to this scene.",
+      "selectCameraHelp": "Inspect the camera route or record the current camera view as a keyframe.",
+      "selectObjectHelp": "Select {{name}} to edit its name, color, and transform.",
+      "backToObjectHelp": "Return to the selected object's name, color, and transform.",
+      "objectProperties": "Object properties",
+      "cameraEmpty": "The camera has no motion yet. Set a view and record a keyframe, or draw a camera route with the tools on the left.",
+      "addCameraKey": "Record camera view",
+      "addCameraKeyHelp": "Record the current camera position, target, and field of view at the timeline's current time.",
+      "objectRouteEmpty": "Use the route tools on the left to give this object a motion path.",
+      "editRoute": "Edit motion route",
+      "editRouteHelp": "Inspect route timing, keyframe positions, and heading for this object.",
+      "openActionsHelp": "Choose a local pose, playable action, or saved clip for the selected person.",
+      "editActions": "Edit action timing",
+      "editActionsHelp": "Select an action keyframe to adjust its start time or remove it.",
+      "deleteObject": "Delete object",
+      "deleteObjectHelp": "Remove this object and its motion tracks from the current scene.",
+      "followObject": "Follow {{name}}",
+      "duplicateFrameHelp": "Copy the selected keyframe, then adjust its time or properties.",
+      "toggleSidebar": "Scene and properties",
+      "toggleSidebarHelp": "Collapse or expand the right sidebar to give the scene more space"
+    },
     "motion": {
+      "guide": {
+        "selectPerson": "Select a person in the scene or Elements panel; you can also draw a camera route",
+        "selectedPerson": "{{name}} selected. Draw a route or add an action.",
+        "addPerson": "Add person",
+        "personRoute": "Person point route",
+        "drawPersonRoute": "Draw person route",
+        "cameraRoute": "Camera point route",
+        "drawCameraRoute": "Draw camera route",
+        "addAction": "Add person action",
+        "followPerson": "Follow person's route",
+        "emptyTracks": "Add or select a person to show movement and action tracks here. You can draw a camera route above now."
+      },
       "timeline": {
         "title": "Timeline", "camera": "Camera", "actionTrack": "{{name}} · Action", "tracks": "Tracks",
         "play": "Play", "pause": "Pause", "goToStart": "Go to start", "loop": "Loop playback",
         "currentTime": "Current time", "duration": "Duration", "routePreview": "Director route view",
         "shotPreview": "Final camera view", "showRoutes": "Show motion routes", "hideRoutes": "Hide motion routes",
-        "addKeyframe": "Add keyframe"
+        "addKeyframe": "Add keyframe", "routeClip": "Route {{start}}–{{end}}s",
+        "routeClipAria": "{{name}} route from {{start}} to {{end}} seconds",
+        "routeClipHelp": "Drag the route clip to move it; drag either end to change duration",
+        "trimStart": "Adjust route start", "trimEnd": "Adjust route end",
+        "keyframeAria": "{{name}} keyframe {{index}} at {{time}} seconds", "actionClip": "Action",
+        "scrubHelp": "Drag the ruler to scrub; arrow keys move one frame, Shift plus arrows move ten frames",
+        "resize": "Drag to resize timeline"
       },
       "route": {
         "point": "Place Route Points", "draw": "Draw Route", "finish": "Finish Route", "cancel": "Cancel Drawing",
@@ -816,7 +963,11 @@
         "easing": "Interpolation", "linear": "Linear", "smooth": "Smooth", "fov": "Field of view",
         "orientToPath": "Face travel direction", "duplicate": "Duplicate", "delete": "Delete keyframe",
         "position": "Position", "yaw": "Heading", "targetMode": "Camera Target", "fixedTarget": "Fixed Target",
-        "targetBodyPart": "Track Body Part", "head": "Head", "torso": "Torso", "feet": "Feet"
+        "targetBodyPart": "Track Body Part", "head": "Head", "torso": "Torso", "feet": "Feet",
+        "trackSummary": "{{count}} keyframes", "keyframes": "Keyframes", "keyframeNumber": "Keyframe {{index}}",
+        "emptyTrack": "Draw a route or add keyframes on the timeline to edit them here.",
+        "clipStart": "Clip start", "clipEnd": "Clip end",
+        "clipHelp": "You can also drag the route clip or its handles on the timeline."
       },
       "library": {
         "title": "Action Library", "poses": "Static Poses", "actions": "Playable Actions", "clips": "Custom Clips",
@@ -826,7 +977,9 @@
         "loop": "Loop clip", "delete": "Delete clip", "timeAt": "Apply at {{time}}s", "untitledClip": "Untitled clip"
       },
       "pilot": {
-        "enter": "Pilot Camera", "exit": "Exit pilot mode", "active": "Camera pilot", "noTarget": "No tracking target"
+        "enter": "Free camera move", "exit": "Exit free camera", "active": "Moving camera", "noTarget": "No tracking target",
+        "help": "Move the camera like an operator. Press Enter to record its current position on the timeline.",
+        "controls": "WASD move · Mouse look · Enter record camera · F lock subject · Esc exit"
       },
       "cameraPresets": {
         "title": "Camera Route", "cinematicPush": "Cinematic Push", "characterFollow": "Character Follow",
@@ -834,7 +987,7 @@
         "followActorRoute": "Follow Actor Route"
       },
       "export": {
-        "title": "Reference Video", "needsCamera": "Add at least two camera keyframes before exporting.",
+        "title": "Export Preview Video", "needsCamera": "Add at least two camera keyframes before exporting.",
         "resolution": "Resolution", "fps": "Frame rate", "duration": "Duration", "format": "Format",
         "unsupported": "Unavailable", "recording": "Recording clean scene", "remaining": "About {{seconds}}s remaining",
         "complete": "{{format}} recording complete", "start": "Start Recording", "cancel": "Cancel Recording",
@@ -1318,6 +1471,7 @@
       "payloadDebugHint": "This shows the request content that will be sent to the gateway / provider, not an image preview. API keys, Authorization, query secrets, and base64 / data URLs are masked or summarized. This preview only builds the request; it does not submit generation."
     },
     "aiVideo": {
+      "workflow": "Workflow",
       "promptPlaceholder": "Describe the video, camera motion, action timing; type @ to reference connected images",
       "promptRequired": "Please enter a video prompt",
       "noVideoProvider": "Add an available video provider in Settings > My Config > Video Generation first.",
@@ -1813,6 +1967,37 @@
         "chat": "Responses, Chat Completions, Anthropic, and Gemini"
       }
     },
+    "comfyui": {
+      "description": "Choose a common workflow template or import your own API-format workflow. Local and cloud servers are supported.",
+      "newConnection": "New connection",
+      "savedConnections": "Saved ComfyUI connections",
+      "edit": "Edit",
+      "setupDescription": "Choose a workflow, then enter the server address and checkpoint. Open node mapping only when needed.",
+      "connectionTitle": "Workflow and connection",
+      "connectionDescription": "Choose a template and enter the server address. Templates use built-in ComfyUI nodes; custom workflows can output images or video.",
+      "chooseWorkflow": "Choose a workflow",
+      "templates": {
+        "text-to-image": { "title": "Basic text to image", "description": "Prompt, size and seed are filled into the workflow automatically." },
+        "image-to-image": { "title": "Reference image redraw", "description": "Upload one reference image and regenerate it with a prompt." },
+        "minimax-h3-local": {"title": "MiniMax H3 local video", "description": "Import a working H3 API workflow with duration and canvas mapping."},
+        "custom": { "title": "Custom workflow", "description": "Import API-format JSON for image or video output." }
+      },
+      "h3LocalHelp": "Install local H3 models and nodes in ComfyUI and verify video generation, then import API JSON containing MiniMaxH3ImageToVideo or MiniMaxH3ReferenceToVideo and a video saver. Durations of 5–15 seconds align at 24fps. No MiniMax API key is needed. Comfy Partner billing nodes are not supported here; use the direct provider instead.",
+      "h3WorkflowRequired": "Import an API workflow containing local MiniMax H3 nodes. Comfy Partner/API nodes are not supported by this entry.",
+      "durations": "Durations in seconds (duration binding required)",
+      "ratios": "Aspect ratios (aspectRatio binding required)",
+      "videoBindingsHelp": "Generic video options require matching bindings; unbound values remain in the workflow. Local H3 uses 5–15 seconds, 768P and preset canvases. Canvas images replace server images in binding order; canvas video/audio uploads are not supported.",
+      "checkpoint": "Checkpoint file",
+      "loadCheckpoints": "Load server models",
+      "checkpointHelp": "Choose a model returned by the server or enter its ComfyUI file name manually.",
+      "checkpointRequired": "Choose or enter a checkpoint file first.",
+      "noCheckpoints": "The server returned no checkpoints. You can enter a file name manually.",
+      "advanced": "Advanced: workflow JSON, node mapping and request options",
+      "displayTitle": "Appearance on the canvas",
+      "displayDescription": "Give this workflow a recognizable name so you can select it from the canvas model list.",
+      "canvasName": "Workflow name",
+      "steps": { "connection": "Workflow and connection", "capabilities": "Canvas display", "review": "Review and save" }
+    },
     "customProviders": {
       "assistant": {
         "open": "Configure with AI",
@@ -1838,7 +2023,7 @@
       },
       "workbench": {
         "chooseTitle": "Choose a creation method",
-        "chooseDescription": "Choose AI assistance, a manual HTTP contract, or a ComfyUI workflow. All settings remain editable; scripts and plugins are never executed.",
+        "chooseDescription": "Choose AI assistance or a manual HTTP contract. ComfyUI has its own section in the settings sidebar.",
         "aiRouteTitle": "Generate with AI",
         "aiRouteDescription": "Paste public provider documentation and use a configured text model to create an editable draft.",
         "manualRouteTitle": "Build manually",

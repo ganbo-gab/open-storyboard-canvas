@@ -8,6 +8,7 @@ export interface DirectorVideoFormat {
 
 export interface DirectorRecordedVideo extends DirectorVideoFormat {
   blob: Blob;
+  /** Authored timeline duration; MediaRecorder does not verify encoded metadata. */
   durationSeconds: number;
   width: number;
   height: number;
@@ -131,7 +132,7 @@ export async function recordDirectorVideo(options: RecordDirectorVideoOptions): 
     stream = platform.captureStream(options.canvas, options.fps);
     recorder = platform.createRecorder(stream, { mimeType: format.mimeType, videoBitsPerSecond: 12_000_000 });
     const chunks: Blob[] = [];
-    const startedAt = platform.now();
+    let startedAt: number | null = null;
 
     const result = await new Promise<DirectorRecordedVideo>((resolve, reject) => {
       let settled = false;
@@ -193,7 +194,10 @@ export async function recordDirectorVideo(options: RecordDirectorVideoOptions): 
 
       const tick = async () => {
         if (settled || cancelled) return;
-        const elapsedSeconds = Math.max(0, (platform.now() - startedAt) / 1000);
+        // The initial prerender predates captureStream. Repaint time zero with
+        // capture active before starting the clock, so startup delays cannot
+        // consume the beginning of the authored timeline.
+        const elapsedSeconds = startedAt === null ? 0 : Math.max(0, (platform.now() - startedAt) / 1000);
         const timelineTime = Math.min(durationSeconds, elapsedSeconds);
         try {
           await options.renderAtTime(timelineTime);
@@ -207,13 +211,26 @@ export async function recordDirectorVideo(options: RecordDirectorVideoOptions): 
           return;
         }
         if (settled || cancelled) return;
+        startedAt ??= platform.now();
         options.onProgress?.({
           progress: Math.min(1, timelineTime / durationSeconds),
           elapsedSeconds: timelineTime,
           remainingSeconds: Math.max(0, durationSeconds - timelineTime),
         });
         if (elapsedSeconds >= durationSeconds) {
-          if (recorder?.state !== 'inactive') recorder?.stop();
+          // Canvas capture happens during paint, after the rendering callback.
+          // Keep the endpoint through two paint opportunities before stopping.
+          frameHandle = platform.scheduleFrame(() => {
+            if (settled || cancelled) return;
+            frameHandle = platform.scheduleFrame(() => {
+              if (settled || cancelled) return;
+              try {
+                if (recorder?.state !== 'inactive') recorder?.stop();
+              } catch (error) {
+                finishWithError(error instanceof Error ? error : new Error('MediaRecorder could not stop.'));
+              }
+            });
+          });
           return;
         }
         frameHandle = platform.scheduleFrame(() => { void tick(); });

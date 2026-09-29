@@ -6,7 +6,7 @@ import { useCustomProvidersStore } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { UI_CONTENT_OVERLAY_INSET_CLASS } from '@/components/ui/motion';
 import { UiButton, UiModal, UiSelect } from '@/components/ui/primitives';
-import { hasConfiguredImageProvider } from '@/features/canvas/application/providerAvailability';
+import { hasConfiguredAnyProvider } from '@/features/canvas/application/providerAvailability';
 import { MissingApiKeyHint } from '@/features/settings/MissingApiKeyHint';
 import { listModelProviders } from '@/features/canvas/models';
 import { RenameDialog } from './RenameDialog';
@@ -30,7 +30,7 @@ export function ProjectManager() {
   const agnesApiKey = useSettingsStore((state) => state.agnesApiKey);
   const customProviders = useCustomProvidersStore((state) => state.providers);
   const hasConfiguredProvider = useMemo(
-    () => hasConfiguredImageProvider({
+    () => hasConfiguredAnyProvider({
       apiKeys,
       builtInProviderIds: providerIds,
       customProviders,

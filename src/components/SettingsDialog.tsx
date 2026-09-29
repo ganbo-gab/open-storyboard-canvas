@@ -27,6 +27,7 @@ import { useModalFocus } from '@/components/ui/useModalFocus';
 import { listModelProviders } from '@/features/canvas/models';
 import type { SettingsCategory } from '@/features/settings/settingsEvents';
 import { CustomProvidersSection } from '@/components/settings/CustomProvidersSection';
+import { ComfyUISettingsSection } from '@/components/settings/ComfyUISettingsSection';
 import { AddProvidersSection, type AddProviderTab } from '@/components/settings/AddProvidersSection';
 import { AgnesSettingsSection } from '@/components/settings/AgnesSettingsSection';
 import { DreaminaSection } from '@/components/settings/DreaminaSection';
@@ -831,6 +832,13 @@ export function SettingsDialog({
               </button>
 
               <button
+                onClick={() => setActiveCategory('comfyui')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${activeCategory === 'comfyui' ? 'border-l-2 border-accent bg-accent/10 text-text-dark' : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'}`}
+              >
+                <span className="text-sm">ComfyUI</span>
+              </button>
+
+              <button
                 onClick={() => setActiveCategory('dreamina')}
                 className={`
                 w-full flex items-center gap-3 px-4 py-2.5 text-left
@@ -987,6 +995,10 @@ export function SettingsDialog({
                   <CustomProvidersSection
                     mode="list"
                     onRequestAdd={(target) => {
+                      if (target === 'comfyui') {
+                        setActiveCategory('comfyui');
+                        return;
+                      }
                       setActiveProviderAddTab(
                         target === 'old' ? 'imageOld' : target === 'video' ? 'video' : target === 'chat' ? 'chat' : 'imageNew'
                       );
@@ -994,6 +1006,12 @@ export function SettingsDialog({
                     }}
                   />
                 </div>
+              </div>
+            )}
+
+            {activeCategory === 'comfyui' && (
+              <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">
+                <ComfyUISettingsSection />
               </div>
             )}
 

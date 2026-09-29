@@ -1,3 +1,5 @@
+import i18n from 'i18next';
+import { composeMinimaxH3Request, MinimaxH3ValidationError } from '@/features/canvas/application/minimaxH3';
 import {
   customHttpRequest,
   customHttpStreamRequest,
@@ -81,6 +83,7 @@ import {
   checkComfyUIConnection,
   ComfyUIExecutionError,
   isComfyUIProvider,
+  listComfyUICheckpoints,
   parseComfyUIConfig,
   pollComfyUIWorkflow,
   submitComfyUIWorkflow,
@@ -228,7 +231,7 @@ function isAmbiguousSubmissionError(error: unknown): boolean {
 export function classifyGenerationError(error: unknown): string {
   const message = formatUnknownError(error).toLowerCase();
   if (/proxy|代理/.test(message)) return 'proxy';
-  if (/dns|resolve|name or service|域名|解析/.test(message)) return 'dns';
+  if (/dns|resolve|name or service|域名解析|解析主机|无法解析.{0,20}(?:域名|主机)/.test(message)) return 'dns';
   if (/tls|ssl|certificate|证书/.test(message)) return 'tls';
   if (/timeout|timed out|超时/.test(message)) return 'timeout';
   if (/http\s*\d{3}|status code|状态码/.test(message)) return 'http';
@@ -271,9 +274,10 @@ function enqueueCustomJobUpdate(
       await updateGenerationJob({ ...update, jobId });
     });
   persistenceQueues.set(jobId, next);
-  void next.finally(() => {
+  const clear = () => {
     if (persistenceQueues.get(jobId) === next) persistenceQueues.delete(jobId);
-  });
+  };
+  void next.then(clear, clear);
   return next;
 }
 
@@ -293,7 +297,7 @@ async function persistCustomJobUpdateRequired(
   await enqueueCustomJobUpdate(jobId, update);
 }
 
-async function persistRecoveryJobUpdate(
+async function persistCriticalCustomJobUpdate(
   jobId: string,
   update: Omit<Parameters<typeof updateGenerationJob>[0], 'jobId'>,
 ): Promise<boolean> {
@@ -302,10 +306,13 @@ async function persistRecoveryJobUpdate(
     return true;
   } catch (error) {
     const detail = formatUnknownError(error);
+    const terminalFailure = update.status === 'failed' || update.status === 'canceled';
     updateCachedJob(jobId, {
-      status: 'recoverable_wait',
+      status: terminalFailure ? update.status : 'recoverable_wait',
       phase: update.phase ?? 'storage',
-      error: `本机任务状态保存失败，未继续恢复流程：${detail}`,
+      error: `本机任务状态保存失败，尚未确认任务完成：${detail}`,
+      result_url: update.resultUrl ?? cache.get(jobId)?.result_url,
+      resumable: !terminalFailure && Boolean(update.resultUrl || cache.get(jobId)?.external_task_id || cache.get(jobId)?.result_url),
       error_category: 'storage',
     });
     return false;
@@ -451,7 +458,7 @@ class NetworkRequestError extends Error {
 class HttpStatusError extends Error {
   readonly status?: number;
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, readonly validationMessage = message) {
     super(message);
     this.name = 'HttpStatusError';
     this.status = status;
@@ -2861,7 +2868,7 @@ async function requestJson(
           }
           throw lastRetryableHttpError;
         }
-        throw new HttpStatusError(message, response.status);
+        throw new HttpStatusError(message, response.status, previewPayload(parsed));
       }
       return { status: response.status, parsed, text: response.text };
     } catch (err) {
@@ -3385,18 +3392,18 @@ async function runCustomProviderJob(
       });
       return;
     }
+    if (!(await persistCriticalCustomJobUpdate(jobId, {
+      status: 'succeeded',
+      phase: 'materialize',
+      result: preparedImageSource,
+      resultUrl: asLightweightRetryResultSource(imageUrl) ?? undefined,
+    }))) return;
     updateCachedJob(jobId, {
       status: 'succeeded',
       phase: 'materialize',
       result: preparedImageSource,
       error: null,
       warning: aspectWarning,
-    });
-    persistCustomJobUpdate(jobId, {
-      status: 'succeeded',
-      phase: 'materialize',
-      result: preparedImageSource,
-      resultUrl: asLightweightRetryResultSource(imageUrl) ?? undefined,
     });
   } catch (err) {
     logCustomProviderPhase('warn', 'submit:failed', {
@@ -3740,6 +3747,11 @@ function scanFirstVideoSource(cfg: CustomProviderConfig, payload: unknown): stri
 }
 
 function extractFirstVideoSource(cfg: CustomProviderConfig, payload: unknown): string | null {
+  if (modernProviderKind(cfg) === 'minimax-h3') {
+    return getValueByPath(payload, 'task.status') === 'succeeded'
+      ? extractVideoByPath(cfg, payload, 'task.content.url')
+      : null;
+  }
   const configuredVideoPaths = Array.isArray(cfg.extraParams?.responseVideoPaths)
     ? cfg.extraParams.responseVideoPaths
     : [];
@@ -4375,7 +4387,7 @@ function buildVideoMultipartBody(
 }
 
 function resolveVideoRequestBodyMode(cfg: CustomProviderConfig): 'json' | 'multipart' {
-  if (modernProviderKind(cfg) === 'agnes-video') {
+  if (['agnes-video', 'minimax-h3'].includes(modernProviderKind(cfg))) {
     return 'json';
   }
   const rawMode = cfg.extraParams?.videoRequestBodyMode ?? cfg.extraParams?.requestBodyMode;
@@ -4388,6 +4400,16 @@ function buildVideoJsonBody(
   request: GenerateRequest,
 ): Record<string, unknown> {
   const providerKind = modernProviderKind(cfg);
+  if (providerKind === 'minimax-h3') {
+    try {
+      return composeMinimaxH3Request(modelName, request, resolveDefaultRequestParams(cfg));
+    } catch (error) {
+      if (error instanceof MinimaxH3ValidationError) {
+        throw new Error(i18n.isInitialized ? i18n.t(error.message) : error.message);
+      }
+      throw error;
+    }
+  }
   const configuredBody = buildConfiguredVideoRequestBody(cfg, modelName, request);
   if (configuredBody) {
     return configuredBody;
@@ -4811,17 +4833,17 @@ async function runCustomVideoJob(
       });
       return;
     }
+    if (!(await persistCriticalCustomJobUpdate(jobId, {
+      status: 'succeeded',
+      phase: 'materialize',
+      result: preparedVideoSource,
+      resultUrl: asLightweightRetryResultSource(videoSource) ?? undefined,
+    }))) return;
     updateCachedJob(jobId, {
       status: 'succeeded',
       phase: 'materialize',
       result: preparedVideoSource,
       error: null,
-    });
-    persistCustomJobUpdate(jobId, {
-      status: 'succeeded',
-      phase: 'materialize',
-      result: preparedVideoSource,
-      resultUrl: asLightweightRetryResultSource(videoSource) ?? undefined,
     });
   } catch (err) {
     if (err instanceof VideoPollTimeoutError) {
@@ -4917,18 +4939,18 @@ async function retryCustomVideoPoll(jobId: string, retryContext: VideoPollRetryC
       });
       return;
     }
+    if (!(await persistCriticalCustomJobUpdate(jobId, {
+      status: 'succeeded',
+      phase: 'materialize',
+      result: preparedVideoSource,
+      resultUrl: asLightweightRetryResultSource(videoSource) ?? undefined,
+    }))) return;
     updateCachedJob(jobId, {
       status: 'succeeded',
       phase: 'materialize',
       result: preparedVideoSource,
       result_url: asLightweightRetryResultSource(videoSource),
       error: null,
-    });
-    persistCustomJobUpdate(jobId, {
-      status: 'succeeded',
-      phase: 'materialize',
-      result: preparedVideoSource,
-      resultUrl: asLightweightRetryResultSource(videoSource) ?? undefined,
     });
   } catch (err) {
     if (err instanceof VideoPollTimeoutError) {
@@ -4989,9 +5011,15 @@ async function retryCustomVideoPoll(jobId: string, retryContext: VideoPollRetryC
   }
 }
 
+function describesResponseFailure(message: string): boolean {
+  // An upstream response error cannot prove the paid request was rejected before execution.
+  return /\b(?:response|output|result|upstream|returned?|generated?|generation|completed?|processed?)\b|响应|返回|输出|生成|完成|处理后/i.test(message);
+}
+
 function isRecognizedImageEditValidationError(error: unknown): error is HttpStatusError {
   if (!(error instanceof HttpStatusError) || error.status !== 400) return false;
-  const message = error.message;
+  const message = error.validationMessage;
+  if (describesResponseFailure(message)) return false;
   return isEmptyModelValidationError(error)
     || /(?:missing|required|not specified|cannot be empty|must provide)\b[^\n]{0,100}\b(?:image|file)\b/i.test(message)
     || /\b(?:image|file)\b[^\n]{0,100}\b(?:missing|required|not specified|cannot be empty)\b/i.test(message)
@@ -5006,7 +5034,8 @@ function isRecognizedImageEditValidationError(error: unknown): error is HttpStat
 
 function isEmptyModelValidationError(error: unknown): error is HttpStatusError {
   if (!(error instanceof HttpStatusError) || error.status !== 400) return false;
-  const message = error.message;
+  const message = error.validationMessage;
+  if (describesResponseFailure(message)) return false;
   return /\bmodel(?:\s+name)?\b[^\n]{0,100}\b(?:not specified|cannot be empty|must not be empty|is required|missing|empty)\b/i.test(message)
     || /\b(?:not specified|missing|empty)\b[^\n]{0,100}\bmodel(?:\s+name)?\b/i.test(message)
     || /(?:未指定|缺少)[^\n]{0,40}模型|模型[^\n]{0,40}(?:为空|不能为空|必填)/i.test(message);
@@ -5127,7 +5156,7 @@ function appendCompatibilityAttemptsToError(
 ): Error {
   const rawMessage = error instanceof Error ? error.message : String(error);
   const message = `${rawMessage}\n图生图兼容协商已尝试：${formatImageEditCompatibilityAttempts(attempts)}`;
-  if (error instanceof HttpStatusError) return new HttpStatusError(message, error.status);
+  if (error instanceof HttpStatusError) return new HttpStatusError(message, error.status, error.validationMessage);
   if (error instanceof NetworkRequestError) return new NetworkRequestError(message);
   return new Error(message);
 }
@@ -5636,7 +5665,8 @@ export function getCustomProviderJob(jobId: string): GenerationJobStatus {
     ...(cached.error_category ? { error_category: cached.error_category } : {}),
     ...(cached.phase ? { phase: cached.phase } : {}),
     ...(cached.network_route ? { network_route: cached.network_route } : {}),
-    resumable: Boolean(cached.external_task_id || cached.result_url),
+    resumable: !['succeeded', 'failed', 'canceled'].includes(cached.status)
+      && (cached.resumable ?? Boolean(cached.external_task_id || cached.result_url)),
     ...(cached.created_at ? { created_at: cached.created_at } : {}),
     ...(cached.updated_at ? { updated_at: cached.updated_at } : {}),
   };
@@ -5646,7 +5676,7 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<Gene
   try {
     if (job.status === 'submitting' && !job.external_task_id && !job.result_url) {
       const message = '应用在提交响应确认前关闭；上游可能已经接受请求。为避免重复计费，系统不会自动重新提交。';
-      const persisted = await persistRecoveryJobUpdate(job.job_id, {
+      const persisted = await persistCriticalCustomJobUpdate(job.job_id, {
         status: 'unknown',
         phase: 'submit',
         error: message,
@@ -5715,7 +5745,7 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<Gene
     }
     if (!remoteSource) throw new Error('安全恢复完成轮询，但响应中没有结果地址。');
 
-    if (!(await persistRecoveryJobUpdate(job.job_id, {
+    if (!(await persistCriticalCustomJobUpdate(job.job_id, {
       status: 'materializing',
       phase: 'materialize',
       resultUrl: asLightweightRetryResultSource(remoteSource) ?? undefined,
@@ -5730,7 +5760,7 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<Gene
     const result = job.media_type === 'video'
       ? await materializeGeneratedVideoSource(cfg, remoteSource, network)
       : (await materializeGeneratedImageSourceDetails(cfg, remoteSource, network)).imageSource;
-    if (!(await persistRecoveryJobUpdate(job.job_id, {
+    if (!(await persistCriticalCustomJobUpdate(job.job_id, {
       status: 'succeeded',
       phase: 'materialize',
       result,
@@ -5745,14 +5775,14 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<Gene
     return getCustomProviderJob(job.job_id);
   } catch (error) {
     const message = formatUnknownError(error);
-    const terminal = error instanceof ComfyUIExecutionError;
+    const terminal = error instanceof ComfyUIExecutionError || error instanceof RemoteGenerationFailedError;
     cache.set(job.job_id, {
       ...job,
       status: terminal ? 'failed' : 'recoverable_wait',
       result: job.result ?? null,
       error: message,
     });
-    await persistRecoveryJobUpdate(job.job_id, {
+    await persistCriticalCustomJobUpdate(job.job_id, {
       status: terminal ? 'failed' : 'recoverable_wait',
       phase: job.result_url ? 'materialize' : 'polling',
       error: message,
@@ -6840,6 +6870,12 @@ export async function streamCustomChatCompletion(
     ),
     usage: state.usage ?? undefined,
   };
+}
+
+export async function listCustomComfyUICheckpoints(cfg: CustomProviderConfig): Promise<string[]> {
+  if (!isComfyUIProvider(cfg)) throw new Error('当前配置不是 ComfyUI 连接。');
+  if (!cfg.baseUrl?.trim()) throw new Error('请先填写 ComfyUI 服务地址。');
+  return await listComfyUICheckpoints(createComfyUITransport(cfg));
 }
 
 export async function testCustomProviderConnectivity(

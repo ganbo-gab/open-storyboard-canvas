@@ -2,7 +2,10 @@ import {
   createEmptyCustomImageProviderDraft,
   type CustomImageProviderDraft,
 } from '@/features/canvas/application/customImageProviderConfig';
-import type { ImageRequestVariantV1, JsonTemplateValue } from '@/features/canvas/application/customImageProviderContract';
+import type { GenerateRequest } from '@/commands/ai';
+import type { CustomProviderConfig } from '@/stores/customProvidersStore';
+import { createComfyUIWorkflowTemplate, getComfyUIReferenceRequirements, getComfyUIVideoCapabilities, parseComfyUIConfig } from '@/features/canvas/infrastructure/comfyuiGateway';
+import type { ImageFieldDescriptorV1, ImageRequestVariantV1, JsonTemplateValue } from '@/features/canvas/application/customImageProviderContract';
 
 export type CustomImageProviderCreationRoute = 'ai' | 'manual' | 'comfyui';
 
@@ -45,6 +48,7 @@ export function createCustomImageProviderWorkbenchDraft(): CustomImageProviderDr
 
 export function createComfyUIProviderWorkbenchDraft(): CustomImageProviderDraft {
   const draft = createEmptyCustomImageProviderDraft();
+  const template = createComfyUIWorkflowTemplate('text-to-image');
   return {
     ...draft,
     label: 'ComfyUI',
@@ -59,9 +63,8 @@ export function createComfyUIProviderWorkbenchDraft(): CustomImageProviderDraft 
       allowNoApiKey: true,
       auth: { mode: 'none' },
       comfyui: {
-        workflow: {},
-        bindings: { images: [] },
-        outputNodeIds: [],
+        ...template,
+        templateId: 'text-to-image',
         pollIntervalMs: 1500,
         pollTimeoutMs: 600000,
       },
@@ -96,4 +99,30 @@ export function getImageToImageVariant(draft: CustomImageProviderDraft): ImageRe
     imageFields: [{ name: 'image', mode: 'single', encoding: 'data-url' }],
     responseImagePaths: getTextToImageVariant(draft).responseImagePaths ?? ['data[0].url'],
   };
+}
+
+export function updateFirstWorkbenchImageField(
+  variant: ImageRequestVariantV1,
+  patch: Partial<ImageFieldDescriptorV1>,
+): ImageFieldDescriptorV1[] {
+  const first = variant.imageFields?.[0] ?? { name: 'image', mode: 'single', encoding: 'data-url' };
+  return [{ ...first, ...patch }, ...(variant.imageFields?.slice(1) ?? [])];
+}
+
+export function createWorkbenchPreviewRequest(config: CustomProviderConfig, model: string): GenerateRequest {
+  const sample: GenerateRequest = {
+    prompt: 'preview prompt', model: `custom:${config.id}:${model}`, size: '1024x1024', aspect_ratio: '1:1',
+  };
+  if (config.apiStyle !== 'comfyui') return sample;
+  const comfy = parseComfyUIConfig(config);
+  const references = getComfyUIReferenceRequirements(comfy);
+  sample.reference_images = Array.from({ length: references.min }, () => 'data:image/png;base64,AAAA');
+  if (config.mediaType === 'video') {
+    const capabilities = getComfyUIVideoCapabilities(comfy);
+    sample.size = capabilities.supportedResolutions[0];
+    sample.aspect_ratio = capabilities.supportedAspectRatios[0];
+    const duration = Number(capabilities.supportedDurations[0]);
+    if (Number.isFinite(duration) && duration > 0) sample.extra_params = { seconds: duration };
+  }
+  return sample;
 }

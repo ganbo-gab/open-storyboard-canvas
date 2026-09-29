@@ -10,12 +10,26 @@ import {
   createEmptyDirectorMotionProject,
   deleteDirectorMotionClip,
   normalizeDirectorMotionProject,
+  retimeDirectorTrack,
   sampleDirectorMotion,
   sampleDirectorProceduralAction,
   timeDirectorRoutePoints,
 } from './directorMotion';
 
 describe('director motion schema', () => {
+  it('moves and stretches a route without changing its points or keyframe identity', () => {
+    const route = [
+      { id: 'a', time: 1, position: { x: 0 } },
+      { id: 'b', time: 2, position: { x: 4 } },
+      { id: 'c', time: 5, position: { x: 8 } },
+    ];
+    const next = retimeDirectorTrack(route, 3, 7, 8);
+    expect(next.map((frame) => frame.time)).toEqual([3, 4, 7]);
+    expect(next.map((frame) => frame.id)).toEqual(['a', 'b', 'c']);
+    expect(next.map((frame) => frame.position.x)).toEqual([0, 4, 8]);
+    expect(route[0].time).toBe(1);
+    expect(retimeDirectorTrack(route, 7.99, 12, 8).map((frame) => frame.time)).toEqual([7.9, 7.925000000000001, 8]);
+  });
   it('normalizes a legacy missing value without mutating persisted input', () => {
     const project = normalizeDirectorMotionProject(undefined);
 

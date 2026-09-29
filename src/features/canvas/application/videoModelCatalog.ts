@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { getComfyUIVideoCapabilities, isLocalH3Workflow, parseComfyUIConfig } from '@/features/canvas/infrastructure/comfyuiGateway';
 
 import {
   AGNES_PROVIDER_DEFAULTS,
@@ -105,9 +106,31 @@ export function buildVideoModelCatalog(
     );
     const hasBaseUrl = Boolean(provider.baseUrl?.trim());
     const hasCredential = hasCustomProviderCredential(provider);
-    const usable = hasBaseUrl && hasCredential;
+    let comfyCapabilities: ReturnType<typeof getComfyUIVideoCapabilities> | undefined;
+    let comfyError = '';
+    if (provider.apiStyle === 'comfyui') {
+      try {
+        const config = parseComfyUIConfig(provider);
+        comfyCapabilities = getComfyUIVideoCapabilities(config);
+        if (config.bindings.duration && !isLocalH3Workflow(config.workflow)) {
+          comfyCapabilities.supportedDurations = uniqueStrings(provider.extraParams?.supportedDurations, comfyCapabilities.supportedDurations);
+        }
+        if (config.bindings.resolution) comfyCapabilities.supportedResolutions = uniqueStrings(provider.supportedResolutions, comfyCapabilities.supportedResolutions);
+        if (config.bindings.aspectRatio) comfyCapabilities.supportedAspectRatios = uniqueStrings(provider.extraParams?.supportedRatios, comfyCapabilities.supportedAspectRatios);
+      }
+      catch (error) { comfyError = error instanceof Error ? error.message : String(error); }
+    }
+    const usable = hasBaseUrl && hasCredential && !comfyError;
 
     for (const modelId of models) {
+      const inputSchema = resolveVideoInputSchemaFromExtraParams(provider.extraParams, modelId);
+      const defaults = provider.extraParams?.defaultRequestParams;
+      const imageMode = defaults && typeof defaults === 'object' && !Array.isArray(defaults)
+        ? (defaults as Record<string, unknown>).imageMode
+        : undefined;
+      const defaultExtraParams = typeof imageMode === 'string' && inputSchema.imageModes?.some((mode) => mode === imageMode)
+        ? { imageMode }
+        : undefined;
       entries.push({
         id: `custom:${provider.id}:${modelId}`,
         providerId: provider.id,
@@ -117,11 +140,13 @@ export function buildVideoModelCatalog(
         supportedDurations,
         supportedResolutions,
         supportedAspectRatios,
-        inputSchema: resolveVideoInputSchemaFromExtraParams(provider.extraParams, modelId),
+        inputSchema,
+        ...(defaultExtraParams ? { defaultExtraParams } : {}),
+        ...(comfyCapabilities ?? {}),
         usable,
         notReadyReason: usable
           ? undefined
-          : (hasBaseUrl ? '请在「我的配置」里填入 API Key' : '请在「我的配置」里填入 API 根地址'),
+          : comfyError || (hasBaseUrl ? '请在「我的配置」里填入 API Key' : '请在「我的配置」里填入 API 根地址'),
       });
     }
   }

@@ -88,7 +88,7 @@ import {
   nodeHasSourceHandle,
   nodeHasTargetHandle,
 } from '@/features/canvas/domain/nodeRegistry';
-import { hasConfiguredImageProvider } from '@/features/canvas/application/providerAvailability';
+import { hasConfiguredAnyProvider } from '@/features/canvas/application/providerAvailability';
 import { listModelProviders } from '@/features/canvas/models';
 import { nodeTypes } from './nodes';
 import { edgeTypes } from './edges';
@@ -1034,7 +1034,7 @@ export function Canvas() {
   const customProviders = useCustomProvidersStore((state) => state.providers);
   const providerIds = useMemo(() => listModelProviders().map((provider) => provider.id), []);
   const hasConfiguredProvider = useMemo(
-    () => hasConfiguredImageProvider({
+    () => hasConfiguredAnyProvider({
       apiKeys,
       builtInProviderIds: providerIds,
       customProviders,

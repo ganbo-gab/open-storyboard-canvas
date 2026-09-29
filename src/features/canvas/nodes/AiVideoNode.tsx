@@ -67,6 +67,7 @@ import {
 import { subscribeCanvasGenerationTrigger } from '@/features/canvas/application/canvasGenerationTriggers';
 import {
   DEFAULT_VIDEO_INPUT_SCHEMA,
+  getVideoReferenceOverflow,
   normalizeVideoInputSchema,
   type VideoInputSchema,
 } from '@/features/canvas/application/videoInputSchema';
@@ -759,20 +760,28 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
       ? latestReferences
         .filter((reference) => reference.kind === 'image' && reference.imageUrl)
         .map((reference) => reference.imageUrl as string)
-        .slice(0, latestInputSchema.images.max)
       : [];
     const latestIncomingVideos = latestInputSchema.video.enabled
       ? latestReferences
         .filter((reference) => reference.kind === 'video' && reference.videoUrl)
         .map((reference) => reference.videoUrl as string)
-        .slice(0, latestInputSchema.video.max)
       : [];
     const latestIncomingAudios = latestInputSchema.audio.enabled
       ? latestReferences
         .filter((reference) => reference.kind === 'audio' && reference.audioUrl)
         .map((reference) => reference.audioUrl as string)
-        .slice(0, latestInputSchema.audio.max)
       : [];
+    const overflow = getVideoReferenceOverflow(latestInputSchema, {
+      images: latestIncomingImages.length,
+      video: latestIncomingVideos.length,
+      audio: latestIncomingAudios.length,
+    });
+    if (overflow) {
+      const message = t(`videoInputModes.limitErrors.${overflow.kind}`, { count: overflow.count, max: overflow.max });
+      setError(message);
+      void showErrorDialog(message, t('common.error'));
+      return null;
+    }
     if (latestIncomingImages.length < latestInputSchema.images.min) {
       const message = `当前模型至少需要 ${latestInputSchema.images.min} 张图片引用。`;
       setError(message);
@@ -1549,7 +1558,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                     count: dreaminaMultiframeImageCount - 1,
                     resolution: resolvedModelConfig.resolution,
                   })
-                  : `${resolvedModelConfig.duration}s·${resolvedModelConfig.resolution}·${resolvedModelConfig.aspectRatio}`}
+                  : `${resolvedModelConfig.duration === 'workflow' ? t('node.aiVideo.workflow') : `${resolvedModelConfig.duration}s`}·${resolvedModelConfig.resolution === 'workflow' ? t('node.aiVideo.workflow') : resolvedModelConfig.resolution}·${resolvedModelConfig.aspectRatio}`}
               </span>
               <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
             </UiButton>
@@ -1596,13 +1605,31 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                                 : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'
                             }`}
                           >
-                            {duration}s
+                            {duration === 'workflow' ? t('node.aiVideo.workflow') : `${duration}s`}
                           </button>
                         );
                       })}
                     </div>
                   )}
                 </div>}
+                {(selectedEntry.inputSchema.imageModes?.length ?? 0) > 1 ? (
+                  <label className="block space-y-1">
+                    <span className="text-[10px] text-text-muted">{t('videoInputModes.label')}</span>
+                    <select
+                      className="nodrag nowheel w-full rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2 py-1 text-xs text-text-dark"
+                      value={String(resolvedModelConfig.extraParams?.imageMode ?? 'reference')}
+                      onChange={(event) => handleConfigChange({ extraParams: {
+                        ...resolvedModelConfig.extraParams,
+                        imageMode: event.target.value,
+                      } })}
+                    >
+                      {selectedEntry.inputSchema.imageModes?.map((mode) => (
+                        <option key={mode} value={mode}>{t(`videoInputModes.${mode}`)}</option>
+                      ))}
+                    </select>
+                    <span className="block text-[10px] leading-4 text-text-muted">{t('videoInputModes.hint')}</span>
+                  </label>
+                ) : null}
                 {isAgnesVideoModel && schemaIncomingImageItems.length > 1 && (
                   <div>
                     <div className="mb-1 text-[10px] text-text-muted">{t('node.aiVideo.agnesMode')}</div>
@@ -1668,7 +1695,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                               : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'
                           }`}
                         >
-                          {resolution}
+                          {resolution === 'workflow' ? t('node.aiVideo.workflow') : resolution}
                         </button>
                       );
                     })}

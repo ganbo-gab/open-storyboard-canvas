@@ -44,7 +44,7 @@ export const DirectorActionLibrary = memo(function DirectorActionLibrary({
   onLoopClip,
 }: Props) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<LibraryTab>('poses');
+  const [tab, setTab] = useState<LibraryTab>('actions');
   const [clipName, setClipName] = useState('');
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [editingClipName, setEditingClipName] = useState('');
@@ -60,7 +60,7 @@ export const DirectorActionLibrary = memo(function DirectorActionLibrary({
       onKeyDown={(event) => event.stopPropagation()}
       onKeyUp={(event) => event.stopPropagation()}
     >
-      <section className="flex max-h-[78vh] w-[760px] max-w-full flex-col overflow-hidden rounded-lg border border-white/12 bg-[#111719] shadow-2xl">
+      <section className="flex max-h-[78vh] w-[760px] max-w-full flex-col overflow-hidden rounded-lg border border-white/12 bg-[#202329] shadow-2xl">
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
           <div className="flex items-center gap-2">
             <UserRound className="h-4 w-4 text-accent" />
@@ -93,7 +93,7 @@ export const DirectorActionLibrary = memo(function DirectorActionLibrary({
           ) : null}
 
           {tab === 'poses' ? (
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {DIRECTOR_STATIC_POSES.map((pose) => (
                 <button
                   key={pose.id}
@@ -102,8 +102,7 @@ export const DirectorActionLibrary = memo(function DirectorActionLibrary({
                   onClick={() => onApplyStaticPose(pose.id, pose.pose)}
                   className="flex min-h-[58px] flex-col items-start justify-between rounded border border-white/10 bg-white/5 px-2.5 py-2 text-left text-[10px] text-white/68 hover:border-accent/60 hover:bg-accent/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 focus:outline-none focus:ring-2 focus:ring-accent/60"
                 >
-                  <span className="text-[11px] text-white/84">{t(pose.labelKey)}</span>
-                  <span className="font-mono text-[9px] text-white/32">{pose.id}</span>
+                  <span className="text-xs text-white/84">{t(pose.labelKey)}</span>
                 </button>
               ))}
               {customPoseEntries.map(([name, pose]) => (
@@ -122,7 +121,7 @@ export const DirectorActionLibrary = memo(function DirectorActionLibrary({
           ) : null}
 
           {tab === 'actions' ? (
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {DIRECTOR_PROCEDURAL_ACTIONS.map((action) => (
                 <button
                   key={action.id}
@@ -132,7 +131,7 @@ export const DirectorActionLibrary = memo(function DirectorActionLibrary({
                   className="flex min-h-[72px] flex-col items-start justify-between rounded border border-sky-200/15 bg-sky-300/8 px-3 py-2 text-left text-white/78 hover:border-sky-200/45 hover:bg-sky-300/14 disabled:cursor-not-allowed disabled:opacity-35 focus:outline-none focus:ring-2 focus:ring-sky-200/60"
                 >
                   <span className="flex items-center gap-2 text-xs text-white/88"><Play className="h-3.5 w-3.5 text-sky-200" />{t(action.labelKey)}</span>
-                  <span className="font-mono text-[9px] text-white/36">{action.durationSeconds.toFixed(2)}s</span>
+                  <span className="font-mono text-[11px] text-white/55">{action.durationSeconds.toFixed(2)}s</span>
                 </button>
               ))}
             </div>
