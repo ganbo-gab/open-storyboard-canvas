@@ -19,3 +19,9 @@
 自建中转站或 NewAPI 渠道请求格式不同？参阅[中转站生图兼容配置](image-relay-compatibility.md)，按实际 API 文档设置文生图、图生图端点与请求体。
 
 本地或云端 ComfyUI 请参阅[ComfyUI 连接指南](comfyui-guide.md)，导入 API 格式工作流并配置节点映射。
+
+## Atlas Cloud（可选）
+
+在“添加供应商”中选择 `Atlas Cloud Seedream` 预设，填写 Atlas Cloud API Key 后即可使用
+`bytedance/seedream-v5.0-lite`。该预设会提交一次异步生图任务并轮询结果，不会改变现有默认供应商；
+当前模型仅支持文生图，因此不会发送参考图字段。

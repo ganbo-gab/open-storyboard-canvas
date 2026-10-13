@@ -1721,6 +1721,8 @@ function applyRequestBodyHints(
   if (ratioField) {
     delete next.aspect_ratio;
     setBodyValue(next, ratioField, request.aspect_ratio);
+  } else if (Object.prototype.hasOwnProperty.call(record, 'ratioField') && record.ratioField === '') {
+    delete next.aspect_ratio;
   }
 
   const sizeField = typeof record.sizeField === 'string' ? record.sizeField.trim() : '';
@@ -1745,6 +1747,11 @@ function applyRequestBodyHints(
         ? mappedImages
         : mappedImages[0]);
     }
+  } else if (
+    Object.prototype.hasOwnProperty.call(record, 'referenceImageField')
+    && record.referenceImageField === ''
+  ) {
+    delete next.reference_images;
   }
 
   return next;
