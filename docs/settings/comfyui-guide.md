@@ -79,3 +79,13 @@ Open Storyboard Canvas 可以连接本机或自行部署在云端的 ComfyUI。�
 一般节点的 `duration` 按秒写入；仅已识别的本地 H3 节点 `length` 自动转换成帧数。需要其它 fps/帧数表达式的自定义节点应在 ComfyUI 工作流内部添加转换节点，再把秒数绑定到转换节点输入。可在画布显示步骤填写供应商真正支持的秒数、分辨率与比例枚举；未绑定的参数保留工作流原值，并显示「由工作流决定」。工作流的默认种子会保留，除非调用方明确传入新的 seed。
 
 视频输入能力按工作流的图片绑定数量计算，不再默认宣称支持九张图、首尾帧角色或参考视频/音频。只读连接成功仅证明服务可访问，不证明模型、插件、GPU 和工作流执行成功；首次实际运行仍需在自己的服务器验证。
+
+## 新渠道运行时（逻辑接口）
+
+`src/features/channels/adapters/comfyui` 提供独立于旧设置页面的渠道适配器。调用方在任务持久化前使用 `createComfyUIJob`，把 API 工作流、参数绑定及解析后的地址写入 `params.comfyuiSnapshot`；`submit` 和恢复后的 `poll` 只读取该快照，不读取可变渠道配置。旧网关仍沿用上文设置流程，尚未切换的页面不受影响。
+
+- 地址解析默认给无协议输入补 `http://`，通过 `defaultedScheme` 明确告知调用方；保留反向代理路径，剥离粘贴的 `/prompt`、`/history`、`/api/...` 等接口路径，通过 `strippedPath` 返回被移除部分。
+- `detectComfyUIBindings` 为每个参数返回完整候选和 `auto` / `ambiguous` / `missing` 状态；节点标题中的 `OSC:<参数>` 或 `ARCREEL:<参数>` 优先。参考图使用 `image1`、`image2` 等参数；输出绑定用 `input: "$output"` 标识整节点选择，而不是修改节点输入。时长直接写入绑定输入，帧数转换应由工作流或调用方决定。
+- `preflightComfyUIWorkflow(objectInfo, workflow)` 核对节点安装情况和加载节点的枚举模型文件，不把普通枚举参数当作模型文件。
+- 快照只保存鉴权模式及 Header/Query 名称，不保存连接密钥或 Comfy 账号密钥。适配器通过注入的 `getSecrets(channelId)` 在执行时取密钥；`comfyOrgKeyRequired` 启用 Partner Key 检查和 `/prompt` 的 `extra_data.api_key_comfy_org`。密钥不得放入可分享的工作流。
+- 注入的 `http` 负责 JSON 请求和本地 `JobRef.path` 文件的 multipart 上传；可选的 `ws` 负责带鉴权头的 WebSocket。进度消息优先，断开或消息长时间不更新时改查 history；提交不确定时返回 `unknown`，不会重试 `/prompt`。输出下载仅向同源 `/view` 地址附加连接鉴权。
