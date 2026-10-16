@@ -16,7 +16,7 @@ interface Props {
   onViewChange: (view: CanvasAgentView) => void;
   onOpenExternalConnection: () => void;
   onClose: () => void;
-  closeRef: RefObject<HTMLButtonElement>;
+  closeRef: RefObject<HTMLButtonElement | null>;
 }
 
 function HeaderAction({
@@ -32,7 +32,7 @@ function HeaderAction({
   badge?: number;
   onClick: () => void;
   children: ReactNode;
-  buttonRef?: RefObject<HTMLButtonElement>;
+  buttonRef?: RefObject<HTMLButtonElement | null>;
 }) {
   return (
     <button

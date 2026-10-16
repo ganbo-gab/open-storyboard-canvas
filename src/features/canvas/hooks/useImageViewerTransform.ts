@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type RefObject, type SyntheticEvent } from 'react';
 
 export interface ImageViewerTransformHandlers {
-  containerRef: RefObject<HTMLDivElement>;
-  imageRef: RefObject<HTMLImageElement>;
-  scaleDisplayRef: RefObject<HTMLDivElement>;
+  containerRef: RefObject<HTMLDivElement | null>;
+  imageRef: RefObject<HTMLImageElement | null>;
+  scaleDisplayRef: RefObject<HTMLDivElement | null>;
   viewerOpacity: number;
   isDragging: boolean;
   resetView: () => void;

@@ -56,11 +56,11 @@ const request: GenerateRequest = {
   extra_params: { seed: 42 },
 };
 
-function transport(): ComfyUITransport & { json: ReturnType<typeof vi.fn>; multipart: ReturnType<typeof vi.fn> } {
+function transport() {
   return {
-    json: vi.fn(),
-    multipart: vi.fn(),
-    url: (path, query) => `http://127.0.0.1:8188${path}?${new URLSearchParams(query).toString()}`,
+    json: vi.fn<ComfyUITransport['json']>(),
+    multipart: vi.fn<ComfyUITransport['multipart']>(),
+    url: ((path, query) => `http://127.0.0.1:8188${path}?${new URLSearchParams(query).toString()}`) satisfies ComfyUITransport['url'],
   };
 }
 

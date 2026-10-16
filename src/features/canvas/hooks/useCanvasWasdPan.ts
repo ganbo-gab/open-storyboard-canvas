@@ -38,7 +38,7 @@ function hasBlockingCanvasKeyboardSurface(): boolean {
 }
 
 interface UseCanvasWasdPanOptions {
-  wrapperRef: RefObject<HTMLElement>;
+  wrapperRef: RefObject<HTMLElement | null>;
   enabled: boolean;
   sensitivity: number;
   reactFlowInstance: ReactFlowInstance;

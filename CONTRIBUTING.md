@@ -6,7 +6,7 @@
 
 环境要求：
 
-- Node.js 20+
+- Node.js 22.22.2+（22 LTS）、24.15+（24 LTS）或 26+；Vite 8 / Vitest 5 / jsdom 30 不再支持 Node.js 20。
 - npm 10+
 - Rust stable（含 Cargo）
 - Tauri 2 平台依赖
@@ -18,6 +18,9 @@ npm install
 npx tsc --noEmit
 npm run build
 ```
+
+`next` 分支的前端基线为 React 19、Vite 8、TypeScript 7。组件测试使用 React DOM + Testing Library；`npm test -- --run` 默认使用最多两个 fork worker，避免大画布测试耗尽内存。
+TypeScript 7 的路径别名直接使用相对 `paths`，不再配置已移除的 `baseUrl`。
 
 需要桌面能力时再运行：
 

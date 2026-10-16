@@ -66,7 +66,7 @@ type Props = {
   pendingCount: number;
   hasPendingPlan: boolean;
   showNewItems: boolean;
-  scrollRef: RefObject<HTMLDivElement>;
+  scrollRef: RefObject<HTMLDivElement | null>;
   onScroll: () => void;
   onStartConversation: () => void;
   onLoadSession: (sessionId: string) => void;

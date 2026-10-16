@@ -3701,7 +3701,7 @@ export function Canvas() {
   );
 
   const handleNodeDragStart = useCallback(
-    (event: ReactMouseEvent, node: CanvasNode) => {
+    (event: MouseEvent | TouchEvent, node: CanvasNode) => {
       if (!event.altKey) {
         altDragCopyRef.current = null;
         return;
@@ -3777,7 +3777,7 @@ export function Canvas() {
   );
 
   const handleNodeDrag = useCallback(
-    (_event: ReactMouseEvent, node: CanvasNode) => {
+    (_event: MouseEvent | TouchEvent, node: CanvasNode) => {
       const altCopyState = altDragCopyRef.current;
       if (!altCopyState) {
         return;
@@ -3841,7 +3841,7 @@ export function Canvas() {
   );
 
   const handleNodeDragStop = useCallback(
-    (_event: ReactMouseEvent, node: CanvasNode) => {
+    (_event: MouseEvent | TouchEvent, node: CanvasNode) => {
       const altCopyState = altDragCopyRef.current;
       if (!altCopyState) {
         return;

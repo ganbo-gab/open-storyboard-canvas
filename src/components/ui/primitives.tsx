@@ -12,6 +12,7 @@ import {
   type HTMLAttributes,
   type InputHTMLAttributes,
   type KeyboardEvent as ReactKeyboardEvent,
+  type OptionHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
@@ -222,7 +223,7 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
   );
   const parsedOptions = useMemo<UiSelectOption[]>(() => {
     return Children.toArray(children).flatMap((child) => {
-      if (!isValidElement(child) || child.type !== 'option') {
+      if (!isValidElement<OptionHTMLAttributes<HTMLOptionElement>>(child) || child.type !== 'option') {
         return [];
       }
 

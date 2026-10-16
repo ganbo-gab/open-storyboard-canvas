@@ -1,6 +1,5 @@
-import type { ReactNode } from 'react';
-import ReactReconciler from 'react-reconciler';
-import { DefaultEventPriority, LegacyRoot } from 'react-reconciler/constants';
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -34,139 +33,6 @@ vi.mock('@/stores/settingsStore', () => ({
 
 import { AgnesSettingsSection } from './AgnesSettingsSection';
 
-interface TestText {
-  kind: 'text';
-  text: string;
-}
-
-interface TestInstance {
-  kind: 'instance';
-  type: string;
-  props: Record<string, unknown>;
-  children: TestNode[];
-}
-
-type TestNode = TestInstance | TestText;
-interface TestContainer { children: TestNode[] }
-
-function removeNode(children: TestNode[], child: TestNode): void {
-  const index = children.indexOf(child);
-  if (index >= 0) children.splice(index, 1);
-}
-
-const testRenderer = ReactReconciler<string, Record<string, unknown>, TestContainer, TestInstance,
-  TestText, never, never, TestNode, null, true, never, ReturnType<typeof setTimeout>, -1>({
-    supportsMutation: true,
-    supportsPersistence: false,
-    supportsHydration: false,
-    supportsMicrotasks: true,
-    scheduleMicrotask: queueMicrotask,
-    isPrimaryRenderer: false,
-    warnsIfNotActing: false,
-    getCurrentEventPriority: () => DefaultEventPriority,
-    getRootHostContext: () => null,
-    getChildHostContext: () => null,
-    prepareForCommit: () => null,
-    resetAfterCommit: () => undefined,
-    preparePortalMount: () => undefined,
-    createInstance: (type, props) => ({ kind: 'instance', type, props, children: [] }),
-    createTextInstance: (text) => ({ kind: 'text', text }),
-    appendInitialChild: (parent, child) => { parent.children.push(child); },
-    appendChild: (parent, child) => { parent.children.push(child); },
-    appendChildToContainer: (container, child) => { container.children.push(child); },
-    insertBefore: (parent, child, beforeChild) => {
-      removeNode(parent.children, child);
-      parent.children.splice(parent.children.indexOf(beforeChild), 0, child);
-    },
-    insertInContainerBefore: (container, child, beforeChild) => {
-      removeNode(container.children, child);
-      container.children.splice(container.children.indexOf(beforeChild), 0, child);
-    },
-    removeChild: (parent, child) => { removeNode(parent.children, child); },
-    removeChildFromContainer: (container, child) => { removeNode(container.children, child); },
-    clearContainer: (container) => { container.children.length = 0; },
-    finalizeInitialChildren: () => false,
-    prepareUpdate: () => true,
-    commitUpdate: (instance, _payload, _type, _oldProps, newProps) => {
-      instance.props = newProps;
-    },
-    commitTextUpdate: (instance, _oldText, newText) => { instance.text = newText; },
-    shouldSetTextContent: () => false,
-    getPublicInstance: (instance) => instance,
-    scheduleTimeout: setTimeout,
-    cancelTimeout: clearTimeout,
-    noTimeout: -1,
-    getInstanceFromNode: () => null,
-    beforeActiveInstanceBlur: () => undefined,
-    afterActiveInstanceBlur: () => undefined,
-    prepareScopeUpdate: () => undefined,
-    getInstanceFromScope: () => null,
-    detachDeletedInstance: () => undefined,
-  });
-
-function renderComponent(element: ReactNode): TestContainer {
-  const container: TestContainer = { children: [] };
-  const root = testRenderer.createContainer(
-    container,
-    LegacyRoot,
-    null,
-    false,
-    null,
-    '',
-    (error) => { throw error; },
-    null,
-  );
-  testRenderer.flushSync(() => {
-    testRenderer.updateContainer(element, root, null);
-  });
-  testRenderer.flushPassiveEffects();
-  return container;
-}
-
-function allInstances(container: TestContainer): TestInstance[] {
-  const instances: TestInstance[] = [];
-  const visit = (node: TestNode) => {
-    if (node.kind === 'text') return;
-    instances.push(node);
-    node.children.forEach(visit);
-  };
-  container.children.forEach(visit);
-  return instances;
-}
-
-function nodeText(node: TestNode): string {
-  return node.kind === 'text' ? node.text : node.children.map(nodeText).join('');
-}
-
-function findInstance(
-  container: TestContainer,
-  predicate: (instance: TestInstance) => boolean,
-): TestInstance {
-  const instance = allInstances(container).find(predicate);
-  if (!instance) throw new Error('Expected component host instance was not rendered');
-  return instance;
-}
-
-function click(instance: TestInstance): void {
-  testRenderer.flushSync(() => {
-    (instance.props.onClick as (() => void))();
-  });
-}
-
-function edit(instance: TestInstance, value: string): void {
-  testRenderer.flushSync(() => {
-    (instance.props.onChange as ((event: { target: { value: string } }) => void))({
-      target: { value },
-    });
-  });
-}
-
-async function flushAsyncState(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  testRenderer.flushSync();
-}
-
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
@@ -174,36 +40,32 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 afterEach(() => {
+  cleanup();
   runtimeMocks.verifyAgnesKey.mockReset();
   runtimeMocks.setAgnesApiKey.mockReset();
 });
 
 describe('AgnesSettingsSection', () => {
   it('renders save and explicit verification as separate controls', () => {
-    const container = renderComponent(<AgnesSettingsSection />);
-    const text = container.children.map(nodeText).join('');
-    expect(text).toContain('settings.agnes.save');
-    expect(text).toContain('settings.agnes.verify');
-    expect(text).not.toContain('settings.agnes.verifySuccess');
-    expect(text).toContain('Agnes 2.5 Flash');
+    const { container } = render(<AgnesSettingsSection />);
+    expect(screen.getByRole('button', { name: 'settings.agnes.save' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'settings.agnes.verify' })).toBeTruthy();
+    expect(container.textContent).not.toContain('settings.agnes.verifySuccess');
+    expect(container.textContent).toContain('Agnes 2.5 Flash');
   });
 
   it('shows verifying and then a successful verification result', async () => {
     const result = deferred<{ ok: true; modelCount: number }>();
     runtimeMocks.verifyAgnesKey.mockReturnValueOnce(result.promise);
-    const container = renderComponent(<AgnesSettingsSection />);
-    const verifyButton = findInstance(container, (instance) => (
-      instance.type === 'button' && nodeText(instance) === 'settings.agnes.verify'
-    ));
+    render(<AgnesSettingsSection />);
+    const verifyButton = screen.getByRole<HTMLButtonElement>('button', { name: 'settings.agnes.verify' });
 
-    click(verifyButton);
-    expect(nodeText(verifyButton)).toBe('settings.agnes.verifying');
-    expect(verifyButton.props.disabled).toBe(true);
+    fireEvent.click(verifyButton);
+    expect(verifyButton.textContent).toBe('settings.agnes.verifying');
+    expect(verifyButton.disabled).toBe(true);
 
-    result.resolve({ ok: true, modelCount: 7 });
-    await flushAsyncState();
-    const status = findInstance(container, (instance) => instance.props.role === 'status');
-    expect(nodeText(status)).toContain('settings.agnes.verifySuccess:7');
+    await act(async () => { result.resolve({ ok: true, modelCount: 7 }); });
+    expect(screen.getByRole('status').textContent).toContain('settings.agnes.verifySuccess:7');
   });
 
   it('shows a categorized failed verification result', async () => {
@@ -211,31 +73,25 @@ describe('AgnesSettingsSection', () => {
       ok: false,
       category: 'authorization',
     });
-    const container = renderComponent(<AgnesSettingsSection />);
-    click(findInstance(container, (instance) => (
-      instance.type === 'button' && nodeText(instance) === 'settings.agnes.verify'
-    )));
-    await flushAsyncState();
-
-    const status = findInstance(container, (instance) => instance.props.role === 'status');
-    expect(nodeText(status)).toContain('settings.agnes.verifyErrors.authorization');
+    render(<AgnesSettingsSection />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'settings.agnes.verify' }));
+    });
+    expect(screen.getByRole('status').textContent).toContain('settings.agnes.verifyErrors.authorization');
   });
 
   it('resets on Key edits and ignores a stale verification response', async () => {
     const staleResult = deferred<{ ok: true; modelCount: number }>();
     runtimeMocks.verifyAgnesKey.mockReturnValueOnce(staleResult.promise);
-    const container = renderComponent(<AgnesSettingsSection />);
-    const input = findInstance(container, (instance) => instance.type === 'input');
-    click(findInstance(container, (instance) => (
-      instance.type === 'button' && nodeText(instance) === 'settings.agnes.verify'
-    )));
+    const { container } = render(<AgnesSettingsSection />);
+    const input = container.querySelector('input')!;
+    fireEvent.click(screen.getByRole('button', { name: 'settings.agnes.verify' }));
 
-    edit(input, 'new-key');
-    expect(allInstances(container).some((instance) => instance.props.role === 'status')).toBe(false);
+    fireEvent.change(input, { target: { value: 'new-key' } });
+    expect(screen.queryByRole('status')).toBeNull();
     expect(runtimeMocks.verifyAgnesKey).toHaveBeenCalledWith('saved-key');
 
-    staleResult.resolve({ ok: true, modelCount: 99 });
-    await flushAsyncState();
-    expect(container.children.map(nodeText).join('')).not.toContain('settings.agnes.verifySuccess');
+    await act(async () => { staleResult.resolve({ ok: true, modelCount: 99 }); });
+    expect(container.textContent).not.toContain('settings.agnes.verifySuccess');
   });
 });

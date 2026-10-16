@@ -22,7 +22,7 @@ export function ImageViewerModal({
   currentIndex,
   onClose,
   onNavigate,
-}: ImageViewerModalProps): JSX.Element | null {
+}: ImageViewerModalProps): React.JSX.Element | null {
   const { t } = useTranslation();
   const viewerControlClass =
     'inline-flex h-10 items-center justify-center rounded-full border border-white/20 bg-black/60 px-4 text-sm text-white backdrop-blur-xl';
