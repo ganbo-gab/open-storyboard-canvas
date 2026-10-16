@@ -136,7 +136,7 @@ Open Storyboard Canvas 把参考素材、提示词、AI 生图/生视频、分�
 
 ### 环境要求
 
-- Node.js 20+
+- Node.js 22.22.2+（22 LTS）、24.15+（24 LTS）或 26+（前端工具链要求）
 - Rust stable
 - Tauri 2 所需系统依赖
 - macOS：Xcode Command Line Tools
