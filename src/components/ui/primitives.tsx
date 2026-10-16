@@ -139,7 +139,7 @@ UiPanel.displayName = 'UiPanel';
 export function UiTextArea({ className = '', ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
-      className={`w-full resize-none border ui-field px-3 py-2.5 text-sm text-text-dark outline-none transition-colors placeholder:text-text-muted/70 focus:border-accent ${className}`}
+      className={`w-full resize-none border ui-field px-3 py-2.5 text-sm text-text-dark outline-hidden transition-colors placeholder:text-text-muted/70 focus:border-accent ${className}`}
       {...props}
     />
   );
@@ -149,7 +149,7 @@ export const UiTextAreaField = forwardRef<HTMLTextAreaElement, TextareaHTMLAttri
   ({ className = '', ...props }, ref) => (
     <textarea
       ref={ref}
-      className={`w-full resize-none border ui-field px-3 py-2.5 text-sm text-text-dark outline-none transition-colors placeholder:text-text-muted/70 focus:border-accent ${className}`}
+      className={`w-full resize-none border ui-field px-3 py-2.5 text-sm text-text-dark outline-hidden transition-colors placeholder:text-text-muted/70 focus:border-accent ${className}`}
       {...props}
     />
   )
@@ -161,7 +161,7 @@ export const UiInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInpu
   ({ className = '', ...props }, ref) => (
     <input
       ref={ref}
-      className={`w-full border ui-field px-3 py-2 text-sm text-text-dark outline-none transition-colors placeholder:text-text-muted/70 focus:border-accent ${className}`}
+      className={`w-full border ui-field px-3 py-2 text-sm text-text-dark outline-hidden transition-colors placeholder:text-text-muted/70 focus:border-accent ${className}`}
       {...props}
     />
   )
@@ -395,7 +395,7 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
         aria-expanded={isOpen}
         aria-controls={listboxIdRef.current}
         disabled={disabled}
-        className={`group inline-flex h-8 w-full items-center justify-between rounded-[6px] border border-[color:var(--ui-border-soft)] bg-[var(--ui-surface-field)] px-3 text-left text-xs font-medium text-text-dark outline-none transition-[border-color,background-color,box-shadow,color] hover:border-[color:var(--ui-border-strong)] focus-visible:border-accent focus-visible:shadow-[0_0_0_2px_rgba(var(--accent-rgb),0.12)] disabled:cursor-not-allowed disabled:opacity-55 ${className}`}
+        className={`group inline-flex h-8 w-full items-center justify-between rounded-[6px] border border-(--ui-border-soft) bg-(--ui-surface-field) px-3 text-left text-xs font-medium text-text-dark outline-hidden transition-[border-color,background-color,box-shadow,color] hover:border-(--ui-border-strong) focus-visible:border-accent focus-visible:shadow-[0_0_0_2px_rgba(var(--accent-rgb),0.12)] disabled:cursor-not-allowed disabled:opacity-55 ${className}`}
         onClick={() => {
           if (!disabled && parsedOptions.length > 0) {
             setIsOpen((current) => !current);
@@ -419,7 +419,7 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
               id={listboxIdRef.current}
               role="listbox"
               aria-label={ariaLabel}
-              className={`nowheel fixed z-[140] overflow-hidden rounded-[6px] border border-[color:var(--ui-border-soft)] bg-[var(--ui-surface-panel)] p-1 shadow-[var(--ui-shadow-panel)] transition-[opacity,transform] ease-out ${
+              className={`nowheel fixed z-140 overflow-hidden rounded-[6px] border border-(--ui-border-soft) bg-(--ui-surface-panel) p-1 shadow-(--ui-shadow-panel) transition-[opacity,transform,translate,scale,rotate] ease-out ${
                 isMenuVisible ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 -translate-y-1'
               }`}
               onWheelCapture={stopWheelPropagation}
@@ -446,7 +446,7 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
                           ? 'cursor-not-allowed opacity-40'
                           : isSelected
                             ? 'bg-accent text-white'
-                            : 'text-text-dark hover:bg-[rgba(255,255,255,0.08)] dark:hover:bg-white/[0.06]'
+                            : 'text-text-dark hover:bg-[rgba(255,255,255,0.08)] dark:hover:bg-white/6'
                       }`}
                       onClick={() => {
                         if (option.disabled) {
@@ -496,7 +496,7 @@ export function UiModal({
       onTouchMoveCapture={(event) => event.stopPropagation()}
     >
       <div
-        className={`absolute inset-0 bg-black/55 transition-opacity duration-[180ms] ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 bg-black/55 transition-opacity duration-180 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
         onClick={onClose}
       />
       <UiPanel
@@ -506,7 +506,7 @@ export function UiModal({
         aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className={`relative flex max-h-[calc(100dvh-4rem)] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden transition-[opacity,transform] duration-[180ms] ease-out ${isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-1 scale-[0.99] opacity-0'} ${widthClassName}`}
+        className={`relative flex max-h-[calc(100dvh-4rem)] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden transition-[opacity,transform,translate,scale,rotate] duration-180 ease-out ${isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-1 scale-[0.99] opacity-0'} ${widthClassName}`}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-[rgba(255,255,255,0.1)] px-4 py-3">
           <h2 id={titleId} className="min-w-0 truncate text-sm font-medium text-text-dark">{title}</h2>

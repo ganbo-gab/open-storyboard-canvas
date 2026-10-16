@@ -465,7 +465,7 @@ export const ModelParamsControls = memo(({
       {typeof document !== 'undefined' && renderPanel === 'model' && createPortal(
         <div
           ref={modelPanelRef}
-          className={`nowheel fixed z-[80] transition-opacity duration-200 ease-out ${isPanelVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
+          className={`nowheel fixed z-80 transition-opacity duration-200 ease-out ${isPanelVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
             }`}
           style={buildPanelStyle(modelPanelAnchor, modelPanelAlign)}
           onWheelCapture={stopPanelWheel}
@@ -532,7 +532,7 @@ export const ModelParamsControls = memo(({
                           setOpenPanel(null);
                         }}
                       >
-                        <span className="max-w-full break-words text-center">{group.name}</span>
+                        <span className="max-w-full wrap-break-word text-center">{group.name}</span>
                       </button>
                     );
                   })}
@@ -547,7 +547,7 @@ export const ModelParamsControls = memo(({
       {typeof document !== 'undefined' && renderPanel === 'params' && createPortal(
         <div
           ref={paramsPanelRef}
-          className={`nowheel fixed z-[80] transition-opacity duration-200 ease-out ${isPanelVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
+          className={`nowheel fixed z-80 transition-opacity duration-200 ease-out ${isPanelVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
             }`}
           style={buildPanelStyle(paramsPanelAnchor, paramsPanelAlign)}
           onWheelCapture={stopPanelWheel}
@@ -715,7 +715,7 @@ export const ModelParamsControls = memo(({
       {typeof document !== 'undefined' && renderPanel === 'otherParams' && createPortal(
         <div
           ref={otherParamsPanelRef}
-          className={`nowheel fixed z-[80] transition-opacity duration-200 ease-out ${isPanelVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
+          className={`nowheel fixed z-80 transition-opacity duration-200 ease-out ${isPanelVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
             }`}
           style={buildPanelStyle(otherParamsPanelAnchor, 'center')}
           onWheelCapture={stopPanelWheel}
@@ -792,7 +792,7 @@ export const ModelParamsControls = memo(({
           title={t('modelParams.providerKeyRequiredTitle')}
           onClose={() => setMissingKeyProviderName(null)}
           widthClassName="w-[420px]"
-          containerClassName="z-[120]"
+          containerClassName="z-120"
           footer={(
             <>
               <UiButton

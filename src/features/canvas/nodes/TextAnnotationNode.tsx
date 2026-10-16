@@ -82,10 +82,10 @@ export const TextAnnotationNode = memo(({
     <>
       <div
         className={`
-          group relative h-full w-full overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-2 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+          group relative h-full w-full overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-2 shadow-(--canvas-node-shadow) transition-colors duration-150
           ${selected
             ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-            : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
+            : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
         `}
         style={{ width: resolvedWidth, height: resolvedHeight }}
         onClick={() => setSelectedNode(id)}
@@ -98,7 +98,7 @@ export const TextAnnotationNode = memo(({
             <div className="flex items-center gap-1">
               {shouldShowGenerationElapsed ? (
                 <span
-                  className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-[1px] text-[10px] font-medium leading-tight text-white"
+                  className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-px text-[10px] font-medium leading-tight text-white"
                   title="生成耗时"
                 >
                   {generationElapsedText}
@@ -107,7 +107,7 @@ export const TextAnnotationNode = memo(({
               <button
                 type="button"
                 data-canvas-no-marquee="true"
-                className={`nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] text-text-muted shadow-sm transition-colors hover:border-accent/50 hover:bg-[var(--canvas-node-menu-hover)] hover:text-accent ${
+                className={`nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) text-text-muted shadow-xs transition-colors hover:border-accent/50 hover:bg-(--canvas-node-menu-hover) hover:text-accent ${
                   copyFlash ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-200' : ''
                 }`}
                 title={copyFlash ? '已复制' : '复制文本'}
@@ -122,7 +122,7 @@ export const TextAnnotationNode = memo(({
               <button
                 type="button"
                 data-canvas-no-marquee="true"
-                className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] text-text-muted shadow-sm transition-colors hover:border-accent/50 hover:bg-[var(--canvas-node-menu-hover)] hover:text-accent"
+                className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) text-text-muted shadow-xs transition-colors hover:border-accent/50 hover:bg-(--canvas-node-menu-hover) hover:text-accent"
                 title="编辑"
                 aria-label="编辑"
                 onClick={(event) => {
@@ -136,7 +136,7 @@ export const TextAnnotationNode = memo(({
               <button
                 type="button"
                 data-canvas-no-marquee="true"
-                className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] text-text-muted shadow-sm transition-colors hover:border-accent/50 hover:bg-[var(--canvas-node-menu-hover)] hover:text-accent"
+                className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) text-text-muted shadow-xs transition-colors hover:border-accent/50 hover:bg-(--canvas-node-menu-hover) hover:text-accent"
                 title="放大查看"
                 aria-label="放大查看"
                 onClick={(event) => {
@@ -176,7 +176,7 @@ export const TextAnnotationNode = memo(({
               }
             }}
             placeholder="输入 Markdown 文本"
-            className="nodrag nowheel h-full w-full resize-none border-none bg-transparent px-1 py-0.5 text-sm leading-6 text-text-dark outline-none placeholder:text-text-muted/70"
+            className="nodrag nowheel h-full w-full resize-none border-none bg-transparent px-1 py-0.5 text-sm leading-6 text-text-dark outline-hidden placeholder:text-text-muted/70"
           />
         ) : (
           <div
@@ -188,7 +188,7 @@ export const TextAnnotationNode = memo(({
             }}
           >
             {content.trim().length > 0 ? (
-              <div className="markdown-body select-text break-words [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-white/20 [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-white/10 [&_code]:px-1 [&_code]:py-0.5 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold [&_hr]:border-white/10 [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-0 [&_p+_p]:mt-4 [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-2 [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs [&_td]:border [&_td]:border-white/10 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-white/10 [&_th]:px-2 [&_th]:py-1 [&_ul]:list-disc [&_ul]:pl-5">
+              <div className="markdown-body select-text wrap-break-word [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-white/20 [&_blockquote]:pl-3 [&_code]:rounded-sm [&_code]:bg-white/10 [&_code]:px-1 [&_code]:py-0.5 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold [&_hr]:border-white/10 [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-0 [&_p+_p]:mt-4 [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-2 [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs [&_td]:border [&_td]:border-white/10 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-white/10 [&_th]:px-2 [&_th]:py-1 [&_ul]:list-disc [&_ul]:pl-5">
                 <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
                   {content}
                 </ReactMarkdown>
@@ -203,17 +203,17 @@ export const TextAnnotationNode = memo(({
           type="target"
           id="target"
           position={Position.Left}
-          className="!h-2 !w-2 !border-surface-dark !bg-accent"
+          className="h-2! w-2! border-surface-dark! bg-accent!"
         />
         <Handle
           type="source"
           id="source"
           position={Position.Right}
           onPointerDownCapture={clearBrowserTextSelection}
-          className="!h-2 !w-2 !border-surface-dark !bg-accent"
+          className="h-2! w-2! border-surface-dark! bg-accent!"
         />
 
-        <div className="pointer-events-none absolute bottom-1 right-2 z-10 rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] px-1.5 py-0.5 text-[10px] leading-none text-text-muted shadow-sm">
+        <div className="pointer-events-none absolute bottom-1 right-2 z-10 rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) px-1.5 py-0.5 text-[10px] leading-none text-text-muted shadow-xs">
           {characterCount} 字
         </div>
       </div>

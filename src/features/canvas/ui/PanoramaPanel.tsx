@@ -42,7 +42,7 @@ export const PanoramaPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt, 
 
   return (
     <div
-      className="fixed z-[200] rounded-xl border border-white/12 bg-[#202020] shadow-2xl overflow-hidden"
+      className="fixed z-200 rounded-xl border border-white/12 bg-[#202020] shadow-2xl overflow-hidden"
       style={{ left: panelLeft, top: panelTop, width: panelWidth }}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -50,7 +50,7 @@ export const PanoramaPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt, 
       <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/8">
         <div>
           <div className="text-sm font-semibold text-white">全景图生成</div>
-          <div className="mt-0.5 text-[11px] text-white/[0.42]">
+          <div className="mt-0.5 text-[11px] text-white/42">
             左侧管理素材 · 中间写提示词与参数 · 右侧选择生成方式和比例兜底
           </div>
         </div>

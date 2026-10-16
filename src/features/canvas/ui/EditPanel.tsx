@@ -125,7 +125,7 @@ export const EditPanel = memo(({ node, isOpen, onClose, buttonRect }: EditPanelP
 
   return (
     <div
-      className="fixed z-[100] min-w-[300px] rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-dark/95 p-2 shadow-2xl backdrop-blur-sm"
+      className="fixed z-100 min-w-[300px] rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-dark/95 p-2 shadow-2xl backdrop-blur-xs"
       style={{
         left: `${buttonRect.left}px`,
         top: `${buttonRect.bottom + 4}px`,

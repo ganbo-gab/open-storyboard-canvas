@@ -578,7 +578,7 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
                 type="button"
                 onClick={() => chooseComfyWorkflow(choice)}
                 aria-pressed={comfyChoice === choice}
-                className={`min-h-[84px] rounded-lg border p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-accent/60 ${comfyChoice === choice ? 'border-accent/70 bg-accent/10' : 'border-border-dark bg-surface-dark hover:border-accent/40'}`}
+                className={`min-h-[84px] rounded-lg border p-3 text-left transition-colors focus:outline-hidden focus:ring-2 focus:ring-accent/60 ${comfyChoice === choice ? 'border-accent/70 bg-accent/10' : 'border-border-dark bg-surface-dark hover:border-accent/40'}`}
               >
                 <span className="block text-xs font-semibold text-text-dark">{t(`settings.comfyui.templates.${choice}.title`)}</span>
                 <span className="mt-1 block text-[11px] leading-4 text-text-muted">{t(`settings.comfyui.templates.${choice}.description`)}</span>
@@ -654,7 +654,7 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
             <input
               type="file"
               accept=".json,application/json"
-              className="mt-1.5 block w-full rounded-lg border border-border-dark bg-bg-dark px-3 py-2 text-xs text-text-dark file:mr-3 file:rounded file:border-0 file:bg-accent/15 file:px-2 file:py-1 file:text-accent"
+              className="mt-1.5 block w-full rounded-lg border border-border-dark bg-bg-dark px-3 py-2 text-xs text-text-dark file:mr-3 file:rounded-sm file:border-0 file:bg-accent/15 file:px-2 file:py-1 file:text-accent"
               onChange={(event) => {
                 const file = event.currentTarget.files?.[0];
                 if (!file) return;

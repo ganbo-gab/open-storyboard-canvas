@@ -38,9 +38,9 @@ function HeaderAction({
     <button
       ref={buttonRef}
       type="button"
-      className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[7px] transition-[background-color,color,transform] duration-150 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${active
+      className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[7px] transition-[background-color,color,transform,translate,scale,rotate] duration-150 active:scale-[0.96] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 ${active
         ? 'bg-accent/12 text-accent'
-        : 'text-text-muted hover:bg-text-dark/[0.055] hover:text-text-dark'}`}
+        : 'text-text-muted hover:bg-text-dark/5.5 hover:text-text-dark'}`}
       aria-label={label}
       title={label}
       onClick={onClick}
@@ -90,9 +90,9 @@ export function CanvasAgentHeader({
   }, [menuOpen]);
 
   return (
-    <header className="shrink-0 border-b border-border-dark/75 bg-[var(--ui-surface-panel)]">
+    <header className="shrink-0 border-b border-border-dark/75 bg-(--ui-surface-panel)">
       <div className="flex min-h-[62px] items-center gap-2 px-3.5">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-accent/[0.11] text-accent">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-accent/11 text-accent">
           <Bot className="h-[18px] w-[18px]" aria-hidden="true" />
         </div>
         <div className="min-w-0 flex-1">
@@ -113,7 +113,7 @@ export function CanvasAgentHeader({
             <div
               role="menu"
               aria-label={t('canvasAgent.moreActions')}
-              className="absolute right-0 top-[calc(100%+4px)] z-50 w-52 rounded-lg border border-border-dark bg-[var(--ui-surface-panel)] p-1 shadow-[var(--ui-shadow-panel)]"
+              className="absolute right-0 top-[calc(100%+4px)] z-50 w-52 rounded-lg border border-border-dark bg-(--ui-surface-panel) p-1 shadow-(--ui-shadow-panel)"
               onKeyDown={(event) => {
                 if (event.key === 'Escape') {
                   event.preventDefault();
@@ -122,11 +122,11 @@ export function CanvasAgentHeader({
                 }
               }}
             >
-              <button type="button" role="menuitemcheckbox" aria-checked={showCompletedTools} onClick={() => { onToggleCompletedTools(); setMenuOpen(false); }} className="flex min-h-10 w-full items-center gap-2 rounded-md px-2.5 text-left text-xs text-text-dark hover:bg-text-dark/[0.055]">
+              <button type="button" role="menuitemcheckbox" aria-checked={showCompletedTools} onClick={() => { onToggleCompletedTools(); setMenuOpen(false); }} className="flex min-h-10 w-full items-center gap-2 rounded-md px-2.5 text-left text-xs text-text-dark hover:bg-text-dark/5.5">
                 <Wrench className="h-4 w-4 text-text-muted" aria-hidden="true" />
                 {showCompletedTools ? t('canvasAgent.hideCompletedTools') : t('canvasAgent.showCompletedTools')}
               </button>
-              <button type="button" role="menuitem" onClick={() => { onOpenExternalConnection(); setMenuOpen(false); }} className="flex min-h-10 w-full items-center gap-2 rounded-md px-2.5 text-left text-xs text-text-dark hover:bg-text-dark/[0.055]">
+              <button type="button" role="menuitem" onClick={() => { onOpenExternalConnection(); setMenuOpen(false); }} className="flex min-h-10 w-full items-center gap-2 rounded-md px-2.5 text-left text-xs text-text-dark hover:bg-text-dark/5.5">
                 <Link2 className="h-4 w-4 text-text-muted" aria-hidden="true" />
                 {t('canvasAgent.externalConnection')}
               </button>
@@ -148,7 +148,7 @@ export function CanvasAgentHeader({
             type="button"
             aria-current={activeView === view ? 'page' : undefined}
             onClick={() => onViewChange(view)}
-            className={`flex min-h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${activeView === view ? 'bg-accent/12 text-accent' : 'text-text-muted hover:bg-text-dark/[0.055] hover:text-text-dark'}`}
+            className={`flex min-h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 ${activeView === view ? 'bg-accent/12 text-accent' : 'text-text-muted hover:bg-text-dark/5.5 hover:text-text-dark'}`}
           >
             <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span className="truncate">{label}</span>

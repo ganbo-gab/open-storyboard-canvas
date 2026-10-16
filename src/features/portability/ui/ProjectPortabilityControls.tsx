@@ -282,12 +282,12 @@ export function ProjectPortabilityControls({
             <div>
               <div className="flex items-center gap-2 text-sm text-text-dark">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="min-w-0 flex-1 break-words">{operation.label}</span>
+                <span className="min-w-0 flex-1 wrap-break-word">{operation.label}</span>
                 <span className="shrink-0 text-xs text-text-muted">{percent}%</span>
                 <button
                   type="button"
                   onClick={() => operation.controller.abort()}
-                  className="inline-flex min-h-9 shrink-0 items-center rounded px-2 text-xs text-text-muted hover:bg-bg-dark hover:text-text-dark"
+                  className="inline-flex min-h-9 shrink-0 items-center rounded-sm px-2 text-xs text-text-muted hover:bg-bg-dark hover:text-text-dark"
                 >
                   {t('common.cancel')}
                 </button>
@@ -298,7 +298,7 @@ export function ProjectPortabilityControls({
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={percent}
-                className="mt-2 h-1 overflow-hidden rounded bg-bg-dark"
+                className="mt-2 h-1 overflow-hidden rounded-sm bg-bg-dark"
               >
                 <div
                   className="h-full w-full origin-left bg-accent transition-transform"
@@ -315,11 +315,11 @@ export function ProjectPortabilityControls({
               {feedback?.kind === 'error'
                 ? <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
                 : <Download className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />}
-              <span className="min-w-0 flex-1 break-words">{feedback?.message}</span>
+              <span className="min-w-0 flex-1 wrap-break-word">{feedback?.message}</span>
               <button
                 type="button"
                 onClick={() => setFeedback(null)}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-dark hover:text-text-dark"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-text-muted hover:bg-bg-dark hover:text-text-dark"
                 aria-label={t('common.close')}
                 title={t('common.close')}
               >
@@ -342,7 +342,7 @@ export function ProjectPortabilityControls({
           }
         }}
         widthClassName="w-[min(92vw,620px)]"
-        containerClassName="z-[70]"
+        containerClassName="z-70"
         footer={(
           <>
             <UiButton type="button" onClick={() => { setCandidate(null); setReplaceConfirm(false); }}>
@@ -408,7 +408,7 @@ export function ProjectPortabilityControls({
                         type="button"
                         aria-pressed={importMode === mode}
                         onClick={() => { setImportMode(mode); setReplaceConfirm(false); }}
-                        className={`h-9 rounded text-sm transition-colors ${importMode === mode ? 'bg-accent text-white' : 'text-text-muted hover:text-text-dark'}`}
+                        className={`h-9 rounded-sm text-sm transition-colors ${importMode === mode ? 'bg-accent text-white' : 'text-text-muted hover:text-text-dark'}`}
                       >
                         {t(`portability.project.modes.${mode}`)}
                       </button>

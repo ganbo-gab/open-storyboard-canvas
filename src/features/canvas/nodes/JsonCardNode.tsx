@@ -515,10 +515,10 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
     <>
       <div
         className={`
-          group relative flex h-full w-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-2 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+          group relative flex h-full w-full flex-col overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-2 shadow-(--canvas-node-shadow) transition-colors duration-150
           ${selected
             ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-            : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
+            : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
         `}
         style={{ width: resolvedWidth, height: resolvedHeight }}
         onClick={() => setSelectedNode(id)}
@@ -531,13 +531,13 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
             <div className="flex items-center gap-1.5">
               {generationElapsedText ? (
                 <span
-                  className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-[1px] text-[10px] font-medium leading-tight text-white"
+                  className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-px text-[10px] font-medium leading-tight text-white"
                   title="生成耗时"
                 >
                   {generationElapsedText}
                 </span>
               ) : null}
-              <span className="inline-flex h-6 items-center gap-1 rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] px-2 text-[10px] text-text-muted">
+              <span className="inline-flex h-6 items-center gap-1 rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) px-2 text-[10px] text-text-muted">
                 {isStreaming ? (
                   <>
                     <LoaderCircle className="h-3 w-3 animate-spin text-accent" />
@@ -548,7 +548,7 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
               <button
                 type="button"
                 data-canvas-no-marquee="true"
-                className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] text-text-muted shadow-sm transition-colors hover:border-accent/50 hover:bg-[var(--canvas-node-menu-hover)] hover:text-accent"
+                className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) text-text-muted shadow-xs transition-colors hover:border-accent/50 hover:bg-(--canvas-node-menu-hover) hover:text-accent"
                 title="放大查看源 JSON"
                 aria-label="放大查看源 JSON"
                 onClick={(event) => {
@@ -572,12 +572,12 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
         />
 
         <div
-          className="ui-scrollbar nodrag nowheel min-h-0 flex-1 overflow-auto rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-3"
+          className="ui-scrollbar nodrag nowheel min-h-0 flex-1 overflow-auto rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-3"
           onMouseDown={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
         >
           {isStreaming ? (
-            <div className="flex h-full min-h-[180px] flex-col justify-center gap-4 rounded-lg border border-[var(--canvas-node-field-border)] bg-[rgba(15,23,42,0.28)] p-4">
+            <div className="flex h-full min-h-[180px] flex-col justify-center gap-4 rounded-lg border border-(--canvas-node-field-border) bg-[rgba(15,23,42,0.28)] p-4">
               <div className="flex items-center gap-2 text-sm font-medium text-text-dark">
                 <LoaderCircle className="h-4 w-4 animate-spin text-accent" />
                 正在生成 JSON，完成后自动解析结构化展示
@@ -586,7 +586,7 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
                 已接收 {streamReceivedCharacters.toLocaleString()} 字
                 {generationElapsedText ? ` · ${generationElapsedText}` : ''}
               </div>
-              <div className="rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-3 py-2 text-xs leading-5 text-text-muted">
+              <div className="rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-3 py-2 text-xs leading-5 text-text-muted">
                 {streamPreview || '等待模型返回内容...'}
               </div>
             </div>
@@ -633,12 +633,12 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
                         />
                       ))}
                     </colgroup>
-                    <thead className="sticky top-0 z-10 bg-[var(--canvas-node-field-bg)]">
+                    <thead className="sticky top-0 z-10 bg-(--canvas-node-field-bg)">
                       <tr>
                         {group.fields.map((field) => (
                           <th
                             key={field.path}
-                            className="relative border-b border-[var(--canvas-node-field-border)] px-1.5 py-2 text-[11px] font-semibold text-text-muted"
+                            className="relative border-b border-(--canvas-node-field-border) px-1.5 py-2 text-[11px] font-semibold text-text-muted"
                             title={field.path}
                           >
                             <span className="block truncate">
@@ -647,7 +647,7 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
                             <button
                               type="button"
                               data-canvas-no-marquee="true"
-                              className="nodrag nowheel absolute bottom-1 right-0 top-1 w-2 cursor-col-resize rounded-sm border-r border-transparent transition-colors hover:border-accent/70 hover:bg-accent/10"
+                              className="nodrag nowheel absolute bottom-1 right-0 top-1 w-2 cursor-col-resize rounded-xs border-r border-transparent transition-colors hover:border-accent/70 hover:bg-accent/10"
                               title="拖动调整列宽"
                               aria-label="拖动调整列宽"
                               onPointerDown={(event) => startColumnResize(event, group, field)}
@@ -662,9 +662,9 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
                           {group.fields.map((field) => (
                             <td
                               key={`${rowIndex}-${field.path}`}
-                              className="border-b border-[var(--canvas-node-field-border)] px-1.5 py-2 leading-5"
+                              className="border-b border-(--canvas-node-field-border) px-1.5 py-2 leading-5"
                             >
-                              <div className="whitespace-pre-wrap break-words select-text">
+                              <div className="whitespace-pre-wrap wrap-break-word select-text">
                                 {resolveRowValue(row, field.path, group.pathPrefixTokens)}
                               </div>
                             </td>
@@ -681,10 +681,10 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
                   {fieldBlocks.map((field) => (
                     <div
                       key={field.path}
-                      className="rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2.5 py-2"
+                      className="rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-2.5 py-2"
                     >
                       <div className="shrink-0 truncate text-[11px] text-text-muted">{field.label}</div>
-                      <div className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-text-dark select-text">
+                      <div className="mt-1 whitespace-pre-wrap wrap-break-word text-xs leading-5 text-text-dark select-text">
                         {field.value}
                       </div>
                     </div>
@@ -693,7 +693,7 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
               ) : null}
             </div>
           ) : !isStreaming ? (
-            <pre className="whitespace-pre-wrap break-words select-text font-mono text-xs leading-6 text-text-dark">
+            <pre className="whitespace-pre-wrap wrap-break-word select-text font-mono text-xs leading-6 text-text-dark">
               {rawJson || '暂无内容'}
             </pre>
           ) : null}
@@ -703,13 +703,13 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
           type="target"
           id="target"
           position={Position.Left}
-          className="!h-2 !w-2 !border-surface-dark !bg-accent"
+          className="h-2! w-2! border-surface-dark! bg-accent!"
         />
         <Handle
           type="source"
           id="source"
           position={Position.Right}
-          className="!h-2 !w-2 !border-surface-dark !bg-accent"
+          className="h-2! w-2! border-surface-dark! bg-accent!"
         />
       </div>
 

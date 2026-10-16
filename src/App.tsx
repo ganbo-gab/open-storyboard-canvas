@@ -254,7 +254,7 @@ function App() {
               <span>{t('project.webStorageFallback')}</span>
               <button
                 type="button"
-                className="shrink-0 rounded px-2 py-1 text-text-muted transition-colors hover:bg-amber-400/10 hover:text-text-dark"
+                className="shrink-0 rounded-sm px-2 py-1 text-text-muted transition-colors hover:bg-amber-400/10 hover:text-text-dark"
                 onClick={() => setShowWebStorageFallback(false)}
               >
                 {t('common.close')}
@@ -294,7 +294,7 @@ function App() {
               fallback={showSettings ? (
                 <div
                   role="status"
-                  className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/45 text-sm text-white backdrop-blur-sm"
+                  className="fixed inset-0 z-100000 flex items-center justify-center bg-black/45 text-sm text-white backdrop-blur-xs"
                 >
                   {t('common.loading')}
                 </div>

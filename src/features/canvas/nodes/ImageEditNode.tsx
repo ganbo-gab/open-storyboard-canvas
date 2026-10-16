@@ -230,7 +230,7 @@ function renderPromptWithHighlights(prompt: string, maxImageCount: number): Reac
     segments.push(
       <span
         key={`ref-${matchStart}`}
-        className="relative z-0 text-white [text-shadow:0.24px_0_currentColor,-0.24px_0_currentColor] before:absolute before:-inset-x-[4px] before:-inset-y-[1px] before:-z-10 before:rounded-[7px] before:bg-accent/55 before:content-['']"
+        className="relative z-0 text-white [text-shadow:0.24px_0_currentColor,-0.24px_0_currentColor] before:absolute before:inset-x-[-4px] before:-inset-y-px before:-z-10 before:rounded-[7px] before:bg-accent/55 before:content-['']"
       >
         {matchText}
       </span>
@@ -1259,10 +1259,10 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     <div
       ref={rootRef}
       className={`
-        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-2 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative flex h-full flex-col overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-2 shadow-(--canvas-node-shadow) transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
+          : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
       `}
       style={{ width: `${resolvedWidth}px`, height: `${resolvedHeight}px` }}
       onClick={() => setSelectedNode(id)}
@@ -1275,7 +1275,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
           <button
             type="button"
             data-canvas-no-marquee="true"
-            className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] text-text-muted shadow-sm transition-colors hover:border-accent/50 hover:bg-[var(--canvas-node-menu-hover)] hover:text-accent"
+            className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) text-text-muted shadow-xs transition-colors hover:border-accent/50 hover:bg-(--canvas-node-menu-hover) hover:text-accent"
             title={t('node.imageEdit.payloadDebug')}
             aria-label={t('node.imageEdit.payloadDebug')}
             onClick={(event) => {
@@ -1294,10 +1294,10 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
       />
 
-      <div ref={imageBoxRef} className="image-box relative min-h-0 flex-1 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-2">
+      <div ref={imageBoxRef} className="image-box relative min-h-0 flex-1 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-2">
         <div className="relative h-full min-h-0">
           {selectedFunctionLabel && (
-            <div className="absolute left-1 top-1 z-20 flex max-w-[calc(100%-8px)] items-center gap-1 rounded-md border border-accent/35 bg-accent/18 px-2 py-1 text-xs text-accent shadow-sm">
+            <div className="absolute left-1 top-1 z-20 flex max-w-[calc(100%-8px)] items-center gap-1 rounded-md border border-accent/35 bg-accent/18 px-2 py-1 text-xs text-accent shadow-xs">
               <Sparkles className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">{selectedFunctionLabel}</span>
               <button
@@ -1307,7 +1307,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                   clearSelectedFunctionSource();
                   promptRef.current?.focus();
                 }}
-                className="ml-0.5 rounded p-0.5 text-accent/80 hover:bg-accent/20 hover:text-accent"
+                className="ml-0.5 rounded-sm p-0.5 text-accent/80 hover:bg-accent/20 hover:text-accent"
                 title="移除已选功能"
               >
                 <X className="h-3 w-3" />
@@ -1320,7 +1320,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
             className="ui-scrollbar pointer-events-none absolute inset-0 overflow-y-auto overflow-x-hidden text-sm leading-6 text-text-dark"
             style={{ scrollbarGutter: 'stable' }}
           >
-            <div className={`min-h-full whitespace-pre-wrap break-words px-1 py-0.5 ${selectedFunctionLabel ? 'pt-8' : ''}`}>
+            <div className={`min-h-full whitespace-pre-wrap wrap-break-word px-1 py-0.5 ${selectedFunctionLabel ? 'pt-8' : ''}`}>
               {renderPromptWithHighlights(promptDraft, incomingReferences.length)}
             </div>
           </div>
@@ -1340,14 +1340,14 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
             onScroll={syncPromptHighlightScroll}
             onMouseDown={(event) => event.stopPropagation()}
             placeholder={t('node.imageEdit.promptPlaceholder')}
-            className={`ui-scrollbar nodrag nowheel relative z-10 h-full w-full resize-none overflow-y-auto overflow-x-hidden border-none bg-transparent px-1 py-0.5 text-sm leading-6 text-transparent caret-text-dark outline-none placeholder:text-text-muted/80 focus:border-transparent whitespace-pre-wrap break-words ${selectedFunctionLabel ? 'pt-8' : ''}`}
+            className={`ui-scrollbar nodrag nowheel relative z-10 h-full w-full resize-none overflow-y-auto overflow-x-hidden border-none bg-transparent px-1 py-0.5 text-sm leading-6 text-transparent caret-text-dark outline-hidden placeholder:text-text-muted/80 focus:border-transparent whitespace-pre-wrap wrap-break-word ${selectedFunctionLabel ? 'pt-8' : ''}`}
             style={{ scrollbarGutter: 'stable' }}
           />
         </div>
 
         {showImagePicker && incomingReferencePickerItems.length > 0 && (
           <div
-            className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
+            className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-xl"
             style={{ left: pickerAnchor.left, top: pickerAnchor.top }}
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
@@ -1365,8 +1365,8 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                     insertGraphReference(index);
                   }}
                   onMouseEnter={() => setPickerActiveIndex(index)}
-                  className={`flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[var(--canvas-node-field-border)] hover:bg-[var(--canvas-node-menu-hover)] ${pickerActiveIndex === index
-                      ? 'border-accent/35 bg-[var(--canvas-node-menu-active)]'
+                  className={`flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-(--canvas-node-field-border) hover:bg-(--canvas-node-menu-hover) ${pickerActiveIndex === index
+                      ? 'border-accent/35 bg-(--canvas-node-menu-active)'
                       : ''
                     }`}
                 >
@@ -1376,11 +1376,11 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                       alt={item.label}
                       viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl ?? item.displayUrl)}
                       viewerImageList={incomingImageViewerList}
-                      className="h-8 w-8 rounded object-cover"
+                      className="h-8 w-8 rounded-sm object-cover"
                       draggable={false}
                     />
                   ) : (
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[var(--canvas-node-button-bg)] text-[10px] font-semibold text-text-muted">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm bg-(--canvas-node-button-bg) text-[10px] font-semibold text-text-muted">
                       {item.kind === 'video' ? 'V' : 'T'}
                     </span>
                   )}
@@ -1393,7 +1393,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
 
         {showFunctionPicker && functionPickerItems.length > 0 && (
           <div
-            className="nowheel absolute z-40 w-[280px] overflow-visible rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-2xl"
+            className="nowheel absolute z-40 w-[280px] overflow-visible rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-2xl"
             style={{ left: functionPickerAnchor.left, top: functionPickerAnchor.top }}
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
@@ -1419,8 +1419,8 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                     onMouseEnter={() => setFunctionPickerActiveIndex(index)}
                     className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors ${
                       active
-                        ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
-                        : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                        ? 'bg-(--canvas-node-menu-active) text-text-dark'
+                        : 'text-text-dark hover:bg-(--canvas-node-menu-hover)'
                     }`}
                     title={item.description}
                   >
@@ -1439,7 +1439,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
             </div>
             {functionPickerItems[functionPickerActiveIndex]?.kind === 'presetGroup' && (
               <div
-                className="nowheel absolute left-[calc(100%+8px)] w-[240px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-2xl"
+                className="nowheel absolute left-[calc(100%+8px)] w-[240px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-2xl"
                 style={{ top: `${Math.min(44 + functionPickerActiveIndex * 58, 150)}px` }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onWheelCapture={(event) => event.stopPropagation()}
@@ -1456,8 +1456,8 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                         type="button"
                         className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors ${
                           presetSelected
-                            ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
-                            : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                            ? 'bg-(--canvas-node-menu-active) text-text-dark'
+                            : 'text-text-dark hover:bg-(--canvas-node-menu-hover)'
                         }`}
                         title={preset.prompt}
                         onClick={(event) => {
@@ -1515,7 +1515,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
               setShowCountPicker(!showCountPicker);
             }}
             variant="muted"
-            className={`shrink-0 !inline-flex !flex-row !items-center !justify-center ${NODE_CONTROL_CHIP_CLASS}`}
+            className={`shrink-0 inline-flex! flex-row! items-center! justify-center! ${NODE_CONTROL_CHIP_CLASS}`}
           >
             <span className="shrink-0">{customCount || generateCount}张</span>
             <span className="ml-0.5 shrink-0 text-[10px] opacity-70">▾</span>
@@ -1524,7 +1524,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
           {showCountPicker && (
             <div
               ref={countPickerRef}
-              className="nowheel absolute bottom-full right-0 z-50 mb-1 w-[120px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
+              className="nowheel absolute bottom-full right-0 z-50 mb-1 w-[120px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-xl"
               onMouseDown={(event) => event.stopPropagation()}
             >
               {[1, 2, 3, 4].map((count) => (
@@ -1537,20 +1537,20 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                     setCustomCount('');
                     setShowCountPicker(false);
                   }}
-                  className={`flex w-full items-center px-3 py-2 text-left text-sm text-text-dark transition-colors hover:bg-[var(--canvas-node-menu-hover)] ${
-                    generateCount === count && !customCount ? 'bg-[var(--canvas-node-menu-active)]' : ''
+                  className={`flex w-full items-center px-3 py-2 text-left text-sm text-text-dark transition-colors hover:bg-(--canvas-node-menu-hover) ${
+                    generateCount === count && !customCount ? 'bg-(--canvas-node-menu-active)' : ''
                   }`}
                 >
                   {count}
                 </button>
               ))}
-              <div className="border-t border-[var(--canvas-node-divider)]">
+              <div className="border-t border-(--canvas-node-divider)">
                 <button
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
                   }}
-                  className="flex w-full items-center px-3 py-2 text-left text-sm text-text-dark transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+                  className="flex w-full items-center px-3 py-2 text-left text-sm text-text-dark transition-colors hover:bg-(--canvas-node-menu-hover)"
                 >
                   {t('node.imageEdit.customCount')}
                 </button>
@@ -1565,7 +1565,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                     }}
                     onClick={(event) => event.stopPropagation()}
                     placeholder="1-10"
-                    className="w-full rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2 py-1 text-sm text-text-dark outline-none focus:border-accent"
+                    className="w-full rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-2 py-1 text-sm text-text-dark outline-hidden focus:border-accent"
                   />
                 </div>
               </div>
@@ -1593,7 +1593,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         title={t('node.imageEdit.payloadDebugTitle')}
         onClose={() => setPayloadDebugText(null)}
         widthClassName="w-[min(760px,calc(100vw-32px))]"
-        containerClassName="!z-[13050]"
+        containerClassName="z-13050!"
         footer={(
           <>
             <UiButton
@@ -1619,7 +1619,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
             {t('node.imageEdit.payloadDebugHint')}
           </div>
           <pre
-            className="ui-scrollbar nowheel max-h-[60vh] overflow-auto rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-3 text-xs leading-5 text-text-dark"
+            className="ui-scrollbar nowheel max-h-[60vh] overflow-auto rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-3 text-xs leading-5 text-text-dark"
             onWheelCapture={(event) => event.stopPropagation()}
             onTouchMoveCapture={(event) => event.stopPropagation()}
           >
@@ -1632,13 +1632,13 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         type="target"
         id="target"
         position={Position.Left}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <Handle
         type="source"
         id="source"
         position={Position.Right}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <NodeResizeHandle
         minWidth={IMAGE_EDIT_NODE_MIN_WIDTH}

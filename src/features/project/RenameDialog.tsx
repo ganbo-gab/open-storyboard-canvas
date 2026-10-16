@@ -48,7 +48,7 @@ export function RenameDialog({
       title={title}
       onClose={onClose}
       widthClassName="w-[min(360px,calc(100vw-1.5rem))]"
-      containerClassName="z-[100]"
+      containerClassName="z-100"
       footer={(
         <>
           <UiButton type="button" variant="ghost" onClick={onClose}>

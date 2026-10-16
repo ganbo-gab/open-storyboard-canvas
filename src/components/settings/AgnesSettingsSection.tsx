@@ -106,7 +106,7 @@ export const AgnesSettingsSection = memo(function AgnesSettingsSection() {
                   setLocalKey(event.target.value);
                   invalidateVerification();
                 }}
-                className="h-9 w-full rounded-md border border-border-dark bg-surface-dark pl-9 pr-3 text-sm text-text-dark outline-none focus:border-accent"
+                className="h-9 w-full rounded-md border border-border-dark bg-surface-dark pl-9 pr-3 text-sm text-text-dark outline-hidden focus:border-accent"
                 placeholder={t('settings.agnes.keyPlaceholder')}
                 type="password"
               />

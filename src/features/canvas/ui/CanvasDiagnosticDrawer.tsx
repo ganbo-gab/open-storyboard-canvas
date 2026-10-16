@@ -146,7 +146,7 @@ export function CanvasDiagnosticDrawer({ isOpen, nodes, onClose }: Props) {
         type="button"
         aria-haspopup="menu"
         aria-expanded={openFilter === kind}
-        className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${value ? 'border-accent/45 bg-accent/10 text-accent' : 'border-border-dark/70 bg-surface-dark text-text-muted hover:text-text-dark'}`}
+        className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 ${value ? 'border-accent/45 bg-accent/10 text-accent' : 'border-border-dark/70 bg-surface-dark text-text-muted hover:text-text-dark'}`}
         onClick={() => setOpenFilter(openFilter === kind ? null : kind)}
       >
         <Filter className="h-3.5 w-3.5" />{label}<ChevronDown className="h-3.5 w-3.5" />
@@ -156,7 +156,7 @@ export function CanvasDiagnosticDrawer({ isOpen, nodes, onClose }: Props) {
           {(kind === 'severity' ? SEVERITIES : SOURCES).map((option) => (
             <button
               key={option || 'all'} type="button" role="menuitemradio" aria-checked={value === option}
-              className="flex min-h-9 w-full items-center justify-between rounded-lg px-2.5 text-left text-xs text-text-dark hover:bg-text-dark/[0.06]"
+              className="flex min-h-9 w-full items-center justify-between rounded-lg px-2.5 text-left text-xs text-text-dark hover:bg-text-dark/6"
               onClick={() => {
                 if (kind === 'severity') setSeverity(option); else setSource(option);
                 setOpenFilter(null);
@@ -178,20 +178,20 @@ export function CanvasDiagnosticDrawer({ isOpen, nodes, onClose }: Props) {
           <h2 className="text-sm font-semibold text-text-dark">{t('generationJob.logDrawerTitle')}</h2>
           <p className="truncate text-[11px] text-text-muted">{t('generationJob.logDrawerDescription')}</p>
         </div>
-        <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-text-muted hover:bg-text-dark/[0.06] hover:text-text-dark" onClick={() => void copy()} disabled={!filteredEvents.length} aria-label={t('generationJob.copyLogs')}>
+        <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-text-muted hover:bg-text-dark/6 hover:text-text-dark" onClick={() => void copy()} disabled={!filteredEvents.length} aria-label={t('generationJob.copyLogs')}>
           {copyState === 'copied' ? <Check className="h-4 w-4 text-emerald-500" /> : copyState === 'failed' ? <X className="h-4 w-4 text-red-500" /> : <Copy className="h-4 w-4" />}
         </button>
-        <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-text-muted hover:bg-text-dark/[0.06] hover:text-text-dark" onClick={() => void refresh()} aria-label={t('generationJob.refreshTasks')}>
+        <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-text-muted hover:bg-text-dark/6 hover:text-text-dark" onClick={() => void refresh()} aria-label={t('generationJob.refreshTasks')}>
           <RefreshCw className={`h-4 w-4 ${loading ? 'motion-safe:animate-spin' : ''}`} />
         </button>
-        <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-text-muted hover:bg-text-dark/[0.06] hover:text-text-dark" onClick={onClose} aria-label={t('common.close')}><X className="h-4 w-4" /></button>
+        <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-text-muted hover:bg-text-dark/6 hover:text-text-dark" onClick={onClose} aria-label={t('common.close')}><X className="h-4 w-4" /></button>
       </header>
 
       <div ref={filterRef} className="border-b border-border-dark/60 p-3">
         <label className="relative block">
           <span className="sr-only">{t('generationJob.searchLogs')}</span>
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
-          <input id="canvas-diagnostic-search" name="canvasDiagnosticSearch" value={query} onChange={(event) => setQuery(event.target.value.slice(0, 200))} placeholder={t('generationJob.searchLogs')} className="h-10 w-full rounded-xl border border-border-dark/70 bg-surface-dark pl-9 pr-3 text-xs text-text-dark outline-none placeholder:text-text-muted focus:border-accent/60" />
+          <input id="canvas-diagnostic-search" name="canvasDiagnosticSearch" value={query} onChange={(event) => setQuery(event.target.value.slice(0, 200))} placeholder={t('generationJob.searchLogs')} className="h-10 w-full rounded-xl border border-border-dark/70 bg-surface-dark pl-9 pr-3 text-xs text-text-dark outline-hidden placeholder:text-text-muted focus:border-accent/60" />
         </label>
         <div className="mt-2 flex flex-wrap gap-2">
           {filterButton('severity', severity, severity ? t(`generationJob.filterOption.${severity}`) : t('generationJob.allSeverity'))}
@@ -221,11 +221,11 @@ export function CanvasDiagnosticDrawer({ isOpen, nodes, onClose }: Props) {
                     {event.recoverable && event.jobId ? <button type="button" className="flex h-9 w-9 items-center justify-center rounded-lg text-amber-600 hover:bg-amber-500/10" aria-label={t('generationJob.recoverResult')} onClick={() => setConfirmRecoveryId(event.jobId!)}><RotateCcw className={`h-4 w-4 ${recoveringId === event.jobId ? 'motion-safe:animate-spin' : ''}`} /></button> : null}
                   </div>
                 </div>
-                <button type="button" aria-expanded={expanded} className="flex min-h-9 w-full items-center justify-between border-t border-border-dark/50 px-3 text-[11px] text-text-muted hover:bg-text-dark/[0.04] hover:text-text-dark" onClick={() => setExpandedId(expanded ? null : event.id)}>
+                <button type="button" aria-expanded={expanded} className="flex min-h-9 w-full items-center justify-between border-t border-border-dark/50 px-3 text-[11px] text-text-muted hover:bg-text-dark/4 hover:text-text-dark" onClick={() => setExpandedId(expanded ? null : event.id)}>
                   {t(expanded ? 'generationJob.hideRaw' : 'generationJob.showRaw')}<ChevronDown className={`h-3.5 w-3.5 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`} />
                 </button>
                 {expanded ? <pre className="max-h-44 overflow-auto whitespace-pre-wrap break-all border-t border-border-dark/50 bg-bg-dark/50 p-3 text-[10px] leading-5 text-text-muted">{diagnosticEventsToText([event])}</pre> : null}
-                {confirmRecoveryId === event.jobId ? <div className="border-t border-amber-500/25 bg-amber-500/[0.07] p-3 text-xs leading-5 text-text-dark"><p>{t('generationJob.recoveryConfirm')}</p><div className="mt-2 flex justify-end gap-2"><button type="button" className="h-9 rounded-lg px-3 text-text-muted hover:bg-text-dark/[0.05]" onClick={() => setConfirmRecoveryId(null)}>{t('common.cancel')}</button><button type="button" className="h-9 rounded-lg bg-amber-500 px-3 font-medium text-black" onClick={() => void recover(event)}>{t('generationJob.confirmRecovery')}</button></div></div> : null}
+                {confirmRecoveryId === event.jobId ? <div className="border-t border-amber-500/25 bg-amber-500/[0.07] p-3 text-xs leading-5 text-text-dark"><p>{t('generationJob.recoveryConfirm')}</p><div className="mt-2 flex justify-end gap-2"><button type="button" className="h-9 rounded-lg px-3 text-text-muted hover:bg-text-dark/5" onClick={() => setConfirmRecoveryId(null)}>{t('common.cancel')}</button><button type="button" className="h-9 rounded-lg bg-amber-500 px-3 font-medium text-black" onClick={() => void recover(event)}>{t('generationJob.confirmRecovery')}</button></div></div> : null}
               </article>
             );
           })}

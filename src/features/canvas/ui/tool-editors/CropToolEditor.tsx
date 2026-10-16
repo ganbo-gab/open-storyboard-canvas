@@ -399,7 +399,7 @@ export function CropToolEditor({ plugin, sourceImageUrl, options, onOptionsChang
               });
             }}
             placeholder="输入比例，如 3:2 或 1.5"
-            className="h-9 w-[220px] rounded-lg border border-[rgba(255,255,255,0.15)] bg-bg-dark/80 px-3 text-sm text-text-dark outline-none"
+            className="h-9 w-[220px] rounded-lg border border-[rgba(255,255,255,0.15)] bg-bg-dark/80 px-3 text-sm text-text-dark outline-hidden"
           />
           {customRatioError && <span className="text-xs text-red-400">{customRatioError}</span>}
         </div>

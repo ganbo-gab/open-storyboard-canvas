@@ -878,7 +878,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
             <input
               value={label}
               onChange={(event) => setLabel(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="例如：我的 OpenAI 兼容站"
             />
           </label>
@@ -887,7 +887,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
             <input
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="sk-..."
               type="password"
             />
@@ -897,7 +897,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
             <input
               value={baseUrl}
               onChange={(event) => setBaseUrl(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder={template.defaultBaseUrl}
             />
             <span className="block text-[10px] leading-4 text-text-muted">
@@ -909,7 +909,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
             <input
               value={modelListEndpointPath}
               onChange={(event) => setModelListEndpointPath(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder={template.modelListEndpointPath || '/v1/models'}
             />
           </label>
@@ -918,7 +918,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
             <input
               value={endpointPath}
               onChange={(event) => setEndpointPath(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder={template.endpointPath || '留空表示使用 Base URL 本身'}
             />
           </label>
@@ -930,7 +930,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
             <textarea
               value={modelInput}
               onChange={(event) => setModelInput(event.target.value)}
-              className="ui-scrollbar h-[150px] w-full resize-none rounded-md border border-border-dark bg-surface-dark px-3 py-2 text-xs leading-5 text-text-dark outline-none focus:border-accent"
+              className="ui-scrollbar h-[150px] w-full resize-none rounded-md border border-border-dark bg-surface-dark px-3 py-2 text-xs leading-5 text-text-dark outline-hidden focus:border-accent"
               placeholder="每行一个模型 ID"
             />
           </label>
@@ -968,13 +968,13 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
             <input
               value={customModelName}
               onChange={(event) => setCustomModelName(event.target.value)}
-              className="h-9 rounded-md border border-border-dark bg-bg-dark px-3 text-xs font-mono text-text-dark outline-none focus:border-accent"
+              className="h-9 rounded-md border border-border-dark bg-bg-dark px-3 text-xs font-mono text-text-dark outline-hidden focus:border-accent"
               placeholder="模型 ID，例如 gpt-image-2"
             />
             <input
               value={customModelDescription}
               onChange={(event) => setCustomModelDescription(event.target.value)}
-              className="h-9 rounded-md border border-border-dark bg-bg-dark px-3 text-xs text-text-dark outline-none focus:border-accent"
+              className="h-9 rounded-md border border-border-dark bg-bg-dark px-3 text-xs text-text-dark outline-hidden focus:border-accent"
               placeholder="描述，例如 默认生图模型 / 适合图生图"
             />
             <button
@@ -1014,7 +1014,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
                       className="flex min-w-0 flex-1 items-start gap-2 px-2 py-1.5 text-left"
                       title={description ? `${model}\n${description}` : model}
                     >
-                      <span className={`mt-0.5 h-3 w-3 shrink-0 rounded border ${checked ? 'border-accent bg-accent' : 'border-border-dark'}`} />
+                      <span className={`mt-0.5 h-3 w-3 shrink-0 rounded-sm border ${checked ? 'border-accent bg-accent' : 'border-border-dark'}`} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-mono">{model}</span>
                         {description && (
@@ -1073,7 +1073,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
                     <button
                       type="button"
                       onClick={() => handleRemoveRatio(ratio)}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-red-500/12 hover:text-red-300"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-sm hover:bg-red-500/12 hover:text-red-300"
                       title="删除自定义比例"
                     >
                       <Trash2 className="h-3 w-3" />
@@ -1091,7 +1091,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
                       handleAddCustomRatio();
                     }
                   }}
-                  className="h-6 w-16 bg-transparent text-xs text-text-dark outline-none placeholder:text-text-muted"
+                  className="h-6 w-16 bg-transparent text-xs text-text-dark outline-hidden placeholder:text-text-muted"
                   placeholder="自定义"
                 />
                 <button
@@ -1139,7 +1139,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
                     <button
                       type="button"
                       onClick={() => handleRemoveResolution(resolution)}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-red-500/12 hover:text-red-300"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-sm hover:bg-red-500/12 hover:text-red-300"
                       title="删除自定义分辨率"
                     >
                       <Trash2 className="h-3 w-3" />
@@ -1157,7 +1157,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
                       handleAddCustomResolution();
                     }
                   }}
-                  className="h-6 w-24 bg-transparent text-xs text-text-dark outline-none placeholder:text-text-muted"
+                  className="h-6 w-24 bg-transparent text-xs text-text-dark outline-hidden placeholder:text-text-muted"
                   placeholder="自定义"
                 />
                 <button
@@ -1193,13 +1193,13 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
             <input
               value={customParamKey}
               onChange={(event) => setCustomParamKey(event.target.value)}
-              className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 text-xs font-mono text-text-dark outline-none focus:border-accent"
+              className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 text-xs font-mono text-text-dark outline-hidden focus:border-accent"
               placeholder="参数名，例如 quality"
             />
             <input
               value={customParamValue}
               onChange={(event) => setCustomParamValue(event.target.value)}
-              className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 text-xs text-text-dark outline-none focus:border-accent"
+              className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 text-xs text-text-dark outline-hidden focus:border-accent"
               placeholder='参数值，例如 auto / false / {"mode":"fast"}'
             />
             <button
@@ -1215,7 +1215,7 @@ export const ModernProvidersSection = memo(function ModernProvidersSection() {
           <textarea
             value={defaultRequestParamsText}
             onChange={(event) => setDefaultRequestParamsText(event.target.value)}
-            className="ui-scrollbar h-[110px] w-full resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-none focus:border-accent"
+            className="ui-scrollbar h-[110px] w-full resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-hidden focus:border-accent"
             spellCheck={false}
           />
         </details>

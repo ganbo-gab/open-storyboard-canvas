@@ -135,7 +135,7 @@ export function MaskToolEditor({ plugin, sourceImageUrl, options, onOptionsChang
   return (
     <div className="space-y-3">
       <div ref={hostRef} className="relative inline-block w-full">
-        <canvas ref={baseCanvasRef} className="rounded border border-white/10 bg-black/40 block" />
+        <canvas ref={baseCanvasRef} className="rounded-sm border border-white/10 bg-black/40 block" />
         <canvas
           ref={maskCanvasRef}
           className="absolute inset-0 cursor-crosshair"
@@ -163,17 +163,17 @@ export function MaskToolEditor({ plugin, sourceImageUrl, options, onOptionsChang
           <button
             type="button"
             onClick={() => onOptionsChange({ ...options, __maskMode: 'paint' })}
-            className={`rounded px-2 py-0.5 border transition-colors ${mode === 'paint' ? 'border-accent/60 bg-accent/20 text-accent' : 'border-white/10 bg-white/5 text-white/65 hover:border-white/25'}`}
+            className={`rounded-sm px-2 py-0.5 border transition-colors ${mode === 'paint' ? 'border-accent/60 bg-accent/20 text-accent' : 'border-white/10 bg-white/5 text-white/65 hover:border-white/25'}`}
           >涂</button>
           <button
             type="button"
             onClick={() => onOptionsChange({ ...options, __maskMode: 'erase' })}
-            className={`rounded px-2 py-0.5 border transition-colors ${mode === 'erase' ? 'border-accent/60 bg-accent/20 text-accent' : 'border-white/10 bg-white/5 text-white/65 hover:border-white/25'}`}
+            className={`rounded-sm px-2 py-0.5 border transition-colors ${mode === 'erase' ? 'border-accent/60 bg-accent/20 text-accent' : 'border-white/10 bg-white/5 text-white/65 hover:border-white/25'}`}
           >擦</button>
           <button
             type="button"
             onClick={clearMask}
-            className="rounded px-2 py-0.5 border border-white/10 bg-white/5 text-white/65 hover:border-red-400/50 hover:text-red-300"
+            className="rounded-sm px-2 py-0.5 border border-white/10 bg-white/5 text-white/65 hover:border-red-400/50 hover:text-red-300"
           >清空</button>
         </div>
       </div>
@@ -187,7 +187,7 @@ export function MaskToolEditor({ plugin, sourceImageUrl, options, onOptionsChang
             value={String(options[promptKey] ?? '')}
             onChange={(e) => onOptionsChange({ ...options, [promptKey]: e.target.value })}
             placeholder={(plugin.fields.find((f) => f.key === promptKey) as { placeholder?: string }).placeholder ?? ''}
-            className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-text-dark outline-none focus:border-white/25"
+            className="w-full rounded-sm bg-white/5 border border-white/10 px-2 py-1 text-xs text-text-dark outline-hidden focus:border-white/25"
           />
         </div>
       )}

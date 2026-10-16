@@ -277,7 +277,7 @@ export function TagRelationsDialog({
               return (
                 <div
                   key={node.id}
-                  className="flex cursor-pointer items-center gap-3 rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-subtle-bg)] px-3 py-2 text-sm text-text-dark hover:border-accent/45"
+                  className="flex cursor-pointer items-center gap-3 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-subtle-bg) px-3 py-2 text-sm text-text-dark hover:border-accent/45"
                   title={label}
                   onClick={() => toggleSelected(node.id)}
                 >
@@ -288,9 +288,9 @@ export function TagRelationsDialog({
                     onCheckedChange={() => toggleSelected(node.id)}
                   />
                   {preview?.source ? (
-                    <img src={resolveImageDisplayUrl(preview.source)} alt="" className="h-11 w-14 shrink-0 rounded object-cover" />
+                    <img src={resolveImageDisplayUrl(preview.source)} alt="" className="h-11 w-14 shrink-0 rounded-sm object-cover" />
                   ) : preview ? (
-                    <span className="flex h-11 w-14 shrink-0 items-center justify-center rounded bg-[var(--canvas-node-bg)] text-text-muted"><KindIcon className="h-4 w-4" /></span>
+                    <span className="flex h-11 w-14 shrink-0 items-center justify-center rounded-sm bg-(--canvas-node-bg) text-text-muted"><KindIcon className="h-4 w-4" /></span>
                   ) : null}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{label}</span>
@@ -299,7 +299,7 @@ export function TagRelationsDialog({
                   {variant === 'members' ? (
                     <button
                       type="button"
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-text-muted hover:bg-accent/10 hover:text-accent"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-text-muted hover:bg-accent/10 hover:text-accent"
                       aria-label={t('node.tag.locateMember')}
                       title={t('node.tag.locateMember')}
                       onClick={(event) => {

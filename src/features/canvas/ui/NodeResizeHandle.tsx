@@ -25,7 +25,7 @@ export function NodeResizeHandle({
       maxWidth={maxWidth}
       maxHeight={maxHeight}
       position="bottom-right"
-      className="!h-5 !w-5 !min-h-0 !min-w-0 !rounded-none !border-0 !bg-transparent !p-0 !opacity-0 transition-opacity duration-100 hover:!opacity-100 focus-within:!opacity-100"
+      className="h-5! w-5! min-h-0! min-w-0! rounded-none! border-0! bg-transparent! p-0! opacity-0! transition-opacity duration-100 hover:opacity-100! focus-within:opacity-100!"
     >
       <div className="pointer-events-none absolute bottom-0 right-0 h-3 w-3 border-b border-r border-white/35 transition-colors hover:border-accent" />
     </NodeResizeControl>

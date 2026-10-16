@@ -128,13 +128,13 @@ export const BlueprintPoseEditor = memo(function BlueprintPoseEditor({ pose, onC
   const handleReset = useCallback(() => onChange({}), [onChange]);
 
   return (
-    <div className="rounded-lg border border-white/10 bg-black/[0.18] p-3">
+    <div className="rounded-lg border border-white/10 bg-black/18 p-3">
       <div className="mb-2 flex items-center justify-between">
         <div className="text-[11px] font-semibold text-white/72">姿态控制</div>
         <button
           type="button"
           onClick={handleReset}
-          className="rounded bg-white/8 px-2 py-0.5 text-[10px] text-white/65 hover:bg-white/14 hover:text-white"
+          className="rounded-sm bg-white/8 px-2 py-0.5 text-[10px] text-white/65 hover:bg-white/14 hover:text-white"
         >
           重置
         </button>
@@ -224,7 +224,7 @@ function PoseSliderRow({ label, value, min, max, step = 1, unit = '°', onChange
         onChange={(event) => onChange(Number(event.target.value))}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
-        className="nodrag nopan rounded border border-white/10 bg-white/5 px-1 py-0.5 text-[10px] text-white/85 outline-none focus:border-accent/50"
+        className="nodrag nopan rounded-sm border border-white/10 bg-white/5 px-1 py-0.5 text-[10px] text-white/85 outline-hidden focus:border-accent/50"
         title={`${label} (${unit})`}
       />
     </label>

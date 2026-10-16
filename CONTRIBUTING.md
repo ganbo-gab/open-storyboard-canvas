@@ -22,6 +22,8 @@ npm run build
 `next` 分支的前端基线为 React 19、Vite 8、TypeScript 7。组件测试使用 React DOM + Testing Library；`npm test -- --run` 默认使用最多两个 fork worker，避免大画布测试耗尽内存。
 TypeScript 7 的路径别名直接使用相对 `paths`，不再配置已移除的 `baseUrl`。
 
+Tailwind CSS 4 通过 `@tailwindcss/vite` 编译，颜色及字体别名维护在 `src/index.css` 的 `@theme inline` 中（无需 JavaScript / PostCSS 配置）。旧版边框、ring 颜色、placeholder 和按钮光标默认值已保留；新增样式应显式指定颜色和 ring 宽度。最低 WebView 基线为 Safari 16.4 / Chromium 111 / Firefox 128。修改主题时检查明暗模式、暖/冷色调以及设置、画布和导演台；v4 的 hover 仅作用于支持悬停的主输入设备，space/divide 选择器和独立 transform 属性也与 v3 不同。
+
 需要桌面能力时再运行：
 
 ```bash

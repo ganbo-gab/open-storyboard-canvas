@@ -58,7 +58,7 @@ export function DreaminaMultiframeEditor({
   };
 
   return (
-    <section className="space-y-2 border-t border-[var(--canvas-node-field-border)] pt-2">
+    <section className="space-y-2 border-t border-(--canvas-node-field-border) pt-2">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-medium text-text-dark">
@@ -84,7 +84,7 @@ export function DreaminaMultiframeEditor({
         {segments.map((segment, index) => (
           <div
             key={index}
-            className="rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-2"
+            className="rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-2"
           >
             <div className="mb-1.5 flex items-center gap-1 text-[10px] font-medium text-text-muted">
               <span>{t('node.aiVideo.frameLabel', { index: index + 1 })}</span>
@@ -109,7 +109,7 @@ export function DreaminaMultiframeEditor({
                   from: index + 1,
                   to: index + 2,
                 })}
-                className="nodrag nowheel min-h-[48px] min-w-0 flex-1 resize-y rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-2 py-1.5 text-[11px] leading-4 text-text-dark outline-none transition-colors placeholder:text-text-muted/70 focus:border-accent/60"
+                className="nodrag nowheel min-h-[48px] min-w-0 flex-1 resize-y rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-1.5 text-[11px] leading-4 text-text-dark outline-hidden transition-colors placeholder:text-text-muted/70 focus:border-accent/60"
               />
               {usesCustomDurations && (
                 <label className="w-[66px] shrink-0 text-[10px] text-text-muted">
@@ -134,7 +134,7 @@ export function DreaminaMultiframeEditor({
                         : defaultDuration;
                       commit(next);
                     }}
-                    className="nodrag nowheel h-8 w-full rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-2 text-[11px] text-text-dark outline-none focus:border-accent/60"
+                    className="nodrag nowheel h-8 w-full rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 text-[11px] text-text-dark outline-hidden focus:border-accent/60"
                   />
                 </label>
               )}

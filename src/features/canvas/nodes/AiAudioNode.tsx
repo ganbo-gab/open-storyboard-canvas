@@ -895,10 +895,10 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
   return (
     <div
       className={`
-        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-2 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative flex h-full flex-col overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-2 shadow-(--canvas-node-shadow) transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
+          : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
       `}
       style={{ width: resolvedWidth, height: resolvedHeight }}
       onClick={() => setSelectedNode(id)}
@@ -911,7 +911,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
           <button
             type="button"
             data-canvas-no-marquee="true"
-            className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] text-text-muted shadow-sm transition-colors hover:border-accent/50 hover:bg-[var(--canvas-node-menu-hover)] hover:text-accent"
+            className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) text-text-muted shadow-xs transition-colors hover:border-accent/50 hover:bg-(--canvas-node-menu-hover) hover:text-accent"
             title={t('node.aiAudio.payloadDebug')}
             aria-label={t('node.aiAudio.payloadDebug')}
             onClick={(event) => {
@@ -930,7 +930,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
         onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
       />
 
-      <div className="relative min-h-[130px] flex-1 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-2">
+      <div className="relative min-h-[130px] flex-1 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-2">
         <div className="mb-1 flex items-center justify-between gap-2 px-1 text-[10px] font-medium text-text-muted">
           <span>{currentInputSchema.text.label}</span>
           {incomingTextReferences.length > 0 ? <span>已接入文本 {incomingTextReferences.length}</span> : null}
@@ -949,7 +949,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
           onMouseDown={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
           placeholder={currentInputSchema.text.placeholder || t('node.aiAudio.promptPlaceholder') as string}
-          className="ui-scrollbar nodrag nopan nowheel h-[calc(100%-22px)] w-full resize-none border-none bg-transparent px-1 py-0.5 pb-5 text-sm leading-6 text-text-dark outline-none placeholder:text-text-muted/80"
+          className="ui-scrollbar nodrag nopan nowheel h-[calc(100%-22px)] w-full resize-none border-none bg-transparent px-1 py-0.5 pb-5 text-sm leading-6 text-text-dark outline-hidden placeholder:text-text-muted/80"
           spellCheck={false}
         />
         <span className="pointer-events-none absolute bottom-2 right-3 text-[10px] text-text-muted/60">
@@ -960,11 +960,11 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
       {(currentInputSchema.controlInstruction.enabled
         || currentInputSchema.referenceAudio.enabled
         || currentInputSchema.promptText.enabled) ? (
-        <div className="ui-scrollbar mt-2 min-h-0 shrink overflow-y-auto rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-2">
+        <div className="ui-scrollbar mt-2 min-h-0 shrink overflow-y-auto rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-2">
           {currentInputSchema.referenceAudio.enabled
             && (activeAudioReference || currentInputSchema.referenceAudio.min > 0) ? (
             <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] text-text-muted">
-              <span className="inline-flex max-w-[260px] items-center rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-2 py-0.5">
+              <span className="inline-flex max-w-[260px] items-center rounded-full border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-0.5">
                 <span className="truncate">
                   {activeAudioReference
                     ? `参考：${activeAudioReference.title}`
@@ -1004,13 +1004,13 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
                 placeholder={currentInputSchema.controlInstruction.placeholder}
-                className="ui-scrollbar nodrag nopan nowheel mt-1 h-[58px] w-full resize-none rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-2 py-1.5 text-xs leading-5 text-text-dark outline-none placeholder:text-text-muted/70 focus:border-accent disabled:cursor-not-allowed disabled:opacity-45"
+                className="ui-scrollbar nodrag nopan nowheel mt-1 h-[58px] w-full resize-none rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-1.5 text-xs leading-5 text-text-dark outline-hidden placeholder:text-text-muted/70 focus:border-accent disabled:cursor-not-allowed disabled:opacity-45"
               />
             </label>
           ) : null}
 
           {currentInputSchema.promptText.enabled ? (
-            <div className="mt-2 rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] p-2">
+            <div className="mt-2 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) p-2">
               <label className="flex items-center gap-2 text-[11px] text-text-muted">
                 <UiCheckbox
                   checked={usePromptText}
@@ -1058,7 +1058,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                     placeholder={isTranscribingReference ? '正在自动识别参考音频文本...' : currentInputSchema.promptText.placeholder}
-                    className="ui-scrollbar nodrag nopan nowheel h-[48px] w-full resize-none rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2 py-1.5 text-xs leading-5 text-text-dark outline-none placeholder:text-text-muted/70 focus:border-accent"
+                    className="ui-scrollbar nodrag nopan nowheel h-[48px] w-full resize-none rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-2 py-1.5 text-xs leading-5 text-text-dark outline-hidden placeholder:text-text-muted/70 focus:border-accent"
                   />
                 </div>
               ) : null}
@@ -1087,7 +1087,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
           </UiButton>
           {modelOpen ? (
             <div
-              className="nowheel absolute bottom-full left-0 z-50 mb-1 w-[260px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-xl"
+              className="nowheel absolute bottom-full left-0 z-50 mb-1 w-[260px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-xl"
               onMouseDown={(event) => event.stopPropagation()}
             >
               {enabledModels.length === 0 ? (
@@ -1105,8 +1105,8 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
                         type="button"
                         className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors ${
                           active
-                            ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
-                            : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                            ? 'bg-(--canvas-node-menu-active) text-text-dark'
+                            : 'text-text-dark hover:bg-(--canvas-node-menu-hover)'
                         }`}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -1160,7 +1160,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
           </UiButton>
           {voiceOpen ? (
             <div
-              className="nowheel absolute bottom-full left-0 z-50 mb-1 w-[280px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-xl"
+              className="nowheel absolute bottom-full left-0 z-50 mb-1 w-[280px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-xl"
               onMouseDown={(event) => event.stopPropagation()}
             >
               {audioSettings.voices.length === 0 ? (
@@ -1178,8 +1178,8 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
                         type="button"
                         className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors ${
                           active
-                            ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
-                            : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                            ? 'bg-(--canvas-node-menu-active) text-text-dark'
+                            : 'text-text-dark hover:bg-(--canvas-node-menu-hover)'
                         }`}
                         title={voice.id}
                         onClick={(event) => {
@@ -1225,7 +1225,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
             </UiButton>
             {paramsOpen ? (
               <div
-                className="nowheel absolute bottom-full right-0 z-50 mb-1 w-[280px] rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-2 shadow-xl"
+                className="nowheel absolute bottom-full right-0 z-50 mb-1 w-[280px] rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-2 shadow-xl"
                 onMouseDown={(event) => event.stopPropagation()}
               >
                 <div className="flex flex-col gap-2">
@@ -1235,7 +1235,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
                       return (
                         <label
                           key={parameter.key}
-                          className="flex items-center gap-2 rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-2 py-1.5 text-xs text-text-muted"
+                          className="flex items-center gap-2 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-1.5 text-xs text-text-muted"
                         >
                           <UiCheckbox
                             checked={value === true}
@@ -1277,7 +1277,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
                               onClick={(event) => event.stopPropagation()}
                               onFocus={(event) => event.stopPropagation()}
                               onKeyDown={(event) => event.stopPropagation()}
-                              className="nodrag nowheel h-7 w-16 rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2 text-right text-xs text-text-dark outline-none focus:border-accent"
+                              className="nodrag nowheel h-7 w-16 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-2 text-right text-xs text-text-dark outline-hidden focus:border-accent"
                             />
                           </div>
                           {parameter.description ? (
@@ -1298,7 +1298,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
                           onClick={(event) => event.stopPropagation()}
                           onFocus={(event) => event.stopPropagation()}
                           onKeyDown={(event) => event.stopPropagation()}
-                          className="nodrag nowheel mt-1 h-8 w-full rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2 text-xs text-text-dark outline-none focus:border-accent"
+                          className="nodrag nowheel mt-1 h-8 w-full rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-2 text-xs text-text-dark outline-hidden focus:border-accent"
                         />
                       </label>
                     );
@@ -1341,13 +1341,13 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
         type="target"
         id="target"
         position={Position.Left}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <Handle
         type="source"
         id="source"
         position={Position.Right}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <NodeResizeHandle
         minWidth={AI_AUDIO_NODE_MIN_WIDTH}
@@ -1361,7 +1361,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
         title={t('node.aiAudio.payloadDebugTitle')}
         onClose={() => setPayloadDebugText(null)}
         widthClassName="w-[min(760px,calc(100vw-32px))]"
-        containerClassName="!z-[13050]"
+        containerClassName="z-13050!"
         footer={(
           <>
             <UiButton
@@ -1387,7 +1387,7 @@ export const AiAudioNode = memo(({ id, data, selected, width, height }: AiAudioN
             {t('node.aiAudio.payloadDebugHint')}
           </div>
           <pre
-            className="ui-scrollbar nowheel max-h-[60vh] overflow-auto rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-3 text-xs leading-5 text-text-dark"
+            className="ui-scrollbar nowheel max-h-[60vh] overflow-auto rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-3 text-xs leading-5 text-text-dark"
             onWheelCapture={(event) => event.stopPropagation()}
             onTouchMoveCapture={(event) => event.stopPropagation()}
           >

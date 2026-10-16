@@ -65,7 +65,7 @@ export function CanvasAgentAttachmentPicker({
         </div>
         <button
           type="button"
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] text-text-muted transition-colors hover:bg-text-dark/[0.05] hover:text-text-dark"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] text-text-muted transition-colors hover:bg-text-dark/5 hover:text-text-dark"
           aria-label={t('common.close')}
           title={t('common.close')}
           onClick={onClose}
@@ -78,7 +78,7 @@ export function CanvasAgentAttachmentPicker({
         <button
           type="button"
           disabled={!selectedNodeHasImage || attachmentCount >= maxAttachments}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[5px] border border-border-dark px-2 text-xs text-text-dark transition-[background-color,transform] hover:bg-text-dark/[0.05] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[5px] border border-border-dark px-2 text-xs text-text-dark transition-[background-color,transform,translate,scale,rotate] hover:bg-text-dark/5 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
           onClick={onAttachSelected}
         >
           <ImagePlus className="h-4 w-4" aria-hidden="true" />
@@ -87,7 +87,7 @@ export function CanvasAgentAttachmentPicker({
         <button
           type="button"
           disabled={isUploading || attachmentCount >= maxAttachments}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[5px] border border-border-dark px-2 text-xs text-text-dark transition-[background-color,transform] hover:bg-text-dark/[0.05] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[5px] border border-border-dark px-2 text-xs text-text-dark transition-[background-color,transform,translate,scale,rotate] hover:bg-text-dark/5 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
           onClick={() => fileInputRef.current?.click()}
         >
           {isUploading
@@ -119,13 +119,13 @@ export function CanvasAgentAttachmentPicker({
           name="canvas-agent-asset-search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          className="min-w-0 flex-1 bg-transparent text-xs text-text-dark outline-none placeholder:text-text-muted/70"
+          className="min-w-0 flex-1 bg-transparent text-xs text-text-dark outline-hidden placeholder:text-text-muted/70"
           placeholder={t('canvasAgent.searchAttachments')}
         />
         {query ? (
           <button
             type="button"
-            className="inline-flex h-8 w-8 items-center justify-center rounded text-text-muted hover:bg-text-dark/[0.05] hover:text-text-dark"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-text-muted hover:bg-text-dark/5 hover:text-text-dark"
             aria-label={t('common.clear')}
             onClick={() => setQuery('')}
           >
@@ -151,10 +151,10 @@ export function CanvasAgentAttachmentPicker({
                   key={asset.id}
                   type="button"
                   disabled={disabled}
-                  className={`group relative overflow-hidden rounded-[5px] border text-left transition-[border-color,background-color,transform] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
+                  className={`group relative overflow-hidden rounded-[5px] border text-left transition-[border-color,background-color,transform,translate,scale,rotate] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
                     selected
-                      ? 'border-accent bg-accent/[0.10]'
-                      : 'border-border-dark bg-text-dark/[0.025] hover:border-accent/50'
+                      ? 'border-accent bg-accent/10'
+                      : 'border-border-dark bg-text-dark/2.5 hover:border-accent/50'
                   }`}
                   title={asset.title}
                   aria-pressed={selected}
@@ -170,7 +170,7 @@ export function CanvasAgentAttachmentPicker({
                   </span>
                   <span className="block truncate px-1.5 py-1.5 text-[10px] text-text-dark">{asset.title}</span>
                   {selected ? (
-                    <span className="absolute right-1.5 top-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white shadow">
+                    <span className="absolute right-1.5 top-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white shadow-sm">
                       <Check className="h-3 w-3" aria-hidden="true" />
                     </span>
                   ) : null}

@@ -63,7 +63,7 @@ export function GlobalErrorDialog({
         {details && (
           <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-bg-dark/60 p-3">
             <div className="mb-2 text-xs font-medium text-text-muted">{t('errorDialog.detailsTitle')}</div>
-            <pre className="ui-scrollbar max-h-[280px] overflow-auto whitespace-pre-wrap break-words text-xs text-text-dark">
+            <pre className="ui-scrollbar max-h-[280px] overflow-auto whitespace-pre-wrap wrap-break-word text-xs text-text-dark">
               {details}
             </pre>
           </div>

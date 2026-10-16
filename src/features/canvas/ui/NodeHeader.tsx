@@ -214,7 +214,7 @@ export function NodeHeader({
             }
           }}
           className={joinClasses(
-            'nodrag nowheel h-6 min-w-[70px] w-full max-w-full rounded border border-[rgba(15,23,42,0.22)] bg-[rgba(255,255,255,0.86)] px-2 text-[13px] font-normal text-text-dark outline-none focus:border-accent/70 dark:border-[rgba(255,255,255,0.24)] dark:bg-black/30',
+            'nodrag nowheel h-6 min-w-[70px] w-full max-w-full rounded-sm border border-[rgba(15,23,42,0.22)] bg-[rgba(255,255,255,0.86)] px-2 text-[13px] font-normal text-text-dark outline-hidden focus:border-accent/70 dark:border-[rgba(255,255,255,0.24)] dark:bg-black/30',
             titleClassName
           )}
         />
@@ -226,7 +226,7 @@ export function NodeHeader({
         type="button"
         ref={setTitleMeasureElement}
         className={joinClasses(
-          'group/title inline-flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap cursor-grab select-none rounded border border-[rgba(15,23,42,0.14)] bg-white/70 px-1.5 text-left shadow-sm active:cursor-grabbing dark:border-white/10 dark:bg-black/20 dark:shadow-none',
+          'group/title inline-flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap cursor-grab select-none rounded-sm border border-[rgba(15,23,42,0.14)] bg-white/70 px-1.5 text-left shadow-xs active:cursor-grabbing dark:border-white/10 dark:bg-black/20 dark:shadow-none',
           NODE_HEADER_TITLE_MAX_WIDTH_CLASS,
           NODE_HEADER_TITLE_CLASS,
           tone,

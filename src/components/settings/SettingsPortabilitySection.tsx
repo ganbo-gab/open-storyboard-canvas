@@ -153,7 +153,7 @@ export function SettingsPortabilitySection() {
             <p className="mt-2 text-xs leading-5 text-text-muted">{t('portability.settings.projectTransferDescription')}</p>
             <p className="mt-2 text-[11px] leading-5 text-text-muted">{t('portability.settings.projectTransferLocation')}</p>
           </section>
-          <section className="rounded-xl border border-accent/25 bg-accent/[0.055] p-4">
+          <section className="rounded-xl border border-accent/25 bg-accent/5.5 p-4">
             <div className="flex items-center gap-2 text-sm font-medium text-text-dark">
               <Settings2 className="h-4 w-4 text-accent" />
               {t('portability.settings.settingsBackupTitle')}
@@ -240,7 +240,7 @@ export function SettingsPortabilitySection() {
         title={t('portability.settings.credentialsWarningTitle')}
         onClose={() => setShowCredentialExportConfirm(false)}
         widthClassName="w-[min(92vw,460px)]"
-        containerClassName="z-[70]"
+        containerClassName="z-70"
         footer={(
           <>
             <UiButton type="button" onClick={() => setShowCredentialExportConfirm(false)}>{t('common.cancel')}</UiButton>
@@ -261,7 +261,7 @@ export function SettingsPortabilitySection() {
         title={t('portability.settings.previewTitle')}
         onClose={() => !isWorking && setImportPayload(null)}
         widthClassName="w-[min(92vw,680px)]"
-        containerClassName="z-[70]"
+        containerClassName="z-70"
         footer={(
           <>
             <UiButton type="button" onClick={() => setImportPayload(null)}>{t('common.cancel')}</UiButton>
@@ -342,7 +342,7 @@ export function SettingsPortabilitySection() {
         title={t('portability.settings.importCredentialsConfirmTitle')}
         onClose={() => setShowCredentialImportConfirm(false)}
         widthClassName="w-[min(92vw,460px)]"
-        containerClassName="z-[70]"
+        containerClassName="z-70"
         footer={(
           <>
             <UiButton type="button" onClick={() => setShowCredentialImportConfirm(false)}>{t('common.cancel')}</UiButton>

@@ -152,9 +152,9 @@ export function ExternalAgentConnectionPanel({
   const canCreate = Boolean(projectId && projectName && tools.length > 0 && busy === null);
   const activeConnection = Boolean(connection?.connectionId);
   const statusClass = connection?.status === 'connected'
-    ? 'border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-700 dark:text-emerald-300'
+    ? 'border-emerald-500/30 bg-emerald-500/8 text-emerald-700 dark:text-emerald-300'
     : connection?.status === 'expired'
-      ? 'border-amber-500/30 bg-amber-500/[0.08] text-amber-700 dark:text-amber-300'
+      ? 'border-amber-500/30 bg-amber-500/8 text-amber-700 dark:text-amber-300'
       : 'border-border-dark bg-text-dark/[0.035] text-text-muted';
   const scope = useMemo(() => connection?.scope.join('、') || '—', [connection?.scope]);
 
@@ -231,7 +231,7 @@ export function ExternalAgentConnectionPanel({
         </div>
         <button
           type="button"
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-text-muted transition-colors duration-150 hover:bg-text-dark/[0.05] hover:text-text-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-40"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-text-muted transition-colors duration-150 hover:bg-text-dark/5 hover:text-text-dark focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-40"
           onClick={() => void refresh()}
           disabled={busy !== null}
           aria-label={t('canvasAgent.externalMcp.refresh')}
@@ -265,7 +265,7 @@ export function ExternalAgentConnectionPanel({
 
       {activeConnection ? (
         <>
-          <dl className="mt-3 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1.5 text-[11px] leading-5 text-text-muted">
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[11px] leading-5 text-text-muted">
             <dt>{t('canvasAgent.externalMcp.expires')}</dt><dd className="text-text-dark">{formatDate(connection?.expiresAt ?? null, i18n.language)}</dd>
             <dt>{t('canvasAgent.externalMcp.connectedAt')}</dt><dd className="text-text-dark">{formatDate(connection?.connectedAt ?? null, i18n.language)}</dd>
             <dt>{t('canvasAgent.externalMcp.lastActivity')}</dt><dd className="text-text-dark">{formatDate(connection?.lastActivityAt ?? null, i18n.language)}</dd>
@@ -280,7 +280,7 @@ export function ExternalAgentConnectionPanel({
                 role="tab"
                 aria-selected={provider === item}
                 onClick={() => setProvider(item)}
-                className={`h-9 flex-1 rounded-md text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${provider === item ? 'bg-text-dark/[0.08] text-text-dark' : 'text-text-muted hover:text-text-dark'}`}
+                className={`h-9 flex-1 rounded-md text-xs font-medium transition-colors duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 ${provider === item ? 'bg-text-dark/8 text-text-dark' : 'text-text-muted hover:text-text-dark'}`}
               >
                 {item === 'codex' ? 'Codex' : 'Claude Code'}
               </button>
@@ -293,12 +293,12 @@ export function ExternalAgentConnectionPanel({
                 <span className="truncate">{t('canvasAgent.externalMcp.mergeConfig', { destination: destination(config) })}</span>
                 <span className="shrink-0 uppercase">{config.format}</span>
               </div>
-              <pre className="mt-2 max-h-56 overflow-auto rounded-lg border border-border-dark bg-black/[0.08] p-3 text-[11px] leading-5 text-text-dark dark:bg-black/20">{config.contents}</pre>
+              <pre className="mt-2 max-h-56 overflow-auto rounded-lg border border-border-dark bg-black/8 p-3 text-[11px] leading-5 text-text-dark dark:bg-black/20">{config.contents}</pre>
               <div className="mt-2 flex flex-wrap justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => void handleCopy()}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border-dark px-3 text-xs text-text-dark transition-colors duration-150 hover:bg-text-dark/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border-dark px-3 text-xs text-text-dark transition-colors duration-150 hover:bg-text-dark/5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60"
                 >
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}
                   {copied ? t('canvasAgent.externalMcp.copied') : t('canvasAgent.externalMcp.copy')}
@@ -307,7 +307,7 @@ export function ExternalAgentConnectionPanel({
                   type="button"
                   onClick={() => void handleRevoke()}
                   disabled={busy !== null}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-500/30 px-3 text-xs text-red-600 transition-colors duration-150 hover:bg-red-500/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 disabled:opacity-40 dark:text-red-300"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-500/30 px-3 text-xs text-red-600 transition-colors duration-150 hover:bg-red-500/8 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-red-400/60 disabled:opacity-40 dark:text-red-300"
                 >
                   {busy === 'revoke' ? <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" /> : <Unplug className="h-3.5 w-3.5" />}
                   {t('canvasAgent.externalMcp.revoke')}
@@ -321,7 +321,7 @@ export function ExternalAgentConnectionPanel({
           type="button"
           onClick={() => void handleCreate()}
           disabled={!canCreate}
-          className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 text-xs font-semibold text-white transition-[background-color,transform] duration-150 hover:bg-accent/90 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+          className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 text-xs font-semibold text-white transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-accent/90 active:scale-[0.99] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy === 'create' ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <ExternalLink className="h-4 w-4" />}
           {t('canvasAgent.externalMcp.create')}
@@ -343,7 +343,7 @@ export function ExternalAgentConnectionPanel({
               type="button"
               disabled={approvalBusy}
               onClick={() => void handleApproval(false)}
-              className="h-9 rounded-lg border border-border-dark px-3 text-xs text-text-muted hover:bg-text-dark/[0.05] disabled:opacity-40"
+              className="h-9 rounded-lg border border-border-dark px-3 text-xs text-text-muted hover:bg-text-dark/5 disabled:opacity-40"
             >
               {t('canvasAgent.externalMcp.deny')}
             </button>
@@ -363,7 +363,7 @@ export function ExternalAgentConnectionPanel({
       {!projectId || !projectName ? (
         <p className="mt-3 text-[11px] leading-5 text-amber-700 dark:text-amber-300">{t('canvasAgent.externalMcp.openProjectFirst')}</p>
       ) : null}
-      {error ? <p className="mt-3 break-words text-[11px] leading-5 text-red-600 dark:text-red-300" role="alert">{error}</p> : null}
+      {error ? <p className="mt-3 wrap-break-word text-[11px] leading-5 text-red-600 dark:text-red-300" role="alert">{error}</p> : null}
     </section>
   );
 }

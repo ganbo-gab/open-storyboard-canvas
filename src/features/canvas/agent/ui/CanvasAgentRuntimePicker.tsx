@@ -49,7 +49,7 @@ export function CanvasAgentRuntimePicker({
   return (
     <section className="shrink-0 border-b border-border-dark/70 px-3 py-2" aria-label={t('canvasAgent.runtime.title')}>
       <div className="flex items-center gap-2">
-        <div className="grid min-w-0 flex-1 grid-cols-3 rounded-[6px] border border-border-dark bg-text-dark/[0.025] p-0.5">
+        <div className="grid min-w-0 flex-1 grid-cols-3 rounded-[6px] border border-border-dark bg-text-dark/2.5 p-0.5">
           {runtimes.map(({ id, icon: Icon }) => {
             const diagnostic = isExternal(id) ? diagnostics[id] : undefined;
             const ready = id === 'builtin' || diagnostic?.availability === 'ready';
@@ -58,10 +58,10 @@ export function CanvasAgentRuntimePicker({
                 key={id}
                 type="button"
                 disabled={disabled}
-                className={`relative inline-flex min-h-9 min-w-0 items-center justify-center gap-1.5 rounded-[4px] px-2 text-[11px] transition-[background-color,color,transform] duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 ${
+                className={`relative inline-flex min-h-9 min-w-0 items-center justify-center gap-1.5 rounded-[4px] px-2 text-[11px] transition-[background-color,color,transform,translate,scale,rotate] duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 ${
                   value === id
-                    ? 'bg-bg-dark text-text-dark shadow-sm'
-                    : 'text-text-muted hover:bg-text-dark/[0.04] hover:text-text-dark'
+                    ? 'bg-bg-dark text-text-dark shadow-xs'
+                    : 'text-text-muted hover:bg-text-dark/4 hover:text-text-dark'
                 }`}
                 aria-pressed={value === id}
                 onClick={() => onChange(id)}
@@ -81,7 +81,7 @@ export function CanvasAgentRuntimePicker({
         <button
           type="button"
           disabled={disabled || isRefreshing}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[5px] border border-border-dark text-text-muted transition-[background-color,color,transform] duration-150 hover:bg-text-dark/[0.05] hover:text-text-dark active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[5px] border border-border-dark text-text-muted transition-[background-color,color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 hover:text-text-dark active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60"
           title={t('canvasAgent.runtime.refresh')}
           aria-label={t('canvasAgent.runtime.refresh')}
           onClick={onRefresh}
@@ -94,7 +94,7 @@ export function CanvasAgentRuntimePicker({
         <div className={`agent-feed-enter mt-2 flex items-start gap-2 rounded-[5px] border px-2.5 py-2 text-[11px] leading-4 ${
           selectedUnavailable
             ? 'border-amber-500/25 bg-amber-500/[0.07] text-amber-800 dark:text-amber-100'
-            : 'border-emerald-500/20 bg-emerald-500/[0.06] text-text-muted'
+            : 'border-emerald-500/20 bg-emerald-500/6 text-text-muted'
         }`}>
           {selectedUnavailable ? (
             <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -106,12 +106,12 @@ export function CanvasAgentRuntimePicker({
               {t(`canvasAgent.runtime.status.${selectedDiagnostic.availability}`)}
               {selectedDiagnostic.version ? ` · ${selectedDiagnostic.version}` : ''}
             </div>
-            {selectedDiagnostic.detail ? <div className="mt-0.5 break-words opacity-80">{selectedDiagnostic.detail}</div> : null}
+            {selectedDiagnostic.detail ? <div className="mt-0.5 wrap-break-word opacity-80">{selectedDiagnostic.detail}</div> : null}
           </div>
           {selectedUnavailable ? (
             <button
               type="button"
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] transition-[background-color,transform] duration-150 hover:bg-current/[0.08] active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/40"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-current/8 active:scale-[0.96] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-current/40"
               title={t('canvasAgent.runtime.installGuide')}
               aria-label={t('canvasAgent.runtime.installGuide')}
               onClick={() => { void openUrl(installUrls[value]); }}

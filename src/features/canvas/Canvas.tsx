@@ -4064,7 +4064,7 @@ export function Canvas() {
   return (
     <div
       ref={wrapperRef}
-      className="relative h-full w-full outline-none"
+      className="relative h-full w-full outline-hidden"
       tabIndex={0}
       onPointerDown={handleCanvasPointerDown}
       onPointerMove={handleCanvasPointerMove}
@@ -4129,7 +4129,7 @@ export function Canvas() {
 
       {marqueeRect && (
         <div
-          className="pointer-events-none absolute z-[12000] rounded border border-accent/80 bg-accent/15 shadow-[0_0_0_1px_rgba(255,255,255,0.16)_inset]"
+          className="pointer-events-none absolute z-12000 rounded-sm border border-accent/80 bg-accent/15 shadow-[0_0_0_1px_rgba(255,255,255,0.16)_inset]"
           style={{
             left: marqueeRect.left,
             top: marqueeRect.top,
@@ -4141,7 +4141,7 @@ export function Canvas() {
 
       {!marqueeRect && selectionBoundsRect && (
         <div
-          className="pointer-events-none absolute z-[11990] rounded border border-accent/80 bg-accent/10 shadow-[0_0_0_1px_rgba(255,255,255,0.14)_inset]"
+          className="pointer-events-none absolute z-11990 rounded-sm border border-accent/80 bg-accent/10 shadow-[0_0_0_1px_rgba(255,255,255,0.14)_inset]"
           style={{
             left: selectionBoundsRect.left,
             top: selectionBoundsRect.top,
@@ -4154,7 +4154,7 @@ export function Canvas() {
       {batchToolbarPosition && (selectedNodeIds.length > 1 || isSingleSelectedGroup) && (
         <div
           data-canvas-no-marquee="true"
-          className="absolute z-[12020] flex -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] px-2 py-1.5 text-xs text-text-dark shadow-2xl"
+          className="absolute z-12020 flex -translate-x-1/2 items-center gap-1 rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) px-2 py-1.5 text-xs text-text-dark shadow-2xl"
           style={{
             left: batchToolbarPosition.left,
             top: batchToolbarPosition.top,
@@ -4169,7 +4169,7 @@ export function Canvas() {
           </span>
           <button
             type="button"
-            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-(--canvas-node-menu-hover)"
             onClick={handleBatchCopy}
             title={t('canvas.batchToolbar.copy')}
           >
@@ -4178,7 +4178,7 @@ export function Canvas() {
           </button>
           <button
             type="button"
-            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-[var(--canvas-node-menu-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-(--canvas-node-menu-hover) disabled:cursor-not-allowed disabled:opacity-40"
             disabled={selectedNodeIds.length < 2}
             onClick={handleBatchGroup}
             title={t('canvas.batchToolbar.group')}
@@ -4188,7 +4188,7 @@ export function Canvas() {
           </button>
           <button
             type="button"
-            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-[var(--canvas-node-menu-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-(--canvas-node-menu-hover) disabled:cursor-not-allowed disabled:opacity-40"
             disabled={selectedTagGroupMemberNodeIds.length < 2}
             onClick={handleBatchTagGroup}
             title={selectedTagGroupMemberNodeIds.length < 2
@@ -4207,7 +4207,7 @@ export function Canvas() {
           </button>
           <button
             type="button"
-            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-[var(--canvas-node-menu-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-(--canvas-node-menu-hover) disabled:cursor-not-allowed disabled:opacity-40"
             disabled={selectedGroupNodeIds.length === 0}
             onClick={handleBatchUngroup}
             title={t('canvas.batchToolbar.ungroup')}
@@ -4217,7 +4217,7 @@ export function Canvas() {
           </button>
           <button
             type="button"
-            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-[var(--canvas-node-menu-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-(--canvas-node-menu-hover) disabled:cursor-not-allowed disabled:opacity-40"
             disabled={selectedBatchTriggerNodeIds.length === 0}
             onClick={handleBatchTrigger}
             title={t('canvas.batchToolbar.trigger')}
@@ -4283,7 +4283,7 @@ export function Canvas() {
       {nodeContextMenu && (
         <div
           data-canvas-no-marquee="true"
-          className="absolute z-[12030] min-w-32 overflow-hidden rounded-md border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] py-1 text-sm text-text-dark shadow-2xl"
+          className="absolute z-12030 min-w-32 overflow-hidden rounded-md border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) py-1 text-sm text-text-dark shadow-2xl"
           style={{
             left: nodeContextMenu.position.x,
             top: nodeContextMenu.position.y,
@@ -4296,7 +4296,7 @@ export function Canvas() {
             <>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-(--canvas-node-menu-hover)"
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -4308,7 +4308,7 @@ export function Canvas() {
               </button>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-(--canvas-node-menu-hover)"
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -4318,13 +4318,13 @@ export function Canvas() {
                 <ImagePlus className="h-4 w-4" />
                 {t('nodeToolbar.generateImage')}
               </button>
-              <div className="my-1 h-px bg-[var(--canvas-node-border)]" />
+              <div className="my-1 h-px bg-(--canvas-node-border)" />
             </>
           )}
           {nodeContextMenu.nodeId && (
             <button
               type="button"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-(--canvas-node-menu-hover)"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -4337,7 +4337,7 @@ export function Canvas() {
           )}
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-(--canvas-node-menu-hover)"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();

@@ -269,7 +269,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
 
   return createPortal((
     <div
-      className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-[130] flex items-center justify-center p-3 sm:p-5`}
+      className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-130 flex items-center justify-center p-3 sm:p-5`}
       onMouseDown={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
       onWheelCapture={(event) => event.stopPropagation()}
@@ -279,7 +279,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
         type="button"
         tabIndex={-1}
         aria-hidden="true"
-        className={`absolute inset-0 bg-black/55 transition-opacity duration-[180ms] ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 bg-black/55 transition-opacity duration-180 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
         onClick={requestClose}
       />
       <div
@@ -290,9 +290,9 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
         aria-describedby={descriptionId}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className={`relative flex max-h-[calc(100vh-64px)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-[var(--ui-border-soft)] bg-[var(--ui-surface-panel)] text-text-dark shadow-[var(--ui-shadow-panel)] transition-[opacity,transform] duration-[180ms] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'}`}
+        className={`relative flex max-h-[calc(100vh-64px)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-(--ui-border-soft) bg-(--ui-surface-panel) text-text-dark shadow-(--ui-shadow-panel) transition-[opacity,transform,translate,scale,rotate] duration-180 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'}`}
       >
-        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--ui-border-soft)] px-4 py-3 sm:px-5">
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-(--ui-border-soft) px-4 py-3 sm:px-5">
           <div className="min-w-0">
             <h2 id={titleId} className="text-base font-semibold">{t('promptImport.title')}</h2>
             <p id={descriptionId} className="mt-0.5 text-xs text-text-muted">
@@ -304,7 +304,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
             onClick={requestClose}
             aria-label={t('common.close')}
             title={t('common.close')}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-[var(--canvas-node-menu-hover)] hover:text-text-dark"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-(--canvas-node-menu-hover) hover:text-text-dark"
           >
             <X className="h-4 w-4" />
           </button>
@@ -334,14 +334,14 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
               {isTxtFile(file) && (
                 <fieldset className="space-y-2">
                   <legend className="text-sm font-medium">{t('promptImport.txtMode.label')}</legend>
-                  <div className="inline-flex max-w-full rounded-md border border-[var(--ui-border-soft)] p-1">
+                  <div className="inline-flex max-w-full rounded-md border border-(--ui-border-soft) p-1">
                     {(['nonEmptyLines', 'paragraphs'] as PromptImportTxtMode[]).map((mode) => (
                       <button
                         key={mode}
                         type="button"
                         aria-pressed={txtMode === mode}
                         onClick={() => setTxtMode(mode)}
-                        className={`min-h-9 rounded px-3 py-1.5 text-xs transition-colors ${txtMode === mode ? 'bg-accent text-white' : 'text-text-muted hover:text-text-dark'}`}
+                        className={`min-h-9 rounded-sm px-3 py-1.5 text-xs transition-colors ${txtMode === mode ? 'bg-accent text-white' : 'text-text-muted hover:text-text-dark'}`}
                       >
                         {t(`promptImport.txtMode.${mode}`)}
                       </button>
@@ -362,7 +362,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={Math.round(progress * 100)}
-                    className="h-1.5 overflow-hidden rounded bg-[var(--canvas-node-field-bg)]"
+                    className="h-1.5 overflow-hidden rounded-sm bg-(--canvas-node-field-bg)"
                   >
                     <div
                       className="h-full w-full origin-left bg-accent transition-transform"
@@ -472,18 +472,18 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
                 </p>
               )}
 
-              <div className="overflow-hidden rounded-md border border-[var(--ui-border-soft)]">
-                <div className="flex items-center justify-between border-b border-[var(--ui-border-soft)] px-3 py-2 text-xs text-text-muted">
+              <div className="overflow-hidden rounded-md border border-(--ui-border-soft)">
+                <div className="flex items-center justify-between border-b border-(--ui-border-soft) px-3 py-2 text-xs text-text-muted">
                   <span>{t('promptImport.preview')}</span>
                   <span>{t('promptImport.previewLimit', { count: Math.min(PROMPT_IMPORT_PREVIEW_ROWS, previewRows.length) })}</span>
                 </div>
                 <div className="ui-scrollbar max-h-[310px] overflow-auto">
                   <table className="min-w-full border-collapse text-left text-xs">
-                    <thead className="sticky top-0 z-10 bg-[var(--ui-surface-panel)] text-text-muted">
+                    <thead className="sticky top-0 z-10 bg-(--ui-surface-panel) text-text-muted">
                       <tr>
-                        <th scope="col" className="border-b border-r border-[var(--ui-border-soft)] px-2 py-2 font-medium">#</th>
+                        <th scope="col" className="border-b border-r border-(--ui-border-soft) px-2 py-2 font-medium">#</th>
                         {columnOptions.map((column) => (
-                          <th key={column.index} scope="col" className="min-w-36 border-b border-r border-[var(--ui-border-soft)] px-2 py-2 font-medium last:border-r-0">
+                          <th key={column.index} scope="col" className="min-w-36 border-b border-r border-(--ui-border-soft) px-2 py-2 font-medium last:border-r-0">
                             {column.label}
                           </th>
                         ))}
@@ -491,12 +491,12 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
                     </thead>
                     <tbody>
                       {previewRows.map((row) => (
-                        <tr key={row.sourceRowNumber} className="align-top odd:bg-black/[0.03] dark:odd:bg-white/[0.02]">
-                          <th scope="row" className="border-b border-r border-[var(--ui-border-soft)] px-2 py-2 font-normal text-text-muted">
+                        <tr key={row.sourceRowNumber} className="align-top odd:bg-black/3 dark:odd:bg-white/2">
+                          <th scope="row" className="border-b border-r border-(--ui-border-soft) px-2 py-2 font-normal text-text-muted">
                             {row.sourceRowNumber}
                           </th>
                           {columnOptions.map((column) => (
-                            <td key={column.index} className="max-w-80 whitespace-pre-wrap break-words border-b border-r border-[var(--ui-border-soft)] px-2 py-2 last:border-r-0">
+                            <td key={column.index} className="max-w-80 whitespace-pre-wrap wrap-break-word border-b border-r border-(--ui-border-soft) px-2 py-2 last:border-r-0">
                               {row.cells[column.index] ?? ''}
                             </td>
                           ))}
@@ -511,7 +511,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
 
           {stage === 'confirm' && mapping && (
             <div className="space-y-4">
-              <div className="flex items-start gap-3 rounded-md border border-[var(--ui-border-soft)] bg-[var(--canvas-node-field-bg)] px-4 py-3">
+              <div className="flex items-start gap-3 rounded-md border border-(--ui-border-soft) bg-(--canvas-node-field-bg) px-4 py-3">
                 <FileSpreadsheet className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
                 <div className="min-w-0">
                   <p className="font-medium">{t('promptImport.confirmTitle', { count: mapping.rows.length })}</p>
@@ -532,7 +532,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
           )}
         </div>
 
-        <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[var(--ui-border-soft)] px-4 py-3 sm:px-5">
+        <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-(--ui-border-soft) px-4 py-3 sm:px-5">
           {stage === 'select' && (
             <>
               <UiButton type="button" onClick={requestClose}>{t('common.cancel')}</UiButton>

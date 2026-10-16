@@ -189,7 +189,7 @@ export const BlueprintPosePreview = memo(function BlueprintPosePreview({
     <div
       ref={containerRef}
       style={{ width, height }}
-      className="overflow-hidden rounded-lg border border-white/10 bg-black/[0.4]"
+      className="overflow-hidden rounded-lg border border-white/10 bg-black/40"
     />
   );
 });

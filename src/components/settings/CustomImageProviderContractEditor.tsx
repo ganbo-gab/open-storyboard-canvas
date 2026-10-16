@@ -63,7 +63,7 @@ export function CustomImageProviderContractEditor({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           spellCheck={false}
-          className={`ui-scrollbar h-80 w-full resize-y rounded-md border bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-none ${
+          className={`ui-scrollbar h-80 w-full resize-y rounded-md border bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-hidden ${
             issues.length > 0 ? 'border-red-500/45 focus:border-red-400' : 'border-border-dark focus:border-accent/50'
           }`}
           aria-label={t('settings.customProviders.contract.editorLabel')}

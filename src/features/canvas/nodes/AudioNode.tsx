@@ -535,14 +535,14 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
   return (
     <div
       className={`
-        group relative overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-0 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-0 shadow-(--canvas-node-shadow) transition-colors duration-150
         ${hasGenerationError
           ? (selected
             ? 'border-red-400 shadow-[0_0_0_1px_rgba(248,113,113,0.42)]'
             : 'border-red-500/70 bg-[rgba(127,29,29,0.12)] hover:border-red-400/80')
           : selected
             ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-            : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
+            : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
       `}
       style={{ width: resolvedWidth, height: resolvedHeight }}
       onClick={handleClick}
@@ -560,7 +560,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
         onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
         rightSlot={generationElapsedText ? (
           <span
-            className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-[1px] text-[10px] font-medium leading-tight text-white"
+            className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-px text-[10px] font-medium leading-tight text-white"
             title={t('node.audioNode.generationElapsed') as string}
           >
             {generationElapsedText}
@@ -568,11 +568,11 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
         ) : null}
       />
 
-      <div className={`relative flex h-full w-full flex-col justify-center overflow-hidden rounded-[var(--node-radius)] p-3 ${hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'}`}>
+      <div className={`relative flex h-full w-full flex-col justify-center overflow-hidden rounded-(--node-radius) p-3 ${hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-(--canvas-node-media-bg)'}`}>
         {audioSource ? (
           <div className="flex h-full min-h-0 flex-col justify-center gap-2.5">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-accent">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-accent">
                 <Music2 className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
@@ -587,7 +587,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
               </div>
               <button
                 type="button"
-                className="nodrag nowheel inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-text-muted transition-colors hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)] hover:text-text-dark"
+                className="nodrag nowheel inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-text-muted transition-colors hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover) hover:text-text-dark"
                 title={t('node.audioNode.replace') as string}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -598,14 +598,14 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
               </button>
             </div>
             <div
-              className="nodrag nowheel flex items-center gap-3 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-3 py-2"
+              className="nodrag nowheel flex items-center gap-3 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-3 py-2"
               onClick={(event) => event.stopPropagation()}
               onMouseDown={(event) => event.stopPropagation()}
               onPointerDown={(event) => event.stopPropagation()}
             >
               <button
                 type="button"
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-text-dark transition-colors hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-text-dark transition-colors hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)"
                 title={isPlaying ? '暂停' : '播放'}
                 aria-label={isPlaying ? '暂停音频' : '播放音频'}
                 onClick={(event) => {
@@ -613,7 +613,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
                   void togglePlayback();
                 }}
               >
-                {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
+                {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
               </button>
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <div ref={waveformRef} className="relative h-8 w-full">
@@ -670,13 +670,13 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
                         <button
                           type="button"
                           aria-label="调整裁剪开始位置"
-                          className="absolute -left-1.5 top-1/2 h-7 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border border-accent/80 bg-[var(--canvas-node-menu-bg)] shadow-lg"
+                          className="absolute -left-1.5 top-1/2 h-7 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border border-accent/80 bg-(--canvas-node-menu-bg) shadow-lg"
                           onPointerDown={(event) => beginTrimDrag('start', event)}
                         />
                         <button
                           type="button"
                           aria-label="调整裁剪结束位置"
-                          className="absolute -right-1.5 top-1/2 h-7 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border border-accent/80 bg-[var(--canvas-node-menu-bg)] shadow-lg"
+                          className="absolute -right-1.5 top-1/2 h-7 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border border-accent/80 bg-(--canvas-node-menu-bg) shadow-lg"
                           onPointerDown={(event) => beginTrimDrag('end', event)}
                         />
                       </div>
@@ -691,7 +691,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
             </div>
             {isAudioTrimMode ? (
               <div
-                className="nodrag nowheel flex items-center gap-2 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2 py-1.5"
+                className="nodrag nowheel flex items-center gap-2 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-2 py-1.5"
                 onClick={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -702,7 +702,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
                 </span>
                 <button
                   type="button"
-                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-text-muted transition-colors hover:text-text-dark disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-text-muted transition-colors hover:text-text-dark disabled:cursor-not-allowed disabled:opacity-50"
                   title="取消裁剪"
                   disabled={isTrimming}
                   onClick={(event) => {
@@ -760,7 +760,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
             <span className="text-center text-[12px] font-semibold leading-5 text-red-800 dark:text-red-200">
               {t('node.audioNode.generationFailed')}
             </span>
-            <span className="max-h-[72px] overflow-y-auto break-words text-center text-[11px] leading-5 text-red-800/90 dark:text-red-200/90">
+            <span className="max-h-[72px] overflow-y-auto wrap-break-word text-center text-[11px] leading-5 text-red-800/90 dark:text-red-200/90">
               {generationError}
             </span>
           </div>
@@ -781,7 +781,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="absolute inset-0 bg-bg-dark/55" />
             <div
-              className="absolute left-0 top-0 h-full w-full origin-left bg-gradient-to-r from-[rgba(255,255,255,0.34)] to-[rgba(255,255,255,0.05)] transition-transform duration-100 ease-linear"
+              className="absolute left-0 top-0 h-full w-full origin-left bg-linear-to-r from-[rgba(255,255,255,0.34)] to-[rgba(255,255,255,0.05)] transition-transform duration-100 ease-linear"
               style={{ transform: `scaleX(${progress})` }}
             />
           </div>
@@ -800,13 +800,13 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
         type="target"
         id="target"
         position={Position.Left}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <Handle
         type="source"
         id="source"
         position={Position.Right}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <NodeResizeHandle
         minWidth={AUDIO_NODE_MIN_WIDTH}

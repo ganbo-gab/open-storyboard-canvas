@@ -69,7 +69,7 @@ const PANORAMA_KEY_STEP = 4 * (Math.PI / 180);
 const PANORAMA_CAPTURE_RENDER_TIMEOUT_MS = 600;
 const PANORAMA_CAPTURE_SAMPLE_SIZE = 16;
 const PANORAMA_VIEWER_BUTTON_CLASS =
-  'group relative flex h-11 w-11 items-center justify-center rounded-lg bg-white/95 text-black shadow-lg backdrop-blur-sm transition-[background-color,transform,box-shadow] duration-150 hover:bg-white hover:scale-105 active:scale-95 ring-1 ring-black/25';
+  'group relative flex h-11 w-11 items-center justify-center rounded-lg bg-white/95 text-black shadow-lg backdrop-blur-xs transition-[background-color,transform,box-shadow,translate,scale,rotate] duration-150 hover:bg-white hover:scale-105 active:scale-95 ring-1 ring-black/25';
 
 function getViewerCanvas(viewer: Viewer | null): HTMLCanvasElement | null {
   if (!viewer) return null;
@@ -353,7 +353,7 @@ const PanoramaViewerSurface = memo(({
 
   return (
     <div className={`nodrag nopan nowheel relative ${className ?? ''}`}>
-      <div ref={containerRef} className="nodrag nopan nowheel w-full h-full outline-none" tabIndex={0} />
+      <div ref={containerRef} className="nodrag nopan nowheel w-full h-full outline-hidden" tabIndex={0} />
       {normalizing && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white/85 text-xs">
           <Loader2 className="w-4 h-4 animate-spin mr-2" /> {t('node.panoramaViewer.loading')}
@@ -393,7 +393,7 @@ const PanoramaViewerSurface = memo(({
           <span className="pointer-events-none absolute top-full mt-2 right-0 whitespace-nowrap rounded-md bg-black/90 px-2 py-1 text-[11px] text-white/95 opacity-0 group-hover:opacity-100 transition-opacity">{closeLabel}</span>
         </button>
       </div>
-      <div className="absolute bottom-2 left-2 text-[10px] text-white/55 bg-black/55 px-2 py-0.5 rounded backdrop-blur-sm pointer-events-none">
+      <div className="absolute bottom-2 left-2 text-[10px] text-white/55 bg-black/55 px-2 py-0.5 rounded-sm backdrop-blur-xs pointer-events-none">
         {projection === 'spherical' ? t('node.panoramaViewer.spherical') : t('node.panoramaViewer.cylindrical')} · {t('node.panoramaViewer.controlsHint')}
       </div>
     </div>
@@ -669,12 +669,12 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
     // panorama → panel-like setup" flow the user expects.
     return (
       <div
-        className={`relative w-[1080px] overflow-hidden rounded-xl border bg-[var(--canvas-node-bg)] shadow-[var(--canvas-node-shadow)] ${selected ? 'border-accent' : 'border-[var(--canvas-node-border)]'}`}
+        className={`relative w-[1080px] overflow-hidden rounded-xl border bg-(--canvas-node-bg) shadow-(--canvas-node-shadow) ${selected ? 'border-accent' : 'border-(--canvas-node-border)'}`}
         onDoubleClick={(e) => e.stopPropagation()}
       >
-        <Handle type="target" id="target" position={Position.Left} className="!bg-accent/70" />
-        <Handle type="source" id="source" position={Position.Right} className="!bg-accent/70" />
-        <div className="flex items-center justify-between border-b border-[var(--canvas-node-divider)] px-4 py-2.5">
+        <Handle type="target" id="target" position={Position.Left} className="bg-accent/70!" />
+        <Handle type="source" id="source" position={Position.Right} className="bg-accent/70!" />
+        <div className="flex items-center justify-between border-b border-(--canvas-node-divider) px-4 py-2.5">
           <div>
             <div className="text-sm font-semibold text-text-dark">全景图生成</div>
             <div className="mt-0.5 text-[11px] text-text-muted">
@@ -684,7 +684,7 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); deleteNode(id); }}
-            className="nodrag nopan nowheel flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-[var(--canvas-node-menu-hover)] hover:text-text-dark"
+            className="nodrag nopan nowheel flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-(--canvas-node-menu-hover) hover:text-text-dark"
             title="删除节点"
           >
             <X className="w-4 h-4" />
@@ -736,21 +736,21 @@ export const PanoramaNode = memo(({ id, data, selected }: PanoramaNodeProps) => 
   return (
     <>
       <div
-        className={`h-[340px] w-[560px] overflow-hidden rounded-xl border bg-[var(--canvas-node-bg)] shadow-[var(--canvas-node-shadow)] ${selected ? 'border-accent' : 'border-[var(--canvas-node-border)]'}`}
+        className={`h-[340px] w-[560px] overflow-hidden rounded-xl border bg-(--canvas-node-bg) shadow-(--canvas-node-shadow) ${selected ? 'border-accent' : 'border-(--canvas-node-border)'}`}
         onDoubleClick={(e) => {
           e.stopPropagation();
           setIsExpanded(true);
         }}
       >
-        <Handle type="target" id="target" position={Position.Left} className="!bg-accent/70" />
-        <Handle type="source" id="source" position={Position.Right} className="!bg-accent/70" />
+        <Handle type="target" id="target" position={Position.Left} className="bg-accent/70!" />
+        <Handle type="source" id="source" position={Position.Right} className="bg-accent/70!" />
         <div className="relative w-full h-full">
           {viewerSurface}
         </div>
       </div>
       {isExpanded && createPortal(
         <div
-          className="fixed inset-0 z-[1400] flex items-center justify-center bg-black/[0.88] p-5 backdrop-blur-sm"
+          className="fixed inset-0 z-1400 flex items-center justify-center bg-black/88 p-5 backdrop-blur-xs"
           onClick={() => setIsExpanded(false)}
           onDoubleClick={(e) => e.stopPropagation()}
         >

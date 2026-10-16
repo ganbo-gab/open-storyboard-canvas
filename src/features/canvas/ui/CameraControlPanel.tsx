@@ -205,7 +205,7 @@ const HoverTip = memo(({ title, description, useCase, children }: HoverTipProps)
         createPortal(
           <div
             ref={tipRef}
-            className="pointer-events-none fixed z-[20000] w-[260px] rounded-lg border border-white/15 bg-[#1a1a1a]/98 p-3 shadow-2xl"
+            className="pointer-events-none fixed z-20000 w-[260px] rounded-lg border border-white/15 bg-[#1a1a1a]/98 p-3 shadow-2xl"
             style={{
               left: `${coords.left}px`,
               top: coords.placement === 'bottom' ? `${coords.top}px` : undefined,
@@ -220,7 +220,7 @@ const HoverTip = memo(({ title, description, useCase, children }: HoverTipProps)
               <div className="mt-1 text-[11px] text-white/70 leading-5">{description}</div>
             )}
             {useCase && (
-              <div className="mt-2 rounded bg-white/5 px-2 py-1 text-[10px] text-white/55">
+              <div className="mt-2 rounded-sm bg-white/5 px-2 py-1 text-[10px] text-white/55">
                 使用场景：{useCase}
               </div>
             )}
@@ -256,7 +256,7 @@ const CardColumn = memo(({ label, tooltipTitle, tooltipDesc, tooltipUseCase, vis
         <ChevronUp className="h-3.5 w-3.5" />
       </button>
       <HoverTip title={tooltipTitle} description={tooltipDesc} useCase={tooltipUseCase}>
-        <div className="relative flex h-[140px] w-[140px] flex-col items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 pt-2 pb-2 hover:border-white/25 hover:bg-white/[0.06] transition-colors cursor-help">
+        <div className="relative flex h-[140px] w-[140px] flex-col items-center justify-between rounded-xl border border-white/10 bg-white/3 px-3 pt-2 pb-2 hover:border-white/25 hover:bg-white/6 transition-colors cursor-help">
           <span className="text-[11px] font-medium tracking-wide text-white/55">{label}</span>
           <div className="flex flex-1 items-center justify-center w-full">{visual}</div>
           {cornerBadge && (
@@ -420,7 +420,7 @@ export const CameraControlPanel = memo(({ isOpen, onClose, cameraControl, onAppl
         />
       </div>
 
-      <div className="mx-5 mb-3 rounded-lg border border-white/8 bg-white/[0.03] px-3.5 py-2.5">
+      <div className="mx-5 mb-3 rounded-lg border border-white/8 bg-white/3 px-3.5 py-2.5">
         <div className="text-[10px] uppercase tracking-wide text-white/40">当前配置</div>
         <div className="mt-0.5 text-xs text-white/90">{summary}</div>
       </div>
@@ -457,14 +457,14 @@ export const CameraControlPanel = memo(({ isOpen, onClose, cameraControl, onAppl
               onClick={() => setEnabled((v) => !v)}
               className={`relative inline-flex h-6 w-11 cursor-pointer items-center rounded-full transition-colors ${enabled ? 'bg-emerald-500/95' : 'bg-white/15'}`}
             >
-              <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
+              <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${enabled ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
             </button>
           </div>
 
           <button
             type="button"
             onClick={handleApply}
-            className="rounded-md bg-white px-4 py-1.5 text-xs font-medium text-black transition-[background-color,transform] duration-150 hover:bg-white/95 active:scale-95"
+            className="rounded-md bg-white px-4 py-1.5 text-xs font-medium text-black transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-white/95 active:scale-95"
           >
             <CameraIcon className="mr-1 inline h-3 w-3" />
             {t('cameraControl.apply')}

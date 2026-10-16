@@ -424,7 +424,7 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
             <input
               value={label}
               onChange={(event) => setLabel(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="例如：我的文本模型代理"
             />
           </label>
@@ -433,7 +433,7 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
             <input
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="sk-..."
               type="password"
             />
@@ -443,7 +443,7 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
             <input
               value={baseUrl}
               onChange={(event) => setBaseUrl(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="https://api.openai.com"
             />
           </label>
@@ -452,7 +452,7 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
             <input
               value={endpointPath}
               onChange={(event) => setEndpointPath(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="/v1/chat/completions"
             />
           </label>
@@ -461,7 +461,7 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
             <input
               value={modelListEndpointPath}
               onChange={(event) => setModelListEndpointPath(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="/v1/models"
             />
           </label>
@@ -470,7 +470,7 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
             <input
               value={apiStyle}
               onChange={(event) => setApiStyle(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="openai-compatible / anthropic / google-gemini"
             />
           </label>
@@ -511,7 +511,7 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
                     onChange={(event) => setModels((current) => current.map((item) => (
                       item.id === model.id ? { ...item, description: event.target.value } : item
                     )))}
-                    className="min-w-0 rounded-md border border-border-dark bg-surface-dark px-2 py-1.5 text-[11px] text-text-dark outline-none focus:border-accent"
+                    className="min-w-0 rounded-md border border-border-dark bg-surface-dark px-2 py-1.5 text-[11px] text-text-dark outline-hidden focus:border-accent"
                     placeholder="模型说明（选填）"
                   />
                   <button
@@ -542,7 +542,7 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
                       onChange={(event) => setModels((current) => current.map((item) => (
                         item.id === model.id ? { ...item, contextWindow: event.target.value } : item
                       )))}
-                      className="min-w-0 flex-1 bg-transparent font-mono text-text-dark outline-none"
+                      className="min-w-0 flex-1 bg-transparent font-mono text-text-dark outline-hidden"
                       placeholder={DEFAULT_CHAT_CONTEXT_WINDOW}
                     />
                   </label>
@@ -553,7 +553,7 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
                       onChange={(event) => setModels((current) => current.map((item) => (
                         item.id === model.id ? { ...item, maxOutputTokens: event.target.value } : item
                       )))}
-                      className="min-w-0 flex-1 bg-transparent font-mono text-text-dark outline-none"
+                      className="min-w-0 flex-1 bg-transparent font-mono text-text-dark outline-hidden"
                       placeholder={DEFAULT_CHAT_MAX_OUTPUT_TOKENS}
                     />
                   </label>
@@ -564,13 +564,13 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
               <input
                 value={newModelId}
                 onChange={(event) => setNewModelId(event.target.value)}
-                className="rounded-md border border-dashed border-border-dark bg-surface-dark px-2 py-1.5 font-mono text-[11px] text-text-dark outline-none focus:border-accent"
+                className="rounded-md border border-dashed border-border-dark bg-surface-dark px-2 py-1.5 font-mono text-[11px] text-text-dark outline-hidden focus:border-accent"
                 placeholder="模型 ID，例如 gpt-5.4"
               />
               <input
                 value={newModelDescription}
                 onChange={(event) => setNewModelDescription(event.target.value)}
-                className="rounded-md border border-dashed border-border-dark bg-surface-dark px-2 py-1.5 text-[11px] text-text-dark outline-none focus:border-accent"
+                className="rounded-md border border-dashed border-border-dark bg-surface-dark px-2 py-1.5 text-[11px] text-text-dark outline-hidden focus:border-accent"
                 placeholder="描述"
               />
               <button
@@ -596,7 +596,7 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
           <textarea
             value={defaultParamsText}
             onChange={(event) => setDefaultParamsText(event.target.value)}
-            className="ui-scrollbar mt-2 h-[110px] w-full resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-none focus:border-accent"
+            className="ui-scrollbar mt-2 h-[110px] w-full resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-hidden focus:border-accent"
             spellCheck={false}
           />
           {!parsedDefaultParams.ok && (
@@ -618,7 +618,7 @@ export const ChatProvidersSection = memo(function ChatProvidersSection() {
                 setTemplateExtraParams(parsed.value);
               }
             }}
-            className="ui-scrollbar mt-2 h-[120px] w-full resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-none focus:border-accent"
+            className="ui-scrollbar mt-2 h-[120px] w-full resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-hidden focus:border-accent"
             spellCheck={false}
           />
         </details>

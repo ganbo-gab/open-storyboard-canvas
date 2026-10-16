@@ -42,8 +42,8 @@ type Props = {
   className?: string;
 };
 
-const FIELD_CLASS = 'h-8 w-full min-w-0 rounded border border-white/15 bg-[#171a1f] px-2 text-xs text-white outline-none transition-colors hover:border-white/30 focus:border-teal-400/70 focus:ring-1 focus:ring-teal-400/30';
-const BUTTON_CLASS = 'inline-flex h-8 items-center justify-center gap-1.5 rounded border border-white/15 bg-white/5 text-xs text-white/80 transition-colors hover:border-teal-300/40 hover:bg-white/10 active:bg-teal-400/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/60';
+const FIELD_CLASS = 'h-8 w-full min-w-0 rounded-sm border border-white/15 bg-[#171a1f] px-2 text-xs text-white outline-hidden transition-colors hover:border-white/30 focus:border-teal-400/70 focus:ring-1 focus:ring-teal-400/30';
+const BUTTON_CLASS = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-sm border border-white/15 bg-white/5 text-xs text-white/80 transition-colors hover:border-teal-300/40 hover:bg-white/10 active:bg-teal-400/20 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-teal-400/60';
 
 type NumberFieldProps = {
   label: string;

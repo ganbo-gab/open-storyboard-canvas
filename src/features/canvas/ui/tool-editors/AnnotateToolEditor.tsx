@@ -1029,7 +1029,7 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
                   onChange={(event) =>
                     handleStyleInputChange({ fontSizePercent: Number(event.target.value) })
                   }
-                  className="h-9 w-24 rounded-lg border border-[rgba(255,255,255,0.14)] bg-bg-dark/80 px-2 text-sm text-text-dark outline-none"
+                  className="h-9 w-24 rounded-lg border border-[rgba(255,255,255,0.14)] bg-bg-dark/80 px-2 text-sm text-text-dark outline-hidden"
                 />
                 <span className="text-xs text-text-muted">%</span>
               </div>
@@ -1089,7 +1089,7 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
         <div
           ref={stageHostRef}
           tabIndex={0}
-          className="relative flex h-full w-full items-center justify-center p-2 outline-none"
+          className="relative flex h-full w-full items-center justify-center p-2 outline-hidden"
           onKeyDown={handleStageKeyDown}
         >
           <Stage
@@ -1148,7 +1148,7 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
 
           {textEditorState && textEditorStagePos && (
             <div
-              className="absolute z-20 flex flex-col gap-2 rounded-md border border-[rgba(255,255,255,0.2)] bg-black/75 p-2 backdrop-blur-sm"
+              className="absolute z-20 flex flex-col gap-2 rounded-md border border-[rgba(255,255,255,0.2)] bg-black/75 p-2 backdrop-blur-xs"
               style={{
                 left: `${textEditorStagePos.x}px`,
                 top: `${textEditorStagePos.y}px`,
@@ -1182,19 +1182,19 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
                   }
                 }}
                 rows={3}
-                className="w-full resize-none rounded border border-[rgba(255,255,255,0.18)] bg-bg-dark/90 px-2 py-1.5 text-sm text-text-dark outline-none focus:border-accent"
+                className="w-full resize-none rounded-sm border border-[rgba(255,255,255,0.18)] bg-bg-dark/90 px-2 py-1.5 text-sm text-text-dark outline-hidden focus:border-accent"
               />
               <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  className="rounded border border-[rgba(255,255,255,0.22)] px-2 py-1 text-xs text-text-muted hover:bg-bg-dark"
+                  className="rounded-sm border border-[rgba(255,255,255,0.22)] px-2 py-1 text-xs text-text-muted hover:bg-bg-dark"
                   onClick={handleCancelTextEditor}
                 >
                   取消
                 </button>
                 <button
                   type="button"
-                  className="rounded border border-accent/45 bg-accent/20 px-2 py-1 text-xs text-text-dark hover:bg-accent/30"
+                  className="rounded-sm border border-accent/45 bg-accent/20 px-2 py-1 text-xs text-text-dark hover:bg-accent/30"
                   onClick={handleCommitTextEditor}
                 >
                   确认

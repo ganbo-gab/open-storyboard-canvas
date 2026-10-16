@@ -39,7 +39,7 @@ export const PromptTemplateDialog = memo(({
   }
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/55 backdrop-blur-[2px]" onClick={onClose}>
+    <div className="fixed inset-0 z-300 flex items-center justify-center bg-black/55 backdrop-blur-[2px]" onClick={onClose}>
       <div
         className="w-[560px] rounded-xl border border-[rgba(255,255,255,0.1)] bg-[#1b1b1b] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -83,7 +83,7 @@ export const PromptTemplateDialog = memo(({
               setDraft(next);
               onChange(next);
             }}
-            className="h-48 w-full resize-none rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-sm leading-6 text-white/85 outline-none transition-colors focus:border-[rgba(255,255,255,0.2)]"
+            className="h-48 w-full resize-none rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-sm leading-6 text-white/85 outline-hidden transition-colors focus:border-[rgba(255,255,255,0.2)]"
           />
 
           <div className="rounded-lg border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)] px-3 py-2 text-[11px] leading-5 text-white/45">

@@ -371,7 +371,7 @@ export const MultiAnglePanel = memo(
 
     return (
       <div
-        className="fixed z-[200] rounded-xl border border-[rgba(255,255,255,0.12)] bg-[#202020] shadow-2xl"
+        className="fixed z-200 rounded-xl border border-[rgba(255,255,255,0.12)] bg-[#202020] shadow-2xl"
         style={{ left: panelLeft, top: panelTop, width: panelWidth }}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
@@ -545,7 +545,7 @@ export const MultiAnglePanel = memo(
                 value={extraPrompt}
                 onChange={(e) => setExtraPrompt(e.target.value)}
                 placeholder="输入你自己的附加提示词，会叠加到系统多角度提示词后面"
-                className="h-24 w-full resize-none rounded-xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-sm leading-6 text-white/82 outline-none placeholder:text-white/25 focus:border-[rgba(255,255,255,0.16)]"
+                className="h-24 w-full resize-none rounded-xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-sm leading-6 text-white/82 outline-hidden placeholder:text-white/25 focus:border-[rgba(255,255,255,0.16)]"
               />
             )}
           </div>

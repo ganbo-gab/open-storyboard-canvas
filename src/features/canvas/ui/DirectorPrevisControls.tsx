@@ -57,7 +57,7 @@ export function DirectorPrevisControls(props: Props) {
     props.onCancelRoute();
     props.onTransformMode(props.transformMode === mode ? null : mode);
   };
-  const toolClass = 'h-[52px] w-full flex-col !gap-1 !px-1 !py-1.5';
+  const toolClass = 'h-[52px] w-full flex-col gap-1! px-1! py-1.5!';
   return (
     <div className="pointer-events-none absolute inset-0 z-30" aria-label={t('directorStudio.previs.tools')} onKeyDown={(event) => {
       if (event.key === 'Escape' && cameraMenuOpen) {

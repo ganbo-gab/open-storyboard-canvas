@@ -416,14 +416,14 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
 
   return (
     <div
-      className={`overflow-hidden rounded-xl border bg-[var(--canvas-node-bg)] shadow-[var(--canvas-node-shadow)] ${selected ? 'border-accent' : 'border-[var(--canvas-node-border)]'}`}
+      className={`overflow-hidden rounded-xl border bg-(--canvas-node-bg) shadow-(--canvas-node-shadow) ${selected ? 'border-accent' : 'border-(--canvas-node-border)'}`}
       style={{ width: BLUEPRINT_NODE_WIDTH }}
       onDoubleClick={(e) => e.stopPropagation()}
     >
-      <Handle type="target" id="target" position={Position.Left} className="!bg-accent/70" />
-      <Handle type="source" id="source" position={Position.Right} className="!bg-accent/70" />
+      <Handle type="target" id="target" position={Position.Left} className="bg-accent/70!" />
+      <Handle type="source" id="source" position={Position.Right} className="bg-accent/70!" />
 
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--canvas-node-divider)] px-3 py-2 text-xs text-text-muted">
+      <div className="flex items-center justify-between gap-3 border-b border-(--canvas-node-divider) px-3 py-2 text-xs text-text-muted">
         <div className="min-w-0">
           <div className="truncate font-medium text-text-dark">{t('directorStudio.title')}</div>
           <div className="mt-0.5 truncate text-[10px] text-text-muted">
@@ -436,14 +436,14 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
         </div>
       </div>
 
-      <div className="nodrag nopan flex flex-col gap-3 bg-[var(--canvas-node-subtle-bg)] p-3" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="nodrag nopan flex flex-col gap-3 bg-(--canvas-node-subtle-bg) p-3" onPointerDown={(e) => e.stopPropagation()}>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); openDirectorStudio(); }}
-          className="group relative overflow-hidden rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] text-left transition-colors hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]"
+          className="group relative overflow-hidden rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) text-left transition-colors hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)"
           title={t('directorStudio.openFullscreen')}
         >
-          <div className="aspect-[16/9] bg-[var(--canvas-node-media-bg)]">
+          <div className="aspect-video bg-(--canvas-node-media-bg)">
             {compactSnapshotUrl ? (
               <img
                 src={compactSnapshotUrl}
@@ -458,22 +458,22 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
               </div>
             )}
           </div>
-          <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-[var(--canvas-node-media-overlay)] px-3 py-2">
+          <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-(--canvas-node-media-overlay) px-3 py-2">
             <span className="min-w-0 truncate text-xs font-medium text-white/90">{t('directorStudio.openFullscreen')}</span>
             <Maximize2 className="h-4 w-4 shrink-0 text-white/75 transition-transform group-hover:scale-110" />
           </div>
         </button>
 
         <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-bg-strong)] px-2 py-2">
+          <div className="rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-bg-strong) px-2 py-2">
             <div className="text-sm font-semibold text-text-dark">{data.items.length}</div>
             <div className="mt-0.5 text-[10px] text-text-muted">{t('directorStudio.elements')}</div>
           </div>
-          <div className="rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-bg-strong)] px-2 py-2">
+          <div className="rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-bg-strong) px-2 py-2">
             <div className="text-sm font-semibold text-text-dark">{mergedReferenceImages.length}</div>
             <div className="mt-0.5 text-[10px] text-text-muted">{t('node.imageNode.referenceImages')}</div>
           </div>
-          <div className="rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-bg-strong)] px-2 py-2">
+          <div className="rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-bg-strong) px-2 py-2">
             <div className="text-sm font-semibold text-text-dark">{(openedDirectorStudioProjects ?? data.directorStudioProjects ?? []).length}</div>
             <div className="mt-0.5 text-[10px] text-text-muted">{t('directorStudio.projects')}</div>
           </div>
@@ -493,7 +493,7 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
             type="button"
             onClick={(e) => { e.stopPropagation(); void handleAddSnapshotToCanvas(data.snapshotUrl ?? null); }}
             disabled={!data.snapshotUrl}
-            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-3 py-2 text-xs text-[var(--canvas-node-button-text)] hover:bg-[var(--canvas-node-menu-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-3 py-2 text-xs text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover) disabled:cursor-not-allowed disabled:opacity-40"
             title={data.snapshotUrl ? t('directorStudio.addToCanvasTitle') : t('directorStudio.addToCanvasNoSnapshot')}
           >
             <Camera className="h-3.5 w-3.5" />

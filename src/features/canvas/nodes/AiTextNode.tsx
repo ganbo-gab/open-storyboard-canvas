@@ -775,10 +775,10 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
     <div
       ref={rootRef}
       className={`
-        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-2 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative flex h-full flex-col overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-2 shadow-(--canvas-node-shadow) transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
+          : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
       `}
       style={{ width: `${resolvedWidth}px`, height: `${resolvedHeight}px` }}
       onClick={() => setSelectedNode(id)}
@@ -791,7 +791,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
           <button
             type="button"
             data-canvas-no-marquee="true"
-            className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] text-text-muted shadow-sm transition-colors hover:border-accent/50 hover:bg-[var(--canvas-node-menu-hover)] hover:text-accent"
+            className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) text-text-muted shadow-xs transition-colors hover:border-accent/50 hover:bg-(--canvas-node-menu-hover) hover:text-accent"
             title={t('node.aiText.payloadDebug') as string}
             aria-label={t('node.aiText.payloadDebug') as string}
             onClick={(event) => {
@@ -807,18 +807,18 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
       />
 
       <div className="mb-2 flex shrink-0 flex-wrap items-center gap-1.5 text-[11px] text-text-muted">
-        <span className="inline-flex items-center rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-2 py-0.5">
+        <span className="inline-flex items-center rounded-full border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-0.5">
           {t('node.aiText.textInputCount', { count: textInputCount })}
         </span>
-        <span className="inline-flex items-center rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-2 py-0.5">
+        <span className="inline-flex items-center rounded-full border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-0.5">
           {t('node.aiText.imageInputCount', { count: imageInputCount })}
         </span>
-        <span className="inline-flex items-center rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-2 py-0.5">
+        <span className="inline-flex items-center rounded-full border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-0.5">
           Hash {currentInputHash}
         </span>
       </div>
 
-      <div className="relative min-h-0 flex-1 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-2">
+      <div className="relative min-h-0 flex-1 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-2">
         <textarea
           ref={promptRef}
           value={promptDraft}
@@ -836,12 +836,12 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
           onMouseDown={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
           placeholder={t('node.aiText.promptPlaceholder') as string}
-          className="ui-scrollbar nodrag nopan nowheel h-full w-full resize-none border-none bg-transparent px-1 py-0.5 text-sm leading-6 text-text-dark outline-none placeholder:text-text-muted/80"
+          className="ui-scrollbar nodrag nopan nowheel h-full w-full resize-none border-none bg-transparent px-1 py-0.5 text-sm leading-6 text-text-dark outline-hidden placeholder:text-text-muted/80"
           spellCheck={false}
         />
         {referencePickerOpen && incomingReferenceItems.length > 0 ? (
           <div
-            className="nowheel absolute left-3 top-3 z-30 w-[148px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
+            className="nowheel absolute left-3 top-3 z-30 w-[148px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-xl"
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
           >
@@ -854,7 +854,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
                     event.stopPropagation();
                     insertGraphReference(index);
                   }}
-                  className="flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[var(--canvas-node-field-border)] hover:bg-[var(--canvas-node-menu-hover)]"
+                  className="flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-(--canvas-node-field-border) hover:bg-(--canvas-node-menu-hover)"
                 >
                   {item.kind === 'image' && item.displayUrl ? (
                     <CanvasNodeImage
@@ -862,11 +862,11 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
                       alt={item.label}
                       viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl ?? item.displayUrl)}
                       viewerImageList={incomingImageViewerList}
-                      className="h-8 w-8 rounded object-cover"
+                      className="h-8 w-8 rounded-sm object-cover"
                       draggable={false}
                     />
                   ) : (
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[var(--canvas-node-button-bg)] text-[10px] font-semibold text-text-muted">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm bg-(--canvas-node-button-bg) text-[10px] font-semibold text-text-muted">
                       {item.kind === 'video' ? 'V' : 'T'}
                     </span>
                   )}
@@ -896,7 +896,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
           </UiChipButton>
           {providerOpen ? (
             <div
-              className="nowheel absolute bottom-full left-0 z-50 mb-1 min-w-[190px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-xl"
+              className="nowheel absolute bottom-full left-0 z-50 mb-1 min-w-[190px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-xl"
               onMouseDown={(event) => event.stopPropagation()}
             >
               <div className="ui-scrollbar max-h-[220px] overflow-y-auto pr-1">
@@ -908,8 +908,8 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
                       type="button"
                       className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
                         active
-                          ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
-                          : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                          ? 'bg-(--canvas-node-menu-active) text-text-dark'
+                          : 'text-text-dark hover:bg-(--canvas-node-menu-hover)'
                       }`}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -946,7 +946,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
           </UiChipButton>
           {modelOpen ? (
             <div
-              className="nowheel absolute bottom-full left-0 z-50 mb-1 w-[280px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-xl"
+              className="nowheel absolute bottom-full left-0 z-50 mb-1 w-[280px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-xl"
               onMouseDown={(event) => event.stopPropagation()}
             >
               {availableModelOptions.length === 0 ? (
@@ -964,8 +964,8 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
                         type="button"
                         className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors ${
                           active
-                            ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
-                            : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                            ? 'bg-(--canvas-node-menu-active) text-text-dark'
+                            : 'text-text-dark hover:bg-(--canvas-node-menu-hover)'
                         }`}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -1020,14 +1020,14 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
         type="target"
         id="target"
         position={Position.Left}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <Handle
         type="source"
         id="source"
         position={Position.Right}
         onPointerDownCapture={clearBrowserTextSelection}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <NodeResizeHandle
         minWidth={AI_TEXT_NODE_MIN_WIDTH}
@@ -1041,7 +1041,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
         title={t('node.aiText.payloadDebugTitle') as string}
         onClose={() => setPayloadDebugText(null)}
         widthClassName="w-[calc(100vw-32px)] max-w-[1200px]"
-        containerClassName="!z-[13050]"
+        containerClassName="z-13050!"
         footer={(
           <>
             <UiButton variant="muted" size="sm" onClick={() => setPayloadDebugText(null)}>
@@ -1059,7 +1059,7 @@ export const AiTextNode = memo(({ id, data, selected, width, height }: AiTextNod
           </>
         )}
       >
-        <pre className="ui-scrollbar nowheel max-h-[60vh] overflow-auto rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-3 text-xs leading-5 text-text-dark">
+        <pre className="ui-scrollbar nowheel max-h-[60vh] overflow-auto rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-3 text-xs leading-5 text-text-dark">
           {payloadDebugText}
         </pre>
       </UiModal>

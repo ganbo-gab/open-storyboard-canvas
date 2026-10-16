@@ -375,10 +375,10 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
   return (
     <div
       className={`
-        group relative overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-0 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-0 shadow-(--canvas-node-shadow) transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
+          : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
       `}
       style={{ width: resolvedWidth, height: resolvedHeight }}
       onClick={handleNodeClick}
@@ -394,7 +394,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
       />
 
       {data.imageUrl || transientPreviewUrl ? (
-        <div className="relative block h-full w-full overflow-hidden rounded-[var(--node-radius)] bg-[var(--canvas-node-media-bg)]">
+        <div className="relative block h-full w-full overflow-hidden rounded-(--node-radius) bg-(--canvas-node-media-bg)">
           <CanvasNodeImage
             src={imageSource ?? ''}
             fallbackSrcs={imageFallbackSources}
@@ -406,7 +406,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
           {/* Reupload button on left side */}
           <button
             type="button"
-            className="absolute left-2 top-2 flex h-7 items-center gap-1 rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2 text-xs text-text-dark shadow-sm backdrop-blur-sm transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+            className="absolute left-2 top-2 flex h-7 items-center gap-1 rounded-full border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) px-2 text-xs text-text-dark shadow-xs backdrop-blur-xs transition-colors hover:bg-(--canvas-node-menu-hover)"
             onClick={(e) => {
               e.stopPropagation();
               inputRef.current?.click();
@@ -417,18 +417,18 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
           </button>
         </div>
       ) : uploadError ? (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-[var(--node-radius)] bg-red-500/[0.10] px-4 text-red-800 dark:bg-[rgba(127,29,29,0.16)] dark:text-red-200">
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-(--node-radius) bg-red-500/10 px-4 text-red-800 dark:bg-[rgba(127,29,29,0.16)] dark:text-red-200">
           <AlertTriangle className="h-7 w-7 opacity-90" />
           <span className="text-center text-[12px] font-medium leading-5">
             {t('node.upload.uploadFailed')}
           </span>
-          <span className="max-h-[76px] overflow-y-auto break-words text-center text-[11px] leading-5 text-red-800/90 dark:text-red-200/90">
+          <span className="max-h-[76px] overflow-y-auto wrap-break-word text-center text-[11px] leading-5 text-red-800/90 dark:text-red-200/90">
             {uploadError}
           </span>
         </div>
       ) : (
         <label
-          className="block h-full w-full overflow-hidden rounded-[var(--node-radius)] bg-[var(--canvas-node-media-bg)]"
+          className="block h-full w-full overflow-hidden rounded-(--node-radius) bg-(--canvas-node-media-bg)"
         >
           <div className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-2 text-text-muted/85">
             {isUploading ? (
@@ -454,7 +454,7 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
         type="source"
         id="source"
         position={Position.Right}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <NodeResizeHandle
         minWidth={resizeMinWidth}

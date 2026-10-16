@@ -119,9 +119,9 @@ const FUNCTION_PICKER_WIDTH_PX = 280;
 const PROMPT_PRESET_GROUP_ID = '__prompt_presets__';
 const INLINE_REFERENCE_SEPARATOR = '，';
 const AI_VIDEO_SELECTOR_CHIP_CLASS =
-  'border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-text-dark shadow-sm hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]';
+  'border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-text-dark shadow-xs hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)';
 const AI_VIDEO_COMPACT_ICON_CHIP_CLASS =
-  '!w-6 !px-0 border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-text-dark shadow-sm hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]';
+  'w-6! px-0! border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-text-dark shadow-xs hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)';
 
 function renderPromptWithHighlights(prompt: string, maxImageCount: number): ReactNode {
   if (!prompt) return ' ';
@@ -1202,10 +1202,10 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     <div
       ref={rootRef}
       className={`
-        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-2 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative flex h-full flex-col overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-2 shadow-(--canvas-node-shadow) transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
+          : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
       `}
       style={{ width: `${resolvedWidth}px`, height: `${resolvedHeight}px` }}
       onClick={() => setSelectedNode(id)}
@@ -1218,7 +1218,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
           <button
             type="button"
             data-canvas-no-marquee="true"
-            className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--canvas-node-border)] bg-[var(--canvas-node-menu-bg)] text-text-muted shadow-sm transition-colors hover:border-accent/50 hover:bg-[var(--canvas-node-menu-hover)] hover:text-accent"
+            className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) text-text-muted shadow-xs transition-colors hover:border-accent/50 hover:bg-(--canvas-node-menu-hover) hover:text-accent"
             title={t('node.aiVideo.payloadDebug')}
             aria-label={t('node.aiVideo.payloadDebug')}
             onClick={(event) => {
@@ -1237,10 +1237,10 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
       />
 
-      <div className="image-box relative min-h-0 flex-1 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-2">
+      <div className="image-box relative min-h-0 flex-1 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-2">
         <div className="relative h-full min-h-0">
           {selectedPresetLabel && (
-            <div className="absolute left-1 top-1 z-20 flex max-w-[calc(100%-8px)] items-center gap-1 rounded-md border border-accent/35 bg-accent/18 px-2 py-1 text-xs text-accent shadow-sm">
+            <div className="absolute left-1 top-1 z-20 flex max-w-[calc(100%-8px)] items-center gap-1 rounded-md border border-accent/35 bg-accent/18 px-2 py-1 text-xs text-accent shadow-xs">
               <Sparkles className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">{selectedPresetLabel}</span>
               <button
@@ -1250,7 +1250,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                   clearSelectedPromptPreset();
                   promptRef.current?.focus();
                 }}
-                className="ml-0.5 rounded p-0.5 text-accent/80 hover:bg-accent/20 hover:text-accent"
+                className="ml-0.5 rounded-sm p-0.5 text-accent/80 hover:bg-accent/20 hover:text-accent"
                 title={t('nodeToolbar.promptPreset') as string}
               >
                 <X className="h-3 w-3" />
@@ -1263,7 +1263,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             className="ui-scrollbar pointer-events-none absolute inset-0 overflow-y-auto overflow-x-hidden text-sm leading-6 text-text-dark"
             style={{ scrollbarGutter: 'stable' }}
           >
-            <div className={`min-h-full whitespace-pre-wrap break-words px-1 py-0.5 ${selectedPresetLabel ? 'pt-8' : ''}`}>
+            <div className={`min-h-full whitespace-pre-wrap wrap-break-word px-1 py-0.5 ${selectedPresetLabel ? 'pt-8' : ''}`}>
               {renderPromptWithHighlights(promptDraft, incomingReferences.length)}
             </div>
           </div>
@@ -1281,14 +1281,14 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             onScroll={syncPromptHighlightScroll}
             onMouseDown={(event) => event.stopPropagation()}
             placeholder={t('node.aiVideo.promptPlaceholder')}
-            className={`ui-scrollbar nodrag nowheel relative z-10 h-full w-full resize-none overflow-y-auto overflow-x-hidden border-none bg-transparent px-1 py-0.5 text-sm leading-6 text-transparent caret-text-dark outline-none placeholder:text-text-muted/80 focus:border-transparent whitespace-pre-wrap break-words ${selectedPresetLabel ? 'pt-8' : ''}`}
+            className={`ui-scrollbar nodrag nowheel relative z-10 h-full w-full resize-none overflow-y-auto overflow-x-hidden border-none bg-transparent px-1 py-0.5 text-sm leading-6 text-transparent caret-text-dark outline-hidden placeholder:text-text-muted/80 focus:border-transparent whitespace-pre-wrap wrap-break-word ${selectedPresetLabel ? 'pt-8' : ''}`}
             style={{ scrollbarGutter: 'stable' }}
           />
         </div>
 
         {referencePickerOpen && schemaReferencePickerItems.length > 0 && (
           <div
-            className="nowheel absolute z-30 w-[150px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
+            className="nowheel absolute z-30 w-[150px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-xl"
             style={{ left: referencePickerAnchor.left, top: referencePickerAnchor.top }}
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
@@ -1303,9 +1303,9 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                     insertReferenceToken(index);
                   }}
                   onMouseEnter={() => setReferencePickerActiveIndex(index)}
-                  className={`flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[var(--canvas-node-field-border)] hover:bg-[var(--canvas-node-menu-hover)] ${
+                  className={`flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-(--canvas-node-field-border) hover:bg-(--canvas-node-menu-hover) ${
                     referencePickerActiveIndex === index
-                      ? 'border-accent/35 bg-[var(--canvas-node-menu-active)]'
+                      ? 'border-accent/35 bg-(--canvas-node-menu-active)'
                       : ''
                   }`}
                 >
@@ -1315,11 +1315,11 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                       alt={item.label}
                       viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl ?? item.displayUrl)}
                       viewerImageList={incomingViewerList}
-                      className="h-8 w-8 rounded object-cover"
+                      className="h-8 w-8 rounded-sm object-cover"
                       draggable={false}
                     />
                   ) : (
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[var(--canvas-node-button-bg)] text-[10px] font-semibold text-text-muted">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm bg-(--canvas-node-button-bg) text-[10px] font-semibold text-text-muted">
                       {item.kind === 'video' ? 'V' : item.kind === 'audio' ? 'A' : 'T'}
                     </span>
                   )}
@@ -1332,7 +1332,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
 
         {showFunctionPicker && functionPickerItems.length > 0 && (
           <div
-            className="nowheel absolute z-40 w-[280px] overflow-visible rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-2xl"
+            className="nowheel absolute z-40 w-[280px] overflow-visible rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-2xl"
             style={{ left: functionPickerAnchor.left, top: functionPickerAnchor.top }}
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
@@ -1356,8 +1356,8 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                     onMouseEnter={() => setFunctionPickerActiveIndex(index)}
                     className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors ${
                       active
-                        ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
-                        : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                        ? 'bg-(--canvas-node-menu-active) text-text-dark'
+                        : 'text-text-dark hover:bg-(--canvas-node-menu-hover)'
                     }`}
                     title={item.description}
                   >
@@ -1376,7 +1376,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             </div>
             {functionPickerItems[functionPickerActiveIndex]?.kind === 'presetGroup' && (
               <div
-                className="nowheel absolute left-[calc(100%+8px)] w-[240px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-2xl"
+                className="nowheel absolute left-[calc(100%+8px)] w-[240px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-2xl"
                 style={{ top: `${Math.min(44 + functionPickerActiveIndex * 58, 150)}px` }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onWheelCapture={(event) => event.stopPropagation()}
@@ -1393,8 +1393,8 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                       type="button"
                       className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors ${
                         presetSelected
-                          ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
-                          : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                          ? 'bg-(--canvas-node-menu-active) text-text-dark'
+                          : 'text-text-dark hover:bg-(--canvas-node-menu-hover)'
                       }`}
                       title={preset.prompt}
                       onClick={(event) => {
@@ -1441,7 +1441,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             </UiButton>
             {providerOpen && (
               <div
-                className="nowheel absolute bottom-full left-0 z-50 mb-1 min-w-[170px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-xl"
+                className="nowheel absolute bottom-full left-0 z-50 mb-1 min-w-[170px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-xl"
                 onMouseDown={(event) => event.stopPropagation()}
               >
                 {catalog.length === 0 ? (
@@ -1459,8 +1459,8 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                           type="button"
                           className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
                             active
-                              ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
-                              : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                              ? 'bg-(--canvas-node-menu-active) text-text-dark'
+                              : 'text-text-dark hover:bg-(--canvas-node-menu-hover)'
                           }`}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -1498,7 +1498,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
           </UiButton>
           {modelOpen && (
             <div
-              className="nowheel absolute bottom-full left-0 z-50 mb-1 w-[280px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-1.5 shadow-xl"
+              className="nowheel absolute bottom-full left-0 z-50 mb-1 w-[280px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-xl"
               onMouseDown={(event) => event.stopPropagation()}
             >
               <div className="ui-scrollbar max-h-[240px] overflow-y-auto pr-1">
@@ -1511,8 +1511,8 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                       disabled={!entry.usable}
                       className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors ${
                         active
-                          ? 'bg-[var(--canvas-node-menu-active)] text-text-dark'
-                          : 'text-text-dark hover:bg-[var(--canvas-node-menu-hover)]'
+                          ? 'bg-(--canvas-node-menu-active) text-text-dark'
+                          : 'text-text-dark hover:bg-(--canvas-node-menu-hover)'
                       } disabled:cursor-not-allowed disabled:opacity-55`}
                       title={entry.notReadyReason ?? entry.modelLabel}
                       onClick={(event) => {
@@ -1564,7 +1564,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             </UiButton>
             {paramsOpen && (
               <div
-                className={`ui-scrollbar nowheel absolute bottom-full right-0 z-50 mb-1 max-h-[min(620px,70vh)] space-y-2 overflow-y-auto rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-2 shadow-xl ${isDreaminaMultiframe && dreaminaMultiframeImageCount >= 3 ? 'w-[380px]' : 'w-[300px]'}`}
+                className={`ui-scrollbar nowheel absolute bottom-full right-0 z-50 mb-1 max-h-[min(620px,70vh)] space-y-2 overflow-y-auto rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-2 shadow-xl ${isDreaminaMultiframe && dreaminaMultiframeImageCount >= 3 ? 'w-[380px]' : 'w-[300px]'}`}
                 onMouseDown={(event) => event.stopPropagation()}
                 onWheelCapture={(event) => event.stopPropagation()}
               >
@@ -1602,7 +1602,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                             className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
                               active
                                 ? 'border-accent/60 bg-accent/15 text-accent'
-                                : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'
+                                : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)'
                             }`}
                           >
                             {duration === 'workflow' ? t('node.aiVideo.workflow') : `${duration}s`}
@@ -1616,7 +1616,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                   <label className="block space-y-1">
                     <span className="text-[10px] text-text-muted">{t('videoInputModes.label')}</span>
                     <select
-                      className="nodrag nowheel w-full rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2 py-1 text-xs text-text-dark"
+                      className="nodrag nowheel w-full rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) px-2 py-1 text-xs text-text-dark"
                       value={String(resolvedModelConfig.extraParams?.imageMode ?? 'reference')}
                       onChange={(event) => handleConfigChange({ extraParams: {
                         ...resolvedModelConfig.extraParams,
@@ -1647,7 +1647,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                             className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
                               active
                                 ? 'border-accent/60 bg-accent/15 text-accent'
-                                : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'
+                                : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)'
                             }`}
                           >
                             {label}
@@ -1670,7 +1670,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                           className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
                             active
                               ? 'border-accent/60 bg-accent/15 text-accent'
-                              : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'
+                              : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)'
                           }`}
                         >
                           {aspectRatio}
@@ -1692,7 +1692,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                           className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
                             active
                               ? 'border-accent/60 bg-accent/15 text-accent'
-                              : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]'
+                              : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)'
                           }`}
                         >
                           {resolution === 'workflow' ? t('node.aiVideo.workflow') : resolution}
@@ -1777,13 +1777,13 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         type="target"
         id="target"
         position={Position.Left}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <Handle
         type="source"
         id="source"
         position={Position.Right}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <NodeResizeHandle
         minWidth={AI_VIDEO_NODE_MIN_WIDTH}
@@ -1797,7 +1797,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         title={t('node.imageEdit.payloadDebugTitle')}
         onClose={() => setPayloadDebugText(null)}
         widthClassName="w-[min(760px,calc(100vw-32px))]"
-        containerClassName="!z-[13050]"
+        containerClassName="z-13050!"
         footer={(
           <>
             <UiButton
@@ -1823,7 +1823,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             {t('node.imageEdit.payloadDebugHint')}
           </div>
           <pre
-            className="ui-scrollbar nowheel max-h-[60vh] overflow-auto rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-3 text-xs leading-5 text-text-dark"
+            className="ui-scrollbar nowheel max-h-[60vh] overflow-auto rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-3 text-xs leading-5 text-text-dark"
             onWheelCapture={(event) => event.stopPropagation()}
             onTouchMoveCapture={(event) => event.stopPropagation()}
           >

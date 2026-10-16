@@ -831,7 +831,7 @@ export const SelectedNodeOverlay = memo(() => {
         >
           <button
             type="button"
-            className="pointer-events-auto inline-flex h-7 items-center gap-1 rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2.5 text-[11px] font-medium text-text-dark shadow-lg backdrop-blur transition-colors hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]"
+            className="pointer-events-auto inline-flex h-7 items-center gap-1 rounded-full border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) px-2.5 text-[11px] font-medium text-text-dark shadow-lg backdrop-blur-sm transition-colors hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)"
             onClick={(event) => {
               event.stopPropagation();
               handleToggleActionToolbar();

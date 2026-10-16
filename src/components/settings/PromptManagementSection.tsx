@@ -168,7 +168,7 @@ function PromptTemplateEditor({
                 {placeholders.map((placeholder) => (
                   <span
                     key={placeholder}
-                    className="rounded bg-surface-dark px-2 py-1 font-mono text-[11px] text-text-dark"
+                    className="rounded-sm bg-surface-dark px-2 py-1 font-mono text-[11px] text-text-dark"
                   >
                     {placeholder}
                   </span>
@@ -195,7 +195,7 @@ function PromptTemplateEditor({
           <div className="text-xs font-medium text-text-muted">
             {t('settings.promptManagement.defaultTemplatePreview')}
           </div>
-          <div className="ui-scrollbar mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded bg-surface-dark p-2 font-mono text-[11px] leading-5 text-text-muted">
+          <div className="ui-scrollbar mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-sm bg-surface-dark p-2 font-mono text-[11px] leading-5 text-text-muted">
             {defaultTemplate}
           </div>
         </div>
@@ -290,11 +290,11 @@ export function PromptManagementSection() {
                           <h4 className="text-sm font-medium text-text-dark">
                             {t(definition.titleKey)}
                           </h4>
-                          <span className="rounded bg-surface-dark px-2 py-0.5 text-[11px] text-text-muted">
+                          <span className="rounded-sm bg-surface-dark px-2 py-0.5 text-[11px] text-text-muted">
                             {t(`settings.promptManagement.languages.${effectiveLanguage}`)}
                           </span>
                           {hasTemplateOverride || hasLanguageOverride ? (
-                            <span className="rounded bg-accent/15 px-2 py-0.5 text-[11px] text-accent">
+                            <span className="rounded-sm bg-accent/15 px-2 py-0.5 text-[11px] text-accent">
                               {t('settings.promptManagement.customized')}
                             </span>
                           ) : null}

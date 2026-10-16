@@ -109,9 +109,9 @@ function ToolButton({
     <button
       type="button"
       disabled={disabled}
-      className={`inline-flex h-10 min-w-10 items-center justify-center rounded-[7px] px-2 transition-[background-color,color,transform] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${active
-        ? 'bg-accent/[0.12] text-accent'
-        : 'text-text-muted hover:bg-text-dark/[0.055] hover:text-text-dark'}`}
+      className={`inline-flex h-10 min-w-10 items-center justify-center rounded-[7px] px-2 transition-[background-color,color,transform,translate,scale,rotate] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-35 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 ${active
+        ? 'bg-accent/12 text-accent'
+        : 'text-text-muted hover:bg-text-dark/5.5 hover:text-text-dark'}`}
       aria-label={label}
       title={label}
       onClick={onClick}
@@ -131,7 +131,7 @@ function ComposerPopover({ title, onClose, children }: { title: string; onClose:
   return (
     <section
       ref={popoverRef}
-      className="agent-view-enter absolute inset-x-0 bottom-[calc(100%+10px)] z-40 max-h-[min(420px,58vh)] overflow-hidden rounded-[10px] border border-[color:var(--ui-border-soft)] bg-[var(--ui-surface-panel)] shadow-[var(--ui-shadow-panel)]"
+      className="agent-view-enter absolute inset-x-0 bottom-[calc(100%+10px)] z-40 max-h-[min(420px,58vh)] overflow-hidden rounded-[10px] border border-(--ui-border-soft) bg-(--ui-surface-panel) shadow-(--ui-shadow-panel)"
       role="dialog"
       aria-label={title}
       onKeyDown={(event) => {
@@ -145,7 +145,7 @@ function ComposerPopover({ title, onClose, children }: { title: string; onClose:
         <h3 className="text-xs font-semibold text-text-dark">{title}</h3>
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] text-text-muted hover:bg-text-dark/[0.055] hover:text-text-dark"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] text-text-muted hover:bg-text-dark/5.5 hover:text-text-dark"
           onClick={onClose}
           aria-label={title}
         >
@@ -188,8 +188,8 @@ function ModelGroup({
                 type="button"
                 disabled={entry.usable === false}
                 className={`flex min-h-11 w-full items-center gap-3 rounded-[7px] px-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${selected
-                  ? 'bg-accent/[0.11] text-text-dark'
-                  : 'text-text-dark hover:bg-text-dark/[0.045]'}`}
+                  ? 'bg-accent/11 text-text-dark'
+                  : 'text-text-dark hover:bg-text-dark/4.5'}`}
                 onClick={() => onChange(entry.id)}
               >
                 <span className="min-w-0 flex-1">
@@ -283,7 +283,7 @@ export function CanvasAgentComposer({
       <footer className="agent-composer shrink-0 p-3.5 pt-2">
         <button
           type="button"
-          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-[8px] bg-accent px-3 text-sm font-semibold text-white transition-[background-color,transform] duration-150 hover:bg-accent/[0.85] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-[8px] bg-accent px-3 text-sm font-semibold text-white transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-accent/85 active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/70"
           onClick={onSettings}
         >
           <Settings2 className="h-4 w-4" aria-hidden="true" />
@@ -298,8 +298,8 @@ export function CanvasAgentComposer({
       <div className="relative">
         {openMenu === 'models' ? (
           <ComposerPopover title={t('canvasAgent.modelMenuTitle')} onClose={closeMenu}>
-            <div className="sticky top-0 z-10 -mx-2.5 -mt-2.5 border-b border-border-dark/60 bg-[var(--ui-surface-panel)] px-2.5 pb-2 pt-2.5">
-              <div className="grid grid-cols-3 gap-1 rounded-[8px] bg-text-dark/[0.045] p-1">
+            <div className="sticky top-0 z-10 -mx-2.5 -mt-2.5 border-b border-border-dark/60 bg-(--ui-surface-panel) px-2.5 pb-2 pt-2.5">
+              <div className="grid grid-cols-3 gap-1 rounded-[8px] bg-text-dark/4.5 p-1">
                 {[
                   { label: t('canvasAgent.modelTabs.text'), icon: <Type className="h-3.5 w-3.5" />, ref: textModelsRef },
                   { label: t('canvasAgent.modelTabs.image'), icon: <ImageIcon className="h-3.5 w-3.5" />, ref: imageModelsRef },
@@ -308,7 +308,7 @@ export function CanvasAgentComposer({
                   <button
                     key={item.label}
                     type="button"
-                    className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[6px] px-2 text-[11px] font-medium text-text-muted transition-[background-color,color,transform] duration-150 hover:bg-[var(--ui-surface-field)] hover:text-text-dark active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                    className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[6px] px-2 text-[11px] font-medium text-text-muted transition-[background-color,color,transform,translate,scale,rotate] duration-150 hover:bg-(--ui-surface-field) hover:text-text-dark active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60"
                     onClick={() => jumpToModelGroup(item.ref.current)}
                   >
                     {item.icon}
@@ -348,7 +348,7 @@ export function CanvasAgentComposer({
                   emptyLabel={t('canvasAgent.noVideoModels')}
                 />
               </div>
-              <button type="button" className="mt-2 flex min-h-10 w-full items-center justify-center gap-2 rounded-[7px] border border-border-dark text-xs text-text-muted hover:bg-text-dark/[0.045] hover:text-text-dark" onClick={onSettings}>
+              <button type="button" className="mt-2 flex min-h-10 w-full items-center justify-center gap-2 rounded-[7px] border border-border-dark text-xs text-text-muted hover:bg-text-dark/4.5 hover:text-text-dark" onClick={onSettings}>
                 <Settings2 className="h-3.5 w-3.5" />
                 {t('canvasAgent.manageModels')}
               </button>
@@ -362,7 +362,7 @@ export function CanvasAgentComposer({
               <button
                 key={mode}
                 type="button"
-                className={`mb-1 flex min-h-14 w-full items-start gap-3 rounded-[8px] px-3 py-2.5 text-left last:mb-0 ${executionMode === mode ? 'bg-accent/[0.11]' : 'hover:bg-text-dark/[0.045]'}`}
+                className={`mb-1 flex min-h-14 w-full items-start gap-3 rounded-[8px] px-3 py-2.5 text-left last:mb-0 ${executionMode === mode ? 'bg-accent/11' : 'hover:bg-text-dark/4.5'}`}
                 onClick={() => { onExecutionModeChange(mode); closeMenu(); }}
               >
                 {mode === 'manual' ? <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" /> : <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-accent" />}
@@ -383,7 +383,7 @@ export function CanvasAgentComposer({
                 {formatCanvasAgentContextEstimate(t, contextEstimateTokens, contextWindow)}
               </div>
               {contextPercent !== null ? (
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-text-dark/[0.08]">
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-text-dark/8">
                   <div className="h-full rounded-full bg-accent transition-[width] duration-200" style={{ width: `${contextPercent}%` }} />
                 </div>
               ) : null}
@@ -401,7 +401,7 @@ export function CanvasAgentComposer({
               <div key={attachment.assetId} className="flex min-h-10 max-w-full items-center gap-1.5 rounded-[7px] border border-accent/20 bg-accent/[0.07] p-1 pr-0.5 text-[11px] text-text-dark" title={attachment.title}>
                 <img src={resolveImageDisplayUrl(attachment.source)} alt="" className="h-8 w-8 shrink-0 rounded-[5px] bg-black/10 object-cover" draggable={false} />
                 <span className="max-w-36 truncate">{attachment.title}</span>
-                <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[5px] text-text-muted hover:bg-text-dark/[0.055] hover:text-text-dark" aria-label={t('canvasAgent.removeNamedAttachment', { name: attachment.title })} onClick={() => onRemoveAttachment(attachment.assetId)}>
+                <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[5px] text-text-muted hover:bg-text-dark/5.5 hover:text-text-dark" aria-label={t('canvasAgent.removeNamedAttachment', { name: attachment.title })} onClick={() => onRemoveAttachment(attachment.assetId)}>
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
@@ -416,11 +416,11 @@ export function CanvasAgentComposer({
           </div>
         ) : null}
 
-        <div className="rounded-[14px] border border-[color:var(--ui-border-soft)] bg-[var(--ui-surface-field)] p-2 shadow-[0_10px_28px_rgba(0,0,0,0.09)] transition-[border-color,box-shadow] duration-150 focus-within:border-accent/45 focus-within:shadow-[0_10px_30px_rgba(0,0,0,0.12),0_0_0_2px_rgba(var(--accent-rgb),0.08)]">
+        <div className="rounded-[14px] border border-(--ui-border-soft) bg-(--ui-surface-field) p-2 shadow-[0_10px_28px_rgba(0,0,0,0.09)] transition-[border-color,box-shadow] duration-150 focus-within:border-accent/45 focus-within:shadow-[0_10px_30px_rgba(0,0,0,0.12),0_0_0_2px_rgba(var(--accent-rgb),0.08)]">
           <textarea
             ref={textareaRef}
             aria-label={t('canvasAgent.placeholder')}
-            className="max-h-[156px] min-h-12 w-full resize-none overflow-y-auto bg-transparent px-2 py-2 text-sm leading-5 text-text-dark outline-none placeholder:text-text-muted/65"
+            className="max-h-[156px] min-h-12 w-full resize-none overflow-y-auto bg-transparent px-2 py-2 text-sm leading-5 text-text-dark outline-hidden placeholder:text-text-muted/65"
             value={draft}
             rows={1}
             placeholder={t('canvasAgent.placeholder')}
@@ -463,14 +463,14 @@ export function CanvasAgentComposer({
             <span className="flex-1" />
             {blockedByVision ? <span className="mr-1 text-[10px] text-amber-700 dark:text-amber-200">{t('canvasAgent.switchToVisionModel')}</span> : null}
             {isRunning ? (
-              <button type="button" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] bg-red-500/[0.10] text-red-600 transition-transform active:scale-[0.96] dark:text-red-300" aria-label={t('canvasAgent.cancel')} onClick={onCancel}>
+              <button type="button" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] bg-red-500/10 text-red-600 transition-transform active:scale-[0.96] dark:text-red-300" aria-label={t('canvasAgent.cancel')} onClick={onCancel}>
                 <CircleStop className="h-[19px] w-[19px]" />
               </button>
             ) : (
               <button
                 type="button"
                 disabled={!draft.trim() || hasPendingApproval || hasPendingPlan || blockedByVision || hasMissingAttachments}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] bg-text-dark text-bg-dark transition-[opacity,transform] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-25"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] bg-text-dark text-bg-dark transition-[opacity,transform,translate,scale,rotate] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-25"
                 aria-label={t('canvasAgent.send')}
                 onClick={onSend}
               >

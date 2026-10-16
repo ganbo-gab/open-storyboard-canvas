@@ -197,7 +197,7 @@ export function PromptPresetsSection() {
                     </UiButton>
                   </div>
                 </div>
-                <div className="mt-3 max-h-24 overflow-hidden whitespace-pre-wrap break-words rounded bg-surface-dark p-3 text-xs leading-5 text-text-muted">
+                <div className="mt-3 max-h-24 overflow-hidden whitespace-pre-wrap wrap-break-word rounded-sm bg-surface-dark p-3 text-xs leading-5 text-text-muted">
                   {preset.prompt}
                 </div>
               </div>

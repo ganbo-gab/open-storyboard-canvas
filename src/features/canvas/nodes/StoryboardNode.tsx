@@ -371,7 +371,7 @@ const FrameCard = memo(
 
           <button
             type="button"
-            className="absolute right-1 top-1 rounded bg-black/60 p-1 text-white opacity-0 transition-all duration-150 hover:bg-black/75 group-hover/frame:opacity-100"
+            className="absolute right-1 top-1 rounded-sm bg-black/60 p-1 text-white opacity-0 transition-all duration-150 hover:bg-black/75 group-hover/frame:opacity-100"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
@@ -384,7 +384,7 @@ const FrameCard = memo(
 
           <button
             type="button"
-            className="absolute bottom-1 right-1 rounded bg-black/60 p-1 text-white opacity-0 transition-all duration-150 hover:bg-black/75 group-hover/frame:opacity-100"
+            className="absolute bottom-1 right-1 rounded-sm bg-black/60 p-1 text-white opacity-0 transition-all duration-150 hover:bg-black/75 group-hover/frame:opacity-100"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
@@ -407,7 +407,7 @@ const FrameCard = memo(
           onMouseDown={(event) => event.stopPropagation()}
           onWheelCapture={(event) => event.stopPropagation()}
           placeholder={`分镜 ${String(index + 1).padStart(2, '0')} 描述`}
-          className="ui-scrollbar nodrag nowheel h-10 w-full resize-none overflow-y-auto border-0 border-t border-[rgba(255,255,255,0.12)] bg-bg-dark/90 px-2 py-1 text-[10px] text-text-dark outline-none focus:border-accent"
+          className="ui-scrollbar nodrag nowheel h-10 w-full resize-none overflow-y-auto border-0 border-t border-[rgba(255,255,255,0.12)] bg-bg-dark/90 px-2 py-1 text-[10px] text-text-dark outline-hidden focus:border-accent"
         />
       </div>
     );
@@ -991,7 +991,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
     <div
       ref={rootRef}
       className={`
-        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-surface-dark/90 p-2 transition-colors duration-150
+        group relative flex h-full flex-col overflow-visible rounded-(--node-radius) border bg-surface-dark/90 p-2 transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
           : 'border-[rgba(15,23,42,0.22)] hover:border-[rgba(15,23,42,0.34)] dark:border-[rgba(255,255,255,0.22)] dark:hover:border-[rgba(255,255,255,0.34)]'}
@@ -1047,7 +1047,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
         ? createPortal(
           <div
             ref={pickerMenuRef}
-            className="nowheel fixed z-[140] w-[120px] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.16)] bg-surface-dark shadow-xl"
+            className="nowheel fixed z-140 w-[120px] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.16)] bg-surface-dark shadow-xl"
             style={{ left: `${pickerState.x}px`, top: `${pickerState.y}px` }}
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
@@ -1073,7 +1073,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
                       alt={item.label}
                       viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl)}
                       viewerImageList={incomingImageViewerList}
-                      className="h-8 w-8 rounded object-cover"
+                      className="h-8 w-8 rounded-sm object-cover"
                       draggable={false}
                     />
                     <span className="truncate">{item.label}</span>
@@ -1149,7 +1149,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
       {typeof document !== 'undefined' && isExportPanelOpen && createPortal(
         <div
           ref={exportSettingsPanelRef}
-          className={`fixed z-[120] w-[340px] transition-opacity duration-200 ease-out ${isExportPanelVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
+          className={`fixed z-120 w-[340px] transition-opacity duration-200 ease-out ${isExportPanelVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
             }`}
           style={exportPanelAnchor
             ? {
@@ -1254,7 +1254,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
                     type="color"
                     value={exportOptions.backgroundColor}
                     onChange={(event) => patchExportOptions({ backgroundColor: event.target.value })}
-                    className="h-7 w-full rounded border border-[rgba(255,255,255,0.14)] bg-transparent"
+                    className="h-7 w-full rounded-sm border border-[rgba(255,255,255,0.14)] bg-transparent"
                   />
                 </label>
                 <label className="flex items-center gap-2">
@@ -1263,7 +1263,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
                     type="color"
                     value={exportOptions.textColor}
                     onChange={(event) => patchExportOptions({ textColor: event.target.value })}
-                    className="h-7 w-full rounded border border-[rgba(255,255,255,0.14)] bg-transparent"
+                    className="h-7 w-full rounded-sm border border-[rgba(255,255,255,0.14)] bg-transparent"
                   />
                 </label>
               </div>
@@ -1279,13 +1279,13 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
         type="target"
         id="target"
         position={Position.Left}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <Handle
         type="source"
         id="source"
         position={Position.Right}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <NodeResizeHandle
         minWidth={STORYBOARD_NODE_WIDTH_PX}
@@ -1296,12 +1296,12 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
 
       {typeof document !== 'undefined' && isPackDoneDialogOpen
         ? createPortal(
-          <div className="fixed inset-0 z-[220] flex items-center justify-center">
+          <div className="fixed inset-0 z-220 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/55" />
             <UiPanel className="relative w-[440px] p-4">
               <div className="text-sm font-medium text-text-dark">导出完成</div>
               <div className="mt-2 text-xs text-text-muted">图片已导出到以下路径：</div>
-              <div className="mt-1 break-all rounded border border-[rgba(255,255,255,0.12)] bg-bg-dark/70 px-2 py-1.5 text-xs text-text-dark">
+              <div className="mt-1 break-all rounded-sm border border-[rgba(255,255,255,0.12)] bg-bg-dark/70 px-2 py-1.5 text-xs text-text-dark">
                 {packOutputDir}
               </div>
               <div className="mt-4 flex justify-end gap-2">

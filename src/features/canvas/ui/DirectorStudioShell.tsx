@@ -202,9 +202,9 @@ const PEDESTRIAN_COLORS = [
 ] as const;
 
 const DIRECTOR_FIELD_CLASS =
-  'director-studio-field rounded border border-white/12 bg-[#090d10]/78 text-white outline-none placeholder:text-white/30 focus:border-accent/60 focus:bg-[#0c1115]';
+  'director-studio-field rounded-sm border border-white/12 bg-[#090d10]/78 text-white outline-hidden placeholder:text-white/30 focus:border-accent/60 focus:bg-[#0c1115]';
 const DIRECTOR_EDITABLE_NAME_CLASS =
-  'rounded border border-white/10 bg-white/[0.045] px-1.5 py-1 transition-colors hover:border-white/24 hover:bg-white/[0.075]';
+  'rounded-sm border border-white/10 bg-white/4.5 px-1.5 py-1 transition-colors hover:border-white/24 hover:bg-white/7.5';
 
 const INSPECTOR_ACTION_PRESETS = [
   { id: 'stand', valueKey: 'directorStudio.actionValues.stand', labelKey: 'directorStudio.actionPresets.stand', legacyValues: ['站立', 'Stand'] },
@@ -902,7 +902,7 @@ function TransformVectorBlock({ title, values, step, min, max, suffix = '', onCh
                 const next = Number(event.target.value);
                 if (Number.isFinite(next)) onChange(axis, next);
               }}
-              className="h-8 rounded border border-white/12 bg-white/6 px-1.5 text-right font-mono text-[11px] text-white outline-none focus:border-white/30"
+              className="h-8 rounded-sm border border-white/12 bg-white/6 px-1.5 text-right font-mono text-[11px] text-white outline-hidden focus:border-white/30"
               aria-label={`${axis.toUpperCase()} ${title}${suffix}`}
             />
           </label>
@@ -948,7 +948,7 @@ function BodyScalarControl({ label, value, min, max, step, suffix = '', onChange
           const next = Number(event.target.value);
           if (Number.isFinite(next)) onChange(next);
         }}
-        className="h-7 rounded border border-white/12 bg-white/6 px-1.5 text-right font-mono text-[10px] text-white outline-none focus:border-white/30"
+        className="h-7 rounded-sm border border-white/12 bg-white/6 px-1.5 text-right font-mono text-[10px] text-white outline-hidden focus:border-white/30"
         aria-label={`${label}${suffix}`}
       />
     </label>
@@ -2774,7 +2774,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   const content = (
     <div
       ref={tooltipsRootRef}
-      className="director-studio-shell nodrag nopan fixed inset-0 z-[8600] overflow-hidden bg-[#071012] text-white"
+      className="director-studio-shell nodrag nopan fixed inset-0 z-8600 overflow-hidden bg-[#071012] text-white"
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
     >
@@ -2803,7 +2803,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                 type="button"
                 onClick={() => switchStudioMode(mode)}
                 aria-pressed={studioMode === mode}
-                className={`h-8 rounded px-2 text-xs font-medium transition-colors sm:px-3 ${studioMode === mode ? 'bg-white text-[#152b2e]' : 'text-white/65 hover:bg-white/10 hover:text-white'}`}
+                className={`h-8 rounded-sm px-2 text-xs font-medium transition-colors sm:px-3 ${studioMode === mode ? 'bg-white text-[#152b2e]' : 'text-white/65 hover:bg-white/10 hover:text-white'}`}
               >{t(`directorStudio.studioMode.${mode}`)}</button>
             ))}
           </div>
@@ -2963,7 +2963,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                           <button
                             type="button"
                             onClick={() => { void updateProjectCover(project); }}
-                            className="rounded p-1 text-white/45 hover:bg-white/10 hover:text-white"
+                            className="rounded-sm p-1 text-white/45 hover:bg-white/10 hover:text-white"
                             title={t('directorStudio.changeCover')}
                           >
                             <Camera className="h-3.5 w-3.5" />
@@ -2971,7 +2971,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                           <button
                             type="button"
                             onClick={() => deleteProject(project)}
-                            className="rounded p-1 text-white/45 hover:bg-red-500/16 hover:text-red-200"
+                            className="rounded-sm p-1 text-white/45 hover:bg-red-500/16 hover:text-red-200"
                             title={t('common.delete')}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -2984,7 +2984,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                 <button
                   type="button"
                   onClick={() => { void createBlankWorkspace(); }}
-                  className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-white/16 bg-white/[0.03] text-white/45 hover:border-white/30 hover:text-white"
+                  className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-white/16 bg-white/3 text-white/45 hover:border-white/30 hover:text-white"
                   title={t('directorStudio.newProject')}
                 >
                   <Plus className="h-7 w-7" />
@@ -3039,7 +3039,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                             : 'border-white/10 bg-black/18 text-white/68 hover:border-white/24 hover:text-white'
                         }`}
                       >
-                        <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: item.color || '#9ca3af' }} />
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-xs" style={{ backgroundColor: item.color || '#9ca3af' }} />
                         <CategoryIcon className="h-3.5 w-3.5 shrink-0 text-white/45" />
                         <div className="min-w-0 flex-1">
                           {editingItemId === item.id ? (
@@ -3105,7 +3105,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                             event.stopPropagation();
                             updateItem(item.id, { showLabel: item.showLabel === false });
                           }}
-                          className="shrink-0 rounded p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
+                          className="shrink-0 rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
                           title={item.showLabel === false ? t('directorStudio.inspector.showLabel') : t('directorStudio.inspector.hideLabel')}
                         >
                           {item.showLabel === false ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
@@ -3220,7 +3220,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
               className="pointer-events-none absolute z-10 border border-white/75 shadow-[0_0_0_9999px_rgba(0,0,0,0.22)]"
               style={safeFrameStyle}
             >
-              <div className="absolute left-2 top-2 rounded bg-black/60 px-2 py-0.5 text-[10px] text-white/80">
+              <div className="absolute left-2 top-2 rounded-sm bg-black/60 px-2 py-0.5 text-[10px] text-white/80">
                 {t('directorStudio.safeFrame')} · {selectedAspect.value}
               </div>
             </div>
@@ -3251,7 +3251,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                 <button
                   type="button"
                   onClick={() => setFloatingPanel(null)}
-                  className="rounded p-1 text-white/45 hover:bg-white/10 hover:text-white"
+                  className="rounded-sm p-1 text-white/45 hover:bg-white/10 hover:text-white"
                   aria-label={t('common.close')}
                 >
                   <X className="h-3.5 w-3.5" />
@@ -3271,7 +3271,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                       }
                     }}
                     rows={7}
-                    className="nodrag nowheel w-full resize-none rounded-md border border-white/12 bg-black/30 px-3 py-2 text-xs leading-5 text-white outline-none placeholder:text-white/30 focus:border-white/30"
+                    className="nodrag nowheel w-full resize-none rounded-md border border-white/12 bg-black/30 px-3 py-2 text-xs leading-5 text-white outline-hidden placeholder:text-white/30 focus:border-white/30"
                     placeholder={t('directorStudio.prompt.placeholder')}
                   />
                   <span className="mt-2 block text-[10px] leading-4 text-white/42">
@@ -3400,7 +3400,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                         type="color"
                         value={lighting.mainColor}
                         onChange={(event) => updateLighting({ mainColor: event.target.value })}
-                        className="mt-1 h-9 w-full rounded border border-white/10 bg-transparent"
+                        className="mt-1 h-9 w-full rounded-sm border border-white/10 bg-transparent"
                       />
                     </label>
                     <label className="text-[11px] text-white/62">
@@ -3409,7 +3409,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                         type="color"
                         value={lighting.ambientColor}
                         onChange={(event) => updateLighting({ ambientColor: event.target.value })}
-                        className="mt-1 h-9 w-full rounded border border-white/10 bg-transparent"
+                        className="mt-1 h-9 w-full rounded-sm border border-white/10 bg-transparent"
                       />
                     </label>
                   </div>
@@ -3537,7 +3537,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                 <button
                   type="button"
                   onClick={() => setSidePanel(null)}
-                  className="rounded p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
+                  className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
                   aria-label={t('common.close')}
                 >
                   <X className="h-4 w-4" />
@@ -3555,7 +3555,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                           type="color"
                           value={selectedItem.color || '#9ca3af'}
                           onChange={(event) => updateItem(selectedItem.id, { color: event.target.value })}
-                          className="h-9 w-10 rounded border border-white/10 bg-transparent"
+                          className="h-9 w-10 rounded-sm border border-white/10 bg-transparent"
                           aria-label={t('directorStudio.inspector.color')}
                         />
                         <input
@@ -3592,7 +3592,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                           <button
                             type="button"
                             onClick={() => clearElementAsset(selectedItem.id)}
-                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-red-100 hover:bg-red-500/15"
+                            className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] text-red-100 hover:bg-red-500/15"
                           >
                             <Unlink className="h-3 w-3" />
                             {t('directorStudio.linkedImage.clear')}
@@ -3604,7 +3604,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                           <img
                             src={resolveImageDisplayUrl(selectedItem.refImageUrl) ?? selectedItem.refImageUrl}
                             alt={selectedItem.refImageName ?? selectedItem.label}
-                            className="h-12 w-12 rounded object-cover"
+                            className="h-12 w-12 rounded-sm object-cover"
                             draggable={false}
                           />
                           <div className="min-w-0 flex-1">
@@ -3641,7 +3641,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                           }
                         }}
                         rows={3}
-                        className="w-full resize-none rounded border border-white/12 bg-white/6 px-2.5 py-2 text-xs leading-5 text-white outline-none placeholder:text-white/30 focus:border-white/30"
+                        className="w-full resize-none rounded-sm border border-white/12 bg-white/6 px-2.5 py-2 text-xs leading-5 text-white outline-hidden placeholder:text-white/30 focus:border-white/30"
                         placeholder={t('directorStudio.inspector.relationPlaceholder')}
                       />
                     </label>
@@ -3660,7 +3660,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                           }
                         }}
                         rows={3}
-                        className="w-full resize-none rounded border border-white/12 bg-white/6 px-2.5 py-2 text-xs leading-5 text-white outline-none placeholder:text-white/30 focus:border-white/30"
+                        className="w-full resize-none rounded-sm border border-white/12 bg-white/6 px-2.5 py-2 text-xs leading-5 text-white outline-hidden placeholder:text-white/30 focus:border-white/30"
                         placeholder={t('directorStudio.inspector.notePlaceholder')}
                       />
                     </label>
@@ -3764,7 +3764,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                                     event.currentTarget.blur();
                                   }
                                 }}
-                                className="h-9 min-w-0 flex-1 rounded border border-white/12 bg-white/6 px-2.5 text-xs text-white outline-none placeholder:text-white/30 focus:border-white/30"
+                                className="h-9 min-w-0 flex-1 rounded-sm border border-white/12 bg-white/6 px-2.5 text-xs text-white outline-hidden placeholder:text-white/30 focus:border-white/30"
                                 placeholder={t('directorStudio.inspector.actionPlaceholder')}
                               />
                               <button
@@ -3954,7 +3954,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                   <button
                   type="button"
                   onClick={() => setSidePanel(null)}
-                  className="rounded p-1 text-white/45 hover:bg-white/10 hover:text-white"
+                  className="rounded-sm p-1 text-white/45 hover:bg-white/10 hover:text-white"
                   aria-label={t('common.close')}
                 >
                   <X className="h-3.5 w-3.5" />
@@ -4000,7 +4000,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                                 className="h-full w-full object-cover"
                                 draggable={false}
                               />
-                              <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[9px] text-white/72">{index + 1}</span>
+                              <span className="absolute left-1 top-1 rounded-sm bg-black/60 px-1 text-[9px] text-white/72">{index + 1}</span>
                             </button>
                             <button
                               type="button"
@@ -4008,7 +4008,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                                 event.stopPropagation();
                                 void deleteSnapshot(snapshotUrl);
                               }}
-                              className="absolute right-1 top-1 rounded bg-black/70 p-0.5 text-white/70 opacity-0 transition-opacity hover:bg-red-500/80 hover:text-white group-hover:opacity-100 group-focus-within:opacity-100"
+                              className="absolute right-1 top-1 rounded-sm bg-black/70 p-0.5 text-white/70 opacity-0 transition-opacity hover:bg-red-500/80 hover:text-white group-hover:opacity-100 group-focus-within:opacity-100"
                               aria-label={t('directorStudio.deleteSnapshot')}
                               title={t('directorStudio.deleteSnapshot')}
                             >
@@ -4062,7 +4062,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
             ) : null}
 
           {lightboxSnapshotUrl ? (
-            <div className="absolute inset-0 z-[65] flex items-center justify-center bg-black/78 p-8">
+            <div className="absolute inset-0 z-65 flex items-center justify-center bg-black/78 p-8">
               <button
                 type="button"
                 onClick={() => setLightboxSnapshotUrl(null)}
@@ -4178,7 +4178,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
             </div>
           ) : null}
 
-          <div className="pointer-events-none absolute left-0 z-[42]" style={{ top: timelineOpen ? 56 : 0, width: sceneWidth, height: sceneHeight }}>
+          <div className="pointer-events-none absolute left-0 z-42" style={{ top: timelineOpen ? 56 : 0, width: sceneWidth, height: sceneHeight }}>
           <DirectorCameraPilotHud
             active={timelineOpen && pilotActive}
             recording={false}
@@ -4283,7 +4283,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       </div>
 
       {importOpen ? (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 p-6">
+        <div className="absolute inset-0 z-70 flex items-center justify-center bg-black/55 p-6">
           <section className="flex max-h-[78vh] w-[620px] flex-col rounded-lg border border-white/12 bg-[#151618] shadow-2xl">
             <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
               <div className="min-w-0">
@@ -4293,7 +4293,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
               <button
                 type="button"
                 onClick={() => setImportOpen(false)}
-                className="rounded p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
+                className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
                 aria-label={t('common.close')}
               >
                 <X className="h-4 w-4" />
@@ -4375,7 +4375,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       ) : null}
 
       {assetPickerItem ? (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 p-6">
+        <div className="absolute inset-0 z-70 flex items-center justify-center bg-black/55 p-6">
           <section className="flex max-h-[76vh] w-[620px] flex-col rounded-lg border border-white/12 bg-[#151618] shadow-2xl">
             <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
               <div>
@@ -4387,7 +4387,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
               <button
                 type="button"
                 onClick={() => setAssetPickerItemId(null)}
-                className="rounded p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
+                className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
                 aria-label={t('common.close')}
               >
                 <X className="h-4 w-4" />
@@ -4532,14 +4532,14 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       />
 
       {activeDialog === 'shortcuts' ? (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 p-6">
+        <div className="absolute inset-0 z-70 flex items-center justify-center bg-black/55 p-6">
           <section className="flex max-h-[82vh] w-[760px] flex-col rounded-lg border border-white/12 bg-[#151618] shadow-2xl">
             <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
               <div className="text-sm font-medium text-white/88">{t('directorStudio.shortcuts.title')}</div>
               <button
                 type="button"
                 onClick={() => setActiveDialog(null)}
-                className="rounded p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
+                className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
                 aria-label={t('common.close')}
               >
                 <X className="h-4 w-4" />
@@ -4587,7 +4587,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                               ? 'border-accent bg-accent/20 text-accent'
                               : entry.shortcutId
                                 ? 'border-white/12 bg-white/8 text-white/78 hover:border-white/28 hover:bg-white/12 hover:text-white'
-                                : 'cursor-default border-white/8 bg-white/[0.04] text-white/42'
+                                : 'cursor-default border-white/8 bg-white/4 text-white/42'
                           }`}
                         >
                           {isEditing ? t('directorStudio.shortcuts.recording') : keyText}
@@ -4605,7 +4605,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       ) : null}
 
       {activeDialog === 'modelLibrary' ? (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 p-6">
+        <div className="absolute inset-0 z-70 flex items-center justify-center bg-black/55 p-6">
           <section className="flex max-h-[82vh] w-[820px] flex-col rounded-lg border border-white/12 bg-[#151618] shadow-2xl">
             <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
               <div className="text-sm font-medium text-white/88">{t('directorStudio.modelLibrary.title')}</div>
@@ -4622,7 +4622,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                 <button
                   type="button"
                   onClick={() => setActiveDialog(null)}
-                  className="rounded p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
+                  className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
                   aria-label={t('common.close')}
                 >
                   <X className="h-4 w-4" />
@@ -4668,7 +4668,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                           onClick={() => insertModel(model)}
                           className="group overflow-hidden rounded-lg border border-white/10 bg-black/20 text-left transition-colors hover:border-white/28 hover:bg-white/[0.07]"
                         >
-                          <div className="flex aspect-[4/3] items-center justify-center bg-white/[0.04] p-4">
+                          <div className="flex aspect-4/3 items-center justify-center bg-white/4 p-4">
                             <DirectorStudioModelThumbnail model={model} />
                           </div>
                           <div className="border-t border-white/8 px-2.5 py-2">
@@ -4696,14 +4696,14 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       ) : null}
 
       {activeDialog === 'pedestrians' ? (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 p-6">
+        <div className="absolute inset-0 z-70 flex items-center justify-center bg-black/55 p-6">
           <section className="w-[520px] rounded-lg border border-white/12 bg-[#151618] shadow-2xl">
             <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
               <div className="text-sm font-medium text-white/88">{t('directorStudio.pedestrians.title')}</div>
               <button
                 type="button"
                 onClick={() => setActiveDialog(null)}
-                className="rounded p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
+                className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
                 aria-label={t('common.close')}
               >
                 <X className="h-4 w-4" />
@@ -4741,7 +4741,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                       max={200}
                       value={pedestrianCount}
                       onChange={(event) => setPedestrianCount(Number(event.target.value))}
-                      className="mt-1 h-9 w-full rounded border border-white/12 bg-black/30 px-2 text-xs text-white outline-none focus:border-white/30"
+                      className="mt-1 h-9 w-full rounded-sm border border-white/12 bg-black/30 px-2 text-xs text-white outline-hidden focus:border-white/30"
                     />
                   </label>
                   {pedestrianMode === 'array' ? (
@@ -4753,7 +4753,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                         max={50}
                         value={pedestrianColumns}
                         onChange={(event) => setPedestrianColumns(Number(event.target.value))}
-                        className="mt-1 h-9 w-full rounded border border-white/12 bg-black/30 px-2 text-xs text-white outline-none focus:border-white/30"
+                        className="mt-1 h-9 w-full rounded-sm border border-white/12 bg-black/30 px-2 text-xs text-white outline-hidden focus:border-white/30"
                       />
                     </label>
                   ) : (
@@ -4766,7 +4766,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                         step={0.5}
                         value={pedestrianRadius}
                         onChange={(event) => setPedestrianRadius(Number(event.target.value))}
-                        className="mt-1 h-9 w-full rounded border border-white/12 bg-black/30 px-2 text-xs text-white outline-none focus:border-white/30"
+                        className="mt-1 h-9 w-full rounded-sm border border-white/12 bg-black/30 px-2 text-xs text-white outline-hidden focus:border-white/30"
                       />
                     </label>
                   )}
@@ -4781,7 +4781,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                           step={0.1}
                           value={pedestrianXSpacing}
                           onChange={(event) => setPedestrianXSpacing(Number(event.target.value))}
-                          className="mt-1 h-9 w-full rounded border border-white/12 bg-black/30 px-2 text-xs text-white outline-none focus:border-white/30"
+                          className="mt-1 h-9 w-full rounded-sm border border-white/12 bg-black/30 px-2 text-xs text-white outline-hidden focus:border-white/30"
                         />
                       </label>
                       <label className="text-[11px] text-white/62">
@@ -4793,14 +4793,14 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
                           step={0.1}
                           value={pedestrianZSpacing}
                           onChange={(event) => setPedestrianZSpacing(Number(event.target.value))}
-                          className="mt-1 h-9 w-full rounded border border-white/12 bg-black/30 px-2 text-xs text-white outline-none focus:border-white/30"
+                          className="mt-1 h-9 w-full rounded-sm border border-white/12 bg-black/30 px-2 text-xs text-white outline-hidden focus:border-white/30"
                         />
                       </label>
                     </>
                   ) : null}
                 </div>
               ) : (
-                <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-4 text-xs leading-5 text-white/52">
+                <div className="mt-4 rounded-lg border border-white/10 bg-white/4 px-3 py-4 text-xs leading-5 text-white/52">
                   {t('directorStudio.pedestrians.directHint')}
                 </div>
               )}
@@ -4827,7 +4827,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
           </section>
         </div>
       ) : null}
-      <div ref={tooltipRef} hidden role="tooltip" className="pointer-events-none fixed z-[9999] max-w-[260px] rounded-md border border-white/15 bg-[#102427] px-2.5 py-1.5 text-center text-[11px] font-medium leading-4 text-white shadow-xl" />
+      <div ref={tooltipRef} hidden role="tooltip" className="pointer-events-none fixed z-9999 max-w-[260px] rounded-md border border-white/15 bg-[#102427] px-2.5 py-1.5 text-center text-[11px] font-medium leading-4 text-white shadow-xl" />
     </div>
   );
 

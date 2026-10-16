@@ -116,7 +116,7 @@ function ApprovalCard({
     return (
       <button
         type="button"
-        className="agent-feed-enter flex min-h-11 w-full items-center gap-2 rounded-[6px] border border-border-dark/60 bg-bg-dark/[0.45] px-3 py-2 text-left transition-[background-color,border-color] duration-150 hover:border-amber-500/30 hover:bg-amber-500/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+        className="agent-feed-enter flex min-h-11 w-full items-center gap-2 rounded-[6px] border border-border-dark/60 bg-bg-dark/45 px-3 py-2 text-left transition-[background-color,border-color] duration-150 hover:border-amber-500/30 hover:bg-amber-500/4.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
         onClick={() => setCardExpanded(true)}
         aria-expanded="false"
       >
@@ -130,7 +130,7 @@ function ApprovalCard({
 
   return (
     <article
-      className="agent-feed-enter rounded-[6px] border border-amber-500/[0.35] bg-amber-500/[0.07] p-3"
+      className="agent-feed-enter rounded-[6px] border border-amber-500/35 bg-amber-500/[0.07] p-3"
       aria-live="polite"
     >
       <div className="flex items-start gap-2">
@@ -139,26 +139,26 @@ function ApprovalCard({
           <div className="text-xs font-semibold text-text-dark">{item.toolName}</div>
           <p className="mt-1 text-xs leading-5 text-text-muted">{item.summary}</p>
           <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-text-muted">
-            <span className="rounded border border-amber-500/25 px-1.5 py-0.5">
+            <span className="rounded-sm border border-amber-500/25 px-1.5 py-0.5">
               {t(`canvasAgent.effect.${item.impact.effect}`)}
             </span>
             {item.impact.affectedNodeCount > 0 ? (
-              <span className="rounded border border-border-dark/70 px-1.5 py-0.5">
+              <span className="rounded-sm border border-border-dark/70 px-1.5 py-0.5">
                 {t('canvasAgent.affectedNodes', { count: item.impact.affectedNodeCount })}
               </span>
             ) : null}
             {item.impact.affectedEdgeCount > 0 ? (
-              <span className="rounded border border-border-dark/70 px-1.5 py-0.5">
+              <span className="rounded-sm border border-border-dark/70 px-1.5 py-0.5">
                 {t('canvasAgent.affectedEdges', { count: item.impact.affectedEdgeCount })}
               </span>
             ) : null}
             {item.impact.model ? (
-              <span className="max-w-full truncate rounded border border-border-dark/70 px-1.5 py-0.5">
+              <span className="max-w-full truncate rounded-sm border border-border-dark/70 px-1.5 py-0.5">
                 {t('canvasAgent.modelLabel', { model: item.impact.model })}
               </span>
             ) : null}
             {item.impact.estimatedCost ? (
-              <span className="rounded border border-border-dark/70 px-1.5 py-0.5">
+              <span className="rounded-sm border border-border-dark/70 px-1.5 py-0.5">
                 {item.impact.estimatedCost.confidence === 'unknown'
                   ? t('canvasAgent.costUnknown')
                   : t('canvasAgent.costEstimate')}
@@ -169,7 +169,7 @@ function ApprovalCard({
         {isTerminal ? (
           <button
             type="button"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[4px] text-text-muted transition-colors duration-150 hover:bg-text-dark/[0.05] hover:text-text-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[4px] text-text-muted transition-colors duration-150 hover:bg-text-dark/5 hover:text-text-dark focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60"
             onClick={() => setCardExpanded(false)}
             aria-label={t('canvasAgent.collapseApproval')}
             title={t('canvasAgent.collapseApproval')}
@@ -182,7 +182,7 @@ function ApprovalCard({
 
       <button
         type="button"
-        className="mt-2 inline-flex min-h-11 items-center gap-1 text-xs text-text-muted transition-colors duration-150 hover:text-text-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
+        className="mt-2 inline-flex min-h-11 items-center gap-1 text-xs text-text-muted transition-colors duration-150 hover:text-text-dark focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
         onClick={() => setDetailsExpanded((value) => !value)}
         aria-expanded={detailsExpanded}
       >
@@ -193,7 +193,7 @@ function ApprovalCard({
       </button>
 
       {detailsExpanded ? (
-        <pre className="agent-disclosure-enter mt-2 max-h-48 overflow-auto rounded-[4px] bg-black/[0.08] p-2 text-[11px] leading-5 text-text-muted dark:bg-black/20">
+        <pre className="agent-disclosure-enter mt-2 max-h-48 overflow-auto rounded-[4px] bg-black/8 p-2 text-[11px] leading-5 text-text-muted dark:bg-black/20">
           {stringify(item.arguments)}
         </pre>
       ) : null}
@@ -215,7 +215,7 @@ function ApprovalCard({
               inputMode="decimal"
               min="0"
               step="0.1"
-              className="h-11 min-w-0 flex-1 rounded-[4px] border border-red-500/30 bg-bg-dark px-2 text-xs text-text-dark outline-none focus:border-red-400 focus:ring-2 focus:ring-red-400/20 sm:h-10"
+              className="h-11 min-w-0 flex-1 rounded-[4px] border border-red-500/30 bg-bg-dark px-2 text-xs text-text-dark outline-hidden focus:border-red-400 focus:ring-2 focus:ring-red-400/20 sm:h-10"
               aria-label={t('canvasAgent.adjustBudget')}
               placeholder={t('canvasAgent.newBudgetLimit')}
               value={budgetDraft}
@@ -223,7 +223,7 @@ function ApprovalCard({
             />
             <button
               type="button"
-              className="inline-flex min-h-11 items-center justify-center rounded-[4px] border border-red-500/30 px-2.5 text-xs text-red-700 transition-[background-color,transform] duration-150 hover:bg-red-500/[0.08] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 dark:text-red-200 sm:min-h-10"
+              className="inline-flex min-h-11 items-center justify-center rounded-[4px] border border-red-500/30 px-2.5 text-xs text-red-700 transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-red-500/8 active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-red-400/60 dark:text-red-200 sm:min-h-10"
               onClick={() => {
                 const value = Number(budgetDraft);
                 if (Number.isFinite(value) && value >= 0) onBudgetLimitChange(value);
@@ -244,7 +244,7 @@ function ApprovalCard({
           <button
             type="button"
             disabled={budgetDecision?.allowed === false}
-            className="inline-flex min-h-11 items-center justify-center gap-1 rounded-[5px] bg-accent px-3 text-xs font-semibold text-white transition-[background-color,transform] duration-150 hover:bg-accent/[0.85] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+            className="inline-flex min-h-11 items-center justify-center gap-1 rounded-[5px] bg-accent px-3 text-xs font-semibold text-white transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-accent/85 active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/70"
             onClick={() => onApproval(item, true)}
           >
             <Check className="h-3.5 w-3.5" aria-hidden="true" />
@@ -252,7 +252,7 @@ function ApprovalCard({
           </button>
           <button
             type="button"
-            className="inline-flex min-h-11 items-center justify-center gap-1 rounded-[5px] border border-border-dark px-3 text-xs text-text-dark transition-[background-color,transform] duration-150 hover:bg-text-dark/[0.05] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="inline-flex min-h-11 items-center justify-center gap-1 rounded-[5px] border border-border-dark px-3 text-xs text-text-dark transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60"
             onClick={() => onApproval(item, false)}
           >
             <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -283,7 +283,7 @@ function PlanCard({
   };
 
   return (
-    <article className="agent-feed-enter rounded-[6px] border border-accent/25 bg-accent/[0.055] p-3" aria-live="polite">
+    <article className="agent-feed-enter rounded-[6px] border border-accent/25 bg-accent/5.5 p-3" aria-live="polite">
       <div className="flex items-start gap-2">
         <ListChecks className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
         <div className="min-w-0 flex-1">
@@ -298,12 +298,12 @@ function PlanCard({
         {item.plan.steps.map((step, index) => (
           <li key={step.id} className="rounded-[5px] border border-border-dark/60 bg-bg-dark/55 p-2">
             <div className="flex items-center gap-1.5">
-              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] bg-text-dark/[0.06] text-[10px] font-semibold text-text-muted">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] bg-text-dark/6 text-[10px] font-semibold text-text-muted">
                 {index + 1}
               </span>
               <input
                 aria-label={t('canvasAgent.planStepLabel', { index: index + 1 })}
-                className="h-11 min-w-0 flex-1 rounded-[4px] border border-border-dark bg-bg-dark px-2 text-xs text-text-dark outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-2 focus:ring-accent/[0.12] disabled:opacity-70 sm:h-9"
+                className="h-11 min-w-0 flex-1 rounded-[4px] border border-border-dark bg-bg-dark px-2 text-xs text-text-dark outline-hidden transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-2 focus:ring-accent/12 disabled:opacity-70 sm:h-9"
                 disabled={!editable}
                 maxLength={240}
                 value={step.title}
@@ -316,7 +316,7 @@ function PlanCard({
               {editable ? (
                 <button
                   type="button"
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[4px] text-text-muted transition-[background-color,color,transform] duration-150 hover:bg-red-500/[0.08] hover:text-red-600 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 dark:hover:text-red-300 sm:h-9 sm:w-9"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[4px] text-text-muted transition-[background-color,color,transform,translate,scale,rotate] duration-150 hover:bg-red-500/8 hover:text-red-600 active:scale-[0.96] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-red-400/60 dark:hover:text-red-300 sm:h-9 sm:w-9"
                   aria-label={t('canvasAgent.removePlanStep', { index: index + 1 })}
                   title={t('canvasAgent.removePlanStep', { index: index + 1 })}
                   onClick={() => changeSteps(item.plan.steps.filter((candidate) => candidate.id !== step.id))}
@@ -328,7 +328,7 @@ function PlanCard({
             <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-7">
               <select
                 aria-label={t('canvasAgent.planStepEffect', { index: index + 1 })}
-                className="h-11 rounded-[4px] border border-border-dark bg-bg-dark px-1.5 text-[10px] text-text-muted outline-none focus:border-accent focus:ring-2 focus:ring-accent/[0.12] sm:h-8"
+                className="h-11 rounded-[4px] border border-border-dark bg-bg-dark px-1.5 text-[10px] text-text-muted outline-hidden focus:border-accent focus:ring-2 focus:ring-accent/12 sm:h-8"
                 disabled={!editable}
                 value={step.effect}
                 onChange={(event) => changeSteps(item.plan.steps.map((candidate) => (
@@ -356,7 +356,7 @@ function PlanCard({
                   <button
                     type="button"
                     disabled={index === 0}
-                    className="inline-flex h-11 w-11 items-center justify-center rounded-[4px] text-text-muted hover:bg-text-dark/[0.05] disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:h-8 sm:w-8"
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-[4px] text-text-muted hover:bg-text-dark/5 disabled:opacity-30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 sm:h-8 sm:w-8"
                     aria-label={t('canvasAgent.movePlanStepUp', { index: index + 1 })}
                     title={t('canvasAgent.movePlanStepUp', { index: index + 1 })}
                     onClick={() => {
@@ -370,7 +370,7 @@ function PlanCard({
                   <button
                     type="button"
                     disabled={index === item.plan.steps.length - 1}
-                    className="inline-flex h-11 w-11 items-center justify-center rounded-[4px] text-text-muted hover:bg-text-dark/[0.05] disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:h-8 sm:w-8"
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-[4px] text-text-muted hover:bg-text-dark/5 disabled:opacity-30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 sm:h-8 sm:w-8"
                     aria-label={t('canvasAgent.movePlanStepDown', { index: index + 1 })}
                     title={t('canvasAgent.movePlanStepDown', { index: index + 1 })}
                     onClick={() => {
@@ -393,7 +393,7 @@ function PlanCard({
           <button
             type="button"
             disabled={item.plan.steps.length >= 12}
-            className="mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-[4px] px-2 text-xs text-text-muted transition-[background-color,color,transform] duration-150 hover:bg-text-dark/[0.05] hover:text-text-dark active:scale-[0.98] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
+            className="mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-[4px] px-2 text-xs text-text-muted transition-[background-color,color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 hover:text-text-dark active:scale-[0.98] disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
             onClick={() => changeSteps([...item.plan.steps, createAgentPlanStep(t('canvasAgent.newPlanStep'))])}
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
@@ -403,7 +403,7 @@ function PlanCard({
             <button
               type="button"
               disabled={!item.plan.steps.some((step) => step.title.trim())}
-              className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[5px] bg-accent px-3 text-xs font-semibold text-white transition-[background-color,transform] duration-150 hover:bg-accent/[0.85] active:scale-[0.98] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+              className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[5px] bg-accent px-3 text-xs font-semibold text-white transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-accent/85 active:scale-[0.98] disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/70"
               onClick={() => onPlanConfirm(item)}
             >
               <Play className="h-3.5 w-3.5" aria-hidden="true" />
@@ -411,7 +411,7 @@ function PlanCard({
             </button>
             <button
               type="button"
-              className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[5px] border border-border-dark px-3 text-xs text-text-dark transition-[background-color,transform] duration-150 hover:bg-text-dark/[0.05] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[5px] border border-border-dark px-3 text-xs text-text-dark transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60"
               onClick={() => onPlanCancel(item)}
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -474,12 +474,12 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
       <div
         className={`agent-feed-enter max-w-[96%] whitespace-pre-wrap rounded-[6px] px-2.5 py-2 text-[13px] leading-[1.65] ${
           item.role === 'user'
-            ? 'ml-auto bg-accent/[0.12] text-text-dark'
+            ? 'ml-auto bg-accent/12 text-text-dark'
             : 'border border-border-dark/60 bg-bg-dark/[0.55] text-text-dark'
         }`}
       >
         {item.role === 'assistant' ? (
-          <div className="min-w-0 break-words [&_a]:text-accent [&_a]:underline [&_blockquote]:my-1.5 [&_blockquote]:border-l-2 [&_blockquote]:border-border-dark [&_blockquote]:pl-2.5 [&_code]:rounded [&_code]:bg-text-dark/[0.07] [&_code]:px-1 [&_code]:py-0.5 [&_h1]:mb-1.5 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mb-1 [&_h3]:text-[13px] [&_h3]:font-semibold [&_li]:my-0 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-0 [&_p+_p]:mt-2 [&_pre]:my-1.5 [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:rounded-[5px] [&_pre]:bg-text-dark/[0.07] [&_pre]:p-2 [&_strong]:font-semibold [&_table]:my-1.5 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border-dark [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border-dark [&_th]:px-2 [&_th]:py-1 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5">
+          <div className="min-w-0 wrap-break-word [&_a]:text-accent [&_a]:underline [&_blockquote]:my-1.5 [&_blockquote]:border-l-2 [&_blockquote]:border-border-dark [&_blockquote]:pl-2.5 [&_code]:rounded-sm [&_code]:bg-text-dark/[0.07] [&_code]:px-1 [&_code]:py-0.5 [&_h1]:mb-1.5 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mb-1 [&_h3]:text-[13px] [&_h3]:font-semibold [&_li]:my-0 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-0 [&_p+_p]:mt-2 [&_pre]:my-1.5 [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:rounded-[5px] [&_pre]:bg-text-dark/[0.07] [&_pre]:p-2 [&_strong]:font-semibold [&_table]:my-1.5 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border-dark [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border-dark [&_th]:px-2 [&_th]:py-1 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5">
             <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} skipHtml>
               {normalizeCompactAgentMarkdown(item.text)}
             </ReactMarkdown>
@@ -492,8 +492,8 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
                 key={attachment.referenceId}
                 className={`inline-flex max-w-full items-center gap-1 rounded-[4px] border px-1.5 py-0.5 text-[10px] ${
                   attachment.availability === 'missing'
-                    ? 'border-red-500/30 bg-red-500/[0.06] text-red-700 dark:text-red-200'
-                    : 'border-accent/25 bg-accent/[0.06] text-text-muted'
+                    ? 'border-red-500/30 bg-red-500/6 text-red-700 dark:text-red-200'
+                    : 'border-accent/25 bg-accent/6 text-text-muted'
                 }`}
                 title={attachment.availability === 'missing'
                   ? t('canvasAgent.missingAttachmentNamed', { name: attachment.title })
@@ -532,8 +532,8 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
       <div
         className={`agent-feed-enter rounded-[6px] border px-3 py-2 text-xs leading-5 ${
           item.status === 'error'
-            ? 'border-red-500/[0.35] bg-red-500/[0.08] text-red-700 dark:text-red-200'
-            : 'border-border-dark/60 bg-bg-dark/[0.45] text-text-muted'
+            ? 'border-red-500/35 bg-red-500/8 text-red-700 dark:text-red-200'
+            : 'border-border-dark/60 bg-bg-dark/45 text-text-muted'
         }`}
         role={item.status === 'error' ? 'alert' : 'status'}
         aria-live="polite"
@@ -547,7 +547,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
             {item.diagnosticMessage ? (
               <button
                 type="button"
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-[4px] bg-red-600 px-2.5 font-medium text-white transition-[background-color,transform] duration-150 hover:bg-red-500 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 sm:min-h-9"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-[4px] bg-red-600 px-2.5 font-medium text-white transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-red-500 active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-red-400/60 sm:min-h-9"
                 onClick={() => onDiagnose(item.diagnosticMessage!)}
               >
                 <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
@@ -556,7 +556,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
             ) : null}
             <button
               type="button"
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-[4px] border border-current/25 px-2 transition-[background-color,transform] duration-150 hover:bg-red-500/[0.08] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 sm:min-h-9"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-[4px] border border-current/25 px-2 transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-red-500/8 active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-red-400/60 sm:min-h-9"
               onClick={() => onRestoreDraft(item.retryMessage!)}
             >
               <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
@@ -570,10 +570,10 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
 
   if (item.kind === 'reasoning') {
     return (
-      <div className="agent-feed-enter rounded-[6px] border border-border-dark/60 bg-bg-dark/[0.45] text-xs">
+      <div className="agent-feed-enter rounded-[6px] border border-border-dark/60 bg-bg-dark/45 text-xs">
         <button
           type="button"
-          className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-text-muted transition-colors duration-150 hover:text-text-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+          className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-text-muted transition-colors duration-150 hover:text-text-dark focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
           onClick={() => setExpanded((value) => !value)}
           aria-expanded={expanded}
         >
@@ -594,7 +594,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
 
   if (item.kind === 'skill') {
     return (
-      <details className="agent-feed-enter rounded-[6px] border border-accent/20 bg-accent/[0.06] text-xs text-text-muted">
+      <details className="agent-feed-enter rounded-[6px] border border-accent/20 bg-accent/6 text-xs text-text-muted">
         <summary className="flex cursor-pointer list-none items-start gap-2 px-3 py-2 marker:content-none">
           <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" aria-hidden="true" />
           <span className="min-w-0 flex-1">
@@ -642,7 +642,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
       <article className="agent-feed-enter rounded-[5px] border border-border-dark/55 bg-sky-500/[0.035] text-xs">
         <button
           type="button"
-          className="flex min-h-9 w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors duration-150 hover:bg-text-dark/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+          className="flex min-h-9 w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors duration-150 hover:bg-text-dark/3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
           onClick={() => setExpanded((value) => !value)}
           aria-expanded={expanded}
         >
@@ -676,7 +676,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
             ? 'border-amber-500/30 bg-amber-500/[0.07] text-amber-800 dark:text-amber-200'
             : 'border-red-500/30 bg-red-500/[0.07] text-red-700 dark:text-red-200'}`} role={item.status === 'failed' ? 'alert' : 'status'}>
             <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 break-words">{failureText}</span>
+            <span className="min-w-0 wrap-break-word">{failureText}</span>
           </div>
         ) : null}
         {item.generationInputNodeIds?.length || item.generationResultNodeIds?.length ? (
@@ -684,7 +684,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
             {item.generationInputNodeIds?.length ? (
               <button
                 type="button"
-                className="inline-flex min-h-11 items-center gap-1 rounded-[4px] px-2 text-text-dark transition-[background-color,transform] duration-150 hover:bg-text-dark/[0.05] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
+                className="inline-flex min-h-11 items-center gap-1 rounded-[4px] px-2 text-text-dark transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
                 onClick={() => onLocate(item.generationInputNodeIds!)}
               >
                 <Crosshair className="h-3.5 w-3.5" aria-hidden="true" />
@@ -694,7 +694,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
             {item.generationResultNodeIds?.length ? (
               <button
                 type="button"
-                className="inline-flex min-h-11 items-center gap-1 rounded-[4px] bg-emerald-500/[0.08] px-2 text-emerald-700 transition-[background-color,transform] duration-150 hover:bg-emerald-500/[0.14] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 dark:text-emerald-200 sm:min-h-9"
+                className="inline-flex min-h-11 items-center gap-1 rounded-[4px] bg-emerald-500/8 px-2 text-emerald-700 transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-emerald-500/[0.14] active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-400/60 dark:text-emerald-200 sm:min-h-9"
                 onClick={() => onLocate(item.generationResultNodeIds!)}
               >
                 <Crosshair className="h-3.5 w-3.5" aria-hidden="true" />
@@ -705,7 +705,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
         ) : item.nodeIds?.length ? (
           <button
             type="button"
-            className="m-2 inline-flex min-h-11 items-center gap-1 rounded-[4px] px-2 text-text-dark transition-[background-color,transform] duration-150 hover:bg-text-dark/[0.05] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
+            className="m-2 inline-flex min-h-11 items-center gap-1 rounded-[4px] px-2 text-text-dark transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
             onClick={() => onLocate(item.nodeIds!)}
           >
             <Crosshair className="h-3.5 w-3.5" aria-hidden="true" />
@@ -716,7 +716,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
           <div className="flex flex-wrap items-center gap-1.5 border-t border-border-dark/50 p-2">
             <button
               type="button"
-              className="inline-flex min-h-11 items-center gap-1 rounded-[4px] border border-border-dark/70 px-2 text-text-muted transition-[background-color,color,transform] duration-150 hover:bg-text-dark/[0.05] hover:text-text-dark active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
+              className="inline-flex min-h-11 items-center gap-1 rounded-[4px] border border-border-dark/70 px-2 text-text-muted transition-[background-color,color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 hover:text-text-dark active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
               onClick={() => void copyDiagnosticText(diagnosticBundleJson, 'bundle-copied')}
             >
               <ClipboardCopy className="h-3.5 w-3.5" aria-hidden="true" />
@@ -724,7 +724,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
             </button>
             <button
               type="button"
-              className="inline-flex min-h-11 items-center gap-1 rounded-[4px] border border-border-dark/70 px-2 text-text-muted transition-[background-color,color,transform] duration-150 hover:bg-text-dark/[0.05] hover:text-text-dark active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
+              className="inline-flex min-h-11 items-center gap-1 rounded-[4px] border border-border-dark/70 px-2 text-text-muted transition-[background-color,color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 hover:text-text-dark active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
               onClick={() => void copyDiagnosticText(diagnosticIssueDraft, 'issue-copied')}
             >
               <ClipboardCopy className="h-3.5 w-3.5" aria-hidden="true" />
@@ -732,7 +732,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
             </button>
             <button
               type="button"
-              className="inline-flex min-h-11 items-center gap-1 rounded-[4px] border border-border-dark/70 px-2 text-text-muted transition-[background-color,color,transform] duration-150 hover:bg-text-dark/[0.05] hover:text-text-dark active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
+              className="inline-flex min-h-11 items-center gap-1 rounded-[4px] border border-border-dark/70 px-2 text-text-muted transition-[background-color,color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 hover:text-text-dark active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
               onClick={() => downloadDiagnosticBundle(diagnosticBundle)}
             >
               <Download className="h-3.5 w-3.5" aria-hidden="true" />
@@ -749,7 +749,7 @@ export function AgentFeedCard({ item, onApproval, onLocate, onRestoreDraft, onDi
           <button
             type="button"
             disabled={Boolean(item.rolledBackAt)}
-            className="m-2 inline-flex min-h-11 items-center gap-1 rounded-[4px] border border-border-dark/70 px-2 text-text-muted transition-[background-color,color,transform] duration-150 hover:bg-text-dark/[0.05] hover:text-text-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
+            className="m-2 inline-flex min-h-11 items-center gap-1 rounded-[4px] border border-border-dark/70 px-2 text-text-muted transition-[background-color,color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 hover:text-text-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-9"
             onClick={() => onRollback(item)}
           >
             <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />

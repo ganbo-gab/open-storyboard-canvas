@@ -930,7 +930,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
             <input
               value={label}
               onChange={(event) => setLabel(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="例如：我的 Sora 代理"
             />
           </label>
@@ -939,7 +939,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
             <input
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="sk-..."
               type="password"
             />
@@ -949,7 +949,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
             <input
               value={baseUrl}
               onChange={(event) => setBaseUrl(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="https://api.openai.com"
             />
           </label>
@@ -958,7 +958,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
             <input
               value={endpointPath}
               onChange={(event) => setEndpointPath(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="/v1/videos"
             />
           </label>
@@ -967,7 +967,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
             <input
               value={modelListEndpointPath}
               onChange={(event) => setModelListEndpointPath(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="/v1/models"
             />
           </label>
@@ -976,7 +976,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
             <input
               value={apiStyle}
               onChange={(event) => setApiStyle(event.target.value)}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 font-mono text-sm text-text-dark outline-hidden focus:border-accent"
               placeholder="openai-compatible / generic-json"
             />
           </label>
@@ -985,7 +985,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
             <select
               value={httpMethod}
               onChange={(event) => setHttpMethod(event.target.value === 'GET' ? 'GET' : 'POST')}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
             >
               <option value="POST">POST</option>
               <option value="GET">GET</option>
@@ -997,7 +997,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
               value={videoRequestBodyMode}
               disabled={usesOfficialH3Composer}
               onChange={(event) => setVideoRequestBodyMode(event.target.value === 'multipart' ? 'multipart' : 'json')}
-              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none focus:border-accent"
+              className="h-9 w-full rounded-md border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden focus:border-accent"
             >
               <option value="json">JSON / 查询参数</option>
               <option value="multipart">multipart/form-data</option>
@@ -1040,7 +1040,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                     ...current,
                     [key]: event.target.value,
                   }))}
-                  className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent"
+                  className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent"
                   placeholder={placeholder}
                 />
               </label>
@@ -1082,7 +1082,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
             <textarea
               value={videoRequestBodyTemplateText}
               onChange={(event) => setVideoRequestBodyTemplateText(event.target.value)}
-              className="ui-scrollbar mt-2 h-[130px] w-full resize-none rounded-md border border-border-dark bg-surface-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-none focus:border-accent"
+              className="ui-scrollbar mt-2 h-[130px] w-full resize-none rounded-md border border-border-dark bg-surface-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-hidden focus:border-accent"
               spellCheck={false}
             />
             {!parsedVideoRequestBodyTemplate.ok && (
@@ -1102,7 +1102,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
               <input
                 value={videoTaskIdPath}
                 onChange={(event) => setVideoTaskIdPath(event.target.value)}
-                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent"
+                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent"
                 placeholder="data.task_no / task_id"
               />
             </label>
@@ -1111,7 +1111,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
               <input
                 value={videoStatusEndpointPath}
                 onChange={(event) => setVideoStatusEndpointPath(event.target.value)}
-                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent"
+                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent"
                 placeholder="/v1/videos/{taskId}"
               />
             </label>
@@ -1120,7 +1120,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
               <select
                 value={videoStatusMethod}
                 onChange={(event) => setVideoStatusMethod(event.target.value === 'POST' ? 'POST' : 'GET')}
-                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 text-xs text-text-dark outline-none focus:border-accent"
+                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 text-xs text-text-dark outline-hidden focus:border-accent"
               >
                 <option value="GET">GET</option>
                 <option value="POST">POST</option>
@@ -1131,7 +1131,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
               <input
                 value={videoStatusPath}
                 onChange={(event) => setVideoStatusPath(event.target.value)}
-                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent"
+                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent"
                 placeholder="status / data.status"
               />
             </label>
@@ -1140,7 +1140,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
               <input
                 value={videoErrorPath}
                 onChange={(event) => setVideoErrorPath(event.target.value)}
-                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent"
+                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent"
                 placeholder="error / message"
               />
             </label>
@@ -1149,7 +1149,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
               <input
                 value={videoPollIntervalMs}
                 onChange={(event) => setVideoPollIntervalMs(event.target.value)}
-                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent"
+                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent"
                 placeholder="5000"
               />
             </label>
@@ -1158,7 +1158,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
               <input
                 value={videoPollTimeoutMs}
                 onChange={(event) => setVideoPollTimeoutMs(event.target.value)}
-                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent"
+                className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent"
                 placeholder="960000"
               />
             </label>
@@ -1169,7 +1169,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
               <textarea
                 value={responseVideoPathsText}
                 onChange={(event) => setResponseVideoPathsText(event.target.value)}
-                className="ui-scrollbar h-[86px] resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-none focus:border-accent"
+                className="ui-scrollbar h-[86px] resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-hidden focus:border-accent"
                 spellCheck={false}
               />
               {!parsedResponseVideoPaths.ok && (
@@ -1182,7 +1182,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                 <input
                   value={videoPendingValuesText}
                   onChange={(event) => setVideoPendingValuesText(event.target.value)}
-                  className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent"
+                  className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent"
                 />
               </label>
               <label className="flex flex-col gap-1 text-[11px] text-text-muted">
@@ -1190,7 +1190,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                 <input
                   value={videoSuccessValuesText}
                   onChange={(event) => setVideoSuccessValuesText(event.target.value)}
-                  className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent"
+                  className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent"
                 />
               </label>
               <label className="flex flex-col gap-1 text-[11px] text-text-muted">
@@ -1198,7 +1198,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                 <input
                   value={videoFailedValuesText}
                   onChange={(event) => setVideoFailedValuesText(event.target.value)}
-                  className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent"
+                  className="h-8 rounded-md border border-border-dark bg-bg-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent"
                 />
               </label>
             </div>
@@ -1213,7 +1213,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                 <textarea
                   value={videoStatusRequestBodyText}
                   onChange={(event) => setVideoStatusRequestBodyText(event.target.value)}
-                  className="ui-scrollbar h-[90px] resize-none rounded-md border border-border-dark bg-surface-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-none focus:border-accent"
+                  className="ui-scrollbar h-[90px] resize-none rounded-md border border-border-dark bg-surface-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-hidden focus:border-accent"
                   spellCheck={false}
                 />
                 {!parsedStatusRequestBody.ok && (
@@ -1225,7 +1225,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                 <textarea
                   value={videoStatusQueryParamsText}
                   onChange={(event) => setVideoStatusQueryParamsText(event.target.value)}
-                  className="ui-scrollbar h-[90px] resize-none rounded-md border border-border-dark bg-surface-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-none focus:border-accent"
+                  className="ui-scrollbar h-[90px] resize-none rounded-md border border-border-dark bg-surface-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-hidden focus:border-accent"
                   spellCheck={false}
                 />
                 {!parsedStatusQueryParams.ok && (
@@ -1256,7 +1256,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                   onChange={(event) => setModels((current) => current.map((item) => (
                     item.id === model.id ? { ...item, description: event.target.value } : item
                   )))}
-                  className="rounded-md border border-border-dark bg-bg-dark px-2 py-1 text-[11px] text-text-dark outline-none focus:border-accent"
+                  className="rounded-md border border-border-dark bg-bg-dark px-2 py-1 text-[11px] text-text-dark outline-hidden focus:border-accent"
                   placeholder="模型说明（选填）"
                 />
                 <button
@@ -1273,13 +1273,13 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
               <input
                 value={newModelId}
                 onChange={(event) => setNewModelId(event.target.value)}
-                className="rounded-md border border-dashed border-border-dark bg-bg-dark px-2 py-1 font-mono text-[11px] text-text-dark outline-none focus:border-accent"
+                className="rounded-md border border-dashed border-border-dark bg-bg-dark px-2 py-1 font-mono text-[11px] text-text-dark outline-hidden focus:border-accent"
                 placeholder="模型 ID，例如 sora-2"
               />
               <input
                 value={newModelDescription}
                 onChange={(event) => setNewModelDescription(event.target.value)}
-                className="rounded-md border border-dashed border-border-dark bg-bg-dark px-2 py-1 text-[11px] text-text-dark outline-none focus:border-accent"
+                className="rounded-md border border-dashed border-border-dark bg-bg-dark px-2 py-1 text-[11px] text-text-dark outline-hidden focus:border-accent"
                 placeholder="描述"
               />
               <button
@@ -1337,7 +1337,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                     onChange={(event) => setInputSchema((current) => updateSchemaImage(current, {
                       min: Number(event.target.value),
                     }))}
-                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-none focus:border-accent disabled:opacity-50"
+                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-hidden focus:border-accent disabled:opacity-50"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-[11px] text-text-muted">
@@ -1351,7 +1351,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                     onChange={(event) => setInputSchema((current) => updateSchemaImage(current, {
                       max: Number(event.target.value),
                     }))}
-                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-none focus:border-accent disabled:opacity-50"
+                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-hidden focus:border-accent disabled:opacity-50"
                   />
                 </label>
               </div>
@@ -1421,7 +1421,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                     onChange={(event) => setInputSchema((current) => updateSchemaVideo(current, {
                       min: Number(event.target.value),
                     }))}
-                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-none focus:border-accent disabled:opacity-50"
+                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-hidden focus:border-accent disabled:opacity-50"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-[11px] text-text-muted">
@@ -1435,7 +1435,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                     onChange={(event) => setInputSchema((current) => updateSchemaVideo(current, {
                       max: Number(event.target.value),
                     }))}
-                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-none focus:border-accent disabled:opacity-50"
+                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-hidden focus:border-accent disabled:opacity-50"
                   />
                 </label>
               </div>
@@ -1447,7 +1447,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                   onChange={(event) => setInputSchema((current) => updateSchemaVideo(current, {
                     field: event.target.value,
                   }))}
-                  className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent disabled:opacity-50"
+                  className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent disabled:opacity-50"
                   placeholder="video_url"
                 />
               </label>
@@ -1478,7 +1478,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                     onChange={(event) => setInputSchema((current) => updateSchemaAudio(current, {
                       min: Number(event.target.value),
                     }))}
-                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-none focus:border-accent disabled:opacity-50"
+                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-hidden focus:border-accent disabled:opacity-50"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-[11px] text-text-muted">
@@ -1492,7 +1492,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                     onChange={(event) => setInputSchema((current) => updateSchemaAudio(current, {
                       max: Number(event.target.value),
                     }))}
-                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-none focus:border-accent disabled:opacity-50"
+                    className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 text-xs text-text-dark outline-hidden focus:border-accent disabled:opacity-50"
                   />
                 </label>
               </div>
@@ -1504,7 +1504,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                   onChange={(event) => setInputSchema((current) => updateSchemaAudio(current, {
                     field: event.target.value,
                   }))}
-                  className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 font-mono text-xs text-text-dark outline-none focus:border-accent disabled:opacity-50"
+                  className="h-8 rounded-md border border-border-dark bg-surface-dark px-2 font-mono text-xs text-text-dark outline-hidden focus:border-accent disabled:opacity-50"
                   placeholder="audio_url"
                 />
               </label>
@@ -1525,7 +1525,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                   <button
                     type="button"
                     onClick={() => setDurations((current) => current.filter((item) => item !== duration))}
-                    className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-red-500/12 hover:text-red-300"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-sm hover:bg-red-500/12 hover:text-red-300"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
@@ -1535,7 +1535,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                 <input
                   value={customDuration}
                   onChange={(event) => setCustomDuration(event.target.value)}
-                  className="h-5 w-14 bg-transparent text-xs text-text-dark outline-none"
+                  className="h-5 w-14 bg-transparent text-xs text-text-dark outline-hidden"
                   placeholder="秒数"
                 />
                 <button type="button" onClick={handleAddDuration} className="text-[10px] text-accent">添加</button>
@@ -1551,7 +1551,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                   <button
                     type="button"
                     onClick={() => setAspectRatios((current) => current.filter((item) => item !== aspectRatio))}
-                    className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-red-500/12 hover:text-red-300"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-sm hover:bg-red-500/12 hover:text-red-300"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
@@ -1561,7 +1561,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                 <input
                   value={customAspectRatio}
                   onChange={(event) => setCustomAspectRatio(event.target.value)}
-                  className="h-5 w-16 bg-transparent text-xs text-text-dark outline-none"
+                  className="h-5 w-16 bg-transparent text-xs text-text-dark outline-hidden"
                   placeholder="16:9"
                 />
                 <button type="button" onClick={handleAddAspectRatio} className="text-[10px] text-accent">添加</button>
@@ -1577,7 +1577,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                   <button
                     type="button"
                     onClick={() => setResolutions((current) => current.filter((item) => item !== resolution))}
-                    className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-red-500/12 hover:text-red-300"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-sm hover:bg-red-500/12 hover:text-red-300"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
@@ -1587,7 +1587,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                 <input
                   value={customResolution}
                   onChange={(event) => setCustomResolution(event.target.value)}
-                  className="h-5 w-24 bg-transparent text-xs text-text-dark outline-none"
+                  className="h-5 w-24 bg-transparent text-xs text-text-dark outline-hidden"
                   placeholder="例 1024x1024"
                 />
                 <button type="button" onClick={handleAddResolution} className="text-[10px] text-accent">添加</button>
@@ -1607,7 +1607,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
           <textarea
             value={defaultParamsText}
             onChange={(event) => setDefaultParamsText(event.target.value)}
-            className="ui-scrollbar mt-2 h-[110px] w-full resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-none focus:border-accent"
+            className="ui-scrollbar mt-2 h-[110px] w-full resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-hidden focus:border-accent"
             spellCheck={false}
           />
           {!parsedDefaultParams.ok && (
@@ -1629,7 +1629,7 @@ export const VideoProvidersSection = memo(function VideoProvidersSection() {
                 setTemplateExtraParams(parsed.value);
               }
             }}
-            className="ui-scrollbar mt-2 h-[120px] w-full resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-none focus:border-accent"
+            className="ui-scrollbar mt-2 h-[120px] w-full resize-none rounded-md border border-border-dark bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-hidden focus:border-accent"
             spellCheck={false}
           />
         </details>

@@ -81,7 +81,7 @@ export function ProjectHome() {
                   onKeyDown={(event) => handleBranchKeyDown(event, branch.id)}
                   className={`inline-flex h-10 items-center gap-2 rounded-md px-4 text-sm font-medium transition-colors ${
                     isActive
-                      ? 'bg-accent text-white shadow-sm'
+                      ? 'bg-accent text-white shadow-xs'
                       : 'text-text-muted hover:bg-bg-dark/75 hover:text-text-dark'
                   }`}
                 >
@@ -106,7 +106,7 @@ export function ProjectHome() {
         role="tabpanel"
         aria-labelledby={`home-tab-${activeBranch}`}
         tabIndex={0}
-        className="ui-branch-enter min-h-0 flex-1 overflow-hidden outline-none"
+        className="ui-branch-enter min-h-0 flex-1 overflow-hidden outline-hidden"
       >
         {activeBranch === 'projects' ? (
           <ProjectManager />

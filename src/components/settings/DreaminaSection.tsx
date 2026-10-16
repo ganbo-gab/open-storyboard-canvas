@@ -575,7 +575,7 @@ export const DreaminaSection = memo(() => {
                   : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />}
                 <div className="min-w-0">
                   <div className="text-xs font-medium text-text-dark">{label}</div>
-                  <div className="mt-0.5 break-words text-xs leading-5 text-text-muted">{stage.detail || t('settings.dreamina.status.unavailable')}</div>
+                  <div className="mt-0.5 wrap-break-word text-xs leading-5 text-text-muted">{stage.detail || t('settings.dreamina.status.unavailable')}</div>
                 </div>
               </div>
             ))}

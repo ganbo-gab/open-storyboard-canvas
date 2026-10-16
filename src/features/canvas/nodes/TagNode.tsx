@@ -56,9 +56,9 @@ export const TagNode = memo(({ id, data, selected }: TagNodeProps) => {
   return (
     <>
       <div
-        className={`relative h-full min-h-[132px] w-full overflow-visible rounded-lg border bg-[var(--canvas-node-bg)] shadow-[var(--canvas-node-shadow)] ${selected
+        className={`relative h-full min-h-[132px] w-full overflow-visible rounded-lg border bg-(--canvas-node-bg) shadow-(--canvas-node-shadow) ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.3)]'
-          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}`}
+          : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}`}
         style={{ borderTopColor: COLOR_VARIABLES[data.color] }}
       >
         <NodeHeader
@@ -91,7 +91,7 @@ export const TagNode = memo(({ id, data, selected }: TagNodeProps) => {
               type="button"
               className={`nodrag nowheel inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors ${data.enabled
                 ? 'border-accent/35 bg-accent/10 text-accent'
-                : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-text-muted'}`}
+                : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-text-muted'}`}
               aria-pressed={data.enabled}
               aria-label={data.enabled ? t('node.tag.disable') : t('node.tag.enable')}
               title={data.enabled ? t('node.tag.disable') : t('node.tag.enable')}
@@ -105,7 +105,7 @@ export const TagNode = memo(({ id, data, selected }: TagNodeProps) => {
             </button>
           </div>
 
-          <div className="mt-3 flex items-center justify-between gap-2 border-t border-[var(--canvas-node-divider)] pt-2">
+          <div className="mt-3 flex items-center justify-between gap-2 border-t border-(--canvas-node-divider) pt-2">
             <div className="nodrag nowheel flex items-center gap-1" aria-label={t('node.tag.colorLabel')}>
               {TAG_COLORS.map((color) => (
                 <button
@@ -138,8 +138,8 @@ export const TagNode = memo(({ id, data, selected }: TagNodeProps) => {
           {error ? <p role="alert" className="mt-1 truncate text-[10px] text-red-500" title={error}>{error}</p> : null}
         </div>
 
-        <Handle type="target" id="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-surface-dark !bg-accent" />
-        <Handle type="source" id="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-surface-dark !bg-accent" />
+        <Handle type="target" id="target" position={Position.Left} className="h-2.5! w-2.5! border-surface-dark! bg-accent!" />
+        <Handle type="source" id="source" position={Position.Right} className="h-2.5! w-2.5! border-surface-dark! bg-accent!" />
       </div>
       <TagRelationsDialog
         isOpen={isConnectionsOpen}

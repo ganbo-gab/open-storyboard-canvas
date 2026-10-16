@@ -163,14 +163,14 @@ export function ProjectManager() {
             {sortedProjects.map((project) => (
               <article
                 key={project.id}
-                className="ui-project-card group relative min-h-[136px] overflow-hidden rounded-lg border border-border-dark bg-surface-dark p-4 transition-[border-color,background-color,box-shadow,transform] duration-150 hover:border-accent/45 hover:shadow-[var(--ui-shadow-panel)]"
+                className="ui-project-card group relative min-h-[136px] overflow-hidden rounded-lg border border-border-dark bg-surface-dark p-4 transition-[border-color,background-color,box-shadow,transform,translate,scale,rotate] duration-150 hover:border-accent/45 hover:shadow-(--ui-shadow-panel)"
               >
                 <button
                   type="button"
                   aria-label={`${t('project.open')}: ${project.name}`}
                   disabled={isOpeningProject}
                   onClick={() => openProject(project.id)}
-                  className="absolute inset-0 z-0 rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+                  className="absolute inset-0 z-0 rounded-lg outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
                 >
                   <span className="sr-only">{`${t('project.open')}: ${project.name}`}</span>
                 </button>
@@ -234,7 +234,7 @@ export function ProjectManager() {
           aria-live="polite"
           className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-40 flex items-center justify-center bg-black/20 backdrop-blur-[1px]`}
         >
-          <div className="ui-work-status inline-flex min-w-[180px] items-center justify-center gap-2 rounded-lg border border-border-dark bg-surface-dark/95 px-4 py-3 text-sm font-medium text-text-dark shadow-[var(--ui-shadow-panel)]">
+          <div className="ui-work-status inline-flex min-w-[180px] items-center justify-center gap-2 rounded-lg border border-border-dark bg-surface-dark/95 px-4 py-3 text-sm font-medium text-text-dark shadow-(--ui-shadow-panel)">
             <LoaderCircle className="h-4 w-4 animate-spin text-accent" />
             <span>{t('project.opening')}</span>
           </div>
@@ -254,7 +254,7 @@ export function ProjectManager() {
         title={t('project.deleteConfirmTitle')}
         onClose={() => setDeleteRequest(null)}
         widthClassName="w-[min(420px,calc(100vw-1.5rem))]"
-        containerClassName="z-[100]"
+        containerClassName="z-100"
         footer={(
           <>
             <UiButton type="button" variant="ghost" onClick={() => setDeleteRequest(null)}>

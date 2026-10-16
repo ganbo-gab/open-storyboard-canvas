@@ -82,7 +82,7 @@ export const BlueprintObjectConsole = memo(function BlueprintObjectConsole(props
       <div className="flex items-center justify-between">
         <div>
           <div className="text-xs font-semibold text-white/82">对象控制台</div>
-          <div className="mt-0.5 text-[10px] text-white/[0.38]">修改选中对象</div>
+          <div className="mt-0.5 text-[10px] text-white/38">修改选中对象</div>
         </div>
         {selectedItem && (
           <button
@@ -105,12 +105,12 @@ export const BlueprintObjectConsole = memo(function BlueprintObjectConsole(props
               type="color"
               value={selectedItem.color}
               onChange={(event) => onUpdateItem(selectedItem.id, { color: event.target.value })}
-              className="h-8 w-8 rounded border border-white/10 bg-transparent"
+              className="h-8 w-8 rounded-sm border border-white/10 bg-transparent"
             />
             <input
               value={selectedItem.label}
               onChange={(event) => onUpdateItem(selectedItem.id, { label: event.target.value })}
-              className="min-w-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-white/85 outline-none focus:border-white/25"
+              className="min-w-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-white/85 outline-hidden focus:border-white/25"
             />
           </div>
 
@@ -190,7 +190,7 @@ interface ObjectListSidebarProps {
 
 function ObjectListSidebar({ items, selectedItemId, onSelect }: ObjectListSidebarProps) {
   return (
-    <div className="ui-scrollbar nowheel max-h-40 overflow-y-auto rounded-lg border border-white/8 bg-black/[0.16] p-1.5">
+    <div className="ui-scrollbar nowheel max-h-40 overflow-y-auto rounded-lg border border-white/8 bg-black/16 p-1.5">
       {items.length === 0 ? (
         <div className="px-2 py-6 text-center text-[11px] text-white/35">还没有对象</div>
       ) : (
@@ -226,7 +226,7 @@ interface AxisBlockProps {
 
 function AxisBlock({ selectedItem, followSelectedItem, onFollowChange, onCoordinateChange }: AxisBlockProps) {
   return (
-    <div className="rounded-lg border border-white/8 bg-black/[0.18] p-3">
+    <div className="rounded-lg border border-white/8 bg-black/18 p-3">
       <div className="mb-3 flex items-center justify-between gap-2 text-[11px] text-white/52">
         <span className="inline-flex items-center gap-1.5">
           <Move3d className="h-3.5 w-3.5" /> 坐标轴 <span className="text-white/35">· X 朝屏, Y 左右, Z 高度</span>
@@ -301,7 +301,7 @@ function AxisSlider({ axis, value, min, max, color, onChange }: AxisSliderProps)
         onChange={(event) => onChange(Number(event.target.value))}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
-        className="nodrag nopan rounded border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-white/85 outline-none focus:border-accent/50"
+        className="nodrag nopan rounded-sm border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-white/85 outline-hidden focus:border-accent/50"
       />
     </label>
   );
@@ -467,7 +467,7 @@ function RelationField({ value, mentionTokens, onChange, onAppendMention }: Rela
         }}
         placeholder="描述对象在干什么、和谁有关联，输入 @ 触发自动补全"
         rows={3}
-        className="nodrag nowheel w-full resize-none rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-white/85 outline-none placeholder:text-white/30 focus:border-white/25"
+        className="nodrag nowheel w-full resize-none rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-white/85 outline-hidden placeholder:text-white/30 focus:border-white/25"
       />
 
       {mention.open && filteredSuggestions.length > 0 && (
@@ -514,7 +514,7 @@ function RelationField({ value, mentionTokens, onChange, onAppendMention }: Rela
                   key={token}
                   type="button"
                   onClick={() => onAppendMention(token)}
-                  className="rounded bg-white/8 px-1.5 py-0.5 text-[10px] text-white/62 hover:bg-white/14 hover:text-white"
+                  className="rounded-sm bg-white/8 px-1.5 py-0.5 text-[10px] text-white/62 hover:bg-white/14 hover:text-white"
                 >
                   {token}
                 </button>
@@ -538,7 +538,7 @@ interface ActionPresetGridProps {
 
 function ActionPresetGrid({ presets, customActions, activeAction, onPick, onRemoveCustom, onOpenModal }: ActionPresetGridProps) {
   return (
-    <div className="rounded-lg border border-white/12 bg-black/[0.22] p-3">
+    <div className="rounded-lg border border-white/12 bg-black/22 p-3">
       <div className="mb-2 flex items-center gap-1.5 text-[11px] text-white/65">
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
         <span className="font-semibold">动作预设</span>
@@ -558,7 +558,7 @@ function ActionPresetGrid({ presets, customActions, activeAction, onPick, onRemo
               className={`group relative flex min-h-[44px] items-center justify-center rounded-md border text-xs transition-[background-color,border-color,color,box-shadow] duration-150 ${
                 isActive
                   ? 'border-accent bg-accent text-white shadow-[0_0_0_2px_rgba(255,255,255,0.05)_inset]'
-                  : 'border-white/10 bg-white/[0.05] text-white/78 hover:border-white/30 hover:bg-white/12 hover:text-white'
+                  : 'border-white/10 bg-white/5 text-white/78 hover:border-white/30 hover:bg-white/12 hover:text-white'
               }`}
               title={fullLabel}
             >
@@ -589,7 +589,7 @@ function ActionPresetGrid({ presets, customActions, activeAction, onPick, onRemo
       <button
         type="button"
         onClick={onOpenModal}
-        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-white/20 bg-white/[0.04] px-2 py-2 text-[11px] text-white/72 hover:border-accent/60 hover:bg-accent/10 hover:text-white"
+        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-white/20 bg-white/4 px-2 py-2 text-[11px] text-white/72 hover:border-accent/60 hover:bg-accent/10 hover:text-white"
       >
         <span className="text-base leading-none">+</span> 自定义动作 / 编辑姿态
       </button>

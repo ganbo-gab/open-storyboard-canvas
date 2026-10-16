@@ -48,7 +48,7 @@ export const NodeDeleteToolbar = memo(({ nodeId, node }: NodeDeleteToolbarProps)
       <UiPanel className="flex items-center gap-1 rounded-full p-1">
         {canRetryGeneration && node && (
           <UiChipButton
-            className="h-8 rounded-full border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2.5 text-xs text-text-dark shadow-sm hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]"
+            className="h-8 rounded-full border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) px-2.5 text-xs text-text-dark shadow-xs hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)"
             onClick={(event) => {
               event.stopPropagation();
               updateNodeData(nodeId, buildRetryGenerationFetchPatch(node));
@@ -61,7 +61,7 @@ export const NodeDeleteToolbar = memo(({ nodeId, node }: NodeDeleteToolbarProps)
         )}
         {canUngroup && (
           <UiChipButton
-            className="h-8 rounded-full border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-2.5 text-xs text-text-dark shadow-sm hover:border-[var(--canvas-node-border-hover)] hover:bg-[var(--canvas-node-menu-hover)]"
+            className="h-8 rounded-full border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) px-2.5 text-xs text-text-dark shadow-xs hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)"
             onClick={(event) => {
               event.stopPropagation();
               ungroupNode(nodeId);

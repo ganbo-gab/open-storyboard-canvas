@@ -403,7 +403,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
 
   return (
     <div
-      className="fixed z-[200] rounded-xl border border-white/12 bg-[#202020] shadow-2xl"
+      className="fixed z-200 rounded-xl border border-white/12 bg-[#202020] shadow-2xl"
       style={{ left: panelLeft, top: panelTop, width: panelWidth }}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -411,7 +411,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
       <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/8">
         <div>
           <div className="text-sm font-semibold text-white">{t('directorStudio.legacyPanel.title')}</div>
-          <div className="mt-0.5 text-[11px] text-white/[0.42]">
+          <div className="mt-0.5 text-[11px] text-white/42">
             {t('directorStudio.legacyPanel.subtitle')}
           </div>
         </div>
@@ -438,7 +438,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
         <aside className="flex min-h-[560px] flex-col rounded-xl border border-white/10 bg-white/[0.035]">
           <div className="border-b border-white/8 px-3 py-2">
             <div className="text-xs font-semibold text-white/82">{t('directorStudio.legacyPanel.importImages')}</div>
-            <div className="mt-0.5 text-[10px] text-white/[0.38]">
+            <div className="mt-0.5 text-[10px] text-white/38">
               {t('directorStudio.legacyPanel.importedCount', {
                 imported: referenceImages.length,
                 total: allReferenceImages.length,
@@ -464,14 +464,14 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
                         setWorkflowMode('add');
                       }}
                       className={`w-full rounded-lg border p-1.5 text-left transition-colors ${
-                        draftSourceId === image.id ? 'border-accent/70 bg-accent/10' : 'border-white/10 bg-black/[0.18] hover:border-white/25'
+                        draftSourceId === image.id ? 'border-accent/70 bg-accent/10' : 'border-white/10 bg-black/18 hover:border-white/25'
                       }`}
                     >
-                      <div className="aspect-square overflow-hidden rounded bg-black/30">
+                      <div className="aspect-square overflow-hidden rounded-sm bg-black/30">
                         <img src={displayUrl} alt={image.label} className="h-full w-full object-cover" draggable={false} />
                       </div>
                       <div className="mt-1 flex items-center gap-1">
-                        <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: image.color }} />
+                        <span className="h-2.5 w-2.5 rounded-xs" style={{ backgroundColor: image.color }} />
                         <div className="min-w-0 flex-1 truncate text-[10px] text-white/78">
                           {t('directorStudio.legacyPanel.referenceListItem', { index: index + 1, label: image.label })}
                         </div>
@@ -485,7 +485,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
                     setDraftSelectedIds(importedReferenceIds);
                     setIsAssetPickerOpen(true);
                   }}
-                  className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-white/14 bg-black/[0.12] text-white/42 hover:border-white/30 hover:text-white/70"
+                  className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-white/14 bg-black/12 text-white/42 hover:border-white/30 hover:text-white/70"
                   title={t('directorStudio.legacyPanel.addFromAssets')}
                 >
                   <Plus className="h-6 w-6" />
@@ -533,7 +533,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
           <Suspense
             fallback={
               <div
-                className="flex items-center justify-center rounded-xl border border-white/10 bg-black/[0.18] text-xs text-white/50"
+                className="flex items-center justify-center rounded-xl border border-white/10 bg-black/18 text-xs text-white/50"
                 style={{ width: 760, height: 420 }}
               >
                 {t('directorStudio.legacyPanel.loadingEditor')}
@@ -555,7 +555,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
             />
           </Suspense>
 
-          <div className="rounded-xl border border-white/10 bg-black/[0.18]">
+          <div className="rounded-xl border border-white/10 bg-black/18">
             <div className="flex items-center gap-2 border-b border-white/8 px-3 py-2">
               <button
                 type="button"
@@ -606,7 +606,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
                       type="color"
                       value={draftColor}
                       onChange={(event) => setDraftColor(event.target.value)}
-                      className="h-8 w-8 rounded border border-white/10 bg-transparent"
+                      className="h-8 w-8 rounded-sm border border-white/10 bg-transparent"
                       title={t('directorStudio.legacyPanel.workflow.objectColor')}
                     />
                     <input
@@ -615,7 +615,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
                       placeholder={selectedRef
                         ? t('directorStudio.legacyPanel.workflow.objectNameFromImagePlaceholder')
                         : t('directorStudio.legacyPanel.workflow.newObjectNamePlaceholder')}
-                      className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-white/85 outline-none placeholder:text-white/30 focus:border-white/25"
+                      className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-white/85 outline-hidden placeholder:text-white/30 focus:border-white/25"
                     />
                   </div>
                 </div>
@@ -646,7 +646,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
                           setDraftPresetId(preset.id);
                           if (!draftName.trim()) setDraftName(preset.label);
                         }}
-                        className={`rounded px-2 py-0.5 text-[10px] ${draftPresetId === preset.id ? 'bg-accent text-white' : 'bg-white/8 text-white/65 hover:bg-white/14'}`}
+                        className={`rounded-sm px-2 py-0.5 text-[10px] ${draftPresetId === preset.id ? 'bg-accent text-white' : 'bg-white/8 text-white/65 hover:bg-white/14'}`}
                       >
                         {preset.label}
                       </button>
@@ -670,7 +670,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
           </div>
 
           {allReferenceImages.length === 0 && (
-            <div className="rounded-lg border border-dashed border-white/12 bg-white/[0.03] px-3 py-2 text-[11px] leading-5 text-white/45">
+            <div className="rounded-lg border border-dashed border-white/12 bg-white/3 px-3 py-2 text-[11px] leading-5 text-white/45">
               {t('directorStudio.legacyPanel.noAssetsHint')}
             </div>
           )}
@@ -682,7 +682,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
               if (submitError) setSubmitError('');
             }}
             placeholder={t('directorStudio.legacyPanel.basePromptPlaceholder')}
-            className="h-16 w-full resize-none rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/85 outline-none placeholder:text-white/30 focus:border-white/25"
+            className="h-16 w-full resize-none rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/85 outline-hidden placeholder:text-white/30 focus:border-white/25"
           />
 
           <details className="text-[11px] text-white/50">

@@ -95,7 +95,7 @@ export function ImageViewerModal({
       aria-modal="true"
       aria-label={t('viewer.imageAlt')}
       tabIndex={-1}
-      className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-[100] overflow-hidden bg-black/90 backdrop-blur-lg transition-opacity duration-[180ms] ${isVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+      className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-100 overflow-hidden bg-black/90 backdrop-blur-lg transition-opacity duration-180 ${isVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
       onKeyDown={handleKeyDown}
     >
       <div
@@ -114,7 +114,7 @@ export function ImageViewerModal({
             ref={imageRef}
             src={displayImageUrl}
             alt={t('viewer.imageAlt', '图片')}
-            className="select-none transition-opacity duration-[180ms]"
+            className="select-none transition-opacity duration-180"
             style={{
               opacity: viewerOpacity,
               transformOrigin: 'center',
@@ -143,7 +143,7 @@ export function ImageViewerModal({
                 type="button"
                 onClick={() => onNavigate('prev')}
                 disabled={currentIndex <= 0}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800/80 text-white backdrop-blur-sm transition-[background-color,opacity] duration-200 hover:bg-zinc-700/80 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800/80 text-white backdrop-blur-xs transition-[background-color,opacity] duration-200 hover:bg-zinc-700/80 disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label={t('viewer.prev', '上一张')}
                 title={t('viewer.prev', '上一张')}
               >
@@ -153,7 +153,7 @@ export function ImageViewerModal({
                 type="button"
                 onClick={() => onNavigate('next')}
                 disabled={currentIndex >= imageList.length - 1}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800/80 text-white backdrop-blur-sm transition-[background-color,opacity] duration-200 hover:bg-zinc-700/80 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800/80 text-white backdrop-blur-xs transition-[background-color,opacity] duration-200 hover:bg-zinc-700/80 disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label={t('viewer.next', '下一张')}
                 title={t('viewer.next', '下一张')}
               >

@@ -65,7 +65,7 @@ export const TagGroupToolbar = memo(({ nodeId, data }: TagGroupToolbarProps) => 
           <input
             value={name}
             aria-label={t('node.tag.groupName')}
-            className="nodrag h-8 w-32 rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] px-3 text-xs text-text-dark outline-none focus:border-accent"
+            className="nodrag h-8 w-32 rounded-full border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) px-3 text-xs text-text-dark outline-hidden focus:border-accent"
             onChange={(event) => setName(event.target.value)}
             onBlur={saveName}
             onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
@@ -82,12 +82,12 @@ export const TagGroupToolbar = memo(({ nodeId, data }: TagGroupToolbarProps) => 
               />
             ))}
           </div>
-          <div className="flex items-center gap-0.5 border-l border-[var(--canvas-node-divider)] pl-1">
+          <div className="flex items-center gap-0.5 border-l border-(--canvas-node-divider) pl-1">
             {SHAPES.map(({ value, icon: Icon }) => (
               <button
                 key={value}
                 type="button"
-                className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${data.shape === value ? 'bg-accent/15 text-accent' : 'text-text-muted hover:bg-[var(--canvas-node-menu-hover)]'}`}
+                className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${data.shape === value ? 'bg-accent/15 text-accent' : 'text-text-muted hover:bg-(--canvas-node-menu-hover)'}`}
                 aria-label={t(`node.tag.shapes.${value}`)}
                 title={t(`node.tag.shapes.${value}`)}
                 onClick={() => void run({ type: 'tagGroup.setAppearance', version: CANVAS_COMMAND_VERSION, input: { groupId: nodeId, shape: value } })}

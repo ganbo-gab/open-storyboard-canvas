@@ -260,14 +260,14 @@ export const PanoramaSetupForm = memo(({
       <button
         type="button"
         onClick={() => setProjection('spherical')}
-        className={`flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs ${projection === 'spherical' ? 'border-accent bg-accent text-white' : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:bg-[var(--canvas-node-menu-hover)]'}`}
+        className={`flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs ${projection === 'spherical' ? 'border-accent bg-accent text-white' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)'}`}
       >
         <Globe className="h-3 w-3" /> 720°球体
       </button>
       <button
         type="button"
         onClick={() => setProjection('cylindrical')}
-        className={`flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs ${projection === 'cylindrical' ? 'border-accent bg-accent text-white' : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:bg-[var(--canvas-node-menu-hover)]'}`}
+        className={`flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs ${projection === 'cylindrical' ? 'border-accent bg-accent text-white' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)'}`}
       >
         <Compass className="h-3 w-3" /> 360°环绕
       </button>
@@ -279,14 +279,14 @@ export const PanoramaSetupForm = memo(({
       <button
         type="button"
         onClick={() => setSourceMode('ai')}
-        className={`flex h-10 items-center justify-center gap-1 rounded-md border px-2 text-xs ${sourceMode !== 'image' ? 'border-accent bg-accent text-white' : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:bg-[var(--canvas-node-menu-hover)]'}`}
+        className={`flex h-10 items-center justify-center gap-1 rounded-md border px-2 text-xs ${sourceMode !== 'image' ? 'border-accent bg-accent text-white' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)'}`}
       >
         <Type className="h-3 w-3" /> AI生成全景图
       </button>
       <button
         type="button"
         onClick={() => setSourceMode('image')}
-        className={`flex h-10 items-center justify-center gap-1 rounded-md border px-2 text-xs ${sourceMode === 'image' ? 'border-accent bg-accent text-white' : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:bg-[var(--canvas-node-menu-hover)]'}`}
+        className={`flex h-10 items-center justify-center gap-1 rounded-md border px-2 text-xs ${sourceMode === 'image' ? 'border-accent bg-accent text-white' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)'}`}
       >
         <ImageIcon className="h-3 w-3" /> 图生全景图
       </button>
@@ -299,7 +299,7 @@ export const PanoramaSetupForm = memo(({
         type="button"
         onClick={() => setSmartBase((current) => !current)}
         className={`inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-md border px-2.5 text-xs transition-colors ${
-          smartBase ? 'border-accent/60 bg-accent/15 text-accent' : 'border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-[var(--canvas-node-button-text)] hover:bg-[var(--canvas-node-menu-hover)]'
+          smartBase ? 'border-accent/60 bg-accent/15 text-accent' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)'
         }`}
       >
         {smartBase && <CheckCircle2 className="h-3 w-3" />}
@@ -308,12 +308,12 @@ export const PanoramaSetupForm = memo(({
       <button
         type="button"
         onClick={() => setShowSmartHelp((current) => !current)}
-        className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] text-text-muted hover:bg-[var(--canvas-node-menu-hover)] hover:text-text-dark"
+        className="flex h-8 w-8 items-center justify-center rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-text-muted hover:bg-(--canvas-node-menu-hover) hover:text-text-dark"
       >
         <HelpCircle className="h-3.5 w-3.5" />
       </button>
       {showSmartHelp && (
-        <div className="absolute bottom-full right-0 z-30 mb-2 w-[340px] rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] p-3 text-[11px] leading-5 text-text-muted shadow-2xl">
+        <div className="absolute bottom-full right-0 z-30 mb-2 w-[340px] rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-3 text-[11px] leading-5 text-text-muted shadow-2xl">
           AI生成全景图会优先提交目标比例；如果供应商没有 2:1 / 4:1，会选择最接近的宽比例生成，再裁切、羽化并归一化。
         </div>
       )}
@@ -322,8 +322,8 @@ export const PanoramaSetupForm = memo(({
 
   const body = (
     <div className="grid min-h-[560px] grid-cols-[270px_minmax(0,1fr)_330px]">
-      <aside className="flex flex-col border-r border-[var(--canvas-node-divider)] bg-[var(--canvas-node-subtle-bg)]">
-        <div className="border-b border-[var(--canvas-node-divider)] px-3 py-2">
+      <aside className="flex flex-col border-r border-(--canvas-node-divider) bg-(--canvas-node-subtle-bg)">
+        <div className="border-b border-(--canvas-node-divider) px-3 py-2">
           <div className="text-xs font-semibold text-text-dark">{sourceMode === 'image' ? '全景源图（单张）' : '全景素材'}</div>
           <div className="mt-0.5 text-[10px] text-text-muted">
             {sourceMode === 'image'
@@ -334,17 +334,17 @@ export const PanoramaSetupForm = memo(({
         <div className="ui-scrollbar nowheel flex-1 overflow-y-auto p-2">
           <div className="space-y-2">
             {selectedReferences.map((image, index) => (
-              <div key={image.id} className="rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-bg-strong)] p-1.5">
-                <div className="aspect-video overflow-hidden rounded bg-[var(--canvas-node-media-bg)]">
+              <div key={image.id} className="rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-bg-strong) p-1.5">
+                <div className="aspect-video overflow-hidden rounded-sm bg-(--canvas-node-media-bg)">
                   <img src={image.url} alt={image.label} className="h-full w-full object-cover" draggable={false} />
                 </div>
                 <div className="mt-1 flex items-center gap-1">
-                  <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: image.color }} />
+                  <span className="h-2.5 w-2.5 rounded-xs" style={{ backgroundColor: image.color }} />
                   <div className="min-w-0 flex-1 truncate text-[10px] text-text-dark">{sourceMode === 'image' ? '源图' : `图${index + 1}`} · {image.label}</div>
                   <button
                     type="button"
                     onClick={() => setSelectedIds((current) => current.filter((id) => id !== image.id))}
-                    className="rounded px-1 text-[10px] text-text-muted hover:bg-[var(--canvas-node-menu-hover)] hover:text-text-dark"
+                    className="rounded-sm px-1 text-[10px] text-text-muted hover:bg-(--canvas-node-menu-hover) hover:text-text-dark"
                   >
                     ×
                   </button>
@@ -355,7 +355,7 @@ export const PanoramaSetupForm = memo(({
               <button
                 type="button"
                 onClick={openAssetPicker}
-                className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-[var(--canvas-node-border)] bg-[var(--canvas-node-field-bg)] text-text-muted hover:border-[var(--canvas-node-border-hover)] hover:text-text-dark"
+                className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-(--canvas-node-border) bg-(--canvas-node-field-bg) text-text-muted hover:border-(--canvas-node-border-hover) hover:text-text-dark"
                 title={sourceMode === 'image' ? '选择全景源图' : '从资产加入图片'}
               >
                 <Plus className="h-6 w-6" />
@@ -365,7 +365,7 @@ export const PanoramaSetupForm = memo(({
               <button
                 type="button"
                 onClick={openAssetPicker}
-                className="w-full rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-2 py-2 text-[11px] text-[var(--canvas-node-button-text)] hover:bg-[var(--canvas-node-menu-hover)]"
+                className="w-full rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-2 text-[11px] text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)"
                 title="替换源图"
               >
                 替换源图
@@ -385,10 +385,10 @@ export const PanoramaSetupForm = memo(({
             placeholder={sourceMode === 'image'
               ? '可选备注：使用现成图片作为全景源，不会提交给 AI'
               : '输入全景场景描述；按 @ 可插入图1/图2引用，文字+图片+内置全景提示词会一起提交'}
-            className="nodrag nowheel h-40 w-full resize-none rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-4 py-3 text-sm leading-6 text-text-dark outline-none placeholder:text-text-muted/70 focus:border-accent"
+            className="nodrag nowheel h-40 w-full resize-none rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-4 py-3 text-sm leading-6 text-text-dark outline-hidden placeholder:text-text-muted/70 focus:border-accent"
           />
           {showReferencePicker && selectedReferences.length > 0 && (
-            <div className="absolute left-3 top-11 z-30 w-[180px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-2xl">
+            <div className="absolute left-3 top-11 z-30 w-[180px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-2xl">
               <div className="ui-scrollbar max-h-[220px] overflow-y-auto p-1.5">
                 {selectedReferences.map((image, index) => (
                   <button
@@ -398,10 +398,10 @@ export const PanoramaSetupForm = memo(({
                     onClick={() => insertPanoramaReference(index)}
                     onMouseEnter={() => setReferencePickerIndex(index)}
                     className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors ${
-                      referencePickerIndex === index ? 'bg-[var(--canvas-node-menu-active)] text-text-dark' : 'text-text-muted hover:bg-[var(--canvas-node-menu-hover)]'
+                      referencePickerIndex === index ? 'bg-(--canvas-node-menu-active) text-text-dark' : 'text-text-muted hover:bg-(--canvas-node-menu-hover)'
                     }`}
                   >
-                    <img src={image.url} alt={image.label} className="h-8 w-8 rounded object-cover" draggable={false} />
+                    <img src={image.url} alt={image.label} className="h-8 w-8 rounded-sm object-cover" draggable={false} />
                     <span className="min-w-0 flex-1 truncate">@图{index + 1}</span>
                   </button>
                 ))}
@@ -410,21 +410,21 @@ export const PanoramaSetupForm = memo(({
           )}
         </div>
         {sourceMode === 'ai' || sourceMode === 'text' ? (
-          <div className="rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-subtle-bg)] px-3 py-2 text-[11px] leading-5 text-text-muted">
+          <div className="rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-subtle-bg) px-3 py-2 text-[11px] leading-5 text-text-muted">
             AI生成全景图会把文字、导入图片和内置全景提示词一起提交，目标是先得到 2:1 全景底图，再进入全景查看器。
           </div>
         ) : (
-          <div className="rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-subtle-bg)] px-3 py-2 text-[11px] leading-5 text-text-muted">
+          <div className="rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-subtle-bg) px-3 py-2 text-[11px] leading-5 text-text-muted">
             图生全景图只使用第一张源图作为全景底图。图片接近 {projection === 'spherical' ? '2:1' : '4:1'} 时直接进入全景查看器；不符合时在本地裁切、羽化并归一化，不会提交给 AI。
           </div>
         )}
         {sourceMode !== 'image' && (
           <details className="text-[11px] text-text-muted">
             <summary className="cursor-pointer hover:text-text-dark">查看最终提示词</summary>
-            <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-lg bg-[var(--canvas-node-field-bg)] p-2 text-[11px] text-text-muted">{composed}</pre>
+            <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-lg bg-(--canvas-node-field-bg) p-2 text-[11px] text-text-muted">{composed}</pre>
           </details>
         )}
-        <div className="mt-auto flex items-center justify-between gap-3 border-t border-[var(--canvas-node-divider)] pt-4">
+        <div className="mt-auto flex items-center justify-between gap-3 border-t border-(--canvas-node-divider) pt-4">
           {sourceMode !== 'image' ? (
             <ModelConfigPicker
               panelKey="panorama"
@@ -449,7 +449,7 @@ export const PanoramaSetupForm = memo(({
         </div>
       </main>
 
-      <aside className="flex flex-col gap-4 border-l border-[var(--canvas-node-divider)] bg-[var(--canvas-node-subtle-bg)] p-4">
+      <aside className="flex flex-col gap-4 border-l border-(--canvas-node-divider) bg-(--canvas-node-subtle-bg) p-4">
         <section className="flex flex-col gap-2">
           <div className="text-[10px] uppercase tracking-wider text-text-muted">生成方式</div>
           {modeButtons}
@@ -465,7 +465,7 @@ export const PanoramaSetupForm = memo(({
         )}
         <section className="flex flex-col gap-2">
           <div className="text-[10px] uppercase tracking-wider text-text-muted">比例兜底</div>
-          <div className="flex items-start gap-2 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-bg-strong)] px-3 py-2 text-[11px] leading-5 text-text-muted">
+          <div className="flex items-start gap-2 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-bg-strong) px-3 py-2 text-[11px] leading-5 text-text-muted">
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" />
             <span>
               {sourceMode === 'image'
@@ -479,7 +479,7 @@ export const PanoramaSetupForm = memo(({
               <button
                 type="button"
                 onClick={() => onCopyPrompt?.(composed)}
-                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-3 text-xs text-[var(--canvas-node-button-text)] transition-colors hover:bg-[var(--canvas-node-menu-hover)]"
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-3 text-xs text-(--canvas-node-button-text) transition-colors hover:bg-(--canvas-node-menu-hover)"
                 title="复制完整提示词到剪贴板"
               >
                 <Copy className="h-3 w-3" /> 复制提示词
@@ -499,9 +499,9 @@ export const PanoramaSetupForm = memo(({
     <>
       {body}
       {isAssetPickerOpen && (
-        <div className="absolute inset-0 z-[260] flex items-center justify-center bg-black/35 backdrop-blur-sm">
-          <div className="w-[560px] max-w-[calc(100%-32px)] rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[var(--canvas-node-divider)] px-4 py-3">
+        <div className="absolute inset-0 z-260 flex items-center justify-center bg-black/35 backdrop-blur-xs">
+          <div className="w-[560px] max-w-[calc(100%-32px)] rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-2xl">
+            <div className="flex items-center justify-between border-b border-(--canvas-node-divider) px-4 py-3">
               <div>
                 <div className="text-sm font-semibold text-text-dark">{sourceMode === 'image' ? '选择要转换的全景源图' : '选择全景参考图'}</div>
                 <div className="mt-0.5 text-[11px] text-text-muted">
@@ -510,24 +510,24 @@ export const PanoramaSetupForm = memo(({
                     : 'AI生成全景图支持多选，可作为风格 / 主体 / 元素参考'}
                 </div>
               </div>
-              <button type="button" onClick={() => setIsAssetPickerOpen(false)} className="rounded-md p-1 text-text-muted hover:bg-[var(--canvas-node-menu-hover)] hover:text-text-dark">
+              <button type="button" onClick={() => setIsAssetPickerOpen(false)} className="rounded-md p-1 text-text-muted hover:bg-(--canvas-node-menu-hover) hover:text-text-dark">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="border-b border-[var(--canvas-node-divider)] px-4 py-2">
-              <label className="flex h-8 items-center gap-2 rounded-lg border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2">
+            <div className="border-b border-(--canvas-node-divider) px-4 py-2">
+              <label className="flex h-8 items-center gap-2 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-2">
                 <Search className="h-3.5 w-3.5 text-text-muted" />
                 <input
                   value={assetQuery}
                   onChange={(event) => setAssetQuery(event.target.value)}
                   placeholder="搜索图片名称"
-                  className="min-w-0 flex-1 bg-transparent text-xs text-text-dark outline-none placeholder:text-text-muted/70"
+                  className="min-w-0 flex-1 bg-transparent text-xs text-text-dark outline-hidden placeholder:text-text-muted/70"
                 />
               </label>
             </div>
             <div className="ui-scrollbar max-h-[380px] overflow-y-auto p-4">
               {filteredReferences.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-[var(--canvas-node-border)] px-4 py-10 text-center text-xs text-text-muted">
+                <div className="rounded-lg border border-dashed border-(--canvas-node-border) px-4 py-10 text-center text-xs text-text-muted">
                   没有匹配的图片资产
                 </div>
               ) : (
@@ -539,23 +539,23 @@ export const PanoramaSetupForm = memo(({
                         key={image.id}
                         type="button"
                         onClick={() => toggleDraftReference(image.id)}
-                        className={`relative overflow-hidden rounded-lg border bg-[var(--canvas-node-bg-strong)] text-left transition-colors ${
-                          selected ? 'border-accent/80 ring-1 ring-accent/50' : 'border-[var(--canvas-node-field-border)] hover:border-[var(--canvas-node-border-hover)]'
+                        className={`relative overflow-hidden rounded-lg border bg-(--canvas-node-bg-strong) text-left transition-colors ${
+                          selected ? 'border-accent/80 ring-1 ring-accent/50' : 'border-(--canvas-node-field-border) hover:border-(--canvas-node-border-hover)'
                         }`}
                       >
-                        <div className="aspect-square bg-[var(--canvas-node-media-bg)]">
+                        <div className="aspect-square bg-(--canvas-node-media-bg)">
                           <img src={image.url} alt={image.label} className="h-full w-full object-cover" draggable={false} />
                         </div>
                         <div className="truncate px-1.5 py-1 text-[10px] text-text-dark">{image.label}</div>
-                        {selected && <span className="absolute right-1 top-1 rounded bg-accent px-1 py-0.5 text-[9px] text-white">已选</span>}
+                        {selected && <span className="absolute right-1 top-1 rounded-sm bg-accent px-1 py-0.5 text-[9px] text-white">已选</span>}
                       </button>
                     );
                   })}
                 </div>
               )}
             </div>
-            <div className="flex justify-end gap-2 border-t border-[var(--canvas-node-divider)] px-4 py-3">
-              <button type="button" onClick={() => setIsAssetPickerOpen(false)} className="rounded-md border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-button-bg)] px-3 py-1.5 text-xs text-[var(--canvas-node-button-text)] hover:bg-[var(--canvas-node-menu-hover)]">
+            <div className="flex justify-end gap-2 border-t border-(--canvas-node-divider) px-4 py-3">
+              <button type="button" onClick={() => setIsAssetPickerOpen(false)} className="rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-3 py-1.5 text-xs text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)">
                 取消
               </button>
               <button

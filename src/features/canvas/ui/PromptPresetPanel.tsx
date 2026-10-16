@@ -105,7 +105,7 @@ export const PromptPresetPanel = memo(({
 
   return (
     <div
-      className="fixed z-[100] w-[390px] max-w-[calc(100vw-16px)] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-dark/95 shadow-2xl backdrop-blur-sm"
+      className="fixed z-100 w-[390px] max-w-[calc(100vw-16px)] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-dark/95 shadow-2xl backdrop-blur-xs"
       style={{ left: `${panelLeft}px`, top: `${panelTop}px` }}
       onClick={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
@@ -156,7 +156,7 @@ export const PromptPresetPanel = memo(({
             panelKey="promptPreset"
             value={modelConfig ?? undefined}
             onChange={handleModelConfigChange}
-            className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5"
+            className="rounded-md border border-white/10 bg-white/3 px-2 py-1.5"
           />
         </div>
 
@@ -211,7 +211,7 @@ export const PromptPresetPanel = memo(({
         </div>
 
         {selectedPreset && (
-          <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2.5">
+          <div className="rounded-lg border border-white/10 bg-white/3 p-2.5">
             <div className="mb-1 text-[11px] font-medium text-white/72">
               {t('promptPresetPanel.selectedPrompt')}
             </div>
@@ -228,7 +228,7 @@ export const PromptPresetPanel = memo(({
           className={`flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors ${
             canGenerate
               ? 'border-accent/50 bg-accent/22 text-white hover:bg-accent/30'
-              : 'cursor-not-allowed border-white/10 bg-white/[0.03] text-white/35'
+              : 'cursor-not-allowed border-white/10 bg-white/3 text-white/35'
           }`}
         >
           <Sparkles className="h-3.5 w-3.5" />

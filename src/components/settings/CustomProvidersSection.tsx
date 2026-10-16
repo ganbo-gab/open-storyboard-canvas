@@ -925,7 +925,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
                 placeholder='例：{ "templateKey": "openai_proxy", "label": "我的服务商", "baseUrl": "https://api.example.com/v1", "models": ["nano-banana"] }'
-                className="flex-1 h-20 resize-none rounded-md border border-border-dark bg-surface-dark px-2.5 py-2 text-[11px] text-text-dark font-mono outline-none placeholder:text-text-muted/60 focus:border-accent/50"
+                className="flex-1 h-20 resize-none rounded-md border border-border-dark bg-surface-dark px-2.5 py-2 text-[11px] text-text-dark font-mono outline-hidden placeholder:text-text-muted/60 focus:border-accent/50"
               />
               <button
                 type="button"
@@ -1019,7 +1019,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                   <select
                     value={selectedBodyMode}
                     onChange={(event) => handleBodyModeChange(event.target.value as CustomProviderBodyMode)}
-                    className="h-7 rounded-md border border-border-dark bg-bg-dark px-2 text-text-dark outline-none focus:border-accent/50"
+                    className="h-7 rounded-md border border-border-dark bg-bg-dark px-2 text-text-dark outline-hidden focus:border-accent/50"
                   >
                     <option value="json">JSON</option>
                     <option value="multipart">multipart/form-data</option>
@@ -1057,7 +1057,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                     value={draft.label}
                     onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))}
                     placeholder="例：我的生图服务"
-                    className="rounded-md border border-border-dark bg-surface-dark px-2 py-1 text-text-dark outline-none focus:border-accent/50"
+                    className="rounded-md border border-border-dark bg-surface-dark px-2 py-1 text-text-dark outline-hidden focus:border-accent/50"
                   />
                 </label>
                 <label className="flex flex-col gap-1 col-span-2">
@@ -1066,7 +1066,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                     value={draft.baseUrl}
                     onChange={(e) => setDraft((d) => ({ ...d, baseUrl: e.target.value }))}
                     placeholder="https://api.example.com"
-                    className="rounded-md border border-border-dark bg-surface-dark px-2 py-1 text-text-dark outline-none focus:border-accent/50"
+                    className="rounded-md border border-border-dark bg-surface-dark px-2 py-1 text-text-dark outline-hidden focus:border-accent/50"
                   />
                 </label>
                 <label className="flex flex-col gap-1 col-span-2">
@@ -1077,7 +1077,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                     value={draft.endpointPath ?? ''}
                     onChange={(e) => handleEndpointPathChange(e.target.value)}
                     placeholder="/v1/images/generations"
-                    className="rounded-md border border-border-dark bg-surface-dark px-2 py-1 text-text-dark outline-none focus:border-accent/50 font-mono"
+                    className="rounded-md border border-border-dark bg-surface-dark px-2 py-1 text-text-dark outline-hidden focus:border-accent/50 font-mono"
                   />
                 </label>
                 <label className="flex flex-col gap-1 col-span-2">
@@ -1088,7 +1088,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                     value={draft.modelListEndpointPath ?? ''}
                     onChange={(e) => setDraft((d) => ({ ...d, modelListEndpointPath: e.target.value }))}
                     placeholder="/models"
-                    className="rounded-md border border-border-dark bg-surface-dark px-2 py-1 text-text-dark outline-none focus:border-accent/50 font-mono"
+                    className="rounded-md border border-border-dark bg-surface-dark px-2 py-1 text-text-dark outline-hidden focus:border-accent/50 font-mono"
                   />
                 </label>
                 <label className="flex flex-col gap-1 col-span-2">
@@ -1099,7 +1099,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                       value={draft.apiKey}
                       onChange={(e) => setDraft((d) => ({ ...d, apiKey: e.target.value }))}
                       placeholder="sk-..."
-                      className="w-full rounded-md border border-border-dark bg-surface-dark px-2 py-1 pr-7 text-text-dark outline-none focus:border-accent/50"
+                      className="w-full rounded-md border border-border-dark bg-surface-dark px-2 py-1 pr-7 text-text-dark outline-hidden focus:border-accent/50"
                     />
                     <button
                       type="button"
@@ -1163,12 +1163,12 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                           }
                         }}
                         placeholder="输入模型 ID，例如 gpt-image-1"
-                        className="min-w-0 flex-1 bg-transparent px-1.5 text-[11px] text-text-dark outline-none placeholder:text-text-muted/60"
+                        className="min-w-0 flex-1 bg-transparent px-1.5 text-[11px] text-text-dark outline-hidden placeholder:text-text-muted/60"
                       />
                       <button
                         type="button"
                         onClick={handleAddModel}
-                        className="rounded bg-accent/20 px-2 py-0.5 text-[11px] text-accent hover:bg-accent/30"
+                        className="rounded-sm bg-accent/20 px-2 py-0.5 text-[11px] text-accent hover:bg-accent/30"
                       >
                         保存
                       </button>
@@ -1185,12 +1185,12 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                           <input
                             value={model}
                             onChange={(e) => handleRenameModel(model, e.target.value)}
-                            className="min-w-0 flex-1 rounded border border-border-dark bg-bg-dark px-2 py-1 font-mono text-[11px] text-text-dark outline-none focus:border-accent/50"
+                            className="min-w-0 flex-1 rounded-sm border border-border-dark bg-bg-dark px-2 py-1 font-mono text-[11px] text-text-dark outline-hidden focus:border-accent/50"
                           />
                           <button
                             type="button"
                             onClick={() => handleDeleteModel(model)}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-red-500/20 hover:text-red-400"
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-text-muted hover:bg-red-500/20 hover:text-red-400"
                             title="删除模型"
                           >
                             <Trash2 className="h-3 w-3" />
@@ -1241,7 +1241,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                         <button
                           type="button"
                           onClick={() => setDraft((d) => ({ ...d, supportedRatios: on ? d.supportedRatios.filter((x) => x !== 'auto') : ['auto', ...d.supportedRatios] }))}
-                          className={`rounded px-2 py-0.5 text-[11px] border transition-colors ${on ? 'bg-accent/20 border-accent/50 text-accent' : 'bg-surface-dark border-border-dark text-text-muted hover:border-accent/40'}`}
+                          className={`rounded-sm px-2 py-0.5 text-[11px] border transition-colors ${on ? 'bg-accent/20 border-accent/50 text-accent' : 'bg-surface-dark border-border-dark text-text-muted hover:border-accent/40'}`}
                         >
                           智能
                         </button>
@@ -1255,7 +1255,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                           key={r}
                           type="button"
                           onClick={() => setDraft((d) => ({ ...d, supportedRatios: on ? d.supportedRatios.filter((x) => x !== r) : [...d.supportedRatios, r] }))}
-                          className={`rounded px-2 py-0.5 text-[11px] border transition-colors ${on ? 'bg-accent/20 border-accent/50 text-accent' : 'bg-surface-dark border-border-dark text-text-muted hover:border-accent/40'}`}
+                          className={`rounded-sm px-2 py-0.5 text-[11px] border transition-colors ${on ? 'bg-accent/20 border-accent/50 text-accent' : 'bg-surface-dark border-border-dark text-text-muted hover:border-accent/40'}`}
                         >
                           {r}
                         </button>
@@ -1267,7 +1267,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                       .map((r) => (
                         <span
                           key={r}
-                          className="relative group inline-flex items-center rounded bg-accent/20 border border-accent/50 text-accent px-2 py-0.5 text-[11px]"
+                          className="relative group inline-flex items-center rounded-sm bg-accent/20 border border-accent/50 text-accent px-2 py-0.5 text-[11px]"
                         >
                           {r}
                           <button
@@ -1286,18 +1286,18 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                         type="button"
                         title="添加自定义比例"
                         onClick={() => { setRatioInputOpen(true); setRatioInputValue(''); }}
-                        className="rounded px-2 py-0.5 text-[11px] border border-dashed border-border-dark text-text-muted hover:border-accent/50 hover:text-accent"
+                        className="rounded-sm px-2 py-0.5 text-[11px] border border-dashed border-border-dark text-text-muted hover:border-accent/50 hover:text-accent"
                       >
                         + 自定义
                       </button>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded border border-accent/50 bg-surface-dark px-1.5 py-0.5">
+                      <span className="inline-flex items-center gap-1 rounded-sm border border-accent/50 bg-surface-dark px-1.5 py-0.5">
                         <input
                           autoFocus
                           value={ratioInputValue}
                           onChange={(e) => setRatioInputValue(e.target.value)}
                           placeholder="w:h 例 5:4"
-                          className="w-20 bg-transparent text-[11px] text-text-dark outline-none placeholder:text-text-muted/60"
+                          className="w-20 bg-transparent text-[11px] text-text-dark outline-hidden placeholder:text-text-muted/60"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               const v = ratioInputValue.trim();
@@ -1323,13 +1323,13 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                             setRatioInputOpen(false);
                             setRatioInputValue('');
                           }}
-                          className="inline-flex h-4 w-4 items-center justify-center rounded bg-emerald-500/80 text-white text-[10px] hover:bg-emerald-500"
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-sm bg-emerald-500/80 text-white text-[10px] hover:bg-emerald-500"
                         >√</button>
                         <button
                           type="button"
                           title="取消"
                           onClick={() => { setRatioInputOpen(false); setRatioInputValue(''); }}
-                          className="inline-flex h-4 w-4 items-center justify-center rounded bg-red-500/80 text-white text-[10px] hover:bg-red-500"
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-sm bg-red-500/80 text-white text-[10px] hover:bg-red-500"
                         >×</button>
                       </span>
                     )}
@@ -1350,7 +1350,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                               ? (d.supportedResolutions ?? []).filter((x) => x !== resolution)
                               : [...(d.supportedResolutions ?? []), resolution],
                           }))}
-                          className={`rounded px-2 py-0.5 text-[11px] border transition-colors ${on ? 'bg-accent/20 border-accent/50 text-accent' : 'bg-surface-dark border-border-dark text-text-muted hover:border-accent/40'}`}
+                          className={`rounded-sm px-2 py-0.5 text-[11px] border transition-colors ${on ? 'bg-accent/20 border-accent/50 text-accent' : 'bg-surface-dark border-border-dark text-text-muted hover:border-accent/40'}`}
                         >
                           {resolution === 'auto' ? '自动' : resolution}
                         </button>
@@ -1361,7 +1361,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                       .map((resolution) => (
                         <span
                           key={resolution}
-                          className="inline-flex items-center rounded bg-accent/20 border border-accent/50 text-accent px-2 py-0.5 text-[11px]"
+                          className="inline-flex items-center rounded-sm bg-accent/20 border border-accent/50 text-accent px-2 py-0.5 text-[11px]"
                         >
                           {resolution}
                           <button
@@ -1382,18 +1382,18 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                         type="button"
                         title="添加自定义分辨率"
                         onClick={() => { setResolutionInputOpen(true); setResolutionInputValue(''); }}
-                        className="rounded px-2 py-0.5 text-[11px] border border-dashed border-border-dark text-text-muted hover:border-accent/50 hover:text-accent"
+                        className="rounded-sm px-2 py-0.5 text-[11px] border border-dashed border-border-dark text-text-muted hover:border-accent/50 hover:text-accent"
                       >
                         + 自定义
                       </button>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded border border-accent/50 bg-surface-dark px-1.5 py-0.5">
+                      <span className="inline-flex items-center gap-1 rounded-sm border border-accent/50 bg-surface-dark px-1.5 py-0.5">
                         <input
                           autoFocus
                           value={resolutionInputValue}
                           onChange={(e) => setResolutionInputValue(e.target.value)}
                           placeholder="例 2048x2048"
-                          className="w-24 bg-transparent text-[11px] text-text-dark outline-none placeholder:text-text-muted/60"
+                          className="w-24 bg-transparent text-[11px] text-text-dark outline-hidden placeholder:text-text-muted/60"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               const v = resolutionInputValue.trim();
@@ -1419,13 +1419,13 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                             setResolutionInputOpen(false);
                             setResolutionInputValue('');
                           }}
-                          className="inline-flex h-4 w-4 items-center justify-center rounded bg-emerald-500/80 text-white text-[10px] hover:bg-emerald-500"
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-sm bg-emerald-500/80 text-white text-[10px] hover:bg-emerald-500"
                         >√</button>
                         <button
                           type="button"
                           title="取消"
                           onClick={() => { setResolutionInputOpen(false); setResolutionInputValue(''); }}
-                          className="inline-flex h-4 w-4 items-center justify-center rounded bg-red-500/80 text-white text-[10px] hover:bg-red-500"
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-sm bg-red-500/80 text-white text-[10px] hover:bg-red-500"
                         >×</button>
                       </span>
                     )}
@@ -1441,7 +1441,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                       <select
                         value={draft.httpMethod ?? 'POST'}
                         onChange={(e) => handleHttpMethodChange(e.target.value as 'POST' | 'GET')}
-                        className="rounded-md border border-border-dark bg-bg-dark px-2 py-1 text-text-dark outline-none focus:border-accent/50"
+                        className="rounded-md border border-border-dark bg-bg-dark px-2 py-1 text-text-dark outline-hidden focus:border-accent/50"
                       >
                         {HTTP_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
                       </select>
@@ -1451,7 +1451,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                       <select
                         value={draft.responseFormat ?? 'openai-images'}
                         onChange={(e) => setDraft((d) => ({ ...d, responseFormat: e.target.value as typeof RESPONSE_FORMATS[number] }))}
-                        className="rounded-md border border-border-dark bg-bg-dark px-2 py-1 text-text-dark outline-none focus:border-accent/50"
+                        className="rounded-md border border-border-dark bg-bg-dark px-2 py-1 text-text-dark outline-hidden focus:border-accent/50"
                       >
                         {RESPONSE_FORMATS.map((r) => <option key={r} value={r}>{r}</option>)}
                       </select>
@@ -1474,14 +1474,14 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                           supportedModelVersions: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
                         }))}
                         placeholder="（选填）"
-                        className="rounded-md border border-border-dark bg-bg-dark px-2 py-1 text-text-dark outline-none focus:border-accent/50"
+                        className="rounded-md border border-border-dark bg-bg-dark px-2 py-1 text-text-dark outline-hidden focus:border-accent/50"
                       />
                     </label>
                     <div className="flex flex-col gap-1 col-span-2">
                       <span className="text-text-muted text-[11px]">额外 Query 参数（URL ?key=value 形式，可选）</span>
                       <div className="flex flex-wrap items-center gap-1">
                         {Object.entries(draft.queryParams ?? {}).map(([k, v]) => (
-                          <span key={k} className="inline-flex items-center gap-1 rounded border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[10px] font-mono">
+                          <span key={k} className="inline-flex items-center gap-1 rounded-sm border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[10px] font-mono">
                             <span className="text-accent">{k}</span>=<span className="text-text-dark">{v}</span>
                             <button
                               type="button"
@@ -1497,13 +1497,13 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                           value={newQueryKey}
                           onChange={(e) => setNewQueryKey(e.target.value)}
                           placeholder="key"
-                          className="w-20 rounded border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[11px] text-text-dark outline-none focus:border-accent/50"
+                          className="w-20 rounded-sm border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[11px] text-text-dark outline-hidden focus:border-accent/50"
                         />
                         <input
                           value={newQueryValue}
                           onChange={(e) => setNewQueryValue(e.target.value)}
                           placeholder="value"
-                          className="w-24 rounded border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[11px] text-text-dark outline-none focus:border-accent/50"
+                          className="w-24 rounded-sm border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[11px] text-text-dark outline-hidden focus:border-accent/50"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' && newQueryKey.trim()) {
                               setDraft((d) => ({
@@ -1526,7 +1526,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                             setNewQueryKey('');
                             setNewQueryValue('');
                           }}
-                          className="rounded bg-accent/20 px-2 py-0.5 text-[11px] text-accent hover:bg-accent/30"
+                          className="rounded-sm bg-accent/20 px-2 py-0.5 text-[11px] text-accent hover:bg-accent/30"
                         >+</button>
                       </div>
                     </div>
@@ -1534,7 +1534,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                       <span className="text-text-muted text-[11px]">额外 Header 参数（Referer、版本号等，可选）</span>
                       <div className="flex flex-wrap items-center gap-1">
                         {Object.entries(draft.extraHeaders ?? {}).map(([k, v]) => (
-                          <span key={k} className="inline-flex items-center gap-1 rounded border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[10px] font-mono">
+                          <span key={k} className="inline-flex items-center gap-1 rounded-sm border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[10px] font-mono">
                             <span className="text-accent">{k}</span>:<span className="text-text-dark">{v}</span>
                             <button
                               type="button"
@@ -1550,13 +1550,13 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                           value={newHeaderKey}
                           onChange={(e) => setNewHeaderKey(e.target.value)}
                           placeholder="Header"
-                          className="w-24 rounded border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[11px] text-text-dark outline-none focus:border-accent/50"
+                          className="w-24 rounded-sm border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[11px] text-text-dark outline-hidden focus:border-accent/50"
                         />
                         <input
                           value={newHeaderValue}
                           onChange={(e) => setNewHeaderValue(e.target.value)}
                           placeholder="value"
-                          className="w-32 rounded border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[11px] text-text-dark outline-none focus:border-accent/50"
+                          className="w-32 rounded-sm border border-border-dark bg-bg-dark px-1.5 py-0.5 text-[11px] text-text-dark outline-hidden focus:border-accent/50"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' && newHeaderKey.trim()) {
                               setDraft((d) => ({
@@ -1579,7 +1579,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                             setNewHeaderKey('');
                             setNewHeaderValue('');
                           }}
-                          className="rounded bg-accent/20 px-2 py-0.5 text-[11px] text-accent hover:bg-accent/30"
+                          className="rounded-sm bg-accent/20 px-2 py-0.5 text-[11px] text-accent hover:bg-accent/30"
                         >+</button>
                       </div>
                     </div>
@@ -1601,7 +1601,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                           }
                         }}
                         placeholder='{ "quality": "high", "output_format": "png" }'
-                        className="h-20 resize-none rounded-md border border-border-dark bg-bg-dark px-2 py-1 font-mono text-[11px] text-text-dark outline-none focus:border-accent/50"
+                        className="h-20 resize-none rounded-md border border-border-dark bg-bg-dark px-2 py-1 font-mono text-[11px] text-text-dark outline-hidden focus:border-accent/50"
                       />
                       {defaultParamsError && <span className="text-[10px] text-red-400">{defaultParamsError}</span>}
                     </label>
@@ -1634,7 +1634,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                     value={draft.note ?? ''}
                     onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}
                     placeholder="（选填）服务商注意事项、限速、付费说明等"
-                    className="rounded-md border border-border-dark bg-surface-dark px-2 py-1 text-text-dark outline-none focus:border-accent/50"
+                    className="rounded-md border border-border-dark bg-surface-dark px-2 py-1 text-text-dark outline-hidden focus:border-accent/50"
                   />
                 </label>
               </div>
@@ -1822,7 +1822,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
 
       {modelsDialogProvider && (
         <div
-          className="fixed inset-0 z-[500] flex items-center justify-center bg-black/60"
+          className="fixed inset-0 z-500 flex items-center justify-center bg-black/60"
           onClick={() => setModelsDialogFor(null)}
         >
           <div
@@ -1847,7 +1847,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                 ) : (
                   <div className="flex flex-wrap gap-1">
                     {modelsDialogProvider.models.map((m) => (
-                      <span key={m} className="rounded bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark font-mono">{m}</span>
+                      <span key={m} className="rounded-sm bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark font-mono">{m}</span>
                     ))}
                   </div>
                 )}
@@ -1862,16 +1862,16 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                       ) : modelsDialogProvider.models.map((modelId) => {
                         const metadata = modelsDialogProvider.modelMetadata?.[modelId] ?? {};
                         return (
-                          <div key={modelId} className="rounded bg-bg-dark px-2 py-1.5 text-[11px] text-text-dark">
+                          <div key={modelId} className="rounded-sm bg-bg-dark px-2 py-1.5 text-[11px] text-text-dark">
                             <div className="font-mono">{modelId}</div>
                             <div className="mt-1 flex flex-wrap gap-1 text-text-muted">
-                              <span className="rounded border border-border-dark px-1.5 py-0.5">
+                              <span className="rounded-sm border border-border-dark px-1.5 py-0.5">
                                 {metadata.supportsMultimodal ? '支持多模态' : '纯文本'}
                               </span>
-                              <span className="rounded border border-border-dark px-1.5 py-0.5">
+                              <span className="rounded-sm border border-border-dark px-1.5 py-0.5">
                                 上下文 {metadata.contextWindow ?? '未填'}
                               </span>
-                              <span className="rounded border border-border-dark px-1.5 py-0.5">
+                              <span className="rounded-sm border border-border-dark px-1.5 py-0.5">
                                 最大输出 {metadata.maxOutputTokens ?? '未填'}
                               </span>
                             </div>
@@ -1888,7 +1888,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                     <div className="text-text-muted mb-1">支持秒数</div>
                     <div className="flex flex-wrap gap-1">
                       {(((modelsDialogProvider.extraParams as { supportedDurations?: string[] })?.supportedDurations) ?? []).map((duration) => (
-                        <span key={duration} className="rounded bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{duration}s</span>
+                        <span key={duration} className="rounded-sm bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{duration}s</span>
                       ))}
                     </div>
                   </>
@@ -1897,7 +1897,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                     <div className="text-text-muted mb-1">生图比例</div>
                     <div className="flex flex-wrap gap-1">
                       {(((modelsDialogProvider.extraParams as { supportedRatios?: string[] })?.supportedRatios) ?? []).map((r) => (
-                        <span key={r} className="rounded bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{r}</span>
+                        <span key={r} className="rounded-sm bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{r}</span>
                       ))}
                     </div>
                   </>
@@ -1908,7 +1908,7 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
                   <div className="text-text-muted mb-1">支持分辨率</div>
                   <div className="flex flex-wrap gap-1">
                     {(modelsDialogProvider.supportedResolutions ?? []).map((resolution) => (
-                      <span key={resolution} className="rounded bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{resolution}</span>
+                      <span key={resolution} className="rounded-sm bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{resolution}</span>
                     ))}
                   </div>
                 </div>
@@ -1921,11 +1921,11 @@ export const CustomProvidersSection = memo(({ mode = 'both', onRequestAdd }: Cus
               )}
               <div>
                 <div className="text-text-muted mb-1">接口风格</div>
-                <code className="rounded bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{modelsDialogProvider.apiStyle}</code>
+                <code className="rounded-sm bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">{modelsDialogProvider.apiStyle}</code>
               </div>
               <div>
                 <div className="text-text-muted mb-1">请求格式</div>
-                <code className="rounded bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">
+                <code className="rounded-sm bg-bg-dark px-2 py-0.5 text-[11px] text-text-dark">
                   {isChatCustomProvider(modelsDialogProvider) ? 'JSON 对话' : formatBodyModeLabel(resolveCustomProviderBodyMode(modelsDialogProvider))}
                 </code>
               </div>

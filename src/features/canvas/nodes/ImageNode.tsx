@@ -237,7 +237,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
   return (
     <div
       className={`
-        group relative overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-0 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-0 shadow-(--canvas-node-shadow) transition-colors duration-150
         ${hasGenerationAttention
           ? (selected
             ? 'border-amber-300 shadow-[0_0_0_1px_rgba(252,211,77,0.34)]'
@@ -248,7 +248,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
             : 'border-red-500/70 bg-[rgba(127,29,29,0.12)] hover:border-red-400/80 dark:border-red-500/70 dark:hover:border-red-400/80')
           : selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'}
+          : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
       `}
       style={{ width: resolvedWidth, height: resolvedHeight }}
       onClick={() => setSelectedNode(id)}
@@ -268,7 +268,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
           <span className="flex items-center gap-1">
             {generationElapsedText ? (
               <span
-                className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-[1px] text-[10px] font-medium leading-tight text-white"
+                className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-px text-[10px] font-medium leading-tight text-white"
                 title={t('node.imageNode.generationElapsed')}
               >
                 {generationElapsedText}
@@ -279,7 +279,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
             typeof data.batchTotal === 'number' &&
             data.batchTotal > 1 ? (
               <span
-                className="rounded-full bg-accent/80 px-2 py-[1px] text-[10px] font-medium leading-tight text-white"
+                className="rounded-full bg-accent/80 px-2 py-px text-[10px] font-medium leading-tight text-white"
                 title={`第 ${data.batchIndex + 1} 张 / 共 ${data.batchTotal} 张`}
               >
                 {data.batchIndex + 1}/{data.batchTotal}
@@ -290,10 +290,10 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
       />
 
       <div
-        className={`relative h-full w-full overflow-hidden rounded-[var(--node-radius)] ${
+        className={`relative h-full w-full overflow-hidden rounded-(--node-radius) ${
           hasGenerationAttention
             ? 'bg-amber-950/25'
-            : hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-[var(--canvas-node-media-bg)]'
+            : hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-(--canvas-node-media-bg)'
         }`}
       >
         {data.imageUrl ? (
@@ -318,7 +318,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
                 ? 'generationJob.unknownTitle'
                 : 'generationJob.recoverableTitle')}
             </span>
-            <span className="max-h-[64px] overflow-y-auto break-words text-center text-[12px] leading-5 text-amber-100/85">
+            <span className="max-h-[64px] overflow-y-auto wrap-break-word text-center text-[12px] leading-5 text-amber-100/85">
               {generationError || t('generationJob.recoverableDescription')}
             </span>
             <span className="text-center text-[11px] leading-4 text-amber-200/70">
@@ -335,7 +335,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
             <span className="text-center text-[12px] font-semibold leading-5 text-red-800 dark:text-red-200">
               {t('node.imageNode.generationFailed')}
             </span>
-            <span className="max-h-[88px] overflow-y-auto break-words text-center text-[11px] leading-5 text-red-800/90 dark:text-red-200/90">
+            <span className="max-h-[88px] overflow-y-auto wrap-break-word text-center text-[11px] leading-5 text-red-800/90 dark:text-red-200/90">
               {generationError}
             </span>
           </div>
@@ -356,7 +356,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="absolute inset-0 bg-bg-dark/55" />
             <div
-              className="absolute left-0 top-0 h-full w-full origin-left bg-gradient-to-r from-[rgba(255,255,255,0.4)] to-[rgba(255,255,255,0.06)] transition-transform duration-100 ease-linear"
+              className="absolute left-0 top-0 h-full w-full origin-left bg-linear-to-r from-[rgba(255,255,255,0.4)] to-[rgba(255,255,255,0.06)] transition-transform duration-100 ease-linear"
               style={{ transform: `scaleX(${simulatedProgress})` }}
             />
           </div>
@@ -370,12 +370,12 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
 
         {generationWarning && data.imageUrl ? (
           <div
-            className="pointer-events-auto absolute inset-x-2 bottom-2 z-10 flex max-h-16 items-start gap-1.5 overflow-y-auto rounded-md border border-amber-300/45 bg-amber-950/85 px-2 py-1.5 text-[11px] leading-4 text-amber-100 shadow-lg backdrop-blur-sm"
+            className="pointer-events-auto absolute inset-x-2 bottom-2 z-10 flex max-h-16 items-start gap-1.5 overflow-y-auto rounded-md border border-amber-300/45 bg-amber-950/85 px-2 py-1.5 text-[11px] leading-4 text-amber-100 shadow-lg backdrop-blur-xs"
             role="status"
             title={t('node.imageNode.providerWarning')}
           >
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
-            <span className="min-w-0 break-words">{generationWarning}</span>
+            <span className="min-w-0 wrap-break-word">{generationWarning}</span>
           </div>
         ) : null}
       </div>
@@ -384,13 +384,13 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
         type="target"
         id="target"
         position={Position.Left}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <Handle
         type="source"
         id="source"
         position={Position.Right}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <NodeResizeHandle
         minWidth={resizeMinWidth}

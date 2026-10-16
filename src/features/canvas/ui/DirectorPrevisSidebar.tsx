@@ -35,8 +35,8 @@ export interface DirectorPrevisSidebarProps {
   className?: string;
 }
 
-const BUTTON_CLASS = 'inline-flex min-h-8 items-center justify-center gap-1.5 rounded border border-white/15 bg-white/5 px-2.5 text-xs text-white/80 transition-colors hover:border-teal-300/40 hover:bg-white/10 active:bg-teal-400/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/60';
-const FIELD_CLASS = 'h-8 w-full min-w-0 rounded border border-white/15 bg-[#171a1f] px-2 text-xs text-white outline-none transition-colors hover:border-white/30 focus:border-teal-400/70 focus:ring-1 focus:ring-teal-400/30';
+const BUTTON_CLASS = 'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-sm border border-white/15 bg-white/5 px-2.5 text-xs text-white/80 transition-colors hover:border-teal-300/40 hover:bg-white/10 active:bg-teal-400/20 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-teal-400/60';
+const FIELD_CLASS = 'h-8 w-full min-w-0 rounded-sm border border-white/15 bg-[#171a1f] px-2 text-xs text-white outline-hidden transition-colors hover:border-white/30 focus:border-teal-400/70 focus:ring-1 focus:ring-teal-400/30';
 
 export const DirectorPrevisSidebar = memo(function DirectorPrevisSidebar({
   items,
@@ -116,7 +116,7 @@ export const DirectorPrevisSidebar = memo(function DirectorPrevisSidebar({
             type="button"
             onClick={() => selectItem(null)}
             aria-pressed={cameraSelected}
-            className={`mb-1 flex h-9 w-full items-center gap-2 rounded px-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/60 ${cameraSelected ? 'bg-teal-400/15 text-teal-100 ring-1 ring-inset ring-teal-400/30' : 'text-white/75 hover:bg-white/10 active:bg-white/15'}`}
+            className={`mb-1 flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-teal-400/60 ${cameraSelected ? 'bg-teal-400/15 text-teal-100 ring-1 ring-inset ring-teal-400/30' : 'text-white/75 hover:bg-white/10 active:bg-white/15'}`}
             title={t('directorStudio.previs.selectCameraHelp')}
             data-director-tooltip={t('directorStudio.previs.selectCameraHelp')}
           >
@@ -134,7 +134,7 @@ export const DirectorPrevisSidebar = memo(function DirectorPrevisSidebar({
                 type="button"
                 onClick={() => selectItem(item.id)}
                 aria-pressed={selected}
-                className={`mt-1 flex h-9 w-full items-center gap-2 rounded px-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/60 ${selected ? 'bg-teal-400/15 text-teal-100 ring-1 ring-inset ring-teal-400/30' : 'text-white/75 hover:bg-white/10 active:bg-white/15'}`}
+                className={`mt-1 flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-teal-400/60 ${selected ? 'bg-teal-400/15 text-teal-100 ring-1 ring-inset ring-teal-400/30' : 'text-white/75 hover:bg-white/10 active:bg-white/15'}`}
                 title={t('directorStudio.previs.selectObjectHelp', { name: item.label })}
                 data-director-tooltip={t('directorStudio.previs.selectObjectHelp', { name: item.label })}
               >
@@ -152,7 +152,7 @@ export const DirectorPrevisSidebar = memo(function DirectorPrevisSidebar({
           <button
             type="button"
             onClick={() => selectItem(selectedItem.id)}
-            className="flex h-7 items-center gap-1 rounded px-1.5 text-xs text-teal-200 transition-colors hover:bg-white/10 active:bg-teal-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/60"
+            className="flex h-7 items-center gap-1 rounded-sm px-1.5 text-xs text-teal-200 transition-colors hover:bg-white/10 active:bg-teal-400/15 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-teal-400/60"
             title={t('directorStudio.previs.backToObjectHelp')}
             data-director-tooltip={t('directorStudio.previs.backToObjectHelp')}
           ><ArrowLeft className="h-3.5 w-3.5" />{t('directorStudio.previs.objectProperties')}</button>
@@ -221,7 +221,7 @@ export const DirectorPrevisSidebar = memo(function DirectorPrevisSidebar({
                     onBlur={(event) => {
                       if (event.currentTarget.value !== selectedItem.color) onUpdateItem(selectedItem.id, { color: event.currentTarget.value });
                     }}
-                    className="h-7 w-8 cursor-pointer rounded border border-white/20 bg-[#171a1f] focus-visible:outline-teal-400"
+                    className="h-7 w-8 cursor-pointer rounded-sm border border-white/20 bg-[#171a1f] focus-visible:outline-teal-400"
                   />
                   {t('directorStudio.inspector.color')}
                 </label>
@@ -304,7 +304,7 @@ function PersonBodyProperties({ item, onUpdateItem }: {
   const update = (patch: Partial<BlueprintBodyControls>) => onUpdateItem(item.id, { bodyControls: { ...item.bodyControls, ...patch } });
   return (
     <details className="group rounded-md border border-white/10 bg-[#20242a]">
-      <summary className="flex cursor-pointer list-none items-center justify-between p-3 font-medium text-white/80 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/60">
+      <summary className="flex cursor-pointer list-none items-center justify-between p-3 font-medium text-white/80 transition-colors hover:bg-white/5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-teal-400/60">
         {t('directorStudio.inspector.body')}<ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
       </summary>
       <div className="space-y-4 border-t border-white/10 p-3">

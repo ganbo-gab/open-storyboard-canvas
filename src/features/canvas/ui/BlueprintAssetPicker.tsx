@@ -50,14 +50,14 @@ export const BlueprintAssetPicker = memo(function BlueprintAssetPicker(props: Bl
 
   return (
     <div
-      className="absolute inset-0 z-[260] flex items-center justify-center bg-black/55 backdrop-blur-sm"
+      className="absolute inset-0 z-260 flex items-center justify-center bg-black/55 backdrop-blur-xs"
       onWheel={(event) => event.stopPropagation()}
     >
       <div className="nodrag nopan w-[560px] max-w-[calc(100%-32px)] rounded-xl border border-white/14 bg-[#181818] shadow-2xl">
         <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
           <div>
             <div className="text-sm font-semibold text-white">{title}</div>
-            <div className="mt-0.5 text-[11px] text-white/[0.42]">{subtitle}</div>
+            <div className="mt-0.5 text-[11px] text-white/42">{subtitle}</div>
           </div>
           <button
             type="button"
@@ -71,13 +71,13 @@ export const BlueprintAssetPicker = memo(function BlueprintAssetPicker(props: Bl
         </div>
 
         <div className="border-b border-white/8 px-4 py-2">
-          <label className="flex h-8 items-center gap-2 rounded-lg border border-white/10 bg-black/[0.22] px-2">
+          <label className="flex h-8 items-center gap-2 rounded-lg border border-white/10 bg-black/22 px-2">
             <Search className="h-3.5 w-3.5 text-white/35" />
             <input
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
               placeholder={t('blueprintAssetPicker.searchPlaceholder')}
-              className="min-w-0 flex-1 bg-transparent text-xs text-white/85 outline-none placeholder:text-white/30"
+              className="min-w-0 flex-1 bg-transparent text-xs text-white/85 outline-hidden placeholder:text-white/30"
             />
           </label>
         </div>
@@ -100,7 +100,7 @@ export const BlueprintAssetPicker = memo(function BlueprintAssetPicker(props: Bl
                     key={image.id}
                     type="button"
                     onClick={() => onToggle(image.id)}
-                    className={`relative overflow-hidden rounded-lg border bg-white/[0.04] text-left transition-colors ${
+                    className={`relative overflow-hidden rounded-lg border bg-white/4 text-left transition-colors ${
                       selected ? 'border-accent/80 ring-1 ring-accent/50' : 'border-white/10 hover:border-white/[0.28]'
                     }`}
                   >
@@ -109,7 +109,7 @@ export const BlueprintAssetPicker = memo(function BlueprintAssetPicker(props: Bl
                     </div>
                     <div className="truncate px-1.5 py-1 text-[10px] text-white/76">{image.label}</div>
                     {selected && (
-                      <span className="absolute right-1 top-1 rounded bg-accent px-1 py-0.5 text-[9px] text-white">
+                      <span className="absolute right-1 top-1 rounded-sm bg-accent px-1 py-0.5 text-[9px] text-white">
                         {t('blueprintAssetPicker.selected')}
                       </span>
                     )}

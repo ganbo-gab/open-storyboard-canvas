@@ -742,7 +742,7 @@ export function SettingsDialog({
   return (
     <div className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-50 flex items-center justify-center`}>
       <div
-        className={`absolute inset-0 bg-black/90 transition-opacity duration-[180ms] ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 bg-black/90 transition-opacity duration-180 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
         onClick={requestClose}
       />
       <div className="relative w-[min(96vw,1120px)]">
@@ -753,7 +753,7 @@ export function SettingsDialog({
           aria-label={t('settings.title')}
           tabIndex={-1}
           onKeyDown={onKeyDown}
-          className={`relative mx-auto flex h-[min(86dvh,760px)] w-full flex-col overflow-hidden rounded-lg border border-border-dark bg-surface-dark shadow-xl transition-[opacity,transform] duration-[180ms] ease-out sm:flex-row ${isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-1 scale-[0.99] opacity-0'}`}
+          className={`relative mx-auto flex h-[min(86dvh,760px)] w-full flex-col overflow-hidden rounded-lg border border-border-dark bg-surface-dark shadow-xl transition-[opacity,transform,translate,scale,rotate] duration-180 ease-out sm:flex-row ${isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-1 scale-[0.99] opacity-0'}`}
         >
           {/* Close button */}
           <button
@@ -1041,7 +1041,7 @@ export function SettingsDialog({
                 <div className="shrink-0 flex justify-end border-t border-border-dark px-6 py-4">
                   <button
                     onClick={requestClose}
-                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
+                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
                   >
                     {t('common.close')}
                   </button>
@@ -1058,7 +1058,7 @@ export function SettingsDialog({
                 <div className="shrink-0 flex justify-end border-t border-border-dark px-6 py-4">
                   <button
                     onClick={requestClose}
-                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
+                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
                   >
                     {t('common.close')}
                   </button>
@@ -1136,7 +1136,7 @@ export function SettingsDialog({
                       </div>
                       <button
                         type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded border border-border-dark bg-surface-dark px-2.5 text-xs text-text-dark transition-colors hover:bg-bg-dark"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-border-dark bg-surface-dark px-2.5 text-xs text-text-dark transition-colors hover:bg-bg-dark"
                         onClick={() =>
                           updateLocalImageHostSettings({
                             pixhost: { ...DEFAULT_IMAGE_HOST_SETTINGS.pixhost },
@@ -1159,7 +1159,7 @@ export function SettingsDialog({
                             })
                           }
                           placeholder="https://api.pixhost.to"
-                          className="mt-1 h-9 w-full rounded border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none placeholder:text-text-muted"
+                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
                         />
                       </label>
 
@@ -1193,7 +1193,7 @@ export function SettingsDialog({
                               pixhost: { maxThumbnailSize: event.target.value },
                             })
                           }
-                          className="mt-1 h-9 w-full rounded border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none placeholder:text-text-muted"
+                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
                         />
                       </label>
                     </div>
@@ -1211,7 +1211,7 @@ export function SettingsDialog({
                       </div>
                       <button
                         type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded border border-border-dark bg-surface-dark px-2.5 text-xs text-text-dark transition-colors hover:bg-bg-dark"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-border-dark bg-surface-dark px-2.5 text-xs text-text-dark transition-colors hover:bg-bg-dark"
                         onClick={() =>
                           updateLocalImageHostSettings({
                             seedvault: { ...DEFAULT_IMAGE_HOST_SETTINGS.seedvault },
@@ -1234,7 +1234,7 @@ export function SettingsDialog({
                             })
                           }
                           placeholder="https://img.seedvault.cn/api/v1"
-                          className="mt-1 h-9 w-full rounded border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none placeholder:text-text-muted"
+                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
                         />
                       </label>
 
@@ -1247,7 +1247,7 @@ export function SettingsDialog({
                             updateSeedvaultCredentials({ email: event.target.value })
                           }
                           autoComplete="username"
-                          className="mt-1 h-9 w-full rounded border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none placeholder:text-text-muted"
+                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
                         />
                       </label>
 
@@ -1260,7 +1260,7 @@ export function SettingsDialog({
                             updateSeedvaultCredentials({ password: event.target.value })
                           }
                           autoComplete="current-password"
-                          className="mt-1 h-9 w-full rounded border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none placeholder:text-text-muted"
+                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
                         />
                       </label>
 
@@ -1274,7 +1274,7 @@ export function SettingsDialog({
                             })
                           }
                           placeholder={t('settings.imageHosting.seedvault.strategyIdPlaceholder')}
-                          className="mt-1 h-9 w-full rounded border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none placeholder:text-text-muted"
+                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
                         />
                       </label>
 
@@ -1288,7 +1288,7 @@ export function SettingsDialog({
                             })
                           }
                           placeholder={t('settings.imageHosting.seedvault.tokenPlaceholder')}
-                          className="mt-1 h-9 w-full rounded border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none placeholder:text-text-muted"
+                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
                         />
                       </label>
                     </div>
@@ -1311,7 +1311,7 @@ export function SettingsDialog({
                   {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
                   <button
                     onClick={requestClose}
-                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
+                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
                     disabled={isSavingSettings}
                   >
                     {t('common.close')}
@@ -1320,7 +1320,7 @@ export function SettingsDialog({
                     onClick={() => {
                       void handleSave();
                     }}
-                    className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-sm bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
                     disabled={isSavingSettings}
                   >
                     {isSavingSettings ? t('common.saving') : t('common.save')}
@@ -1421,17 +1421,17 @@ export function SettingsDialog({
                         type="color"
                         value={localAccentColor}
                         onChange={(event) => setLocalAccentColor(event.target.value)}
-                        className="h-9 w-12 rounded border border-border-dark bg-surface-dark p-1"
+                        className="h-9 w-12 rounded-sm border border-border-dark bg-surface-dark p-1"
                       />
                       <input
                         value={localAccentColor}
                         onChange={(event) => setLocalAccentColor(event.target.value)}
                         placeholder="#3B82F6"
-                        className="h-9 flex-1 rounded border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none placeholder:text-text-muted"
+                        className="h-9 flex-1 rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
                       />
                       <button
                         type="button"
-                        className="inline-flex h-9 items-center justify-center rounded border border-border-dark bg-surface-dark px-3 text-xs text-text-dark transition-colors hover:bg-bg-dark"
+                        className="inline-flex h-9 items-center justify-center rounded-sm border border-border-dark bg-surface-dark px-3 text-xs text-text-dark transition-colors hover:bg-bg-dark"
                         onClick={() => setLocalAccentColor('#3B82F6')}
                       >
                         {t('settings.resetAccentColor')}
@@ -1445,14 +1445,14 @@ export function SettingsDialog({
                   <button
                     onClick={requestClose}
                     disabled={isSavingSettings}
-                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('common.close')}
                   </button>
                   <button
                     onClick={handleSave}
                     disabled={isSavingSettings}
-                    className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-sm bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isSavingSettings ? t('common.saving') : t('common.save')}
                   </button>
@@ -1484,7 +1484,7 @@ export function SettingsDialog({
                       </div>
                       <button
                         type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded border border-border-dark bg-surface-dark px-2.5 text-xs text-text-dark transition-colors hover:bg-bg-dark"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-border-dark bg-surface-dark px-2.5 text-xs text-text-dark transition-colors hover:bg-bg-dark"
                         onClick={() => handleCanvasMousePresetChange('default')}
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
@@ -1586,14 +1586,14 @@ export function SettingsDialog({
                   <button
                     onClick={requestClose}
                     disabled={isSavingSettings}
-                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('common.close')}
                   </button>
                   <button
                     onClick={handleSave}
                     disabled={isSavingSettings}
-                    className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-sm bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isSavingSettings ? t('common.saving') : t('common.save')}
                   </button>
@@ -1677,7 +1677,7 @@ export function SettingsDialog({
                         type="button"
                         onClick={() => void handleTestGenerationNetwork()}
                         disabled={networkTestStatus === 'testing'}
-                        className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-border-dark px-3 text-xs font-medium text-text-dark transition-colors hover:bg-bg-hover disabled:cursor-wait disabled:opacity-60"
+                        className="inline-flex min-h-9 items-center justify-center gap-2 rounded-sm border border-border-dark px-3 text-xs font-medium text-text-dark transition-colors hover:bg-bg-hover disabled:cursor-wait disabled:opacity-60"
                       >
                         {networkTestStatus === 'testing'
                           ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -1693,7 +1693,7 @@ export function SettingsDialog({
                           setNetworkTestStatus('');
                         }}
                         placeholder="http://127.0.0.1:7890"
-                        className="mt-3 w-full rounded border border-border-dark bg-bg-darker px-3 py-2 text-sm text-text-dark outline-none transition-colors placeholder:text-text-muted focus:border-accent"
+                        className="mt-3 w-full rounded-sm border border-border-dark bg-bg-darker px-3 py-2 text-sm text-text-dark outline-hidden transition-colors placeholder:text-text-muted focus:border-accent"
                         aria-label={t('settings.generationNetworkProxyUrl')}
                         spellCheck={false}
                       />
@@ -1798,11 +1798,11 @@ export function SettingsDialog({
                         value={localDownloadPathInput}
                         onChange={(event) => setLocalDownloadPathInput(event.target.value)}
                         placeholder={t('settings.downloadPathPlaceholder')}
-                        className="h-9 flex-1 rounded border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-none placeholder:text-text-muted"
+                        className="h-9 flex-1 rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
                       />
                       <button
                         type="button"
-                        className="inline-flex h-9 items-center justify-center rounded border border-border-dark bg-surface-dark px-3 text-xs text-text-dark transition-colors hover:bg-bg-dark"
+                        className="inline-flex h-9 items-center justify-center rounded-sm border border-border-dark bg-surface-dark px-3 text-xs text-text-dark transition-colors hover:bg-bg-dark"
                         onClick={handleAddDownloadPathFromInput}
                       >
                         <Plus className="mr-1 h-3.5 w-3.5" />
@@ -1810,7 +1810,7 @@ export function SettingsDialog({
                       </button>
                       <button
                         type="button"
-                        className="inline-flex h-9 items-center justify-center rounded border border-border-dark bg-surface-dark px-3 text-xs text-text-dark transition-colors hover:bg-bg-dark"
+                        className="inline-flex h-9 items-center justify-center rounded-sm border border-border-dark bg-surface-dark px-3 text-xs text-text-dark transition-colors hover:bg-bg-dark"
                         onClick={() => {
                           void handlePickDownloadPath();
                         }}
@@ -1825,12 +1825,12 @@ export function SettingsDialog({
                         localDownloadPresetPaths.map((path) => (
                           <div
                             key={path}
-                            className="flex items-center gap-2 rounded border border-border-dark bg-surface-dark px-2 py-1.5"
+                            className="flex items-center gap-2 rounded-sm border border-border-dark bg-surface-dark px-2 py-1.5"
                           >
                             <span className="truncate text-xs text-text-dark">{path}</span>
                             <button
                               type="button"
-                              className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
+                              className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-sm text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
                               onClick={() => handleRemoveDownloadPath(path)}
                               title={t('common.delete')}
                             >
@@ -1850,14 +1850,14 @@ export function SettingsDialog({
                   <button
                     onClick={requestClose}
                     disabled={isSavingSettings}
-                    className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('common.close')}
                   </button>
                   <button
                     onClick={handleSave}
                     disabled={isSavingSettings}
-                    className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-sm bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isSavingSettings ? t('common.saving') : t('common.save')}
                   </button>
@@ -1951,7 +1951,7 @@ export function SettingsDialog({
                         onClick={() => {
                           void handleCheckUpdate();
                         }}
-                        className="rounded border border-border-dark bg-surface-dark px-3 py-2 text-sm text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-sm border border-border-dark bg-surface-dark px-3 py-2 text-sm text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={checkUpdateStatus === 'checking'}
                       >
                         {checkUpdateStatus === 'checking'
@@ -1976,14 +1976,14 @@ export function SettingsDialog({
                     <button
                       onClick={requestClose}
                       disabled={isSavingSettings}
-                      className="rounded border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {t('common.close')}
                     </button>
                     <button
                       onClick={handleSave}
                       disabled={isSavingSettings}
-                      className="rounded bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-sm bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isSavingSettings ? t('common.saving') : t('common.save')}
                     </button>

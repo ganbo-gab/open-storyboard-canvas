@@ -217,14 +217,14 @@ const PresetItem = memo(({ preset, onEdit, onDelete, onApply }: PresetItemProps)
           <div className="hidden group-hover:flex gap-0.5">
             <button
               onClick={() => onEdit(preset)}
-              className="rounded p-0.5 text-text-muted hover:bg-white/10 hover:text-text-dark"
+              className="rounded-sm p-0.5 text-text-muted hover:bg-white/10 hover:text-text-dark"
               title={t('common.edit')}
             >
               <Pencil className="h-3 w-3" />
             </button>
             <button
               onClick={() => onDelete(preset)}
-              className="rounded p-0.5 text-text-muted hover:bg-red-500/20 hover:text-red-400"
+              className="rounded-sm p-0.5 text-text-muted hover:bg-red-500/20 hover:text-red-400"
               title={t('common.delete')}
             >
               <Trash2 className="h-3 w-3" />
@@ -331,7 +331,7 @@ export const CameraPresetsPanel = memo(
     return (
       <>
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-100 flex items-center justify-center bg-black/50"
           onClick={onClose}
         >
           <UiPanel

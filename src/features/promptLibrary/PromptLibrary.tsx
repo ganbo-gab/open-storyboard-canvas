@@ -54,7 +54,7 @@ function sortLabels(values: string[]): string[] {
 
 function filterChipClassName(isActive: boolean): string {
   return isActive
-    ? '!border-accent !bg-accent !text-white shadow-[0_0_0_1px_rgba(var(--accent-rgb),0.3),0_10px_22px_rgba(var(--accent-rgb),0.2)]'
+    ? 'border-accent! bg-accent! text-white! shadow-[0_0_0_1px_rgba(var(--accent-rgb),0.3),0_10px_22px_rgba(var(--accent-rgb),0.2)]'
     : '';
 }
 
@@ -111,7 +111,7 @@ function PromptCard({
   onToggleFavorite,
 }: PromptCardProps) {
   return (
-    <article className="group flex h-full min-h-[360px] flex-col overflow-hidden rounded-lg border border-border-dark bg-surface-dark text-left shadow-sm transition-[transform,border-color,box-shadow] duration-150 hover:-translate-y-0.5 hover:border-accent/55 hover:shadow-xl">
+    <article className="group flex h-full min-h-[360px] flex-col overflow-hidden rounded-lg border border-border-dark bg-surface-dark text-left shadow-xs transition-[transform,border-color,box-shadow,translate,scale,rotate] duration-150 hover:-translate-y-0.5 hover:border-accent/55 hover:shadow-xl">
       <div className="relative h-44 w-full overflow-hidden bg-bg-dark">
         <button type="button" className="block h-full w-full text-left" onClick={onOpen}>
           <img
@@ -536,7 +536,7 @@ export function PromptLibrary() {
 
   return (
     <div
-      className="ui-scrollbar h-full min-h-0 w-full overflow-y-auto overflow-x-hidden bg-bg-dark bg-[radial-gradient(rgba(255,255,255,0.11)_1px,transparent_1px)] p-6 [background-size:18px_18px]"
+      className="ui-scrollbar h-full min-h-0 w-full overflow-y-auto overflow-x-hidden bg-bg-dark bg-[radial-gradient(rgba(255,255,255,0.11)_1px,transparent_1px)] p-6 bg-size-[18px_18px]"
       onScroll={handleLibraryScroll}
     >
       <div className="mx-auto max-w-7xl pb-10">
@@ -812,7 +812,7 @@ export function PromptLibrary() {
               <img
                 src={selectedEntry.coverUrl}
                 alt={selectedEntry.title}
-                className="aspect-[4/3] w-full rounded-lg border border-border-dark object-cover"
+                className="aspect-4/3 w-full rounded-lg border border-border-dark object-cover"
                 draggable={false}
               />
               <div className="flex flex-wrap gap-2">
@@ -843,7 +843,7 @@ export function PromptLibrary() {
                 <div className="text-xs font-medium uppercase text-text-muted">
                   {t('promptLibrary.detail.fullPrompt')}
                 </div>
-                <pre className="ui-scrollbar mt-2 max-h-[430px] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-border-dark bg-bg-dark/65 p-4 text-sm leading-7 text-text-dark">
+                <pre className="ui-scrollbar mt-2 max-h-[430px] overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-border-dark bg-bg-dark/65 p-4 text-sm leading-7 text-text-dark">
                   {selectedEntry.prompt}
                 </pre>
               </div>
@@ -852,7 +852,7 @@ export function PromptLibrary() {
                   <div className="text-xs font-medium uppercase text-text-muted">
                     {t('promptLibrary.detail.preview')}
                   </div>
-                  <pre className="ui-scrollbar mt-2 max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-border-dark bg-bg-dark/45 p-3 text-xs leading-6 text-text-muted">
+                  <pre className="ui-scrollbar mt-2 max-h-[180px] overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-border-dark bg-bg-dark/45 p-3 text-xs leading-6 text-text-muted">
                     {selectedEntry.preview}
                   </pre>
                 </div>

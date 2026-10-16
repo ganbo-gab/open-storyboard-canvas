@@ -113,7 +113,7 @@ export const CanvasNodeImage = memo(({
   if (!activeSrc || hasLoadError) {
     return (
       <div
-        className={`flex items-center justify-center gap-1 bg-[var(--canvas-node-media-bg)] text-[10px] leading-tight text-text-muted ${className ?? ''}`}
+        className={`flex items-center justify-center gap-1 bg-(--canvas-node-media-bg) text-[10px] leading-tight text-text-muted ${className ?? ''}`}
         role="img"
         aria-label={typeof alt === 'string' && alt.trim() ? alt : t('common.imageMissing')}
         title={t('common.imageMissing')}

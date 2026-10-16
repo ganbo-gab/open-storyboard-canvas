@@ -40,7 +40,7 @@ export class DirectorSceneErrorBoundary extends Component<
         <div className="w-full max-w-lg rounded-xl border border-red-300/20 bg-[#111719]/96 p-5 shadow-2xl">
           <div className="text-sm font-semibold text-red-100">{this.props.title}</div>
           <p className="mt-2 text-xs leading-5 text-white/58">{this.props.description}</p>
-          <pre className="ui-scrollbar mt-3 max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/10 bg-black/24 p-3 text-[11px] leading-5 text-white/48">
+          <pre className="ui-scrollbar mt-3 max-h-28 overflow-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-white/10 bg-black/24 p-3 text-[11px] leading-5 text-white/48">
             {error.message}
           </pre>
           <div className="mt-4 flex justify-end gap-2">

@@ -108,7 +108,7 @@ const STORYBOARD_GEN_ICON_ADJUST = { x: 0, y: 0, scale: 0.95 };
 const STORYBOARD_GEN_TITLE_ADJUST = { x: 0, y: 0, scale: 1 };
 const GRID_CONTROL_CONTAINER_CLASS = 'flex h-5 items-center gap-0.5 rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.04)] px-1';
 const GRID_CONTROL_LABEL_CLASS = 'text-[9px] text-text-muted';
-const GRID_CONTROL_BUTTON_CLASS = 'flex h-3 w-3 items-center justify-center rounded text-text-muted transition-colors hover:bg-white/10 hover:text-text-dark';
+const GRID_CONTROL_BUTTON_CLASS = 'flex h-3 w-3 items-center justify-center rounded-sm text-text-muted transition-colors hover:bg-white/10 hover:text-text-dark';
 const GRID_CONTROL_ICON_CLASS = 'h-1.5 w-1.5';
 const GRID_CONTROL_VALUE_CLASS = 'min-w-[14px] text-center text-[9px] font-semibold text-text-dark';
 const GRID_SUMMARY_CLASS = 'flex h-5 items-center rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.05)] px-1.5 text-[9px] text-text-muted';
@@ -254,7 +254,7 @@ function renderFrameDescriptionWithHighlights(description: string, maxImageCount
     segments.push(
       <span
         key={`ref-${matchStart}`}
-        className="relative z-0 text-white [text-shadow:0.24px_0_currentColor,-0.24px_0_currentColor] before:absolute before:-inset-x-[4px] before:-inset-y-[1px] before:-z-10 before:rounded-[7px] before:bg-accent/55 before:content-['']"
+        className="relative z-0 text-white [text-shadow:0.24px_0_currentColor,-0.24px_0_currentColor] before:absolute before:inset-x-[-4px] before:-inset-y-px before:-z-10 before:rounded-[7px] before:bg-accent/55 before:content-['']"
       >
         {matchText}
       </span>
@@ -1453,10 +1453,10 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
     <div
       ref={rootRef}
       className={`
-        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-[var(--canvas-node-bg)] p-3 shadow-[var(--canvas-node-shadow)] transition-colors duration-150
+        group relative flex h-full flex-col overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-3 shadow-(--canvas-node-shadow) transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[var(--canvas-node-border)] hover:border-[var(--canvas-node-border-hover)]'
+          : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'
         }
       `}
       style={{
@@ -1495,7 +1495,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
         </div>
 
         {showStoryboardGenAdvancedRatioControls && (
-          <div className="min-w-0 flex-1 rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] px-2 py-0.5 text-center text-[10px] text-text-muted">
+          <div className="min-w-0 flex-1 rounded-full border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-2 py-0.5 text-center text-[10px] text-text-muted">
             <span>{t('node.storyboardGen.cellAspectRatio')}: {resolvedAspectRatios.cellAspectRatioLabel}</span>
             <span className="mx-1 text-text-muted/45">|</span>
             <span>{t('node.storyboardGen.overallAspectRatio')}: {resolvedAspectRatios.overallAspectRatioLabel}</span>
@@ -1504,12 +1504,12 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
 
         <div className="flex items-center gap-1">
           {showStoryboardGenAdvancedRatioControls && (
-            <div className="flex h-5 items-center rounded-full border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)] p-0.5">
+            <div className="flex h-5 items-center rounded-full border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-0.5">
               <button
                 type="button"
                 className={`${RATIO_CONTROL_MODE_BUTTON_CLASS} ${ratioControlMode === 'overall'
                   ? 'border-accent/55 bg-accent/18 text-text-dark'
-                  : 'border-transparent bg-transparent text-text-muted hover:bg-[var(--canvas-node-menu-hover)]'
+                  : 'border-transparent bg-transparent text-text-muted hover:bg-(--canvas-node-menu-hover)'
                   }`}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -1522,7 +1522,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
                 type="button"
                 className={`${RATIO_CONTROL_MODE_BUTTON_CLASS} ${ratioControlMode === 'cell'
                   ? 'border-accent/55 bg-accent/18 text-text-dark'
-                  : 'border-transparent bg-transparent text-text-muted hover:bg-[var(--canvas-node-menu-hover)]'
+                  : 'border-transparent bg-transparent text-text-muted hover:bg-(--canvas-node-menu-hover)'
                   }`}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -1553,7 +1553,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
             return (
               <div
                 key={frame.id}
-                className="relative overflow-hidden rounded border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-field-bg)]"
+                className="relative overflow-hidden rounded-sm border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg)"
                 style={{ aspectRatio: frameLayout.cellAspectRatio }}
               >
                 <div
@@ -1564,7 +1564,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
                   className="ui-scrollbar pointer-events-none absolute inset-0 overflow-y-auto overflow-x-hidden text-[10px] leading-4 text-text-dark"
                   style={{ scrollbarGutter: 'stable' }}
                 >
-                  <div className="min-h-full whitespace-pre-wrap break-words px-1.5 py-1 text-left">
+                  <div className="min-h-full whitespace-pre-wrap wrap-break-word px-1.5 py-1 text-left">
                     {renderFrameDescriptionWithHighlights(frameDescription, incomingImages.length)}
                   </div>
                 </div>
@@ -1594,7 +1594,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
                     index: String(index + 1).padStart(2, '0'),
                   })}
                   wrap="soft"
-                  className="ui-scrollbar nodrag nowheel relative z-10 h-full w-full resize-none overflow-y-auto overflow-x-hidden bg-transparent px-1.5 py-1 text-left text-[10px] leading-4 text-transparent caret-text-dark placeholder:text-text-muted/40 focus:border-accent/50 focus:outline-none whitespace-pre-wrap break-words"
+                  className="ui-scrollbar nodrag nowheel relative z-10 h-full w-full resize-none overflow-y-auto overflow-x-hidden bg-transparent px-1.5 py-1 text-left text-[10px] leading-4 text-transparent caret-text-dark placeholder:text-text-muted/40 focus:border-accent/50 focus:outline-hidden whitespace-pre-wrap wrap-break-word"
                   style={{ scrollbarGutter: 'stable' }}
                 />
               </div>
@@ -1605,7 +1605,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
 
       {showImagePicker && incomingImageItems.length > 0 && (
         <div
-          className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-[var(--canvas-node-field-border)] bg-[var(--canvas-node-menu-bg)] shadow-xl"
+          className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-xl"
           style={{ left: pickerAnchor.left, top: pickerAnchor.top }}
           onMouseDown={(event) => event.stopPropagation()}
           onWheelCapture={(event) => event.stopPropagation()}
@@ -1623,8 +1623,8 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
                   insertImageReference(imageIndex);
                 }}
                 onMouseEnter={() => setPickerActiveIndex(imageIndex)}
-                className={`flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[var(--canvas-node-field-border)] hover:bg-[var(--canvas-node-menu-hover)] ${pickerActiveIndex === imageIndex
-                  ? 'border-accent/35 bg-[var(--canvas-node-menu-active)]'
+                className={`flex w-full items-center gap-2 border border-transparent bg-transparent px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-(--canvas-node-field-border) hover:bg-(--canvas-node-menu-hover) ${pickerActiveIndex === imageIndex
+                  ? 'border-accent/35 bg-(--canvas-node-menu-active)'
                   : ''
                   }`}
               >
@@ -1633,7 +1633,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
                   alt={item.label}
                   viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl)}
                   viewerImageList={incomingImageViewerList}
-                  className="h-8 w-8 rounded object-cover"
+                  className="h-8 w-8 rounded-sm object-cover"
                 />
                 <span>{item.label}</span>
               </button>
@@ -1672,7 +1672,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
           }}
           variant="primary"
           size="sm"
-          className={`!min-w-0 shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
+          className={`min-w-0! shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
         >
           <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
           {t('canvas.generate')}
@@ -1683,13 +1683,13 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
         type="target"
         id="target"
         position={Position.Left}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <Handle
         type="source"
         id="source"
         position={Position.Right}
-        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+        className="h-2! w-2! border-surface-dark! bg-accent!"
       />
       <NodeResizeHandle
         minWidth={baseFrameLayout.nodeWidth}

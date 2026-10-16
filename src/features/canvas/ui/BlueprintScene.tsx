@@ -2828,7 +2828,7 @@ function BlueprintSceneInternals({
             <div
               key={it.id}
               data-item-id={it.id}
-              className="absolute top-0 left-0 rounded whitespace-nowrap border bg-black/70 text-white text-[10px] px-1.5 py-0.5"
+              className="absolute top-0 left-0 rounded-sm whitespace-nowrap border bg-black/70 text-white text-[10px] px-1.5 py-0.5"
               style={{ borderColor: it.color }}
             >
               <span style={{ color: it.color }}>●</span> {showName ? it.label : pedestrianTag}
@@ -2845,13 +2845,13 @@ function BlueprintSceneInternals({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); handleResetCamera(); }}
-          className="flex items-center gap-1 px-2 py-1 rounded bg-black/55 text-white/85 hover:bg-black/75 border border-white/10"
+          className="flex items-center gap-1 px-2 py-1 rounded-sm bg-black/55 text-white/85 hover:bg-black/75 border border-white/10"
           title={t('directorStudio.scene.resetView')}
         ><RotateCcw className="w-3 h-3" /> {t('directorStudio.scene.reset')}</button>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); handleFitCamera(); }}
-          className="flex items-center gap-1 px-2 py-1 rounded bg-black/55 text-white/85 hover:bg-black/75 border border-white/10"
+          className="flex items-center gap-1 px-2 py-1 rounded-sm bg-black/55 text-white/85 hover:bg-black/75 border border-white/10"
           title={t('directorStudio.scene.fitAllTitle')}
         ><Maximize2 className="w-3 h-3" /> {t('directorStudio.scene.fitAll')}</button>
         <button
@@ -2868,7 +2868,7 @@ function BlueprintSceneInternals({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onPointerModeChange?.('orbit'); }}
-            className="flex items-center gap-1 px-2 py-1 rounded border border-amber-500/40 bg-amber-500/20 text-amber-200"
+            className="flex items-center gap-1 px-2 py-1 rounded-sm border border-amber-500/40 bg-amber-500/20 text-amber-200"
             title={t('directorStudio.scene.exitMoveXy')}
           ><MousePointer2 className="w-3 h-3" /> {t('directorStudio.scene.moveXyCancel')}</button>
         )}
@@ -2895,34 +2895,34 @@ function BlueprintSceneInternals({
             ref={miniMapRef}
             width={120}
             height={120}
-            className="rounded border border-white/12 bg-[#071012]/80 shadow-lg backdrop-blur"
+            className="rounded-sm border border-white/12 bg-[#071012]/80 shadow-lg backdrop-blur-sm"
           />
         </div>
       ) : null}
 
       {/* Bottom-left mode hint */}
       {!fullBleed ? (
-      <div className="absolute bottom-2 left-2 flex items-center gap-1 text-[10px] text-white/55 bg-black/40 rounded px-2 py-0.5">
+      <div className="absolute bottom-2 left-2 flex items-center gap-1 text-[10px] text-white/55 bg-black/40 rounded-sm px-2 py-0.5">
         <Move3d className="w-3 h-3" /> {t('directorStudio.scene.sceneLabel')} · {mode === 'panorama' ? t('directorStudio.scene.panoramaGround') : t('directorStudio.scene.flatGround')}
       </div>
       ) : null}
 
       {/* Bottom-center reference legend */}
       {referenceImages.length > 0 && (
-        <div className={`${fullBleed ? 'bottom-24' : 'bottom-8'} absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/55 border border-white/10 rounded px-2 py-1`}>
+        <div className={`${fullBleed ? 'bottom-24' : 'bottom-8'} absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/55 border border-white/10 rounded-sm px-2 py-1`}>
           {referenceImages.map((r, idx) => {
             const color = r.color ?? '#60a5fa';
             const displayUrl = resolveImageDisplayUrl(r.url) ?? r.url;
             return (
               <div key={r.id} className="relative group flex flex-col items-center gap-0.5">
                 <span
-                  className="h-5 w-5 rounded border-2 border-white/20"
+                  className="h-5 w-5 rounded-sm border-2 border-white/20"
                   style={{ backgroundColor: color }}
                   title={`${t('directorStudio.scene.referenceIndex', { index: idx + 1 })} · ${r.label}`}
                 />
                 <span className="text-[9px] text-white/60">{t('directorStudio.scene.referenceIndex', { index: idx + 1 })}</span>
-                <div className="pointer-events-none absolute bottom-full mb-1 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-[#1a1a1a] border border-white/15 rounded p-1 shadow-xl z-20">
-                  <img src={displayUrl} alt={r.label} className="w-20 h-20 object-cover rounded" />
+                <div className="pointer-events-none absolute bottom-full mb-1 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-[#1a1a1a] border border-white/15 rounded-sm p-1 shadow-xl z-20">
+                  <img src={displayUrl} alt={r.label} className="w-20 h-20 object-cover rounded-sm" />
                   <div className="mt-1 text-[10px] text-white/85 text-center whitespace-nowrap">@{r.label}</div>
                 </div>
               </div>
@@ -2933,7 +2933,7 @@ function BlueprintSceneInternals({
 
       {/* Hint banner under the toolbar */}
       {!fullBleed ? (
-      <div className="absolute top-12 left-2 max-w-[420px] text-[10px] text-white/60 bg-black/40 rounded px-2 py-1">
+      <div className="absolute top-12 left-2 max-w-[420px] text-[10px] text-white/60 bg-black/40 rounded-sm px-2 py-1">
         {hint}
       </div>
       ) : null}
@@ -2942,7 +2942,7 @@ function BlueprintSceneInternals({
 
   if (isFullscreen) {
     return createPortal(
-      <div className="fixed inset-0 z-[9000] bg-black/95 p-3 overflow-auto">
+      <div className="fixed inset-0 z-9000 bg-black/95 p-3 overflow-auto">
         {tree}
       </div>,
       document.body,

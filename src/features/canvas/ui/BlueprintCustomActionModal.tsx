@@ -71,14 +71,14 @@ export const BlueprintCustomActionModal = memo(function BlueprintCustomActionMod
 
   return (
     <div
-      className="absolute inset-0 z-[270] flex items-center justify-center bg-black/55 backdrop-blur-sm"
+      className="absolute inset-0 z-270 flex items-center justify-center bg-black/55 backdrop-blur-xs"
       onWheel={(event) => event.stopPropagation()}
     >
       <div className="nodrag nopan w-[840px] max-w-[calc(100%-32px)] rounded-xl border border-white/14 bg-[#181818] shadow-2xl">
         <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
           <div>
             <div className="text-sm font-semibold text-white">自定义动作 · 姿态编辑器</div>
-            <div className="mt-0.5 text-[11px] text-white/[0.42]">
+            <div className="mt-0.5 text-[11px] text-white/42">
               用左侧 AI 提示词或右侧手动滑块设计姿态，预览图实时反映效果
             </div>
           </div>
@@ -100,7 +100,7 @@ export const BlueprintCustomActionModal = memo(function BlueprintCustomActionMod
                 value={nameValue}
                 onChange={(event) => onNameChange(event.target.value)}
                 placeholder="例如：递出文件 / 张开双臂"
-                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-white/85 outline-none placeholder:text-white/28 focus:border-white/25"
+                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-white/85 outline-hidden placeholder:text-white/28 focus:border-white/25"
               />
             </label>
             <label className="block text-[11px] text-white/55">
@@ -110,11 +110,11 @@ export const BlueprintCustomActionModal = memo(function BlueprintCustomActionMod
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder="角色的整体姿态、肢体方向、表情细节，可直接写情境，例如：左手掌心朝上托物，右手指向远处，目视前方稍仰头"
                 rows={5}
-                className="nodrag nowheel mt-1 w-full resize-none rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-white/85 outline-none placeholder:text-white/28 focus:border-white/25"
+                className="nodrag nowheel mt-1 w-full resize-none rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-white/85 outline-hidden placeholder:text-white/28 focus:border-white/25"
               />
             </label>
 
-            <div className="rounded-lg border border-white/10 bg-black/[0.18] p-3">
+            <div className="rounded-lg border border-white/10 bg-black/18 p-3">
               <div className="mb-2 flex items-center gap-1.5 text-[11px] text-white/65">
                 <Sparkles className="h-3.5 w-3.5 text-accent" />
                 <span className="font-semibold">AI 协助</span>
@@ -138,7 +138,7 @@ export const BlueprintCustomActionModal = memo(function BlueprintCustomActionMod
                 }}
                 placeholder="粘贴 AI 返回的 JSON …"
                 rows={4}
-                className="nodrag nowheel mt-2 w-full resize-none rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-[11px] text-white/85 outline-none placeholder:text-white/28 focus:border-white/25"
+                className="nodrag nowheel mt-2 w-full resize-none rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-[11px] text-white/85 outline-hidden placeholder:text-white/28 focus:border-white/25"
               />
               <button
                 type="button"

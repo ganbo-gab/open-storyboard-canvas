@@ -134,7 +134,7 @@ export const AssetPanel = memo(({
 
   return (
     <div
-      className="fixed z-[220] flex max-h-[540px] flex-col rounded-xl border border-white/12 bg-[#202020] shadow-2xl"
+      className="fixed z-220 flex max-h-[540px] flex-col rounded-xl border border-white/12 bg-[#202020] shadow-2xl"
       style={{ left: panelLeft, top: panelTop, width: panelWidth }}
       onClick={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
@@ -161,7 +161,7 @@ export const AssetPanel = memo(({
           className={`inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
             activeKind === 'image'
               ? 'bg-accent/85 text-white'
-              : 'bg-white/[0.04] text-white/60 hover:bg-white/10 hover:text-white/85'
+              : 'bg-white/4 text-white/60 hover:bg-white/10 hover:text-white/85'
           }`}
         >
           <ImageIcon className="h-3.5 w-3.5" />
@@ -174,7 +174,7 @@ export const AssetPanel = memo(({
           className={`inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
             activeKind === 'video'
               ? 'bg-accent/85 text-white'
-              : 'bg-white/[0.04] text-white/60 hover:bg-white/10 hover:text-white/85'
+              : 'bg-white/4 text-white/60 hover:bg-white/10 hover:text-white/85'
           }`}
         >
           <Film className="h-3.5 w-3.5" />
@@ -190,13 +190,13 @@ export const AssetPanel = memo(({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={`搜索${activeKindLabel}名称`}
-            className="min-w-0 flex-1 bg-transparent text-xs text-white/85 outline-none placeholder:text-white/30"
+            className="min-w-0 flex-1 bg-transparent text-xs text-white/85 outline-hidden placeholder:text-white/30"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery('')}
-              className="rounded p-0.5 text-white/35 hover:bg-white/10 hover:text-white/75"
+              className="rounded-sm p-0.5 text-white/35 hover:bg-white/10 hover:text-white/75"
               title="清空搜索"
             >
               <X className="h-3 w-3" />
@@ -207,7 +207,7 @@ export const AssetPanel = memo(({
 
       <div className="ui-scrollbar flex-1 overflow-y-auto p-3">
         {assets.length === 0 ? (
-          <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-white/12 bg-white/[0.03] px-6 text-center">
+          <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-white/12 bg-white/3 px-6 text-center">
             <ImageIcon className="mb-3 h-8 w-8 text-white/25" />
             <div className="text-sm text-white/70">这个项目还没有资产</div>
             <div className="mt-1 text-[11px] leading-5 text-white/40">
@@ -215,7 +215,7 @@ export const AssetPanel = memo(({
             </div>
           </div>
         ) : filteredAssets.length === 0 ? (
-          <div className="flex min-h-40 flex-col items-center justify-center rounded-lg border border-dashed border-white/12 bg-white/[0.03] px-6 text-center">
+          <div className="flex min-h-40 flex-col items-center justify-center rounded-lg border border-dashed border-white/12 bg-white/3 px-6 text-center">
             {query ? (
               <Search className="mb-3 h-7 w-7 text-white/25" />
             ) : activeKind === 'image' ? (
@@ -245,7 +245,7 @@ export const AssetPanel = memo(({
                     <div
                       key={asset.id}
                       title={mode === 'select' ? `${asset.title} · 选择并连接` : `${asset.title} · 双击定位`}
-                      className="group overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] text-left transition-colors hover:border-accent/70 hover:bg-accent/10"
+                      className="group overflow-hidden rounded-lg border border-white/10 bg-white/4 text-left transition-colors hover:border-accent/70 hover:bg-accent/10"
                     >
                       <button
                         type="button"
@@ -308,11 +308,11 @@ export const AssetPanel = memo(({
                                 event.currentTarget.blur();
                               }
                             }}
-                            className="nodrag w-full rounded border border-white/10 bg-black/25 px-1.5 py-0.5 text-[10px] font-medium text-white/80 outline-none transition-colors hover:border-white/20 hover:bg-black/35 focus:border-accent/60 focus:bg-black/40"
+                            className="nodrag w-full rounded-sm border border-white/10 bg-black/25 px-1.5 py-0.5 text-[10px] font-medium text-white/80 outline-hidden transition-colors hover:border-white/20 hover:bg-black/35 focus:border-accent/60 focus:bg-black/40"
                             title="双击资产定位；这里可直接改名，允许同名"
                           />
                         ) : (
-                          <div className="truncate rounded border border-transparent px-1.5 py-0.5 text-[10px] font-medium text-white/80">
+                          <div className="truncate rounded-sm border border-transparent px-1.5 py-0.5 text-[10px] font-medium text-white/80">
                             {asset.title}
                           </div>
                         )}

@@ -158,13 +158,13 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
 
   return (
     <>
-      <div className="canvas-side-toolbar absolute left-3 top-1/2 z-20 flex max-h-[calc(100%-24px)] -translate-y-1/2 flex-col gap-2 overflow-y-auto rounded-xl border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-bg)] p-2 shadow-[var(--canvas-rail-shadow)] backdrop-blur">
+      <div className="canvas-side-toolbar absolute left-3 top-1/2 z-20 flex max-h-[calc(100%-24px)] -translate-y-1/2 flex-col gap-2 overflow-y-auto rounded-xl border border-(--canvas-rail-button-border) bg-(--canvas-rail-bg) p-2 shadow-(--canvas-rail-shadow) backdrop-blur-sm">
         <button
           type="button"
           title={t('canvasToolbar.assetsTitle')}
           aria-label={t('canvasToolbar.assetsTitle')}
           onClick={(event) => onOpenAssets?.(event.currentTarget.getBoundingClientRect())}
-          className="canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] px-2 py-2 text-[10px] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
+          className="canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-(--canvas-rail-button-border) bg-(--canvas-rail-button-bg) px-2 py-2 text-[10px] text-(--canvas-rail-button-text) transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
         >
           <Images className="h-4 w-4" />
           <span className="canvas-side-toolbar__label leading-tight">{t('canvasToolbar.assets')}</span>
@@ -178,7 +178,7 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
               title={t(item.titleKey)}
               aria-label={t(item.titleKey)}
               onClick={() => handleAdd(item.type, item.configuration)}
-              className="canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] px-2 py-2 text-[10px] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
+              className="canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-(--canvas-rail-button-border) bg-(--canvas-rail-button-bg) px-2 py-2 text-[10px] text-(--canvas-rail-button-text) transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
             >
               <Icon className="h-4 w-4" />
               <span className="canvas-side-toolbar__label leading-tight">{t(item.labelKey)}</span>
@@ -191,7 +191,7 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
           aria-label={t('canvasToolbar.logsTitle')}
           aria-expanded={isDiagnosticOpen}
           onClick={() => setIsDiagnosticOpen((value) => !value)}
-          className={`canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border px-2 py-2 text-[10px] transition-colors ${isDiagnosticOpen ? 'border-accent/60 bg-accent/15 text-accent' : 'border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] text-[var(--canvas-rail-button-text)] hover:border-accent/60 hover:bg-accent/15 hover:text-accent'}`}
+          className={`canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border px-2 py-2 text-[10px] transition-colors ${isDiagnosticOpen ? 'border-accent/60 bg-accent/15 text-accent' : 'border-(--canvas-rail-button-border) bg-(--canvas-rail-button-bg) text-(--canvas-rail-button-text) hover:border-accent/60 hover:bg-accent/15 hover:text-accent'}`}
         >
           <ScrollText className="h-4 w-4" />
           <span className="canvas-side-toolbar__label leading-tight">{t('canvasToolbar.logs')}</span>
@@ -201,7 +201,7 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
           title={t('canvasToolbar.bulkPromptImportTitle')}
           aria-label={t('canvasToolbar.bulkPromptImportTitle')}
           onClick={() => setIsPromptImportOpen(true)}
-          className="canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-[var(--canvas-rail-button-border)] bg-[var(--canvas-rail-button-bg)] px-2 py-2 text-[10px] text-[var(--canvas-rail-button-text)] transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
+          className="canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-(--canvas-rail-button-border) bg-(--canvas-rail-button-bg) px-2 py-2 text-[10px] text-(--canvas-rail-button-text) transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
         >
           <ListPlus className="h-4 w-4" />
           <span className="canvas-side-toolbar__label leading-tight">{t('canvasToolbar.bulkPromptImport')}</span>

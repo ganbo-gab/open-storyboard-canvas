@@ -221,7 +221,7 @@ export const LightingControlPanel = memo(
 
     return (
       <div
-        className="fixed z-[200] rounded-xl border border-[rgba(255,255,255,0.1)] bg-[#202020] shadow-2xl"
+        className="fixed z-200 rounded-xl border border-[rgba(255,255,255,0.1)] bg-[#202020] shadow-2xl"
         style={{ left: panelLeft, top: panelTop, width: panelWidth }}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
@@ -282,7 +282,7 @@ export const LightingControlPanel = memo(
                     smartMode ? 'bg-accent' : 'bg-[rgba(255,255,255,0.15)]'
                   }`}
                 >
-                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${smartMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${smartMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
                 </button>
               </div>
             </div>
@@ -316,7 +316,7 @@ export const LightingControlPanel = memo(
               <span className="text-xs text-[rgba(255,255,255,0.6)] w-6">颜色</span>
               <div className="relative flex items-center">
                 <div
-                  className="w-10 h-6 rounded border border-[rgba(255,255,255,0.15)] cursor-pointer overflow-hidden"
+                  className="w-10 h-6 rounded-sm border border-[rgba(255,255,255,0.15)] cursor-pointer overflow-hidden"
                   style={{ background: lightColor === '#ffffff' ? 'linear-gradient(135deg, #ff0000 0%, #ff9900 25%, #ffff00 50%, transparent 50%, transparent 100%), linear-gradient(45deg, #aaa 25%, transparent 25%, transparent 75%, #aaa 75%)' : lightColor }}
                   onClick={() => {
                     const inp = document.createElement('input');
@@ -364,7 +364,7 @@ export const LightingControlPanel = memo(
                   rimLight ? 'bg-accent' : 'bg-[rgba(255,255,255,0.15)]'
                 }`}
               >
-                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${rimLight ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${rimLight ? 'translate-x-4' : 'translate-x-0.5'}`} />
               </button>
             </div>
           </div>
@@ -385,7 +385,7 @@ export const LightingControlPanel = memo(
               value={smartDesc}
               onChange={(e) => setSmartDesc(e.target.value)}
               placeholder="简单描述你想要实现的打光效果，或者情绪风格"
-              className="w-full h-16 resize-none rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] px-3 py-2 text-xs text-[rgba(255,255,255,0.8)] placeholder-[rgba(255,255,255,0.25)] outline-none focus:border-[rgba(255,255,255,0.2)] transition-colors"
+              className="w-full h-16 resize-none rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] px-3 py-2 text-xs text-[rgba(255,255,255,0.8)] placeholder-[rgba(255,255,255,0.25)] outline-hidden focus:border-[rgba(255,255,255,0.2)] transition-colors"
             />
 
             {/* 预设 label */}

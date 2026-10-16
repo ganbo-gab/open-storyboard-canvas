@@ -413,7 +413,7 @@ export function SplitStoryboardToolEditor({ sourceImageUrl, options, onOptionsCh
 
         <div className="flex items-center gap-3 text-xs text-text-muted">
           <div className="inline-flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-sm bg-red-400/70" />
+            <span className="h-2.5 w-2.5 rounded-xs bg-red-400/70" />
             红色区域为切割时会丢弃的分割线像素
           </div>
         </div>

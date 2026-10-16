@@ -235,7 +235,7 @@ export const CameraSphereControl = memo(
           }}
         >
           <div
-            className="absolute left-1/2 top-[30px] h-3 w-8 -translate-x-1/2 rounded-full bg-black/45 blur-[4px]"
+            className="absolute left-1/2 top-[30px] h-3 w-8 -translate-x-1/2 rounded-full bg-black/45 blur-xs"
             style={{ opacity: shadowStrength }}
           />
 
@@ -309,7 +309,7 @@ export const CameraSphereControl = memo(
                 className="absolute left-1/2 top-[10px] flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full bg-[radial-gradient(circle_at_35%_35%,#5a5a5a_0%,#2d2d2d_48%,#0d0d0d_100%)] shadow-[inset_0_1px_2px_rgba(255,255,255,0.08)]"
                 style={{ transform: `translateX(-50%) scaleX(${lensScaleX})` }}
               >
-                <div className="h-3.5 w-3.5 rounded-full bg-black ring-[2px] ring-white/88 shadow-[inset_0_0_8px_rgba(255,255,255,0.08)]" />
+                <div className="h-3.5 w-3.5 rounded-full bg-black ring-2 ring-white/88 shadow-[inset_0_0_8px_rgba(255,255,255,0.08)]" />
                 <div className="absolute right-[2px] top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-red-500/90" />
               </div>
             )}
