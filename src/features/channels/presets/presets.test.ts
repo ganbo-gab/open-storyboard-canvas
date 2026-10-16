@@ -253,6 +253,16 @@ describe('built-in channel profiles', () => {
     });
   });
 
+  it('downloads completed relay video content using channel authentication', () => {
+    expect(openAICompatibleProfile.operations['video.generate']!.response).toEqual({
+      mode: 'async', taskIdPath: 'id', poll: {
+        method: 'GET', path: '/v1/videos/{{taskId}}', intervalSec: 5, timeoutMin: 20,
+        statusPath: 'status', success: ['completed'], failure: ['failed', 'cancelled'],
+        progressPath: 'progress', outputs: [{ url: '/v1/videos/{{taskId}}/content', kind: 'video', auth: true }],
+      },
+    });
+  });
+
   it('does not invent successful GRSAI statuses or encoded KIE output paths', () => {
     const response = grsaiProfile.operations['image.generate']!.response;
     expect(response).toEqual({ mode: 'async', taskIdPath: 'data.id', poll: {

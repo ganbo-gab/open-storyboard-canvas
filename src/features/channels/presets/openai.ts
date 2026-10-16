@@ -110,8 +110,7 @@ export const openAICompatibleProfile: ChannelProfileV2 = {
   baseUrl: 'https://relay.example.invalid',
   notes: [
     '请替换 baseUrl 并核对模型名；new-api / one-api 的具体视频字段以中转站文档为准。',
-    '视频预设采用 model/prompt/seconds/size JSON 方言，轮询读取 video_url；不推断 CC API 的 input/parameters 方言。',
-    '仅支持轮询返回可下载的 video_url；需要鉴权的 /content 二次下载不属于本预设。',
+    '视频预设采用 model/prompt/seconds/size JSON 方言，完成后鉴权下载 /v1/videos/{taskId}/content；不推断 CC API 的 input/parameters 方言。',
   ],
   operations: {
     ...openAIStandardProfile.operations,
@@ -128,7 +127,7 @@ export const openAICompatibleProfile: ChannelProfileV2 = {
         poll: {
           method: 'GET', path: '/v1/videos/{{taskId}}', intervalSec: 5, timeoutMin: 20,
           statusPath: 'status', success: ['completed'], failure: ['failed', 'cancelled'],
-          progressPath: 'progress', outputs: [{ path: 'video_url', as: 'url', kind: 'video' }],
+          progressPath: 'progress', outputs: [{ url: '/v1/videos/{{taskId}}/content', kind: 'video', auth: true }],
         },
       },
       errorPath: 'error.message',
