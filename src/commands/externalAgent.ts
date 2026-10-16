@@ -5,6 +5,28 @@ export const EXTERNAL_AGENT_EVENT_NAME = 'external-agent-event';
 
 export type ExternalAgentRuntime = 'codex' | 'claude';
 
+export interface ExternalAgentInstallStatus {
+  cli: ExternalAgentRuntime;
+  path: string;
+  descriptorPath: string;
+  installed: boolean;
+  state: 'notInstalled' | 'installed' | 'conflict';
+  message: string | null;
+}
+
+export interface ExternalAgentInstallPreview {
+  status: ExternalAgentInstallStatus;
+  changed: boolean;
+  diff: string;
+}
+
+export interface ExternalAgentInstallOutcome {
+  status: ExternalAgentInstallStatus;
+  changed: boolean;
+  backupPath: string | null;
+  restoredOriginal: boolean;
+}
+
 export interface ExternalAgentRuntimeDiagnostic {
   runtime: ExternalAgentRuntime;
   installed: boolean;
@@ -271,6 +293,22 @@ export function revokeExternalAgentConnection(
 
 export function replayExternalAgentPendingToolCalls(): Promise<number> {
   return invokeExternalAgent('replay_external_agent_pending_tool_calls');
+}
+
+export function installExternalAgent(cli: ExternalAgentRuntime): Promise<ExternalAgentInstallOutcome> {
+  return invokeExternalAgent('external_agent_install', { cli });
+}
+
+export function uninstallExternalAgent(cli: ExternalAgentRuntime): Promise<ExternalAgentInstallOutcome> {
+  return invokeExternalAgent('external_agent_uninstall', { cli });
+}
+
+export function inspectExternalAgentInstallStatus(cli: ExternalAgentRuntime): Promise<ExternalAgentInstallStatus> {
+  return invokeExternalAgent('external_agent_install_status', { cli });
+}
+
+export function previewExternalAgentInstall(cli: ExternalAgentRuntime): Promise<ExternalAgentInstallPreview> {
+  return invokeExternalAgent('external_agent_install_preview', { cli });
 }
 
 export async function listenExternalAgentEvents(

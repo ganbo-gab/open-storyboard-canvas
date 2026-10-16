@@ -220,6 +220,7 @@ export function CanvasAgentDock({ projectId }: Props) {
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema,
+    annotations: tool.annotations,
     requiresApproval: true,
   })), []);
   const taskCount = useMemo(() => canvasNodes.filter((node) => {

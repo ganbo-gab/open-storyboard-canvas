@@ -298,7 +298,7 @@ export function SettingsDialog({
   const externalAgentProject = useProjectStore((state) => state.currentProject);
   const externalAgentTools = useMemo(() => buildExternalCanvasMcpManifest([
     'canvas', 'diagnostics', 'config', 'asset-read',
-  ]).tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, requiresApproval: true })), []);
+  ]).tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations, requiresApproval: true })), []);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>(
     normalizeSettingsCategory(initialCategory)
   );

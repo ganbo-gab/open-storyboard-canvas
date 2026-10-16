@@ -379,6 +379,7 @@ mod tests {
             description: "Run anything".to_string(),
             input_schema: json!({"type": "object"}),
             requires_approval: true,
+            annotations: None,
         }]);
         assert_eq!(result.unwrap_err().code, "permission_denied");
     }

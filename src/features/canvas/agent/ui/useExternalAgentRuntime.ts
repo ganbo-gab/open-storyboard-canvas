@@ -408,6 +408,7 @@ export function useExternalAgentRuntime({
             name: tool.name,
             description: tool.description,
             inputSchema: tool.inputSchema,
+            annotations: tool.annotations,
             requiresApproval: true,
           })),
           resumeId: selectedSession?.threadId,

@@ -1,4 +1,3 @@
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -17,14 +16,12 @@ use super::session::terminate_session;
 use super::{
     now_millis, BrokerCredentials, ExternalAgentCommandError, ExternalAgentRuntime,
     ExternalAgentSession, ExternalAgentState, ExternalAgentToolDefinition, SessionWorkspace,
-    CAPABILITY_LIFETIME_MS,
 };
 
 const CONNECTION_DESCRIPTOR_SCHEMA_VERSION: u8 = 1;
-const CONNECTION_DESCRIPTOR_PREFIX: &str = "canvas-mcp-";
-const CONNECTION_DESCRIPTOR_SUFFIX: &str = ".json";
+pub(crate) const CONNECTION_DESCRIPTOR_NAME: &str = "osc.json";
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateExternalAgentConnectionRequest {
     pub project_id: String,
@@ -81,7 +78,8 @@ pub(crate) struct ExternalAgentConnectionDescriptor {
     pub broker_address: String,
     pub capability_token: String,
     pub session_id: String,
-    pub expires_at: u64,
+    #[serde(default)]
+    pub connection: Option<CreateExternalAgentConnectionRequest>,
 }
 
 fn validate_project_text(
@@ -101,53 +99,65 @@ fn validate_project_text(
     Ok(trimmed.to_string())
 }
 
-fn write_connection_descriptor(
+pub(crate) fn write_connection_descriptor(
     descriptor_root: &Path,
-    connection_id: &str,
     descriptor: &ExternalAgentConnectionDescriptor,
 ) -> Result<PathBuf, ExternalAgentCommandError> {
     std::fs::create_dir_all(descriptor_root).map_err(|error| {
-        ExternalAgentCommandError::process(format!(
-            "Failed to prepare the Canvas MCP descriptor directory: {error}"
-        ))
+        ExternalAgentCommandError::process(format!("Failed to prepare the Canvas MCP descriptor directory: {error}"))
     })?;
+    if std::fs::symlink_metadata(descriptor_root).map_err(|error| {
+        ExternalAgentCommandError::process(error.to_string())
+    })?.file_type().is_symlink() {
+        return Err(ExternalAgentCommandError::permission_denied("Canvas MCP descriptor directory cannot be a symlink."));
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(descriptor_root, std::fs::Permissions::from_mode(0o700)).map_err(
-            |error| {
-                ExternalAgentCommandError::process(format!(
-                    "Failed to protect the Canvas MCP descriptor directory: {error}"
-                ))
-            },
-        )?;
+        std::fs::set_permissions(descriptor_root, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| ExternalAgentCommandError::process(error.to_string()))?;
     }
-
-    let path = descriptor_root.join(format!(
-        "{CONNECTION_DESCRIPTOR_PREFIX}{connection_id}{CONNECTION_DESCRIPTOR_SUFFIX}"
-    ));
-    let bytes = serde_json::to_vec(descriptor).map_err(|_| {
-        ExternalAgentCommandError::process("Failed to encode the Canvas MCP descriptor.")
+    let path = descriptor_root.join(CONNECTION_DESCRIPTOR_NAME);
+    let bytes = serde_json::to_vec(descriptor).map_err(|error| {
+        ExternalAgentCommandError::process(format!("Failed to encode the Canvas MCP descriptor: {error}"))
     })?;
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
+    let mut file = TempFileBuilder::new().prefix(".osc-").tempfile_in(descriptor_root)
+        .map_err(|error| ExternalAgentCommandError::process(error.to_string()))?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        use std::os::unix::fs::PermissionsExt;
+        file.as_file().set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| ExternalAgentCommandError::process(error.to_string()))?;
     }
-    let mut file = options.open(&path).map_err(|error| {
-        ExternalAgentCommandError::process(format!(
-            "Failed to create the Canvas MCP descriptor: {error}"
-        ))
-    })?;
-    if let Err(error) = file.write_all(&bytes).and_then(|_| file.sync_all()) {
-        let _ = std::fs::remove_file(&path);
-        return Err(ExternalAgentCommandError::process(format!(
-            "Failed to persist the Canvas MCP descriptor: {error}"
-        )));
-    }
+    file.write_all(&bytes).and_then(|_| file.as_file().sync_all())
+        .map_err(|error| ExternalAgentCommandError::process(format!("Failed to persist the Canvas MCP descriptor: {error}")))?;
+    file.persist(&path).map_err(|error| ExternalAgentCommandError::process(error.to_string()))?;
     Ok(path)
+}
+
+pub(crate) fn read_connection_descriptor(path: &Path) -> Result<ExternalAgentConnectionDescriptor, String> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|_| "请先打开 Open Storyboard Canvas".to_string())?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("Canvas MCP connection descriptor must be a regular file".to_string());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err("Canvas MCP connection descriptor permissions are too broad".to_string());
+        }
+    }
+    if metadata.len() > 8 * 1024 * 1024 {
+        return Err("Canvas MCP connection descriptor is too large".to_string());
+    }
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    let descriptor: ExternalAgentConnectionDescriptor = serde_json::from_slice(&bytes)
+        .map_err(|_| "Canvas MCP connection descriptor is malformed".to_string())?;
+    if descriptor.schema_version != CONNECTION_DESCRIPTOR_SCHEMA_VERSION {
+        return Err("Canvas MCP connection descriptor version is unsupported".to_string());
+    }
+    Ok(descriptor)
 }
 
 fn build_provider_configs(
@@ -217,12 +227,9 @@ pub(crate) fn connection_info(
             "Failed to resolve the bundled Canvas MCP executable: {error}"
         ))
     })?;
-    let now = now_millis();
     let connected_at = session.connected_at.load(Ordering::SeqCst);
     let last_activity_at = session.last_activity_at.load(Ordering::SeqCst);
-    let status = if now >= session.capability_expires_at {
-        "expired"
-    } else if connected_at > 0 {
+    let status = if connected_at > 0 {
         "connected"
     } else {
         "ready"
@@ -240,7 +247,7 @@ pub(crate) fn connection_info(
         scope,
         permission_mode: "manual",
         created_at: Some(session.created_at),
-        expires_at: Some(session.capability_expires_at),
+        expires_at: None,
         connected_at: (connected_at > 0).then_some(connected_at),
         last_activity_at: (last_activity_at > 0).then_some(last_activity_at),
         call_count: session.call_count.load(Ordering::SeqCst),
@@ -253,6 +260,34 @@ pub(crate) fn connection_info(
 pub async fn create_external_agent_connection(
     app: AppHandle,
     state: State<'_, ExternalAgentState>,
+    request: CreateExternalAgentConnectionRequest,
+) -> Result<ExternalAgentConnectionInfo, ExternalAgentCommandError> {
+    create_connection(app, &state, request).await
+}
+
+pub(crate) async fn restore_connection(
+    app: AppHandle,
+    state: &ExternalAgentState,
+) -> Result<(), ExternalAgentCommandError> {
+    let path = state.inner.connection_descriptor_root.lock()
+        .map_err(|_| ExternalAgentCommandError::process("Descriptor root lock is poisoned."))?
+        .join(CONNECTION_DESCRIPTOR_NAME);
+    if !path.try_exists().map_err(|error| ExternalAgentCommandError::process(error.to_string()))? {
+        return Ok(());
+    }
+    let descriptor = read_connection_descriptor(&path)
+        .map_err(ExternalAgentCommandError::process)?;
+    if let Some(request) = descriptor.connection {
+        create_connection(app, state, request).await?;
+    } else {
+        std::fs::remove_file(path).map_err(|error| ExternalAgentCommandError::process(error.to_string()))?;
+    }
+    Ok(())
+}
+
+async fn create_connection(
+    app: AppHandle,
+    state: &ExternalAgentState,
     request: CreateExternalAgentConnectionRequest,
 ) -> Result<ExternalAgentConnectionInfo, ExternalAgentCommandError> {
     if !state.inner.broker_started.load(Ordering::SeqCst) {
@@ -279,7 +314,8 @@ pub async fn create_external_agent_connection(
         ));
     }
 
-    if let Some(previous_id) = state.inner.managed_connection_id.read().await.clone() {
+    let previous_id = state.inner.managed_connection_id.read().await.clone();
+    if let Some(previous_id) = previous_id {
         terminate_session(&state.inner, &app, &previous_id, None).await;
     }
 
@@ -289,7 +325,6 @@ pub async fn create_external_agent_connection(
     let connection_id = Uuid::new_v4().to_string();
     let capability_token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let created_at = now_millis();
-    let expires_at = created_at.saturating_add(CAPABILITY_LIFETIME_MS);
     let descriptor_root = state
         .inner
         .connection_descriptor_root
@@ -301,10 +336,13 @@ pub async fn create_external_agent_connection(
         broker_address: address.to_string(),
         capability_token: capability_token.clone(),
         session_id: connection_id.clone(),
-        expires_at,
+        connection: Some(CreateExternalAgentConnectionRequest {
+            project_id: project_id.clone(),
+            project_name: project_name.clone(),
+            tools: tools.clone(),
+        }),
     };
-    let descriptor_path =
-        write_connection_descriptor(&descriptor_root, &connection_id, &descriptor)?;
+    let descriptor_path = write_connection_descriptor(&descriptor_root, &descriptor)?;
     let workspace = TempFileBuilder::new()
         .prefix("managed-mcp-")
         .tempdir_in(&descriptor_root)
@@ -331,7 +369,6 @@ pub async fn create_external_agent_connection(
         id: connection_id.clone(),
         runtime: ExternalAgentRuntime::Codex,
         capability_token,
-        capability_expires_at: expires_at,
         broker,
         target,
         workspace: std::sync::Mutex::new(Some(SessionWorkspace::Temporary(workspace))),
@@ -456,20 +493,22 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_file_is_private_and_exclusive() {
+    fn descriptor_file_is_private_and_replaced_at_stable_path() {
         let root = tempfile::tempdir().unwrap();
-        let descriptor = ExternalAgentConnectionDescriptor {
+        let mut descriptor = ExternalAgentConnectionDescriptor {
             schema_version: 1,
             broker_address: "127.0.0.1:1234".to_string(),
             capability_token: "secret-capability".to_string(),
             session_id: "session-a".to_string(),
-            expires_at: u64::MAX,
+            connection: None,
         };
-        let path = write_connection_descriptor(root.path(), "session-a", &descriptor).unwrap();
-        assert!(write_connection_descriptor(root.path(), "session-a", &descriptor).is_err());
+        let path = write_connection_descriptor(root.path(), &descriptor).unwrap();
+        descriptor.capability_token = "rotated-token".to_string();
+        assert_eq!(write_connection_descriptor(root.path(), &descriptor).unwrap(), path);
+        assert_eq!(path, root.path().join("osc.json"));
         let decoded: ExternalAgentConnectionDescriptor =
             serde_json::from_slice(&std::fs::read(path.clone()).unwrap()).unwrap();
-        assert_eq!(decoded.capability_token, "secret-capability");
+        assert_eq!(decoded.capability_token, "rotated-token");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

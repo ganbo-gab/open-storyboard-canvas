@@ -1,6 +1,7 @@
 mod claude;
 mod codex;
 pub(crate) mod connection;
+pub(crate) mod install;
 mod mcp;
 mod process;
 mod process_tree;
@@ -52,7 +53,6 @@ const STDERR_RETAIN_BYTES: usize = 8 * 1024;
 const MAX_ATTACHMENTS: usize = 8;
 const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 const MAX_ATTACHMENTS_TOTAL_BYTES: usize = 64 * 1024 * 1024;
-const CAPABILITY_LIFETIME_MS: u64 = 12 * 60 * 60 * 1_000;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -164,6 +164,17 @@ pub struct ExternalAgentToolDefinition {
     pub input_schema: Value,
     #[serde(default)]
     pub requires_approval: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ExternalAgentToolAnnotations>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAgentToolAnnotations {
+    pub read_only_hint: bool,
+    pub destructive_hint: bool,
+    pub idempotent_hint: bool,
+    pub open_world_hint: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -404,7 +415,6 @@ pub(crate) struct ExternalAgentSession {
     id: String,
     runtime: ExternalAgentRuntime,
     capability_token: String,
-    capability_expires_at: u64,
     broker: BrokerCredentials,
     target: LaunchTarget,
     workspace: StdMutex<Option<SessionWorkspace>>,
@@ -529,7 +539,7 @@ impl ExternalAgentState {
             .path()
             .app_data_dir()
             .map_err(|error| format!("failed to resolve Canvas MCP descriptor directory: {error}"))?
-            .join("external-agent-connections");
+            .join("mcp");
         std::fs::create_dir_all(&descriptor_root)
             .map_err(|error| format!("failed to prepare Canvas MCP descriptors: {error}"))?;
         *self
@@ -538,7 +548,9 @@ impl ExternalAgentState {
             .lock()
             .map_err(|_| "Canvas MCP descriptor root lock is poisoned".to_string())? =
             descriptor_root;
-        mcp::start_broker_listener(self.inner.clone(), app)
+        mcp::start_broker_listener(self.inner.clone(), app.clone())?;
+        tauri::async_runtime::block_on(connection::restore_connection(app, self))
+            .map_err(|error| error.message)
     }
 }
 
@@ -661,7 +673,6 @@ pub async fn start_external_agent_session(
         id: session_id.clone(),
         runtime: request.runtime,
         capability_token,
-        capability_expires_at: now_millis().saturating_add(CAPABILITY_LIFETIME_MS),
         broker,
         target,
         workspace: StdMutex::new(Some(workspace)),
@@ -970,7 +981,6 @@ mod tests {
             id: Uuid::new_v4().to_string(),
             runtime: ExternalAgentRuntime::Codex,
             capability_token: "token".to_string(),
-            capability_expires_at: u64::MAX,
             broker: BrokerCredentials {
                 address: "127.0.0.1:1".to_string(),
                 token: "token".to_string(),

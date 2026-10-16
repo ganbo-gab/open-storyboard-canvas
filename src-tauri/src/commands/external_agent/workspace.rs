@@ -305,7 +305,6 @@ mod tests {
             id: Uuid::new_v4().to_string(),
             runtime: ExternalAgentRuntime::Claude,
             capability_token: "token".to_string(),
-            capability_expires_at: u64::MAX,
             broker: BrokerCredentials {
                 address: "127.0.0.1:1".to_string(),
                 token: "token".to_string(),

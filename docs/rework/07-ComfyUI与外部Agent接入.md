@@ -66,3 +66,10 @@
 ### 2.3 验收
 - 新机器上：安装 Claude Code → 应用内点「接入」→ 在 CLI 中让它「在画布上建 3 个分镜节点」→ 应用内弹审批 → 节点出现；次日重启应用后无需重新接入。
 - 撤销接入后 CLI 配置恢复原样（与备份逐字节一致）。
+
+### 2.4 后端接入约定
+
+- CLI 配置只引用 `<app-data>/mcp/osc.json`，不包含能力令牌。该文件以私有权限原子覆盖，保存用于重启恢复的项目与工具清单；启动恢复和显式重连均生成新的会话 ID 与令牌。撤销连接删除描述文件；连接信息的 `expiresAt` 为 `null`，不再表示墙钟截止时间。
+- MCP stdio 在每次 broker 请求前重新读取描述文件；应用关闭或描述文件不存在时返回「请先打开 Open Storyboard Canvas」。broker 仍只监听 loopback，逐次验证会话与令牌，所有工具调用仍经过应用内审批。
+- `external_agent_install`、`external_agent_uninstall`、`external_agent_install_status`、`external_agent_install_preview` 的参数均为 `{ cli: 'codex' | 'claude' }`。预览不写文件；实际变更前生成相邻 `.osc-backup-<timestamp>` 备份。撤销只移除 `storyboard_canvas`，未发生后续配置修改时恢复原始字节；存在后续修改时保留其他配置。
+- 对外工具名称与注册的 CanvasCommand 类型一致，参数直接采用对应注册表的 `schema.input`。事件适配层将独立工具还原为内部 `canvas_command` 审批请求；`diagnostics`、`config_patch`、`asset_read` 保持独立。当前注册表未提供单独的 risk/surface 字段，annotations 保守按 effect 映射：read 为只读，graph/generation 标记 destructive，navigation 不标记 destructive。

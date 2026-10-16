@@ -13,6 +13,10 @@ import {
   createExternalAgentConnection,
   diagnoseExternalAgentRuntimes,
   inspectExternalAgentConnection,
+  inspectExternalAgentInstallStatus,
+  installExternalAgent,
+  uninstallExternalAgent,
+  previewExternalAgentInstall,
   listenExternalAgentEvents,
   replayExternalAgentPendingToolCalls,
   revokeExternalAgentConnection,
@@ -97,5 +101,35 @@ describe('external Agent Tauri commands', () => {
       connectionId: 'connection-1',
     });
     expect(tauri.invoke).toHaveBeenNthCalledWith(4, 'replay_external_agent_pending_tool_calls', undefined);
+  });
+
+  it.each(['codex', 'claude'] as const)('previews, installs, inspects and uninstalls %s with the exact cli argument', async (cli) => {
+    const status = { cli, path: '/home/user/config', descriptorPath: '/app-data/mcp/osc.json', installed: true, state: 'installed', message: null };
+    const preview = { status, changed: true, diff: '--- config\n+++ config\n@@ -0,0 +1 @@\n+storyboard_canvas\n' };
+    tauri.invoke.mockResolvedValueOnce(preview);
+    await expect(previewExternalAgentInstall(cli)).resolves.toEqual(preview);
+    const installed = { status, changed: true, backupPath: '/home/user/config.osc-backup-1', restoredOriginal: false };
+    tauri.invoke.mockResolvedValueOnce(installed);
+    await expect(installExternalAgent(cli)).resolves.toEqual(installed);
+    tauri.invoke.mockResolvedValueOnce(status);
+    await expect(inspectExternalAgentInstallStatus(cli)).resolves.toEqual(status);
+    const removed = { status: { ...status, installed: false, state: 'notInstalled' }, changed: true, backupPath: '/home/user/config.osc-backup-2', restoredOriginal: true };
+    tauri.invoke.mockResolvedValueOnce(removed);
+    await expect(uninstallExternalAgent(cli)).resolves.toEqual(removed);
+    expect(tauri.invoke.mock.calls).toEqual([
+      ['external_agent_install_preview', { cli }],
+      ['external_agent_install', { cli }],
+      ['external_agent_install_status', { cli }],
+      ['external_agent_uninstall', { cli }],
+    ]);
+  });
+
+  it('preserves structured installation failure categories and desktop-only behavior', async () => {
+    tauri.invoke.mockRejectedValue({ code: 'invalid_request', message: 'Conflicting entry', retryable: false });
+    await expect(installExternalAgent('codex')).rejects.toMatchObject({ code: 'invalid_request', message: 'Conflicting entry', retryable: false });
+    tauri.invoke.mockClear();
+    tauri.isTauri.mockReturnValue(false);
+    await expect(previewExternalAgentInstall('claude')).rejects.toMatchObject({ code: 'runtime_unavailable', retryable: false });
+    expect(tauri.invoke).not.toHaveBeenCalled();
   });
 });

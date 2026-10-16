@@ -10,6 +10,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+#[cfg(test)]
 use super::connection::ExternalAgentConnectionDescriptor;
 use super::protocol::{
     mcp_tool_result, read_bounded_jsonl_line, sanitize_json, MAX_TOOL_RESULT_BYTES,
@@ -111,11 +112,8 @@ fn capability_request_is_valid(
     expected_token: &str,
     requested_token: &str,
     cancelled: bool,
-    expires_at: u64,
-    now: u64,
 ) -> bool {
     !cancelled
-        && now < expires_at
         && constant_time_equal(expected_session_id, requested_session_id)
         && constant_time_equal(expected_token, requested_token)
 }
@@ -151,8 +149,6 @@ async fn authorized_session(
         &session.capability_token,
         token,
         session.cancelled.load(std::sync::atomic::Ordering::SeqCst),
-        session.capability_expires_at,
-        super::now_millis(),
     ) {
         return None;
     }
@@ -179,7 +175,7 @@ pub(crate) async fn handle_broker_connection(
         .and_then(Value::as_str)
         .unwrap_or_default();
     let Some(session) = authorized_session(&inner, session_id, token).await else {
-        let response = json!({"ok": false, "error": {"code": "invalid_capability", "message": "The Canvas capability is invalid or expired."}});
+        let response = json!({"ok": false, "error": {"code": "invalid_capability", "message": "The Canvas capability is invalid or revoked. Reconnect in Open Storyboard Canvas."}});
         reader
             .get_mut()
             .write_all(format!("{response}\n").as_bytes())
@@ -280,9 +276,10 @@ pub(crate) async fn handle_broker_connection(
 }
 
 async fn broker_request(
-    credentials: &ChildBrokerCredentials,
+    source: &ChildBrokerSource,
     action: Value,
 ) -> Result<Value, String> {
+    let credentials = source.resolve()?;
     let address: SocketAddr = credentials
         .address
         .parse()
@@ -292,7 +289,7 @@ async fn broker_request(
     }
     let mut stream = TcpStream::connect(address)
         .await
-        .map_err(|error| format!("broker connection failed: {error}"))?;
+        .map_err(|_| "请先打开 Open Storyboard Canvas".to_string())?;
     let mut request = action;
     request["token"] = Value::String(credentials.token.clone());
     request["sessionId"] = Value::String(credentials.session_id.clone());
@@ -328,6 +325,20 @@ struct ChildBrokerCredentials {
     session_id: String,
 }
 
+enum ChildBrokerSource {
+    Environment(ChildBrokerCredentials),
+    Descriptor(std::path::PathBuf),
+}
+
+impl ChildBrokerSource {
+    fn resolve(&self) -> Result<ChildBrokerCredentials, String> {
+        match self {
+            Self::Environment(credentials) => Ok(credentials.clone()),
+            Self::Descriptor(path) => ChildBrokerCredentials::from_descriptor(path),
+        }
+    }
+}
+
 impl ChildBrokerCredentials {
     fn from_env() -> Result<Self, String> {
         let value = |name: &str| {
@@ -344,33 +355,7 @@ impl ChildBrokerCredentials {
     }
 
     fn from_descriptor(path: &std::path::Path) -> Result<Self, String> {
-        let metadata = std::fs::symlink_metadata(path)
-            .map_err(|_| "Canvas MCP connection descriptor is unavailable".to_string())?;
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err("Canvas MCP connection descriptor must be a regular file".to_string());
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if metadata.permissions().mode() & 0o077 != 0 {
-                return Err(
-                    "Canvas MCP connection descriptor permissions are too broad".to_string()
-                );
-            }
-        }
-        if metadata.len() > 16 * 1024 {
-            return Err("Canvas MCP connection descriptor is too large".to_string());
-        }
-        let bytes = std::fs::read(path)
-            .map_err(|_| "Canvas MCP connection descriptor cannot be read".to_string())?;
-        let descriptor: ExternalAgentConnectionDescriptor = serde_json::from_slice(&bytes)
-            .map_err(|_| "Canvas MCP connection descriptor is malformed".to_string())?;
-        if descriptor.schema_version != 1 {
-            return Err("Canvas MCP connection descriptor version is unsupported".to_string());
-        }
-        if super::now_millis() >= descriptor.expires_at {
-            return Err("Canvas MCP connection descriptor has expired".to_string());
-        }
+        let descriptor = super::connection::read_connection_descriptor(path)?;
         let address: SocketAddr = descriptor
             .broker_address
             .parse()
@@ -394,7 +379,7 @@ fn jsonrpc_error(id: Value, code: i64, message: impl Into<String>) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message.into()}})
 }
 
-async fn run_mcp_stdio(credentials: ChildBrokerCredentials) -> Result<(), String> {
+async fn run_mcp_stdio(credentials: ChildBrokerSource) -> Result<(), String> {
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin);
     let mut stdout = tokio::io::stdout();
@@ -482,8 +467,8 @@ pub fn is_external_agent_mcp_mode() -> bool {
 
 pub fn run_external_agent_mcp_mode() -> Result<(), String> {
     let credentials = match env::args_os().nth(2) {
-        Some(path) => ChildBrokerCredentials::from_descriptor(std::path::Path::new(&path))?,
-        None => ChildBrokerCredentials::from_env()?,
+        Some(path) => ChildBrokerSource::Descriptor(std::path::PathBuf::from(path)),
+        None => ChildBrokerSource::Environment(ChildBrokerCredentials::from_env()?),
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -502,7 +487,6 @@ mod tests {
             id: "connection-a".to_string(),
             runtime: super::super::ExternalAgentRuntime::Codex,
             capability_token: "token".to_string(),
-            capability_expires_at: u64::MAX,
             broker: super::super::BrokerCredentials {
                 address: "127.0.0.1:1234".to_string(),
                 token: "token".to_string(),
@@ -546,10 +530,10 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_credentials_reject_broad_permissions_and_expiry() {
+    fn descriptor_credentials_reject_broad_permissions_but_have_no_time_expiry() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("connection.json");
-        let write = |expires_at| {
+        let write = || {
             std::fs::write(
                 &path,
                 serde_json::to_vec(&ExternalAgentConnectionDescriptor {
@@ -557,13 +541,13 @@ mod tests {
                     broker_address: "127.0.0.1:1234".to_string(),
                     capability_token: "secret".to_string(),
                     session_id: "session-a".to_string(),
-                    expires_at,
+                    connection: None,
                 })
                 .unwrap(),
             )
             .unwrap();
         };
-        write(super::super::now_millis().saturating_add(60_000));
+        write();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -577,8 +561,75 @@ mod tests {
                 .session_id,
             "session-a"
         );
-        write(super::super::now_millis().saturating_sub(1));
-        assert!(ChildBrokerCredentials::from_descriptor(&path).is_err());
+        write();
+        assert!(ChildBrokerCredentials::from_descriptor(&path).is_ok());
+    }
+
+    #[tokio::test]
+    async fn descriptor_source_reloads_address_session_and_token_on_each_connect() {
+        let root = tempfile::tempdir().unwrap();
+        let source = ChildBrokerSource::Descriptor(root.path().join("osc.json"));
+        for generation in ["first", "restarted"] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let descriptor = ExternalAgentConnectionDescriptor {
+                schema_version: 1,
+                broker_address: listener.local_addr().unwrap().to_string(),
+                capability_token: format!("token-{generation}"),
+                session_id: format!("session-{generation}"),
+                connection: None,
+            };
+            super::super::connection::write_connection_descriptor(root.path(), &descriptor).unwrap();
+            let expected_token = descriptor.capability_token;
+            let expected_session = descriptor.session_id;
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut reader = BufReader::new(stream);
+                let line = read_bounded_jsonl_line(&mut reader).await.unwrap().unwrap();
+                let request: Value = serde_json::from_slice(&line).unwrap();
+                assert_eq!(request["token"], expected_token);
+                assert_eq!(request["sessionId"], expected_session);
+                assert_eq!(request["action"], "listTools");
+                reader.get_mut().write_all(b"{\"ok\":true,\"result\":{\"tools\":[]}}\n").await.unwrap();
+            });
+            assert_eq!(broker_request(&source, json!({"action": "listTools"})).await.unwrap(), json!({"tools": []}));
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn stopped_app_and_missing_descriptor_report_actionable_error() {
+        let root = tempfile::tempdir().unwrap();
+        let source = ChildBrokerSource::Descriptor(root.path().join("osc.json"));
+        assert_eq!(broker_request(&source, json!({"action": "callTool"})).await.unwrap_err(), "请先打开 Open Storyboard Canvas");
+        let listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        super::super::connection::write_connection_descriptor(root.path(), &ExternalAgentConnectionDescriptor {
+            schema_version: 1,
+            broker_address: address.to_string(),
+            capability_token: "stale-process-token".to_string(),
+            session_id: "stale-process-session".to_string(),
+            connection: None,
+        }).unwrap();
+        assert_eq!(broker_request(&source, json!({"action": "callTool"})).await.unwrap_err(), "请先打开 Open Storyboard Canvas");
+    }
+
+    #[test]
+    fn descriptor_rejects_non_loopback_addresses_and_accepts_legacy_expiry() {
+        let root = tempfile::tempdir().unwrap();
+        let path = super::super::connection::write_connection_descriptor(root.path(), &ExternalAgentConnectionDescriptor {
+            schema_version: 1,
+            broker_address: "203.0.113.1:1234".to_string(),
+            capability_token: "token".to_string(),
+            session_id: "session".to_string(),
+            connection: None,
+        }).unwrap();
+        assert!(ChildBrokerCredentials::from_descriptor(&path).err().unwrap().contains("not loopback"));
+        std::fs::write(&path, serde_json::to_vec(&json!({
+            "schemaVersion": 1, "brokerAddress": "127.0.0.1:1234", "capabilityToken": "token",
+            "sessionId": "session", "expiresAt": 1,
+        })).unwrap()).unwrap();
+        assert!(ChildBrokerCredentials::from_descriptor(&path).is_ok());
     }
 
     #[test]
@@ -593,6 +644,7 @@ mod tests {
                 description: "Canvas only".to_string(),
                 input_schema: json!({"type": "object"}),
                 requires_approval: false,
+                annotations: None,
             },
             json!({"type": "canvas.query", "input": {}}),
         );
@@ -603,15 +655,13 @@ mod tests {
     }
 
     #[test]
-    fn capability_requires_exact_session_token_and_unexpired_active_state() {
+    fn capability_requires_exact_session_token_and_active_state() {
         assert!(capability_request_is_valid(
             "session-a",
             "session-a",
             "token-a",
             "token-a",
             false,
-            101,
-            100,
         ));
         assert!(!capability_request_is_valid(
             "session-a",
@@ -619,8 +669,6 @@ mod tests {
             "token-a",
             "token-a",
             false,
-            101,
-            100,
         ));
         assert!(!capability_request_is_valid(
             "session-a",
@@ -628,17 +676,6 @@ mod tests {
             "token-a",
             "token-b",
             false,
-            101,
-            100,
-        ));
-        assert!(!capability_request_is_valid(
-            "session-a",
-            "session-a",
-            "token-a",
-            "token-a",
-            false,
-            100,
-            100,
         ));
         assert!(!capability_request_is_valid(
             "session-a",
@@ -646,8 +683,6 @@ mod tests {
             "token-a",
             "token-a",
             true,
-            101,
-            100,
         ));
     }
 
