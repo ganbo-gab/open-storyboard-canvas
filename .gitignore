@@ -22,9 +22,9 @@ dist-ssr
 *.sln
 *.sw?
 
-ComfyUI/
-ComfyUI_frontend/
-Henji-AI/
+/ComfyUI/
+/ComfyUI_frontend/
+/Henji-AI/
 
 # Local agent/tool state
 .agents/
