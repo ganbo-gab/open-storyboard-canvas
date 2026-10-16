@@ -3,11 +3,14 @@ import {
   type ExternalAgentEventV1 as RawExternalAgentEventV1,
   type ExternalAgentRuntimeDiagnostic as RawRuntimeDiagnostic,
 } from '@/commands/externalAgent';
+import { CANVAS_REGISTERED_COMMAND_TYPES } from '@/features/canvas/application/canvasCommandRegistry';
+import { CANVAS_COMMAND_VERSION } from '@/features/canvas/domain/canvasCommands';
 import { redactSensitiveValue } from './agentRedaction';
 import {
   EXTERNAL_AGENT_EVENT_VERSION,
   type ExternalAgentEventV1,
   type ExternalAgentRuntimeDiagnostic,
+  type ExternalAgentToolRequest,
 } from '../domain/agentModel';
 
 export function projectExternalAgentRuntimeDiagnostic(
@@ -87,8 +90,15 @@ export function normalizeExternalAgentEvent(
       return { version: 1, kind: 'diagnostic', runtime, sessionId, turnId, message: message || undefined, data };
     case 'toolRequested': {
       if (!turnId || !raw.toolCall) throw new Error('External Agent toolRequested event is incomplete.');
-      if (!['canvas_command', 'diagnostics', 'config_patch', 'asset_read'].includes(raw.toolCall.name)) {
-        throw new Error(`External Agent requested unknown tool ${raw.toolCall.name}.`);
+      const toolCall = raw.toolCall;
+      const commandType = CANVAS_REGISTERED_COMMAND_TYPES.find((type) => type === toolCall.name);
+      let toolName: ExternalAgentToolRequest['toolName'];
+      if (commandType) {
+        toolName = 'canvas_command';
+      } else if (toolCall.name === 'diagnostics' || toolCall.name === 'config_patch' || toolCall.name === 'asset_read') {
+        toolName = toolCall.name;
+      } else {
+        throw new Error(`External Agent requested unknown tool ${toolCall.name}.`);
       }
       return {
         version: 1,
@@ -101,9 +111,11 @@ export function normalizeExternalAgentEvent(
           runtime,
           sessionId,
           turnId,
-          callId: raw.toolCall.callId,
-          toolName: raw.toolCall.name as 'canvas_command' | 'diagnostics' | 'config_patch' | 'asset_read',
-          arguments: redactSensitiveValue(raw.toolCall.input),
+          callId: toolCall.callId,
+          toolName,
+          arguments: redactSensitiveValue(commandType
+            ? { type: commandType, version: CANVAS_COMMAND_VERSION, input: toolCall.input }
+            : toolCall.input),
         },
       };
     }

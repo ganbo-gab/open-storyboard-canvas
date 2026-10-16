@@ -16,11 +16,19 @@ export interface ExternalAgentRuntimeDiagnostic {
   message: string | null;
 }
 
+export interface ExternalAgentToolAnnotations {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+}
+
 export interface ExternalAgentToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
   requiresApproval: boolean;
+  annotations?: ExternalAgentToolAnnotations;
 }
 
 export interface ExternalAgentStartRequest {

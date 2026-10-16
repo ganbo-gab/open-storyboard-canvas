@@ -1,21 +1,17 @@
 import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
-import { CANVAS_COMMAND_VERSION } from '@/features/canvas/domain/canvasCommands';
+import type { CanvasCommandType } from '@/features/canvas/domain/canvasCommands';
+import type { ExternalAgentToolAnnotations } from '@/commands/externalAgent';
 import type { AgentToolKind } from './agentSkills';
 
 export const EXTERNAL_CANVAS_MCP_NAMESPACE = 'storyboard_canvas' as const;
 export const EXTERNAL_CANVAS_MCP_VERSION = 1 as const;
 
 export interface ExternalCanvasMcpTool {
-  name: 'canvas_command' | 'diagnostics' | 'config_patch' | 'asset_read';
+  name: CanvasCommandType | 'diagnostics' | 'config_patch' | 'asset_read';
   title: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  annotations: {
-    readOnlyHint: boolean;
-    destructiveHint: boolean;
-    idempotentHint: boolean;
-    openWorldHint: boolean;
-  };
+  annotations: ExternalAgentToolAnnotations;
 }
 
 export interface ExternalCanvasMcpManifestV1 {
@@ -89,31 +85,24 @@ const assetReadSchema = {
   properties: { assetId: { type: 'string', minLength: 1 } },
 };
 
-function canvasCommandTool(): ExternalCanvasMcpTool {
-  return {
-    name: 'canvas_command',
-    title: 'Canvas command',
-    description: 'Inspect or change the canvas through the application-owned, versioned command registry. Every call requires application approval.',
-    inputSchema: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['type', 'input'],
-      properties: {
-        type: {
-          type: 'string',
-          enum: canvasCommandRegistry.list().map((definition) => definition.type),
-        },
-        version: { type: 'number', const: CANVAS_COMMAND_VERSION },
-        input: { type: 'object', additionalProperties: true },
+function canvasCommandTools(): ExternalCanvasMcpTool[] {
+  return canvasCommandRegistry.list().map((definition) => {
+    const readOnly = definition.effect === 'read';
+    return {
+      name: definition.type,
+      title: definition.type,
+      description: `Execute the registered ${definition.type} canvas command (${definition.effect}). Every call requires application approval.`,
+      inputSchema: { ...definition.schema.input },
+      annotations: {
+        readOnlyHint: readOnly,
+        // Graph edits can replace or remove existing data, and generation can
+        // incur external side effects. Neither is safe to advertise otherwise.
+        destructiveHint: definition.effect === 'graph' || definition.effect === 'generation',
+        idempotentHint: readOnly,
+        openWorldHint: false,
       },
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: false,
-      openWorldHint: false,
-    },
-  };
+    };
+  });
 }
 
 const toolsByKind: Record<Exclude<AgentToolKind, 'canvas'>, ExternalCanvasMcpTool> = {
@@ -143,7 +132,7 @@ const toolsByKind: Record<Exclude<AgentToolKind, 'canvas'>, ExternalCanvasMcpToo
 export function buildExternalCanvasMcpManifest(toolKinds: readonly AgentToolKind[]): ExternalCanvasMcpManifestV1 {
   const kinds = new Set(toolKinds);
   const tools = [
-    ...(kinds.has('canvas') ? [canvasCommandTool()] : []),
+    ...(kinds.has('canvas') ? canvasCommandTools() : []),
     ...(['diagnostics', 'config', 'asset-read'] as const).flatMap((kind) => (
       kinds.has(kind) ? [toolsByKind[kind]] : []
     )),

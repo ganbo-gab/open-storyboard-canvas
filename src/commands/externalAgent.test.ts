@@ -17,6 +17,8 @@ import {
   replayExternalAgentPendingToolCalls,
   revokeExternalAgentConnection,
   startExternalAgentSession,
+  type ExternalAgentStartRequest,
+  type CreateExternalAgentConnectionRequest,
 } from './externalAgent';
 
 describe('external Agent Tauri commands', () => {
@@ -34,17 +36,30 @@ describe('external Agent Tauri commands', () => {
 
   it('forwards an allowlisted tool manifest as a structured start request', async () => {
     tauri.invoke.mockResolvedValue({ sessionId: 'session-1', runtime: 'codex' });
-    const request = {
+    const request: ExternalAgentStartRequest = {
       runtime: 'codex' as const,
       tools: [{
-        name: 'canvas_command',
-        description: 'Canvas only',
-        inputSchema: { type: 'object' },
+        name: 'node.create',
+        description: 'Create a canvas node',
+        inputSchema: { type: 'object', required: ['nodeType', 'position'], additionalProperties: false },
         requiresApproval: true,
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
       }],
     };
     await startExternalAgentSession(request);
     expect(tauri.invoke).toHaveBeenCalledWith('start_external_agent_session', { request });
+  });
+
+  it('allows metadata without annotations without changing the approval requirement', async () => {
+    tauri.invoke.mockResolvedValue({ sessionId: 'session-1', runtime: 'claude' });
+    const request: ExternalAgentStartRequest = {
+      runtime: 'claude',
+      tools: [{ name: 'diagnostics', description: 'Inspect diagnostics', inputSchema: { type: 'object' }, requiresApproval: true }],
+    };
+    await startExternalAgentSession(request);
+    expect(tauri.invoke).toHaveBeenCalledWith('start_external_agent_session', { request });
+    expect(request.tools[0]).not.toHaveProperty('annotations');
+    expect(request.tools[0].requiresApproval).toBe(true);
   });
 
   it('reports unknown event versions instead of silently accepting them', async () => {
@@ -61,14 +76,15 @@ describe('external Agent Tauri commands', () => {
 
   it('creates, inspects, and revokes a user-managed MCP connection without a runtime id', async () => {
     tauri.invoke.mockResolvedValue({ schemaVersion: 1, status: 'ready' });
-    const request = {
+    const request: CreateExternalAgentConnectionRequest = {
       projectId: 'project-1',
       projectName: 'Opening sequence',
       tools: [{
-        name: 'canvas_command',
-        description: 'Canvas only',
-        inputSchema: { type: 'object' },
+        name: 'canvas.query',
+        description: 'Inspect the canvas',
+        inputSchema: { type: 'object', required: ['scope'], additionalProperties: false },
         requiresApproval: true,
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       }],
     };
     await createExternalAgentConnection(request);
