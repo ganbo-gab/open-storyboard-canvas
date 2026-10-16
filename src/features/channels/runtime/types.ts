@@ -15,6 +15,11 @@ export interface JobRef {
   height?: number;
 }
 
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: JsonValue;
+}
+
 export interface JobInput {
   jobId: string;
   channelId: string;
@@ -22,6 +27,8 @@ export interface JobInput {
   operation: OperationKind;
   /** Prompt already compiled for the model's mention dialect. */
   prompt: string;
+  /** Chat operation only; when absent, renderers derive [{ role: 'user', content: prompt }]. */
+  messages?: ChatMessage[];
   params: Record<string, JsonValue>;
   refs: JobRef[];
   count: number;
@@ -31,10 +38,9 @@ export type OutputSource =
   | { type: 'url'; url: string; headers?: Record<string, string> }
   | { type: 'base64'; data: string; mime: string };
 
-export interface Output {
-  kind: MediaKind;
-  source: OutputSource;
-}
+export type Output =
+  | { kind: MediaKind; source: OutputSource }
+  | { kind: 'text'; text: string };
 
 export type ChannelErrorCategory =
   | 'auth'
@@ -82,4 +88,6 @@ export interface ChannelAdapter {
   poll?(job: JobInput, taskId: string, signal?: AbortSignal): Promise<PollResult>;
   cancel?(job: JobInput, taskId: string): Promise<boolean>;
   preview?(job: JobInput): RequestPreview;
+  /** models.list operation. */
+  listModels?(signal?: AbortSignal): Promise<{ ok: true; models: string[] } | { ok: false; error: ChannelError }>;
 }
