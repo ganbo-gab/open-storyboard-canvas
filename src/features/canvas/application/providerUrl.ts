@@ -1,9 +1,6 @@
-const FULL_WIDTH_COLON = /：/g;
+import { sanitizeProviderUrlInput } from '@/features/channels/adapters/comfyui/url';
 const HTTP_SCHEME_PATTERN = /^https?:\/\//i;
 
-function sanitizeProviderUrlInput(value: string): string {
-  return value.trim().replace(FULL_WIDTH_COLON, ':').replace(/\s+/g, '');
-}
 
 function repairMalformedProviderScheme(value: string): string {
   let repaired = value;
