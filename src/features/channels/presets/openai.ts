@@ -16,6 +16,8 @@ export const openAIStandardProfile: ChannelProfileV2 = {
       template: {
         model: '{{model}}',
         messages: '{{messages}}',
+        tools: '{{tools}}',
+        tool_choice: '{{toolChoice}}',
         temperature: '{{param.temperature}}',
         max_tokens: '{{param.max_tokens}}',
       },

@@ -18,6 +18,10 @@ export interface JobRef {
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: JsonValue;
+  /** Standard OpenAI chat tool protocol; preserved verbatim through messages templates. */
+  tool_calls?: JsonValue[];
+  tool_call_id?: string;
+  name?: string;
 }
 
 export interface JobInput {
@@ -29,6 +33,9 @@ export interface JobInput {
   prompt: string;
   /** Chat operation only; when absent, renderers derive [{ role: 'user', content: prompt }]. */
   messages?: ChatMessage[];
+  /** Chat-only JSON tool declarations; sent only if explicitly referenced by the template. */
+  tools?: JsonValue;
+  toolChoice?: JsonValue;
   params: Record<string, JsonValue>;
   refs: JobRef[];
   count: number;

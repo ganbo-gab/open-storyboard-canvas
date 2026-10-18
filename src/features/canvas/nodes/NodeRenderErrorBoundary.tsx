@@ -1,5 +1,6 @@
 import { Component, type ComponentType, type ErrorInfo, type ReactNode } from 'react';
 import type { NodeProps } from '@xyflow/react';
+import { NodeLevelOfDetail } from './NodeLevelOfDetail';
 
 interface NodeRenderErrorBoundaryProps {
   nodeId: string;
@@ -59,7 +60,7 @@ export function withNodeRenderErrorBoundary<TProps extends { id: string | number
   function SafeNode(props: TProps) {
     return (
       <NodeRenderErrorBoundary nodeId={String(props.id)}>
-        <NodeComponent {...props} />
+        <NodeLevelOfDetail nodeId={String(props.id)}><NodeComponent {...props} /></NodeLevelOfDetail>
       </NodeRenderErrorBoundary>
     );
   }

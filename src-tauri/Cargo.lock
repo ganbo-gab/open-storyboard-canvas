@@ -3275,7 +3275,7 @@ dependencies = [
 
 [[package]]
 name = "open-storyboard-canvas"
-version = "0.1.27"
+version = "0.2.0-next.1"
 dependencies = [
  "ab_glyph",
  "arboard",

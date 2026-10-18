@@ -18,6 +18,7 @@ export interface ProjectRecord extends ProjectSummaryRecord {
 export interface WebProjectStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  removeItem?(key: string): void;
 }
 
 export type WebProjectStorageFallbackReason =
@@ -42,15 +43,13 @@ export interface WebProjectStateAdapter {
   getStorageStatus: () => WebProjectStorageStatus;
 }
 
-interface PersistedWebProjectStateV1 {
-  version: 1;
-  projects: ProjectRecord[];
-}
 
 interface CreateWebProjectStateAdapterOptions {
   storage?: WebProjectStorage | null | (() => WebProjectStorage | null);
   storageKey?: string;
   onStatusChange?: (status: WebProjectStorageStatus) => void;
+  indexedDB?: IDBFactory | null;
+  databaseName?: string;
 }
 
 export const WEB_PROJECT_STATE_STORAGE_KEY = 'storyboard-copilot:web-project-state';
@@ -145,133 +144,135 @@ export function createWebProjectStateAdapter(
   options: CreateWebProjectStateAdapterOptions = {}
 ): WebProjectStateAdapter {
   const storageKey = options.storageKey ?? WEB_PROJECT_STATE_STORAGE_KEY;
-  const configuredStorage = options.storage;
-  const resolveStorage: () => WebProjectStorage | null = typeof configuredStorage === 'function'
-    ? configuredStorage
-    : configuredStorage === undefined
-      ? resolveDefaultStorage
-      : () => configuredStorage;
   const records = new Map<string, ProjectRecord>();
-  let isLoaded = false;
-  let activeStorage: WebProjectStorage | null = null;
+  let database: IDBDatabase | undefined;
+  let loaded: Promise<void> | undefined;
+  let mutations = Promise.resolve();
   let storageStatus: WebProjectStorageStatus = { mode: 'pending' };
-
   const fallBackToMemory = (reason: WebProjectStorageFallbackReason): void => {
-    if (storageStatus.mode === 'memory') {
-      return;
-    }
-    activeStorage = null;
+    if (storageStatus.mode === 'memory') return;
     storageStatus = { mode: 'memory', reason };
     options.onStatusChange?.(storageStatus);
   };
-
-  const ensureLoaded = (): void => {
-    if (isLoaded) {
-      return;
-    }
-    isLoaded = true;
-
+  const writeRecord = async (id: string, record?: ProjectRecord): Promise<void> => {
+    if (!database || storageStatus.mode !== 'persistent') return;
     try {
-      activeStorage = resolveStorage();
-    } catch {
-      fallBackToMemory('unavailable');
-      return;
-    }
-
-    if (!activeStorage) {
-      fallBackToMemory('unavailable');
-      return;
-    }
-
-    let raw: string | null;
-    try {
-      raw = activeStorage.getItem(storageKey);
-    } catch {
-      fallBackToMemory('read-failed');
-      return;
-    }
-
-    if (raw === null) {
-      storageStatus = { mode: 'persistent' };
-      return;
-    }
-
-    const parsed = parsePersistedState(raw);
-    if (!parsed.ok) {
-      fallBackToMemory(parsed.reason);
-      return;
-    }
-
-    for (const record of parsed.records) {
-      records.set(record.id, record);
-    }
-    storageStatus = { mode: 'persistent' };
+      await new Promise<void>((resolve, reject) => {
+        const tx = database!.transaction('projects', 'readwrite');
+        if (record) tx.objectStore('projects').put(record, id);
+        else tx.objectStore('projects').delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onabort = tx.onerror = () => reject(tx.error ?? new Error('Project transaction failed'));
+      });
+    } catch { fallBackToMemory('write-failed'); }
   };
-
-  const persistRecords = (): void => {
-    if (storageStatus.mode !== 'persistent' || !activeStorage) {
-      return;
-    }
-
-    const payload: PersistedWebProjectStateV1 = {
-      version: WEB_PROJECT_STATE_VERSION,
-      projects: Array.from(records.values(), cloneProjectRecord),
-    };
-    try {
-      activeStorage.setItem(storageKey, JSON.stringify(payload));
-    } catch {
-      fallBackToMemory('write-failed');
-    }
+  const ensureLoaded = (): Promise<void> => {
+    if (!loaded) loaded = (async () => {
+      let factory: IDBFactory | null | undefined;
+      try { factory = options.indexedDB === undefined ? globalThis.indexedDB : options.indexedDB; }
+      catch { fallBackToMemory('unavailable'); return; }
+      if (!factory) { fallBackToMemory('unavailable'); return; }
+      try {
+        database = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = factory!.open(options.databaseName ?? 'storyboard-copilot:web-projects', 1);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects');
+            if (!db.objectStoreNames.contains('metadata')) db.createObjectStore('metadata');
+          };
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+          request.onblocked = () => reject(new Error('Project database blocked'));
+        });
+        database.onversionchange = () => { database?.close(); fallBackToMemory('unavailable'); };
+        const snapshot = await new Promise<{ projects: unknown[]; migrated: boolean }>((resolve, reject) => {
+          const tx = database!.transaction(['projects', 'metadata'], 'readonly');
+          const projects = tx.objectStore('projects').getAll();
+          const migrated = tx.objectStore('metadata').get(storageKey);
+          tx.oncomplete = () => resolve({ projects: projects.result, migrated: migrated.result === true });
+          tx.onabort = tx.onerror = () => reject(tx.error ?? new Error('Project database read failed'));
+        });
+        if (!snapshot.projects.every(isProjectRecord)) { fallBackToMemory('invalid-data'); return; }
+        for (const record of snapshot.projects) records.set(record.id, cloneProjectRecord(record));
+        if (!snapshot.migrated) {
+          let raw: string | null = null;
+          try {
+            const configured = options.storage;
+            const storage = typeof configured === 'function' ? configured() : configured === undefined ? resolveDefaultStorage() : configured;
+            raw = storage?.getItem(storageKey) ?? null;
+          } catch {
+            // Existing IndexedDB records stay usable; never mark unreadable legacy data as migrated.
+            if (!snapshot.projects.length) { fallBackToMemory('read-failed'); return; }
+          }
+          const parsed = raw === null ? { ok: true as const, records: [] } : parsePersistedState(raw);
+          if (!parsed.ok) { fallBackToMemory(parsed.reason); return; }
+          for (const record of parsed.records) if (!records.has(record.id)) records.set(record.id, cloneProjectRecord(record));
+          await new Promise<void>((resolve, reject) => {
+            const tx = database!.transaction(['projects', 'metadata'], 'readwrite');
+            const store = tx.objectStore('projects');
+            for (const record of parsed.records) if (!snapshot.projects.some((existing) => (existing as ProjectRecord).id === record.id)) store.put(record, record.id);
+            tx.objectStore('metadata').put(true, storageKey);
+            tx.oncomplete = () => resolve();
+            tx.onabort = tx.onerror = () => reject(tx.error ?? new Error('Project migration write failed'));
+          });
+        }
+        // Preserve the exact legacy envelope in durable storage before releasing the
+        // shared ~5 MiB localStorage quota used by settings and Agent accounting.
+        // Also clean up envelopes retained by earlier IndexedDB migrations.
+        try {
+          const configured = options.storage;
+          const storage = typeof configured === 'function' ? configured() : configured === undefined ? resolveDefaultStorage() : configured;
+          const raw = storage?.getItem(storageKey);
+          if (raw && storage?.removeItem && parsePersistedState(raw).ok) {
+            await new Promise<void>((resolve, reject) => {
+              const tx = database!.transaction('metadata', 'readwrite');
+              tx.objectStore('metadata').put(raw, `legacy-backup:${storageKey}`);
+              tx.oncomplete = () => resolve();
+              tx.onabort = tx.onerror = () => reject(tx.error ?? new Error('Legacy backup failed'));
+            });
+            if (storage.getItem(storageKey) === raw) storage.removeItem(storageKey);
+          }
+        } catch {
+          // Migration is committed; cleanup failure must never discard its result.
+          // The original localStorage envelope remains available for a later load.
+        }
+        storageStatus = { mode: 'persistent' };
+      } catch { fallBackToMemory(database ? 'write-failed' : 'unavailable'); }
+    })();
+    return loaded;
   };
-
+  const mutate = (operation: () => Promise<void>): Promise<void> => {
+    const pending = mutations.then(async () => { await ensureLoaded(); await operation(); });
+    mutations = pending.catch(() => undefined);
+    return pending;
+  };
   return {
-    listProjectSummaries: async () => {
-      ensureLoaded();
-      return Array.from(records.values(), toProjectSummary)
-        .sort((left, right) => right.updatedAt - left.updatedAt);
+    async listProjectSummaries() {
+      await ensureLoaded(); await mutations;
+      return Array.from(records.values(), toProjectSummary).sort((left, right) => right.updatedAt - left.updatedAt);
     },
-    getProjectRecord: async (projectId) => {
-      ensureLoaded();
-      const record = records.get(projectId);
+    async getProjectRecord(id) {
+      await ensureLoaded(); await mutations;
+      const record = records.get(id);
       return record ? cloneProjectRecord(record) : null;
     },
-    upsertProjectRecord: async (record) => {
-      ensureLoaded();
-      records.set(record.id, cloneProjectRecord(record));
-      persistRecords();
-    },
-    updateProjectViewportRecord: async (projectId, viewportJson) => {
-      ensureLoaded();
-      const record = records.get(projectId);
-      if (!record) {
-        return;
-      }
-      records.set(projectId, {
-        ...record,
-        viewportJson,
-      });
-      persistRecords();
-    },
-    renameProjectRecord: async (projectId, name, updatedAt) => {
-      ensureLoaded();
-      const record = records.get(projectId);
-      if (!record) {
-        return;
-      }
-      records.set(projectId, {
-        ...record,
-        name,
-        updatedAt,
-      });
-      persistRecords();
-    },
-    deleteProjectRecord: async (projectId) => {
-      ensureLoaded();
-      if (!records.delete(projectId)) {
-        return;
-      }
-      persistRecords();
-    },
+    upsertProjectRecord: (record) => mutate(async () => {
+      const copy = cloneProjectRecord(record);
+      records.set(copy.id, copy);
+      await writeRecord(copy.id, copy);
+    }),
+    updateProjectViewportRecord: (id, viewportJson) => mutate(async () => {
+      const record = records.get(id); if (!record) return;
+      const next = { ...record, viewportJson }; records.set(id, next); await writeRecord(id, next);
+    }),
+    renameProjectRecord: (id, name, updatedAt) => mutate(async () => {
+      const record = records.get(id); if (!record) return;
+      const next = { ...record, name, updatedAt }; records.set(id, next); await writeRecord(id, next);
+    }),
+    deleteProjectRecord: (id) => mutate(async () => {
+      if (!records.delete(id)) return;
+      await writeRecord(id);
+    }),
     getStorageStatus: () => storageStatus,
   };
 }

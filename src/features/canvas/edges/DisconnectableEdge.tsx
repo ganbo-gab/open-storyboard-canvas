@@ -1,10 +1,13 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useRef, useState, useEffect } from 'react';
+import { Scissors } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
   Position,
   type EdgeProps,
+  useReactFlow,
 } from '@xyflow/react';
 
 import { CANVAS_NODE_TYPES } from '@/features/canvas/domain/canvasNodes';
@@ -33,6 +36,11 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
     style,
   } = props;
   const deleteEdge = useCanvasStore((state) => state.deleteEdge);
+  const { t } = useTranslation();
+  const { screenToFlowPosition } = useReactFlow();
+  const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
+  const leaveTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
   const canvasEdgeRoutingMode = useSettingsStore((state) => state.canvasEdgeRoutingMode);
   const geometryIndex = useCanvasStore((state) => (
     canvasEdgeRoutingMode === 'smartOrthogonal'
@@ -135,29 +143,43 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
           ...style,
         }}
       />
-      {selected && (
+      <path
+        d={edgePath}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={24}
+        className="canvas-edge-hit"
+        style={{ pointerEvents: 'stroke' }}
+        onPointerMove={(event) => {
+          window.clearTimeout(leaveTimer.current);
+          const pointer = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+          const path = event.currentTarget;
+          const length = path.getTotalLength();
+          let closest = { x: labelX, y: labelY };
+          let distance = Infinity;
+          for (let index = 0; index <= 32; index++) {
+            const point = path.getPointAtLength(length * index / 32);
+            const nextDistance = (point.x - pointer.x) ** 2 + (point.y - pointer.y) ** 2;
+            if (nextDistance < distance) { closest = { x: point.x, y: point.y }; distance = nextDistance; }
+          }
+          setHoverPoint(closest);
+        }}
+        onPointerLeave={() => { leaveTimer.current = window.setTimeout(() => setHoverPoint(null), 180); }}
+      />
+      {(selected || hoverPoint) && (
         <EdgeLabelRenderer>
           <button
             type="button"
-            className="nodrag nopan absolute flex h-6 w-6 items-center justify-center text-text-muted transition-colors hover:text-text-dark"
-            style={{
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-              pointerEvents: 'all',
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-              deleteEdge(id);
-            }}
-            aria-label="断开连线"
+            className="nodrag nopan canvas-edge-disconnect absolute flex h-8 w-8 items-center justify-center rounded-full border border-border-dark bg-surface-dark text-text-muted shadow-lg transition-colors hover:border-red-400/50 hover:text-red-400 focus-visible:outline-2 focus-visible:outline-accent"
+            style={{ transform: `translate(-50%, -50%) translate(${hoverPoint?.x ?? labelX}px, ${hoverPoint?.y ?? labelY}px)`, pointerEvents: 'all' }}
+            onPointerEnter={() => window.clearTimeout(leaveTimer.current)}
+            onPointerLeave={() => setHoverPoint(null)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); deleteEdge(id); }}
+            title={t('rework.canvas.disconnect')}
+            aria-label={t('rework.canvas.disconnect')}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24">
-              <path
-                fill="currentColor"
-                fillRule="evenodd"
-                d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10s-4.477 10-10 10S2 17.523 2 12m7.707-3.707a1 1 0 0 0-1.414 1.414L10.586 12l-2.293 2.293a1 1 0 1 0 1.414 1.414L12 13.414l2.293 2.293a1 1 0 0 0 1.414-1.414L13.414 12l2.293-2.293a1 1 0 0 0-1.414-1.414L12 10.586z"
-                clipRule="evenodd"
-              />
-            </svg>
+            <Scissors className="h-4 w-4" />
           </button>
         </EdgeLabelRenderer>
       )}

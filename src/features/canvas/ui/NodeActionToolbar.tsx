@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { NodeToolbar as ReactFlowNodeToolbar } from '@xyflow/react';
+import { SafeNodeToolbar as ReactFlowNodeToolbar } from './SafeNodeToolbar';
 import { AlertCircle, Camera, Check, ChevronDown, Copy, Download, FolderOpen, Grid3x3, Maximize2, PenLine, RotateCcw, Scissors, Settings2, Sparkles, Sun, Trash2, X } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { useTranslation } from 'react-i18next';
@@ -804,7 +804,7 @@ export const NodeActionToolbar = memo(({ node, offset = NODE_TOOLBAR_OFFSET }: N
       offset={offset}
       className={NODE_TOOLBAR_CLASS}
     >
-      <UiPanel className="flex items-center gap-1 rounded-full p-1">
+      <UiPanel className="stage-toolbar flex items-center gap-0.5 rounded-xl p-1">
         {/* Case B: empty AI node — render multi-function chips only. Clicking
             a chip selects the module (blue highlight); clicking again
             clears. One at a time. The chip's prompt template is composed in

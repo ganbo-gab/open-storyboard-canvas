@@ -7,6 +7,7 @@ import {
 } from '@/features/canvas/infrastructure/customProviderGateway';
 import { isChatCustomProvider } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { resolveNativeChannelModel, submitChannelChat } from '@/features/channels/application/channelService';
 
 import {
   AgentModelProtocolError,
@@ -416,6 +417,13 @@ export function createAgentModelTransport(
       signal?: AbortSignal,
     ): Promise<AgentModelTurnResponse> {
       throwIfAborted(signal);
+      const channel = resolveNativeChannelModel(request.model.catalogId);
+      if (channel) {
+        validateRequestCapabilities(request);
+        const response = await submitChannelChat(channel.profile, channel.model.id, buildAgentProviderBody(request, false), signal);
+        throwIfAborted(signal);
+        return parseAgentProviderResponse(request, response.raw);
+      }
       let response: AgentProviderHttpResponse;
       try {
         response = await httpClient.request(buildRequest(request, false), signal);

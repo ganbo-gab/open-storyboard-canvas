@@ -39,8 +39,8 @@ type NodeHeaderProps = {
   onTitleChange?: (value: string) => void;
 };
 
-export const NODE_HEADER_TONE_CLASS = 'text-[rgba(15,23,42,0.68)] dark:text-white/55';
-export const NODE_HEADER_TITLE_CLASS = 'text-[14px] font-normal';
+export const NODE_HEADER_TONE_CLASS = 'text-[rgba(15,23,42,0.68)] dark:text-white/72';
+export const NODE_HEADER_TITLE_CLASS = 'text-[13px] font-medium';
 export const NODE_HEADER_META_CLASS = 'text-xs text-text-muted';
 export const NODE_HEADER_FLOATING_POSITION_CLASS = 'absolute -top-7 left-1 right-1 z-10';
 const NODE_HEADER_TITLE_MAX_WIDTH_CLASS = 'max-w-[60%]';
@@ -226,7 +226,7 @@ export function NodeHeader({
         type="button"
         ref={setTitleMeasureElement}
         className={joinClasses(
-          'group/title inline-flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap cursor-grab select-none rounded-sm border border-[rgba(15,23,42,0.14)] bg-white/70 px-1.5 text-left shadow-xs active:cursor-grabbing dark:border-white/10 dark:bg-black/20 dark:shadow-none',
+          'group/title inline-flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap cursor-grab select-none bg-transparent px-0.5 text-left active:cursor-grabbing',
           NODE_HEADER_TITLE_MAX_WIDTH_CLASS,
           NODE_HEADER_TITLE_CLASS,
           tone,

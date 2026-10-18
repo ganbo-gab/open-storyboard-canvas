@@ -178,7 +178,9 @@ export class AgentBudgetLedger {
     const envelope = this.read();
     const index = envelope.projects.findIndex((project) => project.projectId === projectId);
     const current = index >= 0 ? envelope.projects[index] : this.get(projectId);
-    const next = { ...update(current), projectId, currency: 'credits' as const, updatedAt: this.now() };
+    const updated = update(current);
+    if (updated === current) return structuredClone(current);
+    const next = { ...updated, projectId, currency: 'credits' as const, updatedAt: this.now() };
     if (index >= 0) envelope.projects[index] = next;
     else envelope.projects.push(next);
     envelope.projects = envelope.projects.slice(-MAX_PROJECT_BUDGETS);

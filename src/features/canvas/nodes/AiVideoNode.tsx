@@ -11,6 +11,8 @@ import {
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { AlertTriangle, Bug, Camera, Check, ChevronDown, ChevronRight, Copy, Sparkles, Video, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { SafeNodeToolbar } from '@/features/canvas/ui/SafeNodeToolbar';
+import { EditorPopup } from '@/features/canvas/ui/EditorPopup';
 
 import {
   type CameraControlOptions,
@@ -87,6 +89,7 @@ import { CameraControlPanel } from '@/features/canvas/ui/CameraControlPanel';
 import { DreaminaMultiframeEditor } from '@/features/canvas/ui/DreaminaMultiframeEditor';
 import { buildCameraPrompt } from '@/features/canvas/application/cameraPromptLibrary';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
+import { MediaStageFace } from '@/features/canvas/ui/MediaStageFace';
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
 import {
   NODE_CONTROL_CHIP_CLASS,
@@ -341,6 +344,8 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
   const { t } = useTranslation();
   const updateNodeInternals = useUpdateNodeInternals();
   const rootRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const composerInputRef = useRef<HTMLDivElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const promptHighlightRef = useRef<HTMLDivElement>(null);
   const promptCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -678,7 +683,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
       return;
     }
     const handleOutside = (event: MouseEvent) => {
-      if (rootRef.current?.contains(event.target as globalThis.Node)) {
+      if (rootRef.current?.contains(event.target as globalThis.Node) || composerRef.current?.contains(event.target as globalThis.Node)) {
         return;
       }
       closeOpenPopovers();
@@ -1103,7 +1108,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     if (event.key === '/' && functionPickerItems.length > 0) {
       event.preventDefault();
       const cursor = event.currentTarget.selectionStart ?? promptDraftRef.current.length;
-      const anchor = resolvePickerAnchor(rootRef.current, event.currentTarget, cursor);
+      const anchor = resolvePickerAnchor(composerInputRef.current, event.currentTarget, cursor);
       setFunctionPickerAnchor({
         left: Math.max(8, Math.min(anchor.left, resolvedWidth - FUNCTION_PICKER_WIDTH_PX - 8)),
         top: anchor.top,
@@ -1118,7 +1123,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     if (event.key === '@' && schemaReferencePickerItems.length > 0) {
       event.preventDefault();
       const cursor = event.currentTarget.selectionStart ?? promptDraftRef.current.length;
-      const anchor = resolvePickerAnchor(rootRef.current, event.currentTarget, cursor);
+      const anchor = resolvePickerAnchor(composerInputRef.current, event.currentTarget, cursor);
       setReferencePickerAnchor({
         left: Math.max(8, Math.min(anchor.left, resolvedWidth - REFERENCE_PICKER_WIDTH_PX - 8)),
         top: Math.max(8, anchor.top),
@@ -1202,7 +1207,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
     <div
       ref={rootRef}
       className={`
-        group relative flex h-full flex-col overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-2 shadow-(--canvas-node-shadow) transition-colors duration-150
+        stage-node group relative flex h-full flex-col overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) shadow-(--canvas-node-shadow) transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
           : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
@@ -1237,7 +1242,15 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
       />
 
-      <div className="image-box relative min-h-0 flex-1 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-2">
+      <MediaStageFace
+        kind="video"
+        ratio={resolvedModelConfig?.aspectRatio}
+        caption={promptDraft}
+        generating={data.isGenerating === true}
+      />
+      <SafeNodeToolbar nodeId={id} position={Position.Bottom} isVisible={selected === true} offset={18}>
+        <div ref={composerRef} className="studio-node-composer flex h-[260px] w-[min(680px,calc(100vw-120px))] max-w-full flex-col rounded-2xl border border-(--canvas-node-border) bg-(--canvas-node-bg) p-3 shadow-2xl">
+      <div ref={composerInputRef} className="image-box relative min-h-0 flex-1 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-2">
         <div className="relative h-full min-h-0">
           {selectedPresetLabel && (
             <div className="absolute left-1 top-1 z-20 flex max-w-[calc(100%-8px)] items-center gap-1 rounded-md border border-accent/35 bg-accent/18 px-2 py-1 text-xs text-accent shadow-xs">
@@ -1287,9 +1300,8 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
         </div>
 
         {referencePickerOpen && schemaReferencePickerItems.length > 0 && (
-          <div
-            className="nowheel absolute z-30 w-[150px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-xl"
-            style={{ left: referencePickerAnchor.left, top: referencePickerAnchor.top }}
+          <EditorPopup container={composerInputRef} anchor={referencePickerAnchor}
+            className="w-[150px] rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-xl"
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
           >
@@ -1327,13 +1339,12 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                 </button>
               ))}
             </div>
-          </div>
+          </EditorPopup>
         )}
 
         {showFunctionPicker && functionPickerItems.length > 0 && (
-          <div
-            className="nowheel absolute z-40 w-[280px] overflow-visible rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-2xl"
-            style={{ left: functionPickerAnchor.left, top: functionPickerAnchor.top }}
+          <EditorPopup container={composerInputRef} anchor={functionPickerAnchor}
+            className="w-[280px] rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-2xl"
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
           >
@@ -1376,8 +1387,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
             </div>
             {functionPickerItems[functionPickerActiveIndex]?.kind === 'presetGroup' && (
               <div
-                className="nowheel absolute left-[calc(100%+8px)] w-[240px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-2xl"
-                style={{ top: `${Math.min(44 + functionPickerActiveIndex * 58, 150)}px` }}
+                className="nowheel mt-1 w-full overflow-hidden rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5"
                 onMouseDown={(event) => event.stopPropagation()}
                 onWheelCapture={(event) => event.stopPropagation()}
               >
@@ -1414,7 +1424,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
                 </div>
               </div>
             )}
-          </div>
+          </EditorPopup>
         )}
       </div>
 
@@ -1763,7 +1773,7 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
               void handleGenerate();
             }}
             variant="primary"
-            className={`shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
+            className={`stage-send shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
           >
             <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
             {t('canvas.generate')}
@@ -1772,6 +1782,8 @@ export const AiVideoNode = memo(({ id, data, selected, width, height }: AiVideoN
       </div>
 
       {error && <div className="mt-1 shrink-0 text-xs text-red-700 dark:text-red-300">{error}</div>}
+        </div>
+      </SafeNodeToolbar>
 
       <Handle
         type="target"

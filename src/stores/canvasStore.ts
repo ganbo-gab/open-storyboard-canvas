@@ -166,6 +166,7 @@ export interface CanvasState {
     currentIndex: number;
   };
 
+  /** Observer-only dimensions update layout without changing revision/undo; identical measurements are no-ops. */
   onNodesChange: (changes: NodeChange<CanvasNode>[]) => void;
   onEdgesChange: (changes: EdgeChange<CanvasEdge>[]) => void;
   onConnect: (connection: Connection) => void;
@@ -1113,8 +1114,35 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   onNodesChange: (changes) => {
     set((state) => {
+      // ResizeObserver measurements are layout bookkeeping, not undoable edits.
+      // In particular, remounting visible/LOD nodes must not consume undo history.
+      const isMeasurement = (change: NodeChange<CanvasNode>) => (
+        change.type === 'dimensions'
+        && change.resizing === undefined
+        && !change.setAttributes
+      );
+      const nodesById = changes.some(isMeasurement)
+        ? new Map(state.nodes.map((node) => [node.id, node]))
+        : null;
+      const changedIds = new Set<string>();
+      const effectiveChanges = changes.filter((change) => {
+        if (!isMeasurement(change) || change.type !== 'dimensions') {
+          if ('id' in change) changedIds.add(change.id);
+          return true;
+        }
+        if (changedIds.has(change.id)) return true;
+        const node = nodesById?.get(change.id);
+        if (!node || !change.dimensions || (
+          node.measured?.width === change.dimensions.width
+          && node.measured?.height === change.dimensions.height
+        )) return false;
+        changedIds.add(change.id);
+        return true;
+      });
+      if (effectiveChanges.length === 0) return state;
+
       const resizedNodeIds = new Set(
-        changes
+        effectiveChanges
           .filter(
             (change): change is NodeChange<CanvasNode> & { id: string } =>
               change.type === 'dimensions'
@@ -1125,7 +1153,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           .map((change) => change.id)
       );
 
-      let nextNodes = applyNodeChanges<CanvasNode>(changes, state.nodes);
+      let nextNodes = applyNodeChanges<CanvasNode>(effectiveChanges, state.nodes);
       if (resizedNodeIds.size > 0) {
         nextNodes = nextNodes.map((node) => {
           if (!resizedNodeIds.has(node.id) || !isImageAutoResizableType(node.type)) {
@@ -1134,26 +1162,28 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           return withManualSizeLock(node);
         });
       }
-      const hasMeaningfulChange = changes.some((change) => change.type !== 'select');
-      const hasDragMove = changes.some(
+      const hasMeaningfulChange = effectiveChanges.some((change) => (
+        change.type !== 'select' && !isMeasurement(change)
+      ));
+      const hasDragMove = effectiveChanges.some(
         (change) =>
           change.type === 'position' &&
           'dragging' in change &&
           Boolean(change.dragging)
       );
-      const hasDragEnd = changes.some(
+      const hasDragEnd = effectiveChanges.some(
         (change) =>
           change.type === 'position' &&
           'dragging' in change &&
           change.dragging === false
       );
-      const hasResizeMove = changes.some(
+      const hasResizeMove = effectiveChanges.some(
         (change) =>
           change.type === 'dimensions' &&
           'resizing' in change &&
           Boolean(change.resizing)
       );
-      const hasResizeEnd = changes.some(
+      const hasResizeEnd = effectiveChanges.some(
         (change) =>
           change.type === 'dimensions' &&
           'resizing' in change &&

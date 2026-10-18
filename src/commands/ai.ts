@@ -331,6 +331,8 @@ export interface CustomHttpRequest {
   timeoutMs?: number;
   networkRoute?: GenerationNetworkRoute;
   customProxyUrl?: string;
+  /** Hard response byte limit; overflow rejects rather than silently truncating. */
+  maxResponseBytes?: number;
 }
 
 export interface CustomHttpMultipartField {

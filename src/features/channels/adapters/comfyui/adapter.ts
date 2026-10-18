@@ -9,6 +9,7 @@ export interface ComfyUIConfig {
   baseUrl: string;
   workflow: unknown;
   bindings?: ComfyUIBindings;
+  outputNodeIds?: string[];
   auth?: ComfyUIAuthConfig;
   comfyOrgKeyRequired?: boolean;
   mediaKind?: MediaKind;
@@ -16,6 +17,7 @@ export interface ComfyUIConfig {
 export interface ComfyUIJobSnapshot {
   workflow: ComfyUIWorkflow;
   bindings: ComfyUIBindings;
+  outputNodeIds?: string[];
   urls: ComfyUIResolvedUrls;
   auth: ComfyUIAuthConfig;
   comfyOrgKeyRequired: boolean;
@@ -47,6 +49,7 @@ export function createComfyUIJob(job: JobInput, config: ComfyUIConfig): JobInput
     ? { mode: config.auth.mode, name: config.auth.name } : { mode: config.auth?.mode ?? 'none' };
   const snapshot: ComfyUIJobSnapshot = {
     workflow, bindings, urls: resolveComfyUIUrls(config.baseUrl), auth,
+    ...(config.outputNodeIds ? { outputNodeIds: [...config.outputNodeIds] } : {}),
     comfyOrgKeyRequired: config.comfyOrgKeyRequired === true, mediaKind: config.mediaKind ?? (job.operation === 'video.generate' ? 'video' : job.operation === 'audio.generate' ? 'audio' : 'image'),
   };
   return { ...job, params: { ...job.params, comfyuiSnapshot: JSON.parse(JSON.stringify(snapshot)) as JsonValue } };
@@ -197,7 +200,7 @@ export function createComfyUIAdapter(dependencies: ComfyUIDependencies): Channel
         const outputs: Output[] = [];
         const nodes = asRecord(entry.outputs) ?? {};
         const selection = snapshot.bindings.output;
-        const nodeIds = selection ? [selection.nodeId] : Object.keys(nodes);
+        const nodeIds = snapshot.outputNodeIds?.length ? snapshot.outputNodeIds : selection ? [selection.nodeId] : Object.keys(nodes);
         const seen = new Set<string>();
         for (const nodeId of nodeIds) {
           for (const files of Object.values(asRecord(nodes[nodeId]) ?? {})) {

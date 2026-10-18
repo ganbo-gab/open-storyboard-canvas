@@ -74,4 +74,13 @@ describe('agent project budget ledger', () => {
       estimatedCost: null,
     });
   });
+
+  it('allows no-reservation read tool completion under full storage but fails closed on paid reservation', () => {
+    const ledger = new AgentBudgetLedger({ getItem: () => null, setItem: () => { throw new DOMException('Full origin', 'QuotaExceededError'); } });
+    ledger.commit('project', 'free-read');
+    ledger.release('project', 'free-read');
+    expect(ledger.get('project')).toMatchObject({ spent: 0, reservations: {} });
+    expect(() => ledger.reserve(approval('paid', 4))).toThrow('Full origin');
+    expect(ledger.evaluate('project', impact(4))).toMatchObject({ remaining: null, configured: false });
+  });
 });

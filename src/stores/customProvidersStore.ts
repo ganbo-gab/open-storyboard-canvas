@@ -1,5 +1,10 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import {
+  useChannelStore, projectChannelProviders, subscribeChannelCredentials, migrateLegacyProviders,
+  removeChannelRecord,
+} from '@/features/channels/store/channelStore';
+import { channelPersistenceStorage } from '@/features/channels/store/channelPersistence';
 
 /**
  * User-defined image-generation provider config. Intentionally flexible — most
@@ -104,17 +109,42 @@ export const useCustomProvidersStore = create<CustomProvidersState>()(
       updateProvider: (id, patch) => set((s) => ({
         providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch } : p)),
       })),
-      removeProvider: (id) => set((s) => ({ providers: s.providers.filter((p) => p.id !== id) })),
+      removeProvider: (id) => {
+        const provider = useCustomProvidersStore.getState().providers.find((entry) => entry.id === id);
+        if (typeof provider?.extraParams?.channelProfileId === 'string') removeChannelRecord(provider.extraParams.channelProfileId);
+        set((s) => ({ providers: s.providers.filter((p) => p.id !== id) }));
+      },
       replaceAll: (providers) => set({ providers }),
       setPendingEditId: (id) => set({ pendingEditId: id }),
     }),
     {
       name: 'custom-providers-storage',
+      storage: createJSONStorage(() => channelPersistenceStorage),
       // Don't persist ephemeral pendingEditId across reloads.
-      partialize: (s) => ({ providers: s.providers }) as unknown as CustomProvidersState,
+      partialize: (s) => ({ providers: s.providers.filter((provider) => !provider.extraParams?.channelProfileId) }) as unknown as CustomProvidersState,
     }
   )
 );
+
+// Compatibility projection only: native v2 credentials are transient here, never
+// duplicated in legacy persistence. Existing built-in/special providers are kept.
+let projectingChannels = false;
+function synchronizeChannelProviders(): void {
+  if (projectingChannels) return;
+  projectingChannels = true;
+  try {
+    const legacy = useCustomProvidersStore.getState().providers.filter((provider) => !provider.extraParams?.channelProfileId);
+    migrateLegacyProviders(legacy);
+    const projected = projectChannelProviders(useChannelStore.getState().channels);
+    useCustomProvidersStore.setState({ providers: [...legacy, ...projected.filter((provider) => !legacy.some((entry) => entry.id === provider.id))] });
+  } finally { projectingChannels = false; }
+}
+useChannelStore.subscribe(synchronizeChannelProviders);
+subscribeChannelCredentials(synchronizeChannelProviders);
+useCustomProvidersStore.subscribe(synchronizeChannelProviders);
+useCustomProvidersStore.persist.onFinishHydration(synchronizeChannelProviders);
+useChannelStore.persist.onFinishHydration(synchronizeChannelProviders);
+synchronizeChannelProviders();
 
 /** Curated templates by API shape. Keep this list format-focused instead of
  *  looking like endorsements for random middlemen. */

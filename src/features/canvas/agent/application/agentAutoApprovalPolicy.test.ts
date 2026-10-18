@@ -24,18 +24,18 @@ describe('built-in Agent auto approval policy', () => {
     expect(decideAgentAutoApproval(prepared()).allowed).toBe(true);
   });
 
-  it('keeps only node deletion behind confirmation', () => {
+  it('keeps destructive deletion behind confirmation while safe edits and reads continue', () => {
     expect(decideAgentAutoApproval(prepared({ arguments: { type: 'node.delete', input: { nodeIds: ['node'] } } })).allowed).toBe(false);
     expect(decideAgentAutoApproval(prepared({ toolName: 'config_patch', impact: { effect: 'config-write', title: 'config', summary: 'config', affectedNodeCount: 0, affectedEdgeCount: 0, externalSideEffect: false } })).allowed).toBe(true);
     expect(decideAgentAutoApproval(prepared({ toolName: 'asset_read', impact: { effect: 'read', title: 'read', summary: 'read', affectedNodeCount: 1, affectedEdgeCount: 0, externalSideEffect: false } })).allowed).toBe(true);
     expect(decideAgentAutoApproval(prepared({ toolName: 'diagnostics', impact: { effect: 'read', title: 'logs', summary: 'logs', affectedNodeCount: 0, affectedEdgeCount: 0, externalSideEffect: false } })).allowed).toBe(true);
   });
 
-  it('allows new generation and safe result recovery', () => {
+  it('requires explicit paid generation approval but permits safe result recovery', () => {
     expect(decideAgentAutoApproval(prepared({
       arguments: { type: 'generation.submit', input: { nodeIds: ['node'] } },
       impact: { effect: 'external-submit', title: 'generation.submit', summary: 'generate', affectedNodeCount: 1, affectedEdgeCount: 0, externalSideEffect: true, estimatedCost: { confidence: 'unknown' } },
-    })).allowed).toBe(true);
+    })).allowed).toBe(false);
     expect(decideAgentAutoApproval(prepared({
       arguments: { type: 'generation.recover', input: { jobId: 'job' } },
       impact: { effect: 'canvas-write', title: 'generation.recover', summary: 'recover', affectedNodeCount: 1, affectedEdgeCount: 0, externalSideEffect: false },

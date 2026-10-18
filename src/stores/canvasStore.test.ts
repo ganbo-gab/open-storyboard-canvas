@@ -131,6 +131,112 @@ describe('canvasStore.addNodesBatch', () => {
   });
 });
 
+describe('canvasStore dimension bookkeeping', () => {
+  beforeEach(resetCanvasStore);
+
+  it('ignores empty and repeated 500-node measurement batches without notifying subscribers', () => {
+    useCanvasStore.setState({
+      nodes: Array.from({ length: 500 }, (_, index) => ({
+        id: `measured-${index}`,
+        type: CANVAS_NODE_TYPES.imageEdit,
+        position: { x: index * 360, y: 0 },
+        measured: { width: 320, height: 220 },
+        data: {},
+      } as CanvasNode)),
+    });
+    const before = useCanvasStore.getState();
+    let notifications = 0;
+    const unsubscribe = useCanvasStore.subscribe(() => { notifications += 1; });
+
+    before.onNodesChange([]);
+    before.onNodesChange(before.nodes.map((node) => ({
+      id: node.id,
+      type: 'dimensions',
+      dimensions: { width: 320, height: 220 },
+    })));
+    before.onNodesChange([{ id: 'not-mounted', type: 'dimensions', dimensions: { width: 320, height: 220 } }]);
+    unsubscribe();
+
+    expect(useCanvasStore.getState()).toBe(before);
+    expect(notifications).toBe(0);
+  });
+
+  it('updates changed measurements without consuming redo or an in-progress drag snapshot', () => {
+    const nodes = [{
+      id: 'measured-node',
+      type: CANVAS_NODE_TYPES.imageEdit,
+      position: { x: 0, y: 0 },
+      measured: { width: 320, height: 220 },
+      data: {},
+    } as CanvasNode];
+    const snapshot = { nodes, edges: [] };
+    const history = { past: [], future: [snapshot] };
+    useCanvasStore.setState({ nodes, history, dragHistorySnapshot: snapshot, revision: 7 });
+
+    useCanvasStore.getState().onNodesChange([{
+      id: 'measured-node',
+      type: 'dimensions',
+      dimensions: { width: 460, height: 520 },
+    }]);
+
+    const after = useCanvasStore.getState();
+    expect(after.nodes[0].measured).toEqual({ width: 460, height: 520 });
+    expect(after.nodes[0].data).toEqual({});
+    expect(after.history).toBe(history);
+    expect(after.dragHistorySnapshot).toBe(snapshot);
+    expect(after.revision).toBe(7);
+  });
+
+  it('preserves node identity for unchanged measurements within a changed batch', () => {
+    const nodes = ['unchanged', 'changed'].map((id) => ({
+      id,
+      type: CANVAS_NODE_TYPES.imageEdit,
+      position: { x: 0, y: 0 },
+      measured: { width: 320, height: 220 },
+      data: {},
+    } as CanvasNode));
+    useCanvasStore.setState({ nodes });
+
+    useCanvasStore.getState().onNodesChange([
+      { id: 'unchanged', type: 'dimensions', dimensions: { width: 320, height: 220 } },
+      { id: 'changed', type: 'dimensions', dimensions: { width: 460, height: 520 } },
+    ]);
+
+    expect(useCanvasStore.getState().nodes[0]).toBe(nodes[0]);
+    expect(useCanvasStore.getState().nodes[1].measured).toEqual({ width: 460, height: 520 });
+    expect(useCanvasStore.getState().history.past).toEqual([]);
+  });
+
+  it('still commits a resize end at the same measured size and makes it undoable', () => {
+    const node = {
+      id: 'resized-node',
+      type: CANVAS_NODE_TYPES.imageEdit,
+      position: { x: 0, y: 0 },
+      measured: { width: 320, height: 220 },
+      data: {},
+    } as CanvasNode;
+    useCanvasStore.setState({ nodes: [node] });
+
+    useCanvasStore.getState().onNodesChange([{
+      id: node.id,
+      type: 'dimensions',
+      dimensions: { width: 320, height: 220 },
+      resizing: false,
+      setAttributes: true,
+    }]);
+
+    expect(useCanvasStore.getState().nodes[0]).toMatchObject({
+      width: 320,
+      height: 220,
+      data: { isSizeManuallyAdjusted: true },
+    });
+    expect(useCanvasStore.getState().history.past).toHaveLength(1);
+    expect(useCanvasStore.getState().revision).toBe(1);
+    expect(useCanvasStore.getState().undo()).toBe(true);
+    expect(useCanvasStore.getState().nodes[0].data).toEqual({});
+  });
+});
+
 describe('canvasStore related-node placement', () => {
   beforeEach(resetCanvasStore);
 

@@ -34,6 +34,7 @@ import { prepareCanvasAgentToolApproval, type AgentApprovalView } from './canvas
 import { redactSensitiveValue } from './agentRedaction';
 import type { ExternalAgentToolRequest } from '../domain/agentModel';
 import { loadDiagnosticEvents } from '@/features/canvas/application/diagnosticEvents';
+import { decideAgentAutoApproval, type CanvasAgentExecutionMode } from './agentAutoApprovalPolicy';
 
 export interface ExternalAgentToolExecutionResult {
   approvalId: string;
@@ -238,6 +239,21 @@ export async function prepareExternalAgentToolRequest(input: {
     arguments: input.request.arguments,
   });
   return prepared.view;
+}
+
+/** Same risk policy as the SDK: paid/destructive operations never auto-approve. */
+export async function processExternalAgentToolRequest(input: {
+  projectId: string;
+  request: ExternalAgentToolRequest;
+  executionMode: CanvasAgentExecutionMode;
+}): Promise<{ approval: AgentApprovalView; result?: ExternalAgentToolExecutionResult }> {
+  const approval = await prepareExternalAgentToolRequest(input);
+  const record = canvasAgentApprovalStore.get(createApprovalId(input.request.turnId, input.request.toolName, input.request.callId));
+  const automatic = record && ((record.impact.effect === 'read' && record.toolName !== 'asset_read')
+    || (input.executionMode === 'auto' && decideAgentAutoApproval({ record }).allowed));
+  return automatic
+    ? { approval, result: await resolveExternalAgentToolApproval({ ...input, approve: true }) }
+    : { approval };
 }
 
 export async function resolveExternalAgentToolApproval(input: {

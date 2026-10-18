@@ -82,7 +82,8 @@ function prepare(profile: ChannelProfileV2, job: JobInput): { op: OperationSpec;
     if (count > (model?.refs?.[kind] ?? 0)) throw new TemplateValidationError('refs', `${kind} 参考素材数量超出模型声明上限`);
   }
   return { op, model, vars: { model: job.modelId || undefined, prompt: job.prompt || undefined, param: params,
-    messages: job.messages ?? [{ role: 'user', content: job.prompt }] },
+    messages: job.messages ?? [{ role: 'user', content: job.prompt }],
+    ...(job.operation === 'chat' ? { tools: job.tools, toolChoice: job.toolChoice } : {}) },
     required: ['model', 'prompt', ...(model?.params.filter((param) => param.required).map((param) => `param.${param.key}`) ?? [])] };
 }
 function refSummary(ref: JobRef, index: number): string {

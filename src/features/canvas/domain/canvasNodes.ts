@@ -552,12 +552,14 @@ export interface DirectorMotionVector3 {
   z: number;
 }
 
-export type DirectorMotionEasing = 'linear' | 'smooth';
+export type DirectorMotionEasing = 'linear' | 'smooth' | 'hold';
 
 export interface DirectorMotionKeyframeBase {
   id: string;
   time: number;
   easing: DirectorMotionEasing;
+  /** Restricted easing interval, retained when splitting an interpolated segment. */
+  easingRange?: [number, number];
 }
 
 export interface DirectorCameraKeyframe extends DirectorMotionKeyframeBase {
@@ -566,6 +568,8 @@ export interface DirectorCameraKeyframe extends DirectorMotionKeyframeBase {
   fov: number;
   trackTargetId?: string | null;
   trackTargetBodyPart?: string | null;
+  /** Explicit free orientation; absent retains legacy target/track-target behavior. */
+  freeRotation?: DirectorMotionVector3;
 }
 
 export interface DirectorObjectKeyframe extends DirectorMotionKeyframeBase {
@@ -580,6 +584,8 @@ export interface DirectorActionState {
   poseId?: string | null;
   actionId?: string | null;
   clipId?: string | null;
+  /** Phase offset used when splitting an action or a nested custom clip. */
+  actionOffsetSeconds?: number;
   pose?: BlueprintActionPose;
   bodyControls?: BlueprintBodyControls;
 }
@@ -590,6 +596,7 @@ export interface DirectorActionClipKeyframe extends DirectorActionState {
   id: string;
   time: number;
   easing: DirectorMotionEasing;
+  easingRange?: [number, number];
 }
 
 export interface DirectorActionClip {

@@ -1,7 +1,7 @@
 import { memo, useCallback, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
-import { ImagePlus, Globe2, LayoutGrid, Images, ListPlus, ScrollText, Video } from 'lucide-react';
+import { ImagePlus, Globe2, Hand, Keyboard, LayoutGrid, Images, ListPlus, MousePointer2, Plus, ScrollText, Video } from 'lucide-react';
 
 import { CANVAS_NODE_TYPES, type CanvasNodeType } from '@/features/canvas/domain/canvasNodes';
 import {
@@ -66,13 +66,17 @@ const TOOLBAR_ITEMS: SideToolbarItem[] = [
 
 interface CanvasSideToolbarProps {
   onOpenAssets?: (buttonRect: DOMRect) => void;
+  mode: 'select' | 'hand';
+  onMode: (mode: 'select' | 'hand') => void;
+  onAdd: () => void;
+  onShortcuts: () => void;
 }
 
 /**
  * Fixed left-side canvas toolbar for assets, batch import, and primary node
  * creation at the current viewport center.
  */
-export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps) => {
+export const CanvasSideToolbar = memo(({ onOpenAssets, mode, onMode, onAdd, onShortcuts }: CanvasSideToolbarProps) => {
   const { t } = useTranslation();
   const reactFlow = useReactFlow();
   const addNodesBatch = useCanvasStore((s) => s.addNodesBatch);
@@ -84,8 +88,7 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
     type: CanvasNodeType,
     configuration?: CanvasNodeCreateConfiguration,
   ) => {
-    // Drop near the current viewport center, with a small random nudge so
-    // repeated clicks don't stack.
+    // Place the card around the viewport center, then select it for immediate editing.
     let position = { x: 240, y: 160 };
     try {
       const vp = reactFlow.getViewport();
@@ -95,8 +98,8 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
         const screenCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
         const flowPos = reactFlow.screenToFlowPosition(screenCenter);
         position = {
-          x: flowPos.x + (Math.random() - 0.5) * 120,
-          y: flowPos.y + (Math.random() - 0.5) * 120,
+          x: flowPos.x - 240,
+          y: flowPos.y - 130,
         };
       } else {
         position = { x: -vp.x / vp.zoom + 120, y: -vp.y / vp.zoom + 120 };
@@ -112,7 +115,11 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
         position,
         configuration,
       },
-    }, 'ui');
+    }, 'ui').then((result) => {
+      if (result.ok && result.output.references.nodeId) {
+        void canvasCommandRegistry.execute({ type: 'selection.set', version: CANVAS_COMMAND_VERSION, input: { nodeIds: [result.output.references.nodeId] } }, 'ui');
+      }
+    });
   }, [reactFlow]);
 
   const handleImport = useCallback((
@@ -158,17 +165,36 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
 
   return (
     <>
-      <div className="canvas-side-toolbar absolute left-3 top-1/2 z-20 flex max-h-[calc(100%-24px)] -translate-y-1/2 flex-col gap-2 overflow-y-auto rounded-xl border border-(--canvas-rail-button-border) bg-(--canvas-rail-bg) p-2 shadow-(--canvas-rail-shadow) backdrop-blur-sm">
+      <div className="canvas-rail" data-canvas-no-marquee="true">
         <button
           type="button"
-          title={t('canvasToolbar.assetsTitle')}
-          aria-label={t('canvasToolbar.assetsTitle')}
-          onClick={(event) => onOpenAssets?.(event.currentTarget.getBoundingClientRect())}
-          className="canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-(--canvas-rail-button-border) bg-(--canvas-rail-button-bg) px-2 py-2 text-[10px] text-(--canvas-rail-button-text) transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
+          className="canvas-rail__add"
+          title={t('rework.canvas.add')}
+          aria-label={t('rework.canvas.add')}
+          onClick={onAdd}
         >
-          <Images className="h-4 w-4" />
-          <span className="canvas-side-toolbar__label leading-tight">{t('canvasToolbar.assets')}</span>
+          <Plus className="h-4 w-4" />
         </button>
+        <span className="canvas-rail__rule" />
+        <button
+          type="button"
+          title={t('rework.canvas.select')}
+          aria-label={t('rework.canvas.select')}
+          aria-pressed={mode === 'select'}
+          onClick={() => onMode('select')}
+        >
+          <MousePointer2 className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          title={t('rework.canvas.hand')}
+          aria-label={t('rework.canvas.hand')}
+          aria-pressed={mode === 'hand'}
+          onClick={() => onMode('hand')}
+        >
+          <Hand className="h-4 w-4" />
+        </button>
+        <span className="canvas-rail__rule" />
         {TOOLBAR_ITEMS.map((item) => {
           const Icon = item.icon;
           return (
@@ -178,33 +204,44 @@ export const CanvasSideToolbar = memo(({ onOpenAssets }: CanvasSideToolbarProps)
               title={t(item.titleKey)}
               aria-label={t(item.titleKey)}
               onClick={() => handleAdd(item.type, item.configuration)}
-              className="canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-(--canvas-rail-button-border) bg-(--canvas-rail-button-bg) px-2 py-2 text-[10px] text-(--canvas-rail-button-text) transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
             >
               <Icon className="h-4 w-4" />
-              <span className="canvas-side-toolbar__label leading-tight">{t(item.labelKey)}</span>
             </button>
           );
         })}
+        <span className="canvas-rail__rule" />
         <button
           type="button"
-          title={t('canvasToolbar.logsTitle')}
-          aria-label={t('canvasToolbar.logsTitle')}
-          aria-expanded={isDiagnosticOpen}
-          onClick={() => setIsDiagnosticOpen((value) => !value)}
-          className={`canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border px-2 py-2 text-[10px] transition-colors ${isDiagnosticOpen ? 'border-accent/60 bg-accent/15 text-accent' : 'border-(--canvas-rail-button-border) bg-(--canvas-rail-button-bg) text-(--canvas-rail-button-text) hover:border-accent/60 hover:bg-accent/15 hover:text-accent'}`}
+          title={t('canvasToolbar.assetsTitle')}
+          aria-label={t('canvasToolbar.assetsTitle')}
+          onClick={(event) => onOpenAssets?.(event.currentTarget.getBoundingClientRect())}
         >
-          <ScrollText className="h-4 w-4" />
-          <span className="canvas-side-toolbar__label leading-tight">{t('canvasToolbar.logs')}</span>
+          <Images className="h-4 w-4" />
         </button>
         <button
           type="button"
           title={t('canvasToolbar.bulkPromptImportTitle')}
           aria-label={t('canvasToolbar.bulkPromptImportTitle')}
           onClick={() => setIsPromptImportOpen(true)}
-          className="canvas-side-toolbar__button flex w-16 shrink-0 flex-col items-center gap-0.5 rounded-lg border border-(--canvas-rail-button-border) bg-(--canvas-rail-button-bg) px-2 py-2 text-[10px] text-(--canvas-rail-button-text) transition-colors hover:border-accent/60 hover:bg-accent/15 hover:text-accent"
         >
           <ListPlus className="h-4 w-4" />
-          <span className="canvas-side-toolbar__label leading-tight">{t('canvasToolbar.bulkPromptImport')}</span>
+        </button>
+        <button
+          type="button"
+          title={t('canvasToolbar.logsTitle')}
+          aria-label={t('canvasToolbar.logsTitle')}
+          aria-pressed={isDiagnosticOpen}
+          onClick={() => setIsDiagnosticOpen((value) => !value)}
+        >
+          <ScrollText className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          title={t('rework.canvas.shortcuts')}
+          aria-label={t('rework.canvas.shortcuts')}
+          onClick={onShortcuts}
+        >
+          <Keyboard className="h-4 w-4" />
         </button>
       </div>
       <CanvasDiagnosticDrawer isOpen={isDiagnosticOpen} nodes={nodes} onClose={() => setIsDiagnosticOpen(false)} />

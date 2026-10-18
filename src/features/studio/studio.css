@@ -1,0 +1,130 @@
+.studio-shell {
+  isolation: isolate;
+}
+.studio-navigation {
+  transition: width 160ms ease;
+}
+.studio-home {
+  background: #121212;
+}
+.studio-entry,
+.studio-project-card {
+  outline-offset: 3px;
+}
+.studio-shell button:focus-visible,
+.studio-shell a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.studio-shell select option {
+  background: var(--surface-dark);
+  color: var(--text-dark);
+}
+.studio-composer {
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+.studio-composer:focus-within {
+  border-color: rgb(var(--accent-rgb) / 0.45);
+  box-shadow:
+    0 0 0 3px rgb(var(--accent-rgb) / 0.04),
+    0 8px 32px #00000012;
+}
+.canvas-safe-overlay {
+  width: max-content;
+}
+.canvas-safe-overlay__content {
+  max-width: min(800px, calc(100vw - 120px));
+}
+.canvas-safe-overlay__content > div {
+  max-width: 100%;
+}
+.canvas-safe-overlay__content > div:not(.studio-node-composer) {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.canvas-safe-overlay__content > div:not(.studio-node-composer) > button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.canvas-safe-overlay .node-action-toolbar {
+  overflow-x: auto;
+}
+.canvas-flow .react-flow__handle {
+  min-width: 16px;
+  min-height: 16px;
+  border: 2px solid var(--canvas-node-border);
+  background: var(--surface-dark);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.canvas-flow .react-flow__handle:hover,
+.canvas-flow .react-flow__handle.connecting,
+.canvas-flow .react-flow__handle.valid {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 6px rgb(var(--accent-rgb) / 0.12);
+}
+.canvas-flow .react-flow__edge.selected path,
+.canvas-flow .react-flow__edge:hover path:not(.canvas-edge-hit) {
+  stroke: var(--accent);
+}
+.canvas-flow .react-flow__edge:hover .react-flow__edge-path {
+  stroke-dasharray: 7 5;
+  animation: studio-edge-flow 1.4s linear infinite;
+}
+.canvas-flow .react-flow__edge .canvas-edge-hit {
+  cursor: crosshair;
+}
+.canvas-flow .canvas-minimap {
+  width: 150px !important;
+  height: 100px !important;
+  border: 1px solid var(--border-dark);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px #0002;
+}
+.canvas-side-toolbar {
+  border-radius: 16px;
+  padding: 6px;
+  gap: 4px;
+}
+.canvas-side-toolbar .canvas-side-toolbar__button {
+  width: 44px;
+  min-height: 44px;
+  border-color: transparent;
+  background: transparent;
+  border-radius: 10px;
+  gap: 3px;
+}
+.canvas-side-toolbar .canvas-side-toolbar__label {
+  max-width: 42px;
+  font-size: 9px;
+  line-height: 1.1;
+}
+@keyframes studio-edge-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+@media (max-width: 760px) {
+  .studio-navigation {
+    width: 56px;
+  }
+  .studio-nav-item {
+    justify-content: center;
+    padding-inline: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-navigation,
+  .studio-entry,
+  .studio-composer {
+    transition: none;
+  }
+  .canvas-flow .react-flow__edge:hover .react-flow__edge-path {
+    animation: none;
+  }
+}

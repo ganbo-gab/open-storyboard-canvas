@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useEffect, useMemo, useCallback, useState } from 'react';
-import { NodeToolbar as ReactFlowNodeToolbar } from '@xyflow/react';
+import { SafeNodeToolbar as ReactFlowNodeToolbar } from './SafeNodeToolbar';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 

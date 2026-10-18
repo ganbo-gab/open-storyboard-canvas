@@ -2577,6 +2577,10 @@ export const BlueprintScene = memo(forwardRef<BlueprintSceneHandle, BlueprintSce
         if (modeRef.current === 'panorama') clampPanoramaCameraPoints(position, target);
         camera.position.copy(position);
         camera.lookAt(target);
+        if (frame.camera.freeRotation) {
+          const rotation = frame.camera.freeRotation;
+          camera.rotation.set(rotation.x, rotation.y, rotation.z, 'XYZ');
+        }
         camera.fov = Math.max(10, Math.min(150, frame.camera.fov));
         camera.updateProjectionMatrix();
         camStateRef.current.target.copy(target);

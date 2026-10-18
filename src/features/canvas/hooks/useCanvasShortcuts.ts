@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { CanvasNode } from '@/features/canvas/domain/canvasNodes';
 import { canvasEventBus } from '@/features/canvas/application/canvasServices';
 import { isAudioFile, isImageFile, isVideoFile } from '@/features/canvas/application/imageDragDrop';
+import { useCanvasStore } from '@/stores/canvasStore';
 
 function isTypingTarget(target: EventTarget | null): boolean {
   const element = target as HTMLElement | null;
@@ -279,7 +280,7 @@ export function useCanvasShortcuts(args: UseCanvasShortcutsArgs): void {
   ]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    if (isTypingTarget(event.target)) {
+    if (event.defaultPrevented || useCanvasStore.getState().activeDirectorStudioNodeId || isTypingTarget(event.target)) {
       return;
     }
 

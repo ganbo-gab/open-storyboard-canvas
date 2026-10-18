@@ -110,10 +110,21 @@ export const channelProfileSchema: z.ZodType<ChannelProfileV2> = z.strictObject(
       if (variable.startsWith('param.')) {
         const key = variable.slice(6).split('.')[0];
         for (const model of profile.models.filter((candidate) => candidate.operations.includes(kind))) if (!model.params.some((param) => param.key === key)) ctx.addIssue({ code: 'custom', path: ['operations', kind, ...path], message: `模型 ${model.id} 未声明参数 ${key}` });
-      } else if (!(polling && variable.startsWith('submit.')) && !['model', 'prompt', 'images', 'image', 'videos', 'audios', 'messages', ...(polling ? ['taskId'] : [])].includes(variable)) ctx.addIssue({ code: 'custom', path: ['operations', kind, ...path], message: `未声明的模板变量 ${variable}` });
+      } else if (!(polling && variable.startsWith('submit.')) && !['model', 'prompt', 'images', 'image', 'videos', 'audios', 'messages', ...(kind === 'chat' ? ['tools', 'toolChoice'] : []), ...(polling ? ['taskId'] : [])].includes(variable)) ctx.addIssue({ code: 'custom', path: ['operations', kind, ...path], message: `未声明的模板变量 ${variable}` });
     }
   }
 });
+
+/** Proven OpenAI chat tool wire shape; other protocols remain capability-false. */
+export function supportsOpenAIChatTools(profile: ChannelProfileV2): boolean {
+  const op = profile.operations.chat;
+  if (!op || op.method !== 'POST' || op.body !== 'json' || op.response.mode !== 'sync') return false;
+  const path = new URL(op.path, `${profile.baseUrl}/`).pathname;
+  if (!/\/chat\/completions\/?$/.test(path)) return false;
+  const body = op.template;
+  return Boolean(body && typeof body === 'object' && !Array.isArray(body)
+    && body.messages === '{{messages}}' && body.tools === '{{tools}}' && body.stream !== true);
+}
 
 /** Chinese errors are the public validation boundary; raw zod issues are not UI text. */
 export function validateProfile(input: unknown): ProfileValidationError[] {

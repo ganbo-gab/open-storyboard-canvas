@@ -11,15 +11,15 @@ export function MissingApiKeyHint({ className = '' }: MissingApiKeyHintProps) {
 
   return (
     <div className={`flex w-full justify-center ${className}`}>
-      <div className="pointer-events-auto inline-flex w-full max-w-[680px] flex-col items-center gap-3 rounded-lg border border-accent/20 bg-surface-dark/92 px-4 py-3 text-center shadow-(--ui-shadow-panel) sm:w-auto sm:flex-row sm:px-5">
-        <p className="text-sm leading-6 text-text-muted sm:text-[15px]">
+      <div className="pointer-events-auto inline-flex w-full max-w-[640px] flex-col items-center gap-3 rounded-full border border-white/10 bg-[#262626] px-4 py-2 text-center sm:w-auto sm:flex-row sm:px-3">
+        <p className="text-xs leading-5 text-white/62">
           {t('settings.missingAnyApiKeyMessage')}
         </p>
         <UiButton
           type="button"
           variant="primary"
           size="sm"
-          className="shrink-0"
+          className="stage-send shrink-0"
           onClick={() => openSettingsDialog({ category: 'providers' })}
         >
           {t('settings.openProvidersSettings')}

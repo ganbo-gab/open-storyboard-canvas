@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ExternalAgentInstallCard } from './ExternalAgentInstallCard';
 import {
   Check,
   Clipboard,
@@ -266,7 +267,7 @@ export function ExternalAgentConnectionPanel({
       {activeConnection ? (
         <>
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[11px] leading-5 text-text-muted">
-            <dt>{t('canvasAgent.externalMcp.expires')}</dt><dd className="text-text-dark">{formatDate(connection?.expiresAt ?? null, i18n.language)}</dd>
+            <dt>{t('canvasAgent.externalMcp.expires')}</dt><dd className="text-text-dark">{connection?.expiresAt ? formatDate(connection.expiresAt, i18n.language) : t('rework.external.lifetime')}</dd>
             <dt>{t('canvasAgent.externalMcp.connectedAt')}</dt><dd className="text-text-dark">{formatDate(connection?.connectedAt ?? null, i18n.language)}</dd>
             <dt>{t('canvasAgent.externalMcp.lastActivity')}</dt><dd className="text-text-dark">{formatDate(connection?.lastActivityAt ?? null, i18n.language)}</dd>
             <dt>{t('canvasAgent.externalMcp.calls')}</dt><dd className="text-text-dark">{connection?.callCount ?? 0}</dd>
@@ -327,6 +328,7 @@ export function ExternalAgentConnectionPanel({
           {t('canvasAgent.externalMcp.create')}
         </button>
       )}
+      <div className="mt-3"><ExternalAgentInstallCard cli={provider} connected={activeConnection} /></div>
 
       {pendingApproval ? (
         <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/[0.07] p-3" role="alert">

@@ -5,7 +5,7 @@ import { TitleBar } from './components/TitleBar';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import { UpdateAvailableDialog, type UpdateIgnoreMode } from './components/UpdateAvailableDialog';
 import { GlobalErrorDialog } from './components/GlobalErrorDialog';
-import { ProjectHome } from './features/project/ProjectHome';
+import { StudioShell } from './features/studio/StudioShell';
 import { useThemeStore } from './stores/themeStore';
 import { useProjectStore } from './stores/projectStore';
 import { useSettingsStore } from './stores/settingsStore';
@@ -263,6 +263,7 @@ function App() {
           ) : null}
 
           <main className="relative min-h-0 flex-1 overflow-hidden">
+            <StudioShell onSettings={() => { setSettingsInitialCategory('providersAdd'); setHasOpenedSettings(true); setShowSettings(true); }}>
             {currentProjectId ? (
               <div
                 key={`canvas-${currentProjectId}`}
@@ -282,11 +283,8 @@ function App() {
                   <CanvasWorkspace projectId={currentProjectId} />
                 </Suspense>
               </div>
-            ) : (
-              <div key="project-home" className="ui-workspace-enter h-full min-h-0">
-                <ProjectHome />
-              </div>
-            )}
+            ) : null}
+            </StudioShell>
           </main>
 
           {hasOpenedSettings ? (

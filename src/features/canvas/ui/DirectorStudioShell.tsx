@@ -5,7 +5,6 @@ import {
   Aperture,
   Box,
   Camera,
-  Clapperboard,
   Check,
   Crop,
   Eraser,
@@ -21,13 +20,10 @@ import {
   Link2,
   Lightbulb,
   Monitor,
-  PanelRight,
   Move3d,
   Plus,
   RotateCcw,
-  Rotate3d,
   Save,
-  Scale3d,
   SlidersHorizontal,
   Trash2,
   Unlink,
@@ -90,13 +86,18 @@ import {
 import { DirectorTimeline } from '@/features/canvas/ui/DirectorTimeline';
 import { DirectorPrevisControls } from './DirectorPrevisControls';
 import { DirectorPrevisSidebar } from './DirectorPrevisSidebar';
-import { DirectorPrevisButton } from './DirectorPrevisButton';
 import { DirectorVideoExportDialog } from '@/features/canvas/ui/DirectorVideoExportDialog';
 import { useDirectorStudioMotion } from '@/features/canvas/ui/useDirectorStudioMotion';
 import { useDirectorTooltips } from '@/features/canvas/ui/useDirectorTooltips';
 import type { CanvasEventMap } from '@/features/canvas/application/ports';
 import { ensurePos3d, genBlueprintItemId, pos3dToLegacy } from '@/features/canvas/ui/blueprintCoordinates';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { registerStageViewport } from '@/features/stage/application/stageCommands';
+import { saveAsset } from '@/features/assets/application/assetCatalog';
+import { useProjectStore } from '@/stores/projectStore';
+import { ScopedAgentPanel } from '@/features/agents/ui/ScopedAgentPanel';
+import { StageHeader } from '@/features/stage/ui/StageHeader';
+import { StageToolDock } from '@/features/stage/ui/StageToolDock';
 
 const loadBlueprintScene = () =>
   import('@/features/canvas/ui/BlueprintScene').then((m) => ({ default: m.BlueprintScene }));
@@ -120,17 +121,6 @@ type InspectorTextDraft = {
 
 const TEXT_DRAFT_COMMIT_DELAY_MS = 800;
 
-const TRANSFORM_MODE_OPTIONS: Array<{
-  mode: DirectorStudioTransformMode;
-  shortcutId: DirectorStudioShortcutId;
-  labelKey: string;
-  titleKey: string;
-  icon: LucideIcon;
-}> = [
-  { mode: 'move', shortcutId: 'transformMove', labelKey: 'directorStudio.transform.move', titleKey: 'directorStudio.transform.moveTitle', icon: Move3d },
-  { mode: 'rotate', shortcutId: 'transformRotate', labelKey: 'directorStudio.transform.rotate', titleKey: 'directorStudio.transform.rotateTitle', icon: Rotate3d },
-  { mode: 'scale', shortcutId: 'transformScale', labelKey: 'directorStudio.transform.scale', titleKey: 'directorStudio.transform.scaleTitle', icon: Scale3d },
-];
 
 const CAMERA_PRESETS = [
   { id: 'standard', fov: 39.6, labelKey: 'directorStudio.cameraPresets.standard' },
@@ -1021,6 +1011,8 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   const copiedItemRef = useRef<BlueprintItem | null>(null);
   const toolbarAnchorRefs = useRef<Record<string, HTMLElement | null>>({});
   const [studioMode, setStudioMode] = useState<'director' | 'previs'>('director');
+  const projectId = useProjectStore((state) => state.currentProjectId);
+  const [agentOpen, setAgentOpen] = useState(false);
   const [previsSidebarOpen, setPrevisSidebarOpen] = useState(true);
   const [timelineHeightOverride, setTimelineHeightOverride] = useState<number | null>(null);
   const timelineOpen = studioMode === 'previs';
@@ -2598,19 +2590,19 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         claimShortcut();
         return;
       }
-      if (shortcutMatchesEvent(event, shortcuts.transformMove)) {
+      if (shortcutMatchesEvent(event, shortcuts.transformMove) || shortcutMatchesEvent(event, 'g')) {
         if (!selectedItem) return;
         setActiveTransformMode('move');
         claimShortcut();
         return;
       }
-      if (shortcutMatchesEvent(event, shortcuts.transformRotate)) {
+      if (shortcutMatchesEvent(event, shortcuts.transformRotate) || shortcutMatchesEvent(event, 'r')) {
         if (!selectedItem) return;
         setActiveTransformMode('rotate');
         claimShortcut();
         return;
       }
-      if (shortcutMatchesEvent(event, shortcuts.transformScale)) {
+      if (shortcutMatchesEvent(event, shortcuts.transformScale) || shortcutMatchesEvent(event, 't')) {
         if (!selectedItem) return;
         setActiveTransformMode('scale');
         claimShortcut();
@@ -2716,6 +2708,18 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     setPreviewModeAndApply('route');
     setStudioMode(nextMode);
   };
+  const workspaceTransitionRef = useRef(switchStudioMode);
+  workspaceTransitionRef.current = switchStudioMode;
+  useEffect(() => registerStageViewport(sourceNodeId, {
+    setWorkspace: (mode) => workspaceTransitionRef.current(mode),
+    capture: async () => {
+      const raw = editorRef.current?.exportPng(computeScreenshotExportOptions());
+      if (!raw) throw new Error(t('directorStudio.addToCanvasNoSnapshot'));
+      const snapshotUrl = await persistDirectorStudioImageSource(raw);
+      const asset = await saveAsset({ kind: 'image', source: snapshotUrl, name: `${t('directorStudio.title')} · ${t('directorStudio.toolbar.screenshot')}`, origin: 'generated', projectId: projectId ?? undefined, nodeId: sourceNodeId, metadata: { stageNodeId: sourceNodeId } });
+      return { assetId: asset.id };
+    },
+  }), [sourceNodeId, projectId, computeScreenshotExportOptions, t]);
 
   const toolbarButtons: ToolButtonSpec[] = [
     { key: 'model', label: t('directorStudio.toolbar.addModel'), title: t('directorStudio.toolbar.addModel'), icon: Box, active: activeDialog === 'modelLibrary', onClick: () => setActiveDialog('modelLibrary') },
@@ -2778,77 +2782,11 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
     >
-      <header className="absolute inset-x-0 top-0 z-50 flex h-14 items-center justify-between gap-2 border-b border-white/10 bg-[#101113]/82 px-2 shadow-[0_10px_34px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:px-4">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-          <div className="truncate whitespace-nowrap text-sm font-semibold tracking-normal sm:text-base">{t(studioMode === 'previs' ? 'directorStudio.studioMode.previs' : 'directorStudio.title')}</div>
-          <div className={`rounded border px-2 py-0.5 text-[11px] ${
-            hasUnsavedChanges ? 'border-amber-300/30 bg-amber-300/10 text-amber-200' : 'border-emerald-300/25 bg-emerald-300/10 text-emerald-200'
-          }`}>
-            {hasUnsavedChanges ? t('directorStudio.unsaved') : t('directorStudio.saved')}
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-          {timelineOpen ? (
-            <>
-              <DirectorPrevisButton compact showLabel={false} label={t('directorStudio.previs.undo')} icon={<RotateCcw size={15} />} onClick={undoCanvas} />
-              <DirectorPrevisButton compact label={t('directorStudio.toolbar.screenshot')} icon={<Aperture size={15} />} onClick={() => { void captureScreenshot(); }} />
-              <DirectorPrevisButton compact label={t('directorStudio.previs.record')} description={t('directorStudio.motion.export.title')} disabled={motionProject.cameraTrack.length < 2} disabledReason={t('directorStudio.motion.export.needsCamera')} icon={<Clapperboard size={15} />} onClick={openVideoExport} />
-              <DirectorPrevisButton compact showLabel={false} label={t('directorStudio.previs.toggleSidebar')} description={t('directorStudio.previs.toggleSidebarHelp')} active={previsSidebarOpen} icon={<PanelRight size={16} />} onClick={() => setPrevisSidebarOpen((value) => !value)} />
-            </>
-          ) : null}
-          <div role="group" aria-label={t('directorStudio.studioMode.label')} className="mr-1 inline-flex h-9 items-center rounded-md border border-white/15 bg-white/5 p-0.5">
-            {(['director', 'previs'] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => switchStudioMode(mode)}
-                aria-pressed={studioMode === mode}
-                className={`h-8 rounded-sm px-2 text-xs font-medium transition-colors sm:px-3 ${studioMode === mode ? 'bg-white text-[#152b2e]' : 'text-white/65 hover:bg-white/10 hover:text-white'}`}
-              >{t(`directorStudio.studioMode.${mode}`)}</button>
-            ))}
-          </div>
-          <button
-            type="button"
-            onClick={() => { void saveProject(); }}
-            className="inline-flex h-9 w-9 items-center justify-center gap-2 rounded-md bg-white px-0 text-sm font-medium text-black hover:bg-white/90 sm:w-auto sm:px-3"
-            title={t('directorStudio.saveProject')}
-            aria-label={t('directorStudio.saveProject')}
-          >
-            <Save className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('directorStudio.saveProject')}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setImportOpen(true)}
-            className="inline-flex h-9 w-9 items-center justify-center gap-2 rounded-md border border-white/12 bg-white/6 px-0 text-sm text-white/75 hover:bg-white/12 hover:text-white sm:w-auto sm:px-3"
-            title={t('directorStudio.panoramaImport')}
-            aria-label={t('directorStudio.panoramaImport')}
-          >
-            <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('directorStudio.panoramaImport')}</span>
-          </button>
-          {rawPanoramaUrl ? (
-            <button
-              type="button"
-              onClick={clearPanorama}
-              className="inline-flex h-9 w-9 items-center justify-center gap-2 rounded-md border border-red-300/20 bg-red-500/10 px-0 text-sm text-red-100 hover:bg-red-500/18 sm:w-auto sm:px-3"
-              title={t('directorStudio.clearPanorama')}
-              aria-label={t('directorStudio.clearPanorama')}
-            >
-              <Eraser className="h-4 w-4" />
-              <span className="hidden sm:inline">{t('directorStudio.clearPanorama')}</span>
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={handleClose}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-white/6 text-white/70 hover:bg-white/12 hover:text-white"
-            aria-label={t('common.close')}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      </header>
+      <StageHeader mode={studioMode} dirty={hasUnsavedChanges} agentOpen={agentOpen} canRecord={motionProject.cameraTrack.length >= 2}
+        onBack={handleClose} onMode={switchStudioMode} onSave={() => { void saveProject(); }} onCapture={() => { void captureScreenshot(); }}
+        onRecord={openVideoExport} onImport={() => setImportOpen(true)} onUndo={undoCanvas} onSidebar={() => setPrevisSidebarOpen((value) => !value)}
+        onAgent={() => setAgentOpen((value) => !value)} onClearPanorama={rawPanoramaUrl ? clearPanorama : undefined} />
+      {agentOpen && projectId && <aside className="absolute bottom-3 right-3 top-16 z-[90] w-[380px] max-w-[calc(100%-24px)] overflow-hidden rounded-2xl border border-white/15 bg-surface-dark text-text-dark shadow-2xl"><div className="absolute right-2 top-2 z-10"><button type="button" aria-label={t('common.close')} onClick={() => setAgentOpen(false)} className="rounded-md bg-bg-dark p-1.5 text-text-muted"><X className="h-3.5 w-3.5" /></button></div><ScopedAgentPanel scope="stage" projectId={projectId} compact /></aside>}
 
       <div className="absolute inset-0 z-0 overflow-hidden bg-[#071012]">
         {!timelineOpen && (panelOpen ? (
@@ -4082,99 +4020,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
 
           {!timelineOpen ? (
             <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center" style={{ bottom: motionTimelineHeight + 20 }}>
-              <div className="director-studio-tool-dock ui-scrollbar pointer-events-auto flex max-w-[calc(100%-24px)] flex-wrap items-center justify-center gap-1 rounded-lg border border-white/12 bg-[#151618]/92 p-1.5 shadow-2xl">
-                {toolbarButtons.map((button) => {
-                  const Icon = button.icon;
-                  if (button.key === 'transform') {
-                    return (
-                      <div
-                        key={button.key}
-                        ref={(node) => {
-                          toolbarAnchorRefs.current[button.key] = node;
-                        }}
-                        className={`flex h-10 shrink-0 items-center gap-1 rounded-md border px-1 transition-colors ${
-                          button.active
-                            ? 'border-accent/45 bg-accent/14'
-                            : button.disabled
-                              ? 'border-transparent text-white/28'
-                              : 'border-transparent text-white/72 hover:bg-white/8'
-                        }`}
-                        title={button.title}
-                      >
-                        <button
-                          type="button"
-                          disabled={button.disabled}
-                          onClick={button.onClick}
-                          aria-label={button.title}
-                          className={`flex h-8 w-9 items-center justify-center gap-1 rounded px-1 text-[10px] min-[1700px]:w-auto min-[1700px]:min-w-[58px] min-[1700px]:px-1.5 ${
-                            button.active
-                              ? 'text-accent'
-                              : button.disabled
-                                ? 'text-white/28'
-                                : 'text-white/72 hover:bg-white/10 hover:text-white'
-                          }`}
-                        >
-                          <Icon className="h-4 w-4" />
-                          <span className="hidden max-w-[42px] truncate min-[1700px]:block">{button.label}</span>
-                        </button>
-                        <div className="flex items-center gap-0.5">
-                          {TRANSFORM_MODE_OPTIONS.map((option) => {
-                            const ModeIcon = option.icon;
-                            const isActive = activeTransformMode === option.mode;
-                            const shortcut = shortcuts[option.shortcutId];
-                            return (
-                              <button
-                                key={option.mode}
-                                type="button"
-                                disabled={!selectedItem}
-                                onClick={() => setActiveTransformMode(option.mode)}
-                                title={selectedItem ? `${t(option.titleKey)} · ${shortcut}` : t('directorStudio.selectElementFirst')}
-                                aria-label={selectedItem ? `${t(option.titleKey)} · ${shortcut}` : t('directorStudio.selectElementFirst')}
-                                className={`relative flex h-8 w-8 items-center justify-center rounded text-[10px] transition-colors ${
-                                  isActive
-                                    ? 'bg-accent/28 text-accent'
-                                    : selectedItem
-                                      ? 'text-white/68 hover:bg-white/10 hover:text-white'
-                                      : 'text-white/24'
-                                }`}
-                              >
-                                <ModeIcon className="h-4 w-4" />
-                                <span className="absolute bottom-0.5 right-1 font-mono text-[8px] opacity-70">
-                                  {shortcut}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  }
-                  return (
-                    <button
-                      key={button.key}
-                      ref={(node) => {
-                        toolbarAnchorRefs.current[button.key] = node;
-                      }}
-                      type="button"
-                      disabled={button.disabled}
-                      onClick={button.onClick}
-                      title={button.title}
-                      aria-label={button.title}
-                      aria-pressed={button.active ?? undefined}
-                      className={`flex h-10 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-[10px] transition-colors min-[1700px]:w-auto min-[1700px]:min-w-[74px] min-[1700px]:px-2 ${
-                        button.active
-                          ? 'bg-accent/25 text-accent'
-                          : button.disabled
-                            ? 'text-white/28'
-                            : 'text-white/72 hover:bg-white/10 hover:text-white'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      <span className="hidden max-w-full truncate min-[1700px]:block">{button.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              <StageToolDock tools={toolbarButtons} onAnchor={(key,element) => { toolbarAnchorRefs.current[key] = element; }} transformMode={activeTransformMode} canTransform={!!selectedItem} onTransform={setActiveTransformMode} />
             </div>
           ) : null}
 

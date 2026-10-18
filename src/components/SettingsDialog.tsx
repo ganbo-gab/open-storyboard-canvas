@@ -28,7 +28,8 @@ import { listModelProviders } from '@/features/canvas/models';
 import type { SettingsCategory } from '@/features/settings/settingsEvents';
 import { CustomProvidersSection } from '@/components/settings/CustomProvidersSection';
 import { ComfyUISettingsSection } from '@/components/settings/ComfyUISettingsSection';
-import { AddProvidersSection, type AddProviderTab } from '@/components/settings/AddProvidersSection';
+import { ChannelSettingsPage } from '@/features/settings/channels/ChannelSettingsPage';
+import type { AddProviderTab } from '@/components/settings/AddProvidersSection';
 import { AgnesSettingsSection } from '@/components/settings/AgnesSettingsSection';
 import { DreaminaSection } from '@/components/settings/DreaminaSection';
 import { PromptManagementSection } from '@/components/settings/PromptManagementSection';
@@ -302,7 +303,7 @@ export function SettingsDialog({
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>(
     normalizeSettingsCategory(initialCategory)
   );
-  const [activeProviderAddTab, setActiveProviderAddTab] = useState<AddProviderTab>(
+  const [, setActiveProviderAddTab] = useState<AddProviderTab>(
     providerTabFromSettingsCategory(initialCategory)
   );
   const [appVersion, setAppVersion] = useState<string>('');
@@ -1032,10 +1033,7 @@ export function SettingsDialog({
             {activeCategory === 'providersAdd' && (
               <div className="flex flex-1 flex-col overflow-hidden">
                 <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">
-                  <AddProvidersSection
-                    activeTab={activeProviderAddTab}
-                    onTabChange={setActiveProviderAddTab}
-                  />
+                  <ChannelSettingsPage />
                 </div>
 
                 <div className="shrink-0 flex justify-end border-t border-border-dark px-6 py-4">

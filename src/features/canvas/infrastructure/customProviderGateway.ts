@@ -90,6 +90,29 @@ import {
   validateComfyUIRequest,
   type ComfyUITransport,
 } from './comfyuiGateway';
+import {
+  channelJobFromRequest, profileForProjection, submitChannelJob,
+  isChannelJobId, getChannelJob, getChannelJobAsync, recoverChannelJob,
+} from '@/features/channels/runtime/channelExecution';
+import { channelChatInput, submitChannelChat, testChannelModels } from '@/features/channels/application/channelService';
+import { renderPreview as renderChannelPreview } from '@/features/channels/domain/template';
+import {
+  submitComfyChannelJob, isComfyChannelJobId, getComfyChannelJob,
+  getComfyChannelJobAsync, recoverComfyChannelJob,
+} from '@/features/channels/runtime/comfyExecution';
+
+// Intentional legacy route: built-in and non-template/special providers keep
+// their established transport until an explicitly reviewed end-to-end cutover.
+function channelDebugPreview(cfg: CustomProviderConfig, model: string, request: GenerateRequest): CustomProviderRequestDebugPreview | null {
+  const profile = profileForProjection(cfg);
+  if (!profile) return null;
+  const preview = renderChannelPreview(profile, channelJobFromRequest(profile, model, request, isVideoCustomProvider(cfg) ? 'video' : 'image'));
+  return { providerLabel: cfg.label, providerId: cfg.id, modelId: request.model, modelName: model,
+    method: preview.method, bodyMode: preview.body.mode === 'none' ? 'json' : preview.body.mode,
+    url: preview.url, headers: preview.headers,
+    body: preview.body.mode === 'json' ? preview.body.json : undefined,
+    multipart: preview.body.mode === 'multipart' ? preview.body : undefined };
+}
 
 // Custom providers go through a native Tauri/reqwest bridge instead of the
 // WebView's browser fetch. Many aggregators do not expose permissive CORS
@@ -2594,6 +2617,8 @@ export function buildCustomProviderRequestDebugPreviewForConfig(
   model: string,
   request: GenerateRequest,
 ): CustomProviderRequestDebugPreview {
+  const channelPreview = channelDebugPreview(cfg, model, request);
+  if (channelPreview) return channelPreview;
   if (isComfyUIProvider(cfg)) {
     const config = parseComfyUIConfig(cfg);
     validateComfyUIRequest(config, request);
@@ -2671,6 +2696,8 @@ export function buildCustomVideoProviderRequestDebugPreview(
   }
 
   const { cfg, model } = resolved;
+  const channelPreview = channelDebugPreview(cfg, model, request);
+  if (channelPreview) return channelPreview;
   if (isComfyUIProvider(cfg)) {
     return buildCustomProviderRequestDebugPreviewForConfig(cfg, model, request);
   }
@@ -3214,6 +3241,9 @@ export async function submitCustomProviderJob(request: GenerateRequest): Promise
     return jobId;
   }
   const { cfg, model } = resolved;
+  const profile = profileForProjection(cfg);
+  if (profile) return submitChannelJob(profile, channelJobFromRequest(profile, model, request, 'image'));
+  if (isComfyUIProvider(cfg)) return submitComfyChannelJob(cfg, model, request);
   const network = { ...useSettingsStore.getState().generationNetworkSettings };
   if (!hasCustomProviderCredential(cfg)) {
     cache.set(jobId, { job_id: jobId, status: 'failed', result: null, error: `${cfg.label} 未填写 API Key` });
@@ -4725,6 +4755,9 @@ export async function submitCustomVideoJob(request: GenerateRequest): Promise<st
     return jobId;
   }
   const { cfg, model } = resolved;
+  const profile = profileForProjection(cfg);
+  if (profile) return submitChannelJob(profile, channelJobFromRequest(profile, model, request, 'video'));
+  if (isComfyUIProvider(cfg)) return submitComfyChannelJob(cfg, model, request);
   const network = { ...useSettingsStore.getState().generationNetworkSettings };
   if (!hasCustomProviderCredential(cfg)) {
     cache.set(jobId, { job_id: jobId, status: 'failed', result: null, error: `${cfg.label} 未填写 API Key` });
@@ -5647,6 +5680,8 @@ async function resolveGeneratedImageUrl(
 }
 
 export function getCustomProviderJob(jobId: string): GenerationJobStatus {
+  if (isChannelJobId(jobId)) return getChannelJob(jobId);
+  if (isComfyChannelJobId(jobId)) return getComfyChannelJob(jobId);
   const cached = cache.get(jobId);
   if (!cached) return { job_id: jobId, status: 'not_found', result: null, error: 'job id not found' };
   // Keep retry context (which contains the provider config and API key) inside
@@ -5793,6 +5828,8 @@ async function recoverPersistedCustomJob(job: GenerationJobStatus): Promise<Gene
 }
 
 export async function recoverCustomProviderJob(jobId: string): Promise<GenerationJobStatus> {
+  if (isChannelJobId(jobId)) return recoverChannelJob(jobId);
+  if (isComfyChannelJobId(jobId)) return recoverComfyChannelJob(jobId);
   const normalizedJobId = jobId.trim();
   if (!normalizedJobId) throw new Error('恢复任务需要有效的 jobId。');
   const active = recoveryJobs.get(normalizedJobId);
@@ -5842,6 +5879,8 @@ function startPersistedRecovery(persisted: GenerationJobStatus): Promise<Generat
 }
 
 export async function getCustomProviderJobAsync(jobId: string): Promise<GenerationJobStatus> {
+  if (isChannelJobId(jobId)) return getChannelJobAsync(jobId);
+  if (isComfyChannelJobId(jobId)) return getComfyChannelJobAsync(jobId);
   const cached = cache.get(jobId);
   if (cached?.provider_id && cached.network_route) return getCustomProviderJob(jobId);
   try {
@@ -5868,6 +5907,17 @@ export async function getCustomProviderJobAsync(jobId: string): Promise<Generati
 }
 
 export function retryCustomProviderJob(jobId: string): boolean {
+  if (isComfyChannelJobId(jobId)) {
+    if (!getComfyChannelJob(jobId).resumable) return false;
+    void recoverComfyChannelJob(jobId).catch(() => undefined);
+    return true;
+  }
+  if (isChannelJobId(jobId)) {
+    const job = getChannelJob(jobId);
+    if (!job.resumable) return false;
+    void recoverChannelJob(jobId).catch(() => undefined);
+    return true;
+  }
   const cached = cache.get(jobId);
   if (
     (cached?.status === 'recoverable_wait' || cached?.status === 'unknown')
@@ -5979,6 +6029,11 @@ function extractModelIds(payload: unknown): string[] {
 export async function fetchCustomProviderModels(
   cfg: CustomProviderConfig,
 ): Promise<CustomProviderModelListResult> {
+  const profile = profileForProjection(cfg);
+  if (profile) {
+    const result = await testChannelModels(profile);
+    return result.ok ? { ok: true, models: result.models } : { ok: false, models: [], errorMessage: result.error.message };
+  }
   if (!hasCustomProviderCredential(cfg)) {
     return { ok: false, models: [], errorMessage: '未填写 API Key，无法获取模型列表' };
   }
@@ -6204,6 +6259,13 @@ export function buildCustomChatCompletionRequestDebugPreview(
     throw new Error('未找到可用的文本模型配置');
   }
   const { cfg, model } = resolved;
+  const profile = profileForProjection(cfg);
+  if (profile) {
+    const preview = renderChannelPreview(profile, channelChatInput(profile, model, openAiPayload));
+    return { providerLabel: cfg.label, providerId: cfg.id, modelId: catalogModelId, modelName: model,
+      method: preview.method, bodyMode: 'json', url: preview.url, headers: preview.headers,
+      body: preview.body.mode === 'json' ? preview.body.json : undefined };
+  }
   if (!isChatCustomProvider(cfg)) {
     throw new Error('所选模型不是文本对话模型');
   }
@@ -6657,6 +6719,12 @@ export async function submitCustomChatCompletion(
     throw new Error('未找到可用的文本模型配置');
   }
   const { cfg, model } = resolved;
+  const profile = profileForProjection(cfg);
+  if (profile) {
+    const result = await submitChannelChat(profile, model, openAiPayload);
+    return { text: result.text, raw: result.raw, status: result.status,
+      requestDebug: buildCustomChatCompletionRequestDebugPreview(catalogModelId, openAiPayload, false) };
+  }
   if (!isChatCustomProvider(cfg)) {
     throw new Error('所选模型不是文本对话模型');
   }
@@ -6702,6 +6770,13 @@ export async function streamCustomChatCompletion(
     throw new Error('未找到可用的文本模型配置');
   }
   const { cfg, model } = resolved;
+  if (profileForProjection(cfg)) {
+    // v2 declares non-streaming chat. Complete one real template request; do not
+    // parse or manufacture SSE events for a protocol the profile never declared.
+    const result = await submitCustomChatCompletion(catalogModelId, openAiPayload);
+    options.onTextDelta?.(result.text, result.text);
+    return { text: result.text, requestDebug: result.requestDebug };
+  }
   if (!isChatCustomProvider(cfg)) {
     throw new Error('所选模型不是文本对话模型');
   }
@@ -6882,6 +6957,12 @@ export async function testCustomProviderConnectivity(
   cfg: CustomProviderConfig,
   testModelId?: string,
 ): Promise<CustomProviderTestResult> {
+  const profile = profileForProjection(cfg);
+  if (profile) {
+    const result = await testChannelModels(profile);
+    return result.ok ? { ok: true, text: `已读取 ${result.models.length} 个模型；未提交生成请求` }
+      : { ok: false, errorMessage: result.error.message };
+  }
   if (!hasCustomProviderCredential(cfg)) {
     return { ok: false, errorMessage: '未填写 API Key，无法发起测试请求' };
   }

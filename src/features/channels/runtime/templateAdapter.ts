@@ -3,6 +3,7 @@ import { normalizeChannelError, classifyTransportError } from '../domain/errors'
 import { classifyAsyncStatus, extractChatText, extractError, extractOutputs, getPathValues } from '../domain/response';
 import { renderPreview, renderRequest, TemplateValidationError, type HttpRequest, type ResolveRef } from '../domain/template';
 import type { ChannelAdapter, ChannelError, JobInput, PollResult, RequestPreview, SubmitResult } from './types';
+import { captureSubmitSnapshot } from './submitSnapshot';
 
 export interface HttpResponse { status: number; headers: Record<string, string>; bodyText?: string; bodyBytes?: Uint8Array | number[] }
 export type HttpTransport = (request: HttpRequest) => Promise<HttpResponse>;
@@ -10,6 +11,10 @@ export interface TemplateAdapterOptions {
   profile: ChannelProfileV2; apiKey: string | (() => string); http: HttpTransport; resolveRef: ResolveRef;
   /** Restore a submitted response for dynamic polling after an application restart. Never persist secrets or reference bytes. */
   getSubmitResponse?: (job: JobInput, taskId: string) => unknown;
+  /** Called before polling starts. Persistence errors must not trigger a second submit. */
+  onSubmitted?: (job: JobInput, taskId: string, snapshot: Record<string, unknown>) => Promise<void>;
+  /** Ephemeral actual chat response for the existing Agent codec; never persisted as recovery data. */
+  onChatResponse?: (payload: unknown, response: HttpResponse) => void;
 }
 function parseResponse(response: HttpResponse): { payload: unknown; text: string } {
   const text = response.bodyText ?? (response.bodyBytes ? new TextDecoder().decode(new Uint8Array(response.bodyBytes)) : '');
@@ -43,13 +48,24 @@ export class TemplateAdapter implements ChannelAdapter {
     if (op.response.mode === 'async') {
       const id = getPathValues(payload, op.response.taskIdPath)[0];
       if ((typeof id !== 'string' && typeof id !== 'number') || String(id).trim() === '') return { state: 'unknown', error: { category: 'upstream', message: '上游已响应但未返回任务 ID，请先核对渠道任务记录', upstreamMessage: extractError(payload, op.errorPath) ?? text, retryable: false } };
-      this.submitted.set(`${job.jobId}:${String(id)}`, payload);
+      // Record the handle even when a dynamic field cannot safely be retained.
+      // The executor then exposes an actionable recovery error, never a replay.
+      let snapshot: Record<string, unknown>;
+      try { snapshot = captureSubmitSnapshot(this.options.profile, job.operation, payload, typeof this.options.apiKey === 'function' ? this.options.apiKey() : this.options.apiKey); }
+      catch (error) {
+        await this.options.onSubmitted?.(job, String(id), {});
+        return { state: 'unknown', error: validationError(error) };
+      }
+      this.submitted.set(`${job.jobId}:${String(id)}`, snapshot);
+      await this.options.onSubmitted?.(job, String(id), snapshot);
       return { state: 'submitted', taskId: String(id) };
     }
     try {
+      if (job.operation === 'chat') this.options.onChatResponse?.(payload, response);
       const chatText = job.operation === 'chat' ? extractChatText(payload) : undefined;
       const outputs = chatText ? [{ kind: 'text' as const, text: chatText }] : extractOutputs(payload, op.response.outputs, job.operation, { profile: this.options.profile, apiKey: typeof this.options.apiKey === 'function' ? this.options.apiKey() : this.options.apiKey, submit: payload });
-      if (!outputs.length) return { state: 'failed', error: normalizeChannelError(undefined, extractError(payload, op.errorPath) ?? '上游未返回可识别的结果') };
+      const hasToolCalls = job.operation === 'chat' && getPathValues(payload, 'choices[*].message.tool_calls[*]').length > 0;
+      if (!outputs.length && !hasToolCalls) return { state: 'failed', error: normalizeChannelError(undefined, extractError(payload, op.errorPath) ?? '上游未返回可识别的结果') };
       return { state: 'done', outputs };
     } catch (error) { return { state: 'failed', error: validationError(error) }; }
   }

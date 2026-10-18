@@ -23,6 +23,8 @@ pub struct HttpRequestDto {
     pub timeout_ms: Option<u64>,
     pub network_route: Option<String>,
     pub custom_proxy_url: Option<String>,
+    /// Optional hard byte limit for documentation/configuration reads. Never truncate silently.
+    pub max_response_bytes: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -462,14 +464,16 @@ pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponse
     let summary = summarize_http_request(&request);
     let started_at = Instant::now();
     log_http_request(&summary, "buffered");
+    let max_response_bytes = request.max_response_bytes;
     let client = client_for_route(
         request.network_route.as_deref(),
         request.custom_proxy_url.as_deref(),
     )?;
-    let response = build_http_request(&client, request)?
+    let mut response = build_http_request(&client, request)?
         .send()
         .await
         .map_err(|err| {
+            let err = err.without_url();
             warn!(
                 target: "custom_provider_http",
                 transport = "buffered",
@@ -482,10 +486,21 @@ pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponse
             format!("HTTP request failed: {err}")
         })?;
     let status = response.status().as_u16();
-    let text = response
-        .text()
-        .await
-        .map_err(|err| format!("HTTP response read failed: {err}"))?;
+    let text = if let Some(limit) = max_response_bytes {
+        if response.content_length().is_some_and(|length| length > limit as u64) {
+            return Err(format!("HTTP response exceeds size limit ({limit} bytes)"));
+        }
+        let mut bytes = Vec::with_capacity(limit.min(8192));
+        while let Some(chunk) = response.chunk().await.map_err(|err| format!("HTTP response read failed: {err}"))? {
+            if chunk.len() > limit.saturating_sub(bytes.len()) {
+                return Err(format!("HTTP response exceeds size limit ({limit} bytes)"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        String::from_utf8(bytes).map_err(|_| "HTTP response is not valid UTF-8 text".to_string())?
+    } else {
+        response.text().await.map_err(|err| format!("HTTP response read failed: {err}"))?
+    };
 
     info!(
         target: "custom_provider_http",
@@ -525,6 +540,7 @@ pub async fn custom_http_stream_request(
         .send()
         .await
         .map_err(|err| {
+            let err = err.without_url();
             warn!(
                 target: "custom_provider_http",
                 transport = "stream",
@@ -689,6 +705,42 @@ pub async fn custom_http_stream_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn bounded_response_fixture(raw_response: &'static [u8], limit: usize) -> Result<HttpResponseDto, String> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 4096]; let _ = stream.read(&mut request).await;
+            // The caller may reject Content-Length before reading the body.
+            let _ = stream.write_all(raw_response).await;
+        });
+        let mut request = diagnostic_request();
+        request.url = format!("http://{address}/docs"); request.method = "GET".into();
+        request.headers = None; request.body = None; request.body_mode = None;
+        request.network_route = Some("direct".into()); request.max_response_bytes = Some(limit);
+        let result = custom_http_request(request).await;
+        server.await.unwrap(); result
+    }
+
+    #[tokio::test]
+    async fn bounded_response_rejects_content_length_before_body() {
+        let error = bounded_response_fixture(b"HTTP/1.1 200 OK\r\nContent-Length: 9999\r\nConnection: close\r\n\r\n", 16).await.unwrap_err();
+        assert!(error.contains("exceeds size limit (16 bytes)"));
+    }
+
+    #[tokio::test]
+    async fn bounded_response_rejects_stream_overflow_without_silent_truncation() {
+        let error = bounded_response_fixture(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n8\r\n12345678\r\n8\r\nabcdefgh\r\n0\r\n\r\n", 12).await.unwrap_err();
+        assert!(error.contains("exceeds size limit (12 bytes)"));
+    }
+
+    #[tokio::test]
+    async fn bounded_response_returns_complete_valid_document() {
+        let response = bounded_response_fixture(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\ndocument", 8).await.unwrap();
+        assert_eq!(response.text, "document"); assert_eq!(response.status, 200);
+    }
+
 
     fn diagnostic_request() -> HttpRequestDto {
         HttpRequestDto {
@@ -709,6 +761,7 @@ mod tests {
             timeout_ms: Some(30_000),
             network_route: Some("system".to_string()),
             custom_proxy_url: None,
+            max_response_bytes: None,
         }
     }
 

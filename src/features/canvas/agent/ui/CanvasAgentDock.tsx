@@ -956,13 +956,14 @@ export function CanvasAgentDock({ projectId }: Props) {
         type="button"
         aria-label={t('canvasAgent.open')}
         title={t('canvasAgent.open')}
-        className={`absolute right-3 top-3 z-12030 inline-flex h-11 w-11 items-center justify-center rounded-[6px] border border-border-dark bg-bg-dark/95 text-text-dark shadow-xl transition-[opacity,transform,background-color,translate,scale,rotate] duration-200 hover:bg-text-dark/5 active:scale-[0.96] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/70 ${
-          isOpen ? 'pointer-events-none scale-95 opacity-0' : 'scale-100 opacity-100'
+        className={`canvas-agent-launcher absolute right-4 top-3 z-12030 inline-flex items-center justify-center text-text-dark transition-opacity duration-200 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-white/40 ${
+          isOpen ? 'pointer-events-none opacity-0' : 'opacity-100'
         }`}
         onClick={() => setOpen(true)}
         tabIndex={isOpen ? -1 : 0}
       >
-        <Bot className="h-5 w-5" aria-hidden="true" />
+        <Bot className="h-4 w-4" aria-hidden="true" />
+        <span>{t('rework.agent.home')}</span>
         {pendingCount ? (
           <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-amber-400 px-1 text-[10px] font-semibold leading-4 text-black">
             {Math.min(99, pendingCount)}

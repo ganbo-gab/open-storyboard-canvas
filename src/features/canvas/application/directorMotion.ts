@@ -39,6 +39,7 @@ export interface SampledDirectorCameraState {
   fov: number;
   trackTargetId?: string | null;
   trackTargetBodyPart?: string | null;
+  freeRotation?: DirectorMotionVector3;
 }
 
 export interface SampledDirectorMotionFrame {
@@ -155,7 +156,15 @@ function normalizeVector3(value: unknown, fallback: DirectorMotionVector3): Dire
 }
 
 function normalizeEasing(value: unknown): DirectorMotionEasing {
-  return value === 'smooth' ? 'smooth' : 'linear';
+  return value === 'smooth' || value === 'hold' ? value : 'linear';
+}
+
+function normalizeEasingRange(value: unknown): [number, number] | undefined {
+  if (!Array.isArray(value) || value.length !== 2) return undefined;
+  const [start, end] = value;
+  return typeof start === 'number' && typeof end === 'number'
+    && Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end <= 1 && start < end
+    ? [start, end] : undefined;
 }
 
 function normalizeId(value: unknown, fallback: string): string {
@@ -233,6 +242,8 @@ function normalizeActionState(record: UnknownRecord): DirectorActionState {
     poseId: stringOrNull(record.poseId),
     actionId: stringOrNull(record.actionId),
     clipId: stringOrNull(record.clipId),
+    ...(typeof record.actionOffsetSeconds === 'number' && Number.isFinite(record.actionOffsetSeconds)
+      ? { actionOffsetSeconds: record.actionOffsetSeconds } : {}),
     pose: normalizePose(record.pose),
     bodyControls: normalizeBodyControls(record.bodyControls),
   };
@@ -247,11 +258,13 @@ function normalizeCameraTrack(value: unknown, duration: number): DirectorCameraK
       id: normalizeId(record.id, `camera-${index}`),
       time: clamp(finiteNumber(record.time, 0), 0, duration),
       easing: normalizeEasing(record.easing),
+      ...(normalizeEasingRange(record.easingRange) ? { easingRange: normalizeEasingRange(record.easingRange) } : {}),
       position: normalizeVector3(record.position, { x: 0, y: 2, z: 8 }),
       target: normalizeVector3(record.target, { x: 0, y: 1, z: 0 }),
       fov: clamp(finiteNumber(record.fov, 45), 10, 150),
       trackTargetId: typeof record.trackTargetId === 'string' ? record.trackTargetId : null,
       trackTargetBodyPart: typeof record.trackTargetBodyPart === 'string' ? record.trackTargetBodyPart : null,
+      ...(asRecord(record.freeRotation) ? { freeRotation: normalizeVector3(record.freeRotation, { x: 0, y: 0, z: 0 }) } : {}),
     }];
   }));
 }
@@ -265,6 +278,7 @@ function normalizeObjectTrack(value: unknown, duration: number, trackId: string)
       id: normalizeId(record.id, `${trackId}-transform-${index}`),
       time: clamp(finiteNumber(record.time, 0), 0, duration),
       easing: normalizeEasing(record.easing),
+      ...(normalizeEasingRange(record.easingRange) ? { easingRange: normalizeEasingRange(record.easingRange) } : {}),
       position: normalizeVector3(record.position, { x: 0, y: 0, z: 0 }),
       rotation: normalizeVector3(record.rotation, { x: 0, y: 0, z: 0 }),
       scale: normalizeVector3(record.scale, { x: 1, y: 1, z: 1 }),
@@ -282,6 +296,7 @@ function normalizeActionTrack(value: unknown, duration: number, trackId: string)
       id: normalizeId(record.id, `${trackId}-action-${index}`),
       time: clamp(finiteNumber(record.time, 0), 0, duration),
       easing: normalizeEasing(record.easing),
+      ...(normalizeEasingRange(record.easingRange) ? { easingRange: normalizeEasingRange(record.easingRange) } : {}),
       ...normalizeActionState(record),
     }];
   }));
@@ -304,6 +319,7 @@ function normalizeClip(value: unknown, index: number): DirectorActionClip | null
           id: normalizeId(keyframe.id, `${id}-${keyframeIndex}`),
           time: clamp(finiteNumber(keyframe.time, 0), 0, durationSeconds),
           easing: normalizeEasing(keyframe.easing),
+          ...(normalizeEasingRange(keyframe.easingRange) ? { easingRange: normalizeEasingRange(keyframe.easingRange) } : {}),
           ...normalizeActionState(keyframe),
         }];
       }))
@@ -369,6 +385,7 @@ export function normalizeDirectorMotionProject(value: unknown): DirectorMotionPr
 
 function easeProgress(progress: number, easing: DirectorMotionEasing): number {
   const t = clamp(progress, 0, 1);
+  if (easing === 'hold') return t >= 1 ? 1 : 0;
   return easing === 'smooth' ? t * t * (3 - 2 * t) : t;
 }
 
@@ -385,6 +402,10 @@ function lerpVector(from: DirectorMotionVector3, to: DirectorMotionVector3, amou
 }
 
 function slerpEuler(from: DirectorMotionVector3, to: DirectorMotionVector3, amount: number): DirectorMotionVector3 {
+  // Quaternion round-tripping reparameterizes Euler angles at gimbal lock and
+  // loses the authored roll channel even when sampling an exact keyframe.
+  if (amount <= 0) return { ...from };
+  if (amount >= 1) return { ...to };
   const fromQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(from.x, from.y, from.z, 'XYZ'));
   const toQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(to.x, to.y, to.z, 'XYZ'));
   fromQuat.slerp(toQuat, amount);
@@ -401,7 +422,7 @@ interface Segment<T> {
   toIndex: number;
 }
 
-function findSegment<T extends { time: number; easing: DirectorMotionEasing }>(track: T[], time: number): Segment<T> | null {
+function findSegment<T extends { time: number; easing: DirectorMotionEasing; easingRange?: [number, number] }>(track: T[], time: number): Segment<T> | null {
   if (track.length === 0) return null;
   if (track.length === 1 || time <= track[0].time) {
     return { from: track[0], to: track[0], amount: 0, rawAmount: 0, fromIndex: 0, toIndex: 0 };
@@ -411,15 +432,22 @@ function findSegment<T extends { time: number; easing: DirectorMotionEasing }>(t
     return { from: track[lastIndex], to: track[lastIndex], amount: 0, rawAmount: 0, fromIndex: lastIndex, toIndex: lastIndex };
   }
   const toIndex = track.findIndex((keyframe) => keyframe.time >= time);
+  if (track[toIndex].time === time) {
+    return { from: track[toIndex], to: track[toIndex], amount: 0, rawAmount: 0, fromIndex: toIndex, toIndex };
+  }
   const fromIndex = Math.max(0, toIndex - 1);
   const from = track[fromIndex];
   const to = track[toIndex];
   const rawAmount = (time - from.time) / Math.max(0.000001, to.time - from.time);
+  const [rangeStart, rangeEnd] = to.easingRange ?? [0, 1];
+  const lower = easeProgress(rangeStart, to.easing);
+  const upper = easeProgress(rangeEnd, to.easing);
+  const eased = easeProgress(rangeStart + rawAmount * (rangeEnd - rangeStart), to.easing);
   return {
     from,
     to,
     rawAmount,
-    amount: easeProgress(rawAmount, to.easing),
+    amount: upper > lower ? (eased - lower) / (upper - lower) : 0,
     fromIndex,
     toIndex,
   };
@@ -542,6 +570,7 @@ function sampleActionState(
   elapsedSeconds: number,
   customClips: DirectorActionClip[],
 ): SampledDirectorActionState {
+  elapsedSeconds += state.actionOffsetSeconds ?? 0;
   if (state.clipId) {
     const clip = customClips.find((candidate) => candidate.id === state.clipId);
     if (clip && clip.keyframes.length > 0) {
@@ -635,7 +664,10 @@ function sampleCameraTrack(
   const segment = findSegment(track, time);
   if (!segment) return null;
   const { from, to, amount } = segment;
-  const trackTargetId = amount < 0.5 ? from.trackTargetId : to.trackTargetId;
+  const freeRotation = from.freeRotation && to.freeRotation
+    ? slerpEuler(from.freeRotation, to.freeRotation, amount)
+    : (amount < 0.5 ? from.freeRotation : to.freeRotation);
+  const trackTargetId = freeRotation ? null : amount < 0.5 ? from.trackTargetId : to.trackTargetId;
   const trackTargetBodyPart = amount < 0.5 ? from.trackTargetBodyPart : to.trackTargetBodyPart;
   let target = lerpVector(from.target, to.target, amount);
   if (trackTargetId) {
@@ -651,12 +683,18 @@ function sampleCameraTrack(
       };
     }
   }
+  const position = lerpVector(from.position, to.position, amount);
+  if (freeRotation) {
+    const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(freeRotation.x, freeRotation.y, freeRotation.z, 'XYZ'));
+    target = { x: position.x + forward.x, y: position.y + forward.y, z: position.z + forward.z };
+  }
   return {
-    position: lerpVector(from.position, to.position, amount),
+    position,
     target,
     fov: lerpNumber(from.fov, to.fov, amount),
     trackTargetId,
     trackTargetBodyPart,
+    ...(freeRotation ? { freeRotation } : {}),
   };
 }
 
@@ -841,7 +879,7 @@ export function createDirectorObjectRouteTrack(
 
 export function createDirectorCameraRouteTrack(
   points: readonly DirectorMotionVector3[],
-  camera: { target: DirectorMotionVector3; fov: number; trackTargetId?: string | null; trackTargetBodyPart?: string | null },
+  camera: { target: DirectorMotionVector3; fov: number; trackTargetId?: string | null; trackTargetBodyPart?: string | null; freeRotation?: DirectorMotionVector3 },
   startTime: number,
   durationSeconds: number,
 ): DirectorCameraKeyframe[] {
@@ -854,6 +892,7 @@ export function createDirectorCameraRouteTrack(
     fov: camera.fov,
     trackTargetId: camera.trackTargetId ?? null,
     trackTargetBodyPart: camera.trackTargetBodyPart ?? null,
+    ...(camera.freeRotation ? { freeRotation: { ...camera.freeRotation } } : {}),
   }));
 }
 
@@ -991,4 +1030,66 @@ export function upsertDirectorKeyframe<T extends { id: string; time: number }>(t
 
 export function findKeyframeNearTime<T extends { time: number }>(track: T[], time: number, epsilon = 0.025): T | null {
   return track.find((keyframe) => Math.abs(keyframe.time - time) <= epsilon) ?? null;
+}
+
+/** Split library clips in local seconds. Caller converts scene time explicitly. */
+export function splitDirectorMotionClip(
+  project: DirectorMotionProjectV1,
+  clipId: string,
+  localTime: number,
+): { project: DirectorMotionProjectV1; leftId: string; rightId: string } {
+  const clip = project.customClips.find((entry) => entry.id === clipId);
+  if (!clip) throw new Error(`Clip ${clipId} does not exist.`);
+  if (!Number.isFinite(localTime) || localTime < 0.5 || clip.durationSeconds - localTime < 0.5) {
+    throw new Error('Both split clips must be at least 0.5 seconds.');
+  }
+  const referenced = [...Object.values(project.actionTracks).flat(), ...project.customClips.flatMap((entry) => entry.keyframes)]
+    .some((frame) => frame.clipId === clipId);
+  if (clip.loop && referenced) throw new Error('Unloop a placed clip before splitting it.');
+  const segment = findSegment(clip.keyframes, localTime);
+  const sampled = sampleActionTrack(clip.keyframes, localTime, project.customClips);
+  const from = segment?.from;
+  const to = segment?.to;
+  const [start, end] = to?.easingRange ?? [0, 1];
+  const midpoint = start + (segment?.rawAmount ?? 0) * (end - start);
+  const crossing = from && to && from !== to && localTime > from.time && localTime < to.time;
+  const boundary: DirectorActionClipKeyframe = {
+    ...sampled,
+    id: createDirectorMotionId('split-frame'), time: localTime, easing: to?.easing ?? 'linear',
+    ...(crossing ? { easingRange: [start, midpoint] as [number, number] } : {}),
+    ...((from?.actionId || from?.clipId) ? {
+      actionOffsetSeconds: (from.actionOffsetSeconds ?? 0) + localTime - from.time,
+    } : {}),
+  };
+  const left: DirectorActionClip = {
+    ...clip, durationSeconds: localTime,
+    keyframes: [...clip.keyframes.filter((frame) => frame.time < localTime), boundary],
+  };
+  const rightId = createDirectorMotionId('clip');
+  const right: DirectorActionClip = {
+    ...clip, id: rightId, name: `${clip.name} (2)`, durationSeconds: clip.durationSeconds - localTime,
+    keyframes: [
+      { ...boundary, id: createDirectorMotionId('split-frame'), time: 0, easingRange: undefined },
+      ...clip.keyframes.filter((frame) => frame.time > localTime).map((frame) => ({
+        ...frame, id: createDirectorMotionId('split-frame'), time: frame.time - localTime,
+        ...(crossing && frame === to ? { easingRange: [midpoint, end] as [number, number] } : {}),
+      })),
+    ],
+  };
+  const updatePlacements = <T extends DirectorActionClipKeyframe>(track: T[], duration: number): T[] => sortKeyframes(track.flatMap((frame, index) => {
+    if (frame.clipId !== clipId) return [frame];
+    const offset = frame.actionOffsetSeconds ?? 0;
+    if (offset >= localTime) return [{ ...frame, clipId: rightId, actionOffsetSeconds: offset - localTime }];
+    const time = frame.time + localTime - offset;
+    if (time > duration || (track[index + 1] && track[index + 1].time <= time)) return [frame];
+    return [frame, { ...frame, id: createDirectorMotionId('split-placement'), time, clipId: rightId, actionOffsetSeconds: 0 }];
+  }));
+  return {
+    leftId: clipId, rightId,
+    project: {
+      ...project,
+      customClips: project.customClips.flatMap((entry) => entry.id === clipId ? [left, right] : [{ ...entry, keyframes: updatePlacements(entry.keyframes, entry.durationSeconds) }]),
+      actionTracks: Object.fromEntries(Object.entries(project.actionTracks).map(([id, track]) => [id, updatePlacements(track, project.durationSeconds)])),
+    },
+  };
 }

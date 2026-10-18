@@ -10,6 +10,7 @@ import {
   CANVAS_AGENT_DEFINITION_VERSION,
   CANVAS_AGENT_RUNTIME_VERSION,
   type AgentSessionMediaReference,
+  type AgentScope,
 } from '../domain/agentModel';
 import { CANVAS_COMMAND_VERSION } from '../../domain/canvasCommands';
 
@@ -30,6 +31,8 @@ interface StorageLike {
 export interface AgentSessionRecord {
   id: string;
   projectId: string;
+  scope?: AgentScope;
+  executionMode?: 'manual' | 'auto';
   title: string;
   modelRef: string;
   createdAt: number;
@@ -162,7 +165,7 @@ function parseSessionEnvelope(raw: string | null): SessionEnvelope {
     const parsed = JSON.parse(raw) as Partial<SessionEnvelope>;
     if (parsed.version !== 1 || !Array.isArray(parsed.sessions)) throw new Error('unsupported session schema');
     assertPersistenceSafe(parsed);
-    const sessions = parsed.sessions.filter(isAgentSessionRecord);
+    const sessions = parsed.sessions.filter(isAgentSessionRecord).map((session) => ({ ...session, scope: session.scope ?? 'canvas' as const }));
     if (sessions.length !== parsed.sessions.length) throw new Error('invalid session record');
     return { version: 1, sessions };
   } catch {
@@ -207,6 +210,7 @@ function isAgentSessionRecord(value: unknown): value is AgentSessionRecord {
   const record = value as Partial<AgentSessionRecord>;
   return typeof record.id === 'string'
     && typeof record.projectId === 'string'
+    && (record.scope === undefined || record.scope === 'home' || record.scope === 'canvas' || record.scope === 'stage')
     && typeof record.title === 'string'
     && typeof record.modelRef === 'string'
     && isFiniteTimestamp(record.createdAt)
@@ -283,9 +287,9 @@ export class AgentSessionRepository {
     this.compactPersistedTerminalRunStates();
   }
 
-  listSessions(projectId: string): AgentSessionRecord[] {
+  listSessions(projectId: string, scope?: AgentScope): AgentSessionRecord[] {
     return this.readSessions().sessions
-      .filter((session) => session.projectId === projectId)
+      .filter((session) => session.projectId === projectId && (!scope || (session.scope ?? 'canvas') === scope))
       .sort((left, right) => right.updatedAt - left.updatedAt)
       .map(cloneJson);
   }
@@ -295,11 +299,12 @@ export class AgentSessionRepository {
     return session ? cloneJson(session) : null;
   }
 
-  createSession(input: { projectId: string; title?: string; modelRef: string }): AgentSessionRecord {
+  createSession(input: { projectId: string; title?: string; modelRef: string; scope?: AgentScope }): AgentSessionRecord {
     const now = this.now();
     const record: AgentSessionRecord = {
       id: this.nextId(),
       projectId: input.projectId,
+      scope: input.scope ?? 'canvas',
       title: input.title?.trim() || '新对话',
       modelRef: input.modelRef,
       createdAt: now,
@@ -316,7 +321,7 @@ export class AgentSessionRepository {
 
   updateSessionMetadata(
     sessionId: string,
-    patch: Partial<Pick<AgentSessionRecord, 'title' | 'modelRef' | 'compactedSummary'>>,
+    patch: Partial<Pick<AgentSessionRecord, 'title' | 'modelRef' | 'compactedSummary' | 'executionMode'>>,
   ): AgentSessionRecord {
     if (
       patch.compactedSummary !== undefined

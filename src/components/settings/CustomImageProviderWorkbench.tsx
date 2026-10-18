@@ -11,6 +11,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { CustomImageProviderContractEditor } from '@/components/settings/CustomImageProviderContractEditor';
+import { ComfyBindingEditor } from './ComfyBindingEditor';
 import {
   UiButton,
   UiCheckbox,
@@ -680,6 +681,7 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
               }}
             />
           </label>}
+          <ComfyBindingEditor workflowText={comfyWorkflowText} bindingsText={comfyBindingsText} outputsText={comfyOutputsText} baseUrl={draft.baseUrl} apiKey={draft.apiKey} auth={auth} onBindings={setComfyBindingsText} onOutputs={setComfyOutputsText} />
           <details key={comfyChoice} open={comfyChoice === 'custom' || comfyChoice === 'minimax-h3-local' ? true : undefined} className="rounded-lg border border-border-dark bg-bg-dark/45 px-3 py-2">
             <summary className="cursor-pointer text-xs font-medium text-text-dark">{t('settings.comfyui.advanced')}</summary>
             <div className="mt-3 space-y-3">

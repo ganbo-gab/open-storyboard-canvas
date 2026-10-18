@@ -94,6 +94,7 @@ import { nodeTypes } from './nodes';
 import { edgeTypes } from './edges';
 import { NodeSelectionMenu } from './NodeSelectionMenu';
 import { SelectedNodeOverlay } from './ui/SelectedNodeOverlay';
+import { CanvasNavigation } from './ui/CanvasNavigation';
 import { NodeToolDialog } from './ui/NodeToolDialog';
 import { ImageViewerModal } from './ui/ImageViewerModal';
 import { AssetPanel, type CanvasAssetItem } from './ui/AssetPanel';
@@ -1027,7 +1028,13 @@ export function Canvas() {
   const apiKeys = useSettingsStore((state) => state.apiKeys);
   const dreaminaStatus = useSettingsStore((state) => state.dreaminaStatus);
   const agnesApiKey = useSettingsStore((state) => state.agnesApiKey);
-  const canvasMouseBindings = useSettingsStore((state) => state.canvasMouseBindings);
+  const configuredMouseBindings = useSettingsStore((state) => state.canvasMouseBindings);
+  const [interactionMode, setInteractionMode] = useState<'select' | 'hand'>('select');
+  const [shortcutSignal, setShortcutSignal] = useState(0);
+  const [showMinimap, setShowMinimap] = useState(false);
+  const canvasMouseBindings = useMemo(() => interactionMode === 'hand'
+    ? { ...configuredMouseBindings, leftClick: 'none' as const, leftDrag: 'panCanvas' as const }
+    : { ...configuredMouseBindings, leftClick: 'selectNode' as const, leftDrag: 'selectionBox' as const }, [configuredMouseBindings, interactionMode]);
   const enableCanvasWasdPan = useSettingsStore((state) => state.enableCanvasWasdPan);
   const canvasWasdPanSensitivity = useSettingsStore((state) => state.canvasWasdPanSensitivity);
   const useUploadFilenameAsNodeTitle = useSettingsStore((state) => state.useUploadFilenameAsNodeTitle);
@@ -1311,8 +1318,19 @@ export function Canvas() {
 
   const handleMove = useCallback(
     (_event: unknown, viewport: Viewport) => {
-      setViewportState(viewport);
-      scheduleViewportOverlayRefresh();
+      // React Flow owns live transforms. Only batch overlays need our graph-side viewport mid-gesture.
+      let selectedCount = 0;
+      let groupSelected = false;
+      for (const node of nodesRef.current) {
+        if (!node.selected) continue;
+        selectedCount++;
+        groupSelected ||= node.type === CANVAS_NODE_TYPES.group;
+        if (selectedCount > 1 || groupSelected) break;
+      }
+      if (selectedCount > 1 || groupSelected) {
+        setViewportState(viewport);
+        scheduleViewportOverlayRefresh();
+      }
     },
     [scheduleViewportOverlayRefresh, setViewportState]
   );
@@ -4049,17 +4067,6 @@ export function Canvas() {
     [connectNodes, nodes, pendingConnectStart, reactFlowInstance, scheduleCanvasPersist, updateNodeData]
   );
 
-  const emptyHint = useMemo(
-    () => (
-      <div className="canvas-center-safe pointer-events-none absolute inset-0 flex items-center justify-center">
-        <div className="flex max-w-3xl flex-col items-center gap-5 px-6 text-center">
-          {!hasConfiguredProvider && <MissingApiKeyHint />}
-          <div className="text-xl font-medium text-text-muted sm:text-2xl">{t('canvas.emptyHintTitle')}</div>
-        </div>
-      </div>
-    ),
-    [hasConfiguredProvider, t]
-  );
 
   return (
     <div
@@ -4097,9 +4104,12 @@ export function Canvas() {
         defaultEdgeOptions={{ type: 'disconnectableEdge' }}
         defaultViewport={DEFAULT_VIEWPORT}
         minZoom={0.1}
-        maxZoom={5}
+        maxZoom={8}
         panOnDrag={panOnDragButtons.length > 0 ? panOnDragButtons : false}
         selectionOnDrag={false}
+        nodesDraggable={interactionMode === 'select'}
+        nodesConnectable={interactionMode === 'select'}
+        elementsSelectable={interactionMode === 'select'}
         selectionMode={SelectionMode.Partial}
         multiSelectionKeyCode={['Control', 'Meta']}
         selectionKeyCode={['Control', 'Meta']}
@@ -4115,16 +4125,30 @@ export function Canvas() {
           size={1}
           color="var(--canvas-grid-dot)"
         />
-        <MiniMap
-          className="canvas-minimap nopan nowheel"
-          style={{ pointerEvents: 'all', zIndex: 10000 }}
-          nodeColor="var(--canvas-minimap-node)"
-          maskColor="var(--canvas-minimap-mask)"
-          pannable
-          zoomable
-        />
+        {showMinimap && (
+          <MiniMap
+            position="bottom-left"
+            className="canvas-minimap nopan nowheel"
+            style={{ pointerEvents: 'all', zIndex: 10000, marginLeft: 76, marginBottom: 64 }}
+            nodeColor="var(--canvas-minimap-node)"
+            maskColor="var(--canvas-minimap-mask)"
+            pannable
+            zoomable
+          />
+        )}
 
         <SelectedNodeOverlay />
+        <CanvasNavigation
+          mode={interactionMode}
+          onMode={setInteractionMode}
+          shortcutSignal={shortcutSignal}
+          minimap={showMinimap}
+          onMinimap={setShowMinimap}
+          onAdd={() => {
+            const rect = wrapperRef.current?.getBoundingClientRect();
+            if (rect) openNodeMenuAtClientPosition(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          }}
+        />
       </ReactFlow>
 
       {marqueeRect && (
@@ -4237,7 +4261,16 @@ export function Canvas() {
         </div>
       )}
 
-      <CanvasSideToolbar onOpenAssets={handleOpenAssetPanel} />
+      <CanvasSideToolbar
+        onOpenAssets={handleOpenAssetPanel}
+        mode={interactionMode}
+        onMode={setInteractionMode}
+        onShortcuts={() => setShortcutSignal((value) => value + 1)}
+        onAdd={() => {
+          const rect = wrapperRef.current?.getBoundingClientRect();
+          if (rect) openNodeMenuAtClientPosition(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        }}
+      />
       <AssetPanel
         isOpen={isAssetPanelOpen}
         assets={assetPanelAssets}
@@ -4250,9 +4283,8 @@ export function Canvas() {
         onRename={assetPanelMode === 'browse' ? handleRenameAsset : undefined}
       />
 
-      {nodes.length === 0 && emptyHint}
       {nodes.length > 0 && !hasConfiguredProvider && (
-        <div className="canvas-center-safe pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+        <div className="pointer-events-none absolute left-1/2 top-16 z-20 -translate-x-1/2">
           <MissingApiKeyHint />
         </div>
       )}

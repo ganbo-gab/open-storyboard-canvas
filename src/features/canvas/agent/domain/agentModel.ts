@@ -1,6 +1,7 @@
 export const CANVAS_AGENT_RUNTIME_VERSION = 1 as const;
 export const CANVAS_AGENT_DEFINITION_VERSION = 1 as const;
 export const EXTERNAL_AGENT_EVENT_VERSION = 1 as const;
+export type AgentScope = 'home' | 'canvas' | 'stage';
 
 export type CanvasAgentRuntimeId = 'builtin' | 'codex' | 'claude';
 export type ExternalAgentRuntimeId = Exclude<CanvasAgentRuntimeId, 'builtin'>;

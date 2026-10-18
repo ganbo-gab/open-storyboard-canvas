@@ -148,6 +148,8 @@ describe('custom provider submission safety', () => {
   });
 
   it('submits a ComfyUI image workflow once, polls its durable prompt id, then downloads the result', async () => {
+    // Snapshot execution honors environment routing: this fixture exercises the native bridge.
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
     useCustomProvidersStore.getState().replaceAll([comfyProvider()]);
     customHttpRequestMock
       .mockImplementationOnce(() => response(200, { prompt_id: 'prompt-1' }))
@@ -179,6 +181,7 @@ describe('custom provider submission safety', () => {
   });
 
   it('uses the ComfyUI video path and materializes a playable output without another submit', async () => {
+    (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri = true;
     useCustomProvidersStore.getState().replaceAll([comfyProvider('video')]);
     customHttpRequestMock
       .mockImplementationOnce(() => response(200, { prompt_id: 'prompt-video' }))

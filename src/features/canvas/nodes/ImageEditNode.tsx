@@ -25,7 +25,10 @@ import {
 } from '@/features/canvas/domain/canvasNodes';
 import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
+import { MediaStageFace } from '@/features/canvas/ui/MediaStageFace';
 import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
+import { SafeNodeToolbar } from '@/features/canvas/ui/SafeNodeToolbar';
+import { EditorPopup } from '@/features/canvas/ui/EditorPopup';
 import {
   buildImageGenerationDebugPreview,
   canvasAiGateway,
@@ -286,6 +289,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
   const [error, setError] = useState<string | null>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const imageBoxRef = useRef<HTMLDivElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const promptHighlightRef = useRef<HTMLDivElement>(null);
@@ -552,7 +556,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
 
   useEffect(() => {
     const handleOutside = (event: MouseEvent) => {
-      if (rootRef.current?.contains(event.target as globalThis.Node)) {
+      if (rootRef.current?.contains(event.target as globalThis.Node) || composerRef.current?.contains(event.target as globalThis.Node)) {
         return null;
       }
 
@@ -1217,7 +1221,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     if (event.key === '/' && functionPickerItems.length > 0) {
       event.preventDefault();
       const cursor = event.currentTarget.selectionStart ?? promptDraftRef.current.length;
-      const anchor = resolvePickerAnchor(rootRef.current, event.currentTarget, cursor);
+      const anchor = resolvePickerAnchor(imageBoxRef.current, event.currentTarget, cursor);
       setFunctionPickerAnchor({
         left: Math.max(8, Math.min(anchor.left, resolvedWidth - FUNCTION_PICKER_WIDTH_PX - 8)),
         top: anchor.top,
@@ -1232,7 +1236,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     if (event.key === '@' && incomingReferencePickerItems.length > 0) {
       event.preventDefault();
       const cursor = event.currentTarget.selectionStart ?? promptDraftRef.current.length;
-      setPickerAnchor(resolvePickerAnchor(rootRef.current, event.currentTarget, cursor));
+      setPickerAnchor(resolvePickerAnchor(imageBoxRef.current, event.currentTarget, cursor));
       setPickerCursor(cursor);
       setShowImagePicker(true);
       setPickerActiveIndex(0);
@@ -1259,7 +1263,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     <div
       ref={rootRef}
       className={`
-        group relative flex h-full flex-col overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-2 shadow-(--canvas-node-shadow) transition-colors duration-150
+        stage-node group relative flex h-full flex-col overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) shadow-(--canvas-node-shadow) transition-colors duration-150
         ${selected
           ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
           : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
@@ -1271,6 +1275,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         className={NODE_HEADER_FLOATING_POSITION_CLASS}
         icon={<Sparkles className="h-4 w-4" />}
         titleText={resolvedTitle}
+        metaText={selectedAspectRatio.value === AUTO_REQUEST_ASPECT_RATIO ? undefined : selectedAspectRatio.label}
         rightSlot={showNodePayloadPreview ? (
           <button
             type="button"
@@ -1294,6 +1299,14 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
       />
 
+      <MediaStageFace
+        kind="image"
+        ratio={selectedAspectRatio.value === AUTO_REQUEST_ASPECT_RATIO ? undefined : selectedAspectRatio.label}
+        caption={promptDraft}
+        generating={data.isGenerating === true}
+      />
+      <SafeNodeToolbar nodeId={id} position={Position.Bottom} isVisible={selected === true} offset={18}>
+        <div ref={composerRef} className="studio-node-composer flex h-[240px] w-[min(640px,calc(100vw-120px))] max-w-full flex-col rounded-2xl border border-(--canvas-node-border) bg-(--canvas-node-bg) p-3 shadow-2xl">
       <div ref={imageBoxRef} className="image-box relative min-h-0 flex-1 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-2">
         <div className="relative h-full min-h-0">
           {selectedFunctionLabel && (
@@ -1346,9 +1359,8 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         </div>
 
         {showImagePicker && incomingReferencePickerItems.length > 0 && (
-          <div
-            className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-xl"
-            style={{ left: pickerAnchor.left, top: pickerAnchor.top }}
+          <EditorPopup container={imageBoxRef} anchor={pickerAnchor}
+            className="w-[120px] rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-xl"
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
           >
@@ -1388,13 +1400,12 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                 </button>
               ))}
             </div>
-          </div>
+          </EditorPopup>
         )}
 
         {showFunctionPicker && functionPickerItems.length > 0 && (
-          <div
-            className="nowheel absolute z-40 w-[280px] overflow-visible rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-2xl"
-            style={{ left: functionPickerAnchor.left, top: functionPickerAnchor.top }}
+          <EditorPopup container={imageBoxRef} anchor={functionPickerAnchor}
+            className="w-[280px] rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-2xl"
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
           >
@@ -1439,8 +1450,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
             </div>
             {functionPickerItems[functionPickerActiveIndex]?.kind === 'presetGroup' && (
               <div
-                className="nowheel absolute left-[calc(100%+8px)] w-[240px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5 shadow-2xl"
-                style={{ top: `${Math.min(44 + functionPickerActiveIndex * 58, 150)}px` }}
+                className="nowheel mt-1 w-full overflow-hidden rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1.5"
                 onMouseDown={(event) => event.stopPropagation()}
                 onWheelCapture={(event) => event.stopPropagation()}
               >
@@ -1479,7 +1489,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
                 </div>
               </div>
             )}
-          </div>
+          </EditorPopup>
         )}
       </div>
 
@@ -1579,7 +1589,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
             void handleGenerate();
           }}
           variant="primary"
-          className={`shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
+          className={`stage-send shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
         >
           <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
           {t('canvas.generate')}
@@ -1587,6 +1597,8 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
       </div>
 
       {error && <div className="mt-1 shrink-0 text-xs text-red-700 dark:text-red-300">{error}</div>}
+        </div>
+      </SafeNodeToolbar>
 
       <UiModal
         isOpen={payloadDebugText !== null}

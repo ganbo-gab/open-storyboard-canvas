@@ -782,6 +782,119 @@ fn sanitize_poll_descriptor(value: Option<Value>) -> Result<Option<String>, Stri
     let Some(value) = value else {
         return Ok(None);
     };
+    // v2 execution snapshots carry immutable configuration, not expanded HTTP
+    // requests. Keep the legacy descriptor sanitizer unchanged below.
+    if value.get("version").and_then(Value::as_u64) == Some(2) {
+        let root = value.as_object().ok_or("v2 poll descriptor must be an object")?;
+        let adapter = value.get("adapter").and_then(Value::as_str).ok_or("v2 poll descriptor requires adapter type")?;
+        let allowed: &[&str] = match adapter {
+            "template" => &["version", "adapter", "profile", "input", "submit", "assets", "outputs"],
+            "comfyui" => &["version", "adapter", "input", "pollIntervalMs", "pollTimeoutMs", "authPrefix", "headerNames", "queryNames", "assets", "outputs"],
+            _ => return Err("unsupported v2 snapshot adapter".to_string()),
+        };
+        if root.keys().any(|key| !allowed.contains(&key.as_str())) {
+            return Err("v2 snapshot contains an unknown root field".to_string());
+        }
+        let input = value.get("input").and_then(Value::as_object).ok_or("v2 snapshot requires job input")?;
+        let input_fields = ["jobId", "channelId", "modelId", "operation", "prompt", "params", "refs", "count"];
+        if input.keys().any(|key| !input_fields.contains(&key.as_str()))
+            || input.get("prompt").and_then(Value::as_str) != Some("")
+            || !input.get("refs").and_then(Value::as_array).is_some_and(Vec::is_empty)
+            || !input.get("params").is_some_and(Value::is_object)
+        {
+            return Err("v2 recovery input must not contain expanded prompts, messages, tools or media".to_string());
+        }
+        for field in ["jobId", "channelId", "modelId", "operation"] {
+            if !input.get(field).and_then(Value::as_str).is_some_and(|text| !text.is_empty()) {
+                return Err(format!("v2 snapshot is missing input.{field}"));
+            }
+        }
+        fn validate_auth(auth: &Value, selector: &str) -> Result<(), String> {
+            let auth = auth.as_object().ok_or("snapshot auth must be a configuration object")?;
+            let kind = auth.get(selector).and_then(Value::as_str).ok_or("snapshot auth type missing")?;
+            let allowed: &[&str] = match kind {
+                "none" | "bearer" => &[selector],
+                "header" => &[selector, "name", "prefix"],
+                "query" => &[selector, "name"],
+                _ => return Err("snapshot auth type invalid".to_string()),
+            };
+            if auth.keys().any(|key| !allowed.contains(&key.as_str())) {
+                return Err("snapshot auth cannot contain credential values".to_string());
+            }
+            Ok(())
+        }
+        if adapter == "template" {
+            let profile = value.get("profile").and_then(Value::as_object).ok_or("template snapshot requires profile")?;
+            let fields = ["version", "id", "name", "baseUrl", "auth", "headers", "docsUrl", "notes", "operations", "models"];
+            if profile.keys().any(|key| !fields.contains(&key.as_str()))
+                || profile.get("version").and_then(Value::as_u64) != Some(2)
+                || !profile.get("operations").is_some_and(Value::is_object)
+                || !profile.get("models").is_some_and(Value::is_array)
+            {
+                return Err("invalid template channel profile snapshot".to_string());
+            }
+            validate_auth(profile.get("auth").ok_or("snapshot profile auth missing")?, "type")?;
+        } else {
+            let snapshot = value.pointer("/input/params/comfyuiSnapshot").ok_or("ComfyUI workflow snapshot missing")?;
+            if !snapshot.get("workflow").is_some_and(Value::is_object)
+                || !snapshot.get("bindings").is_some_and(Value::is_object)
+                || !snapshot.get("urls").is_some_and(Value::is_object)
+            {
+                return Err("invalid ComfyUI workflow snapshot".to_string());
+            }
+            validate_auth(snapshot.get("auth").ok_or("ComfyUI snapshot auth missing")?, "mode")?;
+        }
+        fn validate_snapshot(value: &Value, depth: usize, profile_auth: Option<&Value>, comfy_auth: Option<&Value>) -> Result<(), String> {
+            if depth > 32 { return Err("v2 snapshot is too deeply nested".to_string()); }
+            match value {
+                Value::String(text) => {
+                    let lower = text.to_ascii_lowercase();
+                    if text.len() > 65_536 || lower.contains("data:") || lower.starts_with("blob:")
+                        || (lower.contains("bearer ") && lower.trim() != "bearer") || lower.contains("authorization=")
+                        || lower.contains("api_key=") || lower.contains("apikey=")
+                        || lower.contains("access_token=") || lower.contains("token=")
+                        || lower.contains("secret=") || lower.contains("password=")
+                    { return Err("v2 snapshot contains credentials, media payload or an oversized string".to_string()); }
+                    if let Ok(url) = reqwest::Url::parse(text) {
+                        if !url.username().is_empty() || url.password().is_some() {
+                            return Err("v2 snapshot URL contains credentials".to_string());
+                        }
+                    }
+                }
+                Value::Array(items) => {
+                    if items.len() > 4096 { return Err("v2 snapshot array exceeds limit".to_string()); }
+                    for item in items { validate_snapshot(item, depth + 1, profile_auth, comfy_auth)?; }
+                }
+                Value::Object(map) => {
+                    if map.len() > 4096 { return Err("v2 snapshot object exceeds limit".to_string()); }
+                    for (key, item) in map {
+                        let key = key.to_ascii_lowercase().replace(['-', ' '], "_");
+                        if matches!(key.as_str(), "api_key" | "apikey" | "api_key_comfy_org" | "authorization" | "cookie" | "set_cookie" | "access_token" | "refresh_token" | "token" | "secret" | "password" | "credential" | "credentials" | "private_key") {
+                            return Err(format!("v2 snapshot contains sensitive field: {key}"));
+                        }
+                        if key == "auth" && !profile_auth.is_some_and(|config| std::ptr::eq(item, config))
+                            && !comfy_auth.is_some_and(|config| std::ptr::eq(item, config))
+                        {
+                            // OutputSpec and the executor's saved URL output both
+                            // declare auth:boolean, not credential configuration.
+                            let is_output = item.is_boolean()
+                                && map.get("url").is_some_and(Value::is_string)
+                                && map.get("kind").and_then(Value::as_str).is_some_and(|kind| matches!(kind, "image" | "video" | "audio"))
+                                && map.keys().all(|field| matches!(field.as_str(), "url" | "kind" | "auth"));
+                            if !is_output { return Err("snapshot auth is only valid at declared configuration or URL-output locations".to_string()); }
+                        }
+                        validate_snapshot(item, depth + 1, profile_auth, comfy_auth)?;
+                    }
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+        validate_snapshot(&value, 0, value.pointer("/profile/auth"), value.pointer("/input/params/comfyuiSnapshot/auth"))?;
+        let serialized = serde_json::to_string(&value).map_err(|e| format!("failed to serialize v2 snapshot: {e}"))?;
+        if serialized.len() > 1_048_576 { return Err("v2 snapshot exceeds 1MB size limit".to_string()); }
+        return Ok(Some(serialized));
+    }
     fn sanitize(value: &Value, depth: usize) -> Result<Value, String> {
         if depth > 4 {
             return Err("poll descriptor is too deeply nested".to_string());
@@ -1341,6 +1454,67 @@ pub async fn list_models() -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn template_snapshot() -> Value {
+        serde_json::json!({
+            "version": 2, "adapter": "template",
+            "profile": { "version": 2, "id": "relay", "name": "Relay", "baseUrl": "https://relay.example", "auth": { "type": "bearer" },
+                "operations": { "image.generate": { "method": "POST", "path": "/images", "body": "json", "template": { "model": "{{model}}", "prompt": "{{prompt}}" },
+                    "response": { "mode": "async", "taskIdPath": "id", "poll": { "method": "GET", "path": "{{submit.status_url}}", "intervalSec": 3, "timeoutMin": 5,
+                        "success": ["completed"], "failure": ["failed"], "outputs": [{ "path": "data[*].url", "as": "url" }] } } } },
+                "models": [{ "id": "model", "operations": ["image.generate"], "params": [] }] },
+            "input": { "jobId": "job", "channelId": "relay", "modelId": "model", "operation": "image.generate", "prompt": "", "params": {}, "refs": [], "count": 1 },
+            "submit": { "status_url": "https://relay.example/tasks/task" }
+        })
+    }
+
+    #[test]
+    fn typed_v2_snapshots_preserve_templates_and_never_truncate_workflows() {
+        let snapshot = template_snapshot();
+        let serialized = sanitize_poll_descriptor(Some(snapshot.clone())).unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&serialized).unwrap(), snapshot);
+        let nodes = (0..80).map(|index| (index.to_string(), serde_json::json!({ "class_type": "SaveImage", "inputs": { "images": ["1", 0] } }))).collect::<serde_json::Map<_, _>>();
+        let comfy = serde_json::json!({ "version": 2, "adapter": "comfyui", "pollIntervalMs": 1000, "pollTimeoutMs": 60000,
+            "authPrefix": "", "headerNames": [], "queryNames": [],
+            "input": { "jobId": "job", "channelId": "comfy", "modelId": "workflow", "operation": "image.generate", "prompt": "", "refs": [], "count": 1,
+                "params": { "comfyuiSnapshot": { "workflow": nodes, "bindings": { "prompt": { "nodeId": "1", "input": "text" }, "output": { "nodeId": "2", "input": "$output" } },
+                    "urls": { "base": "http://127.0.0.1:8188", "prompt": "http://127.0.0.1:8188/prompt" }, "auth": { "mode": "header", "name": "x-api-key" }, "outputNodeIds": ["2", "3"] } } } });
+        let saved = sanitize_poll_descriptor(Some(comfy.clone())).unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&saved).unwrap(), comfy);
+    }
+
+    #[test]
+    fn typed_v2_snapshots_accept_boolean_url_output_auth_only_at_output_shapes() {
+        for auth in [false, true] {
+            let mut snapshot = template_snapshot();
+            snapshot["outputs"] = serde_json::json!([{ "url": "https://relay.example/videos/task/content", "kind": "video", "auth": auth }]);
+            snapshot["profile"]["operations"]["image.generate"]["response"]["poll"]["outputs"] =
+                serde_json::json!([{ "url": "/videos/{{taskId}}/content", "kind": "video", "auth": auth }]);
+            let saved = sanitize_poll_descriptor(Some(snapshot.clone())).unwrap().unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&saved).unwrap(), snapshot);
+        }
+        let mut snapshot = template_snapshot();
+        snapshot["outputs"] = serde_json::json!([{ "url": "https://relay.example/result", "kind": "image", "auth": { "value": "private" } }]);
+        assert!(sanitize_poll_descriptor(Some(snapshot)).is_err());
+        let mut snapshot = template_snapshot(); snapshot["input"]["params"]["auth"] = serde_json::json!({"type":"bearer","value":"private"});
+        assert!(sanitize_poll_descriptor(Some(snapshot)).is_err());
+    }
+
+    #[test]
+    fn typed_v2_snapshots_reject_expanded_inputs_credentials_media_and_overflow() {
+        let mut snapshot = template_snapshot();
+        snapshot["input"]["prompt"] = Value::String("expanded user prompt".into());
+        assert!(sanitize_poll_descriptor(Some(snapshot)).is_err());
+        let mut snapshot = template_snapshot(); snapshot["profile"]["auth"]["value"] = Value::String("private".into());
+        assert!(sanitize_poll_descriptor(Some(snapshot)).is_err());
+        let mut snapshot = template_snapshot(); snapshot["submit"]["token"] = Value::String("private".into());
+        assert!(sanitize_poll_descriptor(Some(snapshot)).is_err());
+        let mut snapshot = template_snapshot(); snapshot["input"]["params"]["image"] = Value::String("data:image/png;base64,AAAA".into());
+        assert!(sanitize_poll_descriptor(Some(snapshot)).is_err());
+        let mut snapshot = template_snapshot(); snapshot["assets"] = serde_json::json!(vec!["local"; 4097]);
+        assert!(sanitize_poll_descriptor(Some(snapshot)).is_err());
+        assert!(sanitize_poll_descriptor(Some(serde_json::json!({"taskId":"legacy-task","pollEndpointPath":"/tasks/{taskId}"}))).is_ok());
+    }
 
     #[test]
     fn status_machine_refuses_duplicate_or_terminal_submission() {

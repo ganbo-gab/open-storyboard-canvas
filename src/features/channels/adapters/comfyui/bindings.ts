@@ -1,6 +1,6 @@
 import { asRecord, cloneWorkflow, nonemptyString, type ComfyUIInputBinding } from './workflow';
 
-export type ComfyUIParameter = 'prompt' | 'negativePrompt' | 'seed' | 'width' | 'height' | 'duration' | 'output' | `image${number}`;
+export type ComfyUIParameter = 'prompt' | 'negativePrompt' | 'seed' | 'width' | 'height' | 'duration' | 'resolution' | 'aspectRatio' | 'output' | `image${number}`;
 export type ComfyUIBindings = Partial<Record<ComfyUIParameter, ComfyUIInputBinding | null>>;
 export interface ComfyUIBindingCandidate extends ComfyUIInputBinding {
   title: string;
