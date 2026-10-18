@@ -28,16 +28,8 @@ export type UiRadiusPreset = 'compact' | 'default' | 'large';
 export type ThemeTonePreset = 'neutral' | 'warm' | 'cool';
 export type CanvasEdgeRoutingMode = 'spline' | 'orthogonal' | 'smartOrthogonal';
 export type PanoramaControlSensitivity = 'low' | 'medium' | 'high';
-export type CanvasMouseBindingPreset = 'default' | 'traditional' | 'custom';
-export type CanvasMouseAction = 'none' | 'selectNode' | 'panCanvas' | 'selectionBox' | 'nodeMenu';
-export type CanvasMouseBindingSlot =
-  | 'leftClick'
-  | 'leftDrag'
-  | 'rightClick'
-  | 'rightDrag'
-  | 'middleClick'
-  | 'middleDrag';
-export type CanvasMouseBindings = Record<CanvasMouseBindingSlot, CanvasMouseAction>;
+export type CanvasLeftDragMode = 'select' | 'pan';
+export type CanvasWheelMode = 'auto' | 'zoom' | 'pan';
 export type ImageHostProvider = 'pixhost' | 'seedvault';
 export type AudioOutputMode = 'server' | 'segmented';
 export type AudioProviderKind = 'local-doubao-tts' | 'gradio-voxcpm';
@@ -61,24 +53,6 @@ export type {
   PromptTemplateId,
   PromptTemplateLanguagePreference,
   PromptTemplateOverride,
-};
-
-export const DEFAULT_CANVAS_MOUSE_BINDINGS: CanvasMouseBindings = {
-  leftClick: 'selectNode',
-  leftDrag: 'panCanvas',
-  rightClick: 'nodeMenu',
-  rightDrag: 'selectionBox',
-  middleClick: 'none',
-  middleDrag: 'none',
-};
-
-export const TRADITIONAL_CANVAS_MOUSE_BINDINGS: CanvasMouseBindings = {
-  leftClick: 'selectNode',
-  leftDrag: 'selectionBox',
-  rightClick: 'nodeMenu',
-  rightDrag: 'none',
-  middleClick: 'none',
-  middleDrag: 'panCanvas',
 };
 
 export interface PromptPreset {
@@ -250,8 +224,8 @@ interface SettingsState {
   showStoryboardGenAdvancedRatioControls: boolean;
   useLegacyPanoramaControlDirection: boolean;
   panoramaControlSensitivity: PanoramaControlSensitivity;
-  canvasMouseBindingPreset: CanvasMouseBindingPreset;
-  canvasMouseBindings: CanvasMouseBindings;
+  canvasLeftDragMode: CanvasLeftDragMode;
+  canvasWheelMode: CanvasWheelMode;
   enableCanvasWasdPan: boolean;
   canvasWasdPanSensitivity: number;
   uiRadiusPreset: UiRadiusPreset;
@@ -293,10 +267,8 @@ interface SettingsState {
   setShowStoryboardGenAdvancedRatioControls: (enabled: boolean) => void;
   setUseLegacyPanoramaControlDirection: (enabled: boolean) => void;
   setPanoramaControlSensitivity: (sensitivity: PanoramaControlSensitivity) => void;
-  setCanvasMouseBindingPreset: (preset: CanvasMouseBindingPreset) => void;
-  setCanvasMouseBindings: (bindings: CanvasMouseBindings) => void;
-  setCanvasMouseBinding: (slot: CanvasMouseBindingSlot, action: CanvasMouseAction) => void;
-  resetCanvasMouseBindingsToPreset: (preset: Exclude<CanvasMouseBindingPreset, 'custom'>) => void;
+  setCanvasLeftDragMode: (mode: CanvasLeftDragMode) => void;
+  setCanvasWheelMode: (mode: CanvasWheelMode) => void;
   setEnableCanvasWasdPan: (enabled: boolean) => void;
   setCanvasWasdPanSensitivity: (sensitivity: number) => void;
   setUiRadiusPreset: (preset: UiRadiusPreset) => void;
@@ -713,58 +685,18 @@ function normalizePanoramaControlSensitivity(
   return 'medium';
 }
 
-function normalizeCanvasMouseBindingPreset(
-  input: CanvasMouseBindingPreset | string | null | undefined
-): CanvasMouseBindingPreset {
-  if (input === 'default' || input === 'traditional' || input === 'custom') {
+function normalizeCanvasLeftDragMode(input: unknown): CanvasLeftDragMode {
+  if (input === 'select' || input === 'pan') {
     return input;
   }
-  return 'default';
+  return 'select';
 }
 
-function normalizeCanvasMouseAction(
-  input: CanvasMouseAction | string | null | undefined,
-  fallback: CanvasMouseAction
-): CanvasMouseAction {
-  if (
-    input === 'none' ||
-    input === 'selectNode' ||
-    input === 'panCanvas' ||
-    input === 'selectionBox' ||
-    input === 'nodeMenu'
-  ) {
+function normalizeCanvasWheelMode(input: unknown): CanvasWheelMode {
+  if (input === 'auto' || input === 'zoom' || input === 'pan') {
     return input;
   }
-  return fallback;
-}
-
-function cloneCanvasMouseBindings(bindings: CanvasMouseBindings): CanvasMouseBindings {
-  return { ...bindings };
-}
-
-function bindingsForCanvasMousePreset(
-  preset: Exclude<CanvasMouseBindingPreset, 'custom'>
-): CanvasMouseBindings {
-  return cloneCanvasMouseBindings(
-    preset === 'traditional'
-      ? TRADITIONAL_CANVAS_MOUSE_BINDINGS
-      : DEFAULT_CANVAS_MOUSE_BINDINGS
-  );
-}
-
-function normalizeCanvasMouseBindings(input: unknown): CanvasMouseBindings {
-  const raw = input && typeof input === 'object'
-    ? input as Partial<Record<CanvasMouseBindingSlot, CanvasMouseAction | string | null>>
-    : {};
-
-  return {
-    leftClick: normalizeCanvasMouseAction(raw.leftClick, DEFAULT_CANVAS_MOUSE_BINDINGS.leftClick),
-    leftDrag: normalizeCanvasMouseAction(raw.leftDrag, DEFAULT_CANVAS_MOUSE_BINDINGS.leftDrag),
-    rightClick: normalizeCanvasMouseAction(raw.rightClick, DEFAULT_CANVAS_MOUSE_BINDINGS.rightClick),
-    rightDrag: normalizeCanvasMouseAction(raw.rightDrag, DEFAULT_CANVAS_MOUSE_BINDINGS.rightDrag),
-    middleClick: normalizeCanvasMouseAction(raw.middleClick, DEFAULT_CANVAS_MOUSE_BINDINGS.middleClick),
-    middleDrag: normalizeCanvasMouseAction(raw.middleDrag, DEFAULT_CANVAS_MOUSE_BINDINGS.middleDrag),
-  };
+  return 'auto';
 }
 
 function normalizeCanvasWasdPanSensitivity(input: number | string | null | undefined): number {
@@ -1006,8 +938,8 @@ export const useSettingsStore = create<SettingsState>()(
       showStoryboardGenAdvancedRatioControls: false,
       useLegacyPanoramaControlDirection: false,
       panoramaControlSensitivity: 'medium',
-      canvasMouseBindingPreset: 'default',
-      canvasMouseBindings: cloneCanvasMouseBindings(DEFAULT_CANVAS_MOUSE_BINDINGS),
+      canvasLeftDragMode: 'select',
+      canvasWheelMode: 'auto',
       enableCanvasWasdPan: false,
       canvasWasdPanSensitivity: 60,
       uiRadiusPreset: 'default',
@@ -1078,33 +1010,10 @@ export const useSettingsStore = create<SettingsState>()(
         set({ useLegacyPanoramaControlDirection: enabled }),
       setPanoramaControlSensitivity: (sensitivity) =>
         set({ panoramaControlSensitivity: normalizePanoramaControlSensitivity(sensitivity) }),
-      setCanvasMouseBindingPreset: (preset) => {
-        const normalizedPreset = normalizeCanvasMouseBindingPreset(preset);
-        set((state) => ({
-          canvasMouseBindingPreset: normalizedPreset,
-          canvasMouseBindings: normalizedPreset === 'custom'
-            ? normalizeCanvasMouseBindings(state.canvasMouseBindings)
-            : bindingsForCanvasMousePreset(normalizedPreset),
-        }));
-      },
-      setCanvasMouseBindings: (bindings) =>
-        set({
-          canvasMouseBindingPreset: 'custom',
-          canvasMouseBindings: normalizeCanvasMouseBindings(bindings),
-        }),
-      setCanvasMouseBinding: (slot, action) =>
-        set((state) => ({
-          canvasMouseBindingPreset: 'custom',
-          canvasMouseBindings: {
-            ...normalizeCanvasMouseBindings(state.canvasMouseBindings),
-            [slot]: normalizeCanvasMouseAction(action, DEFAULT_CANVAS_MOUSE_BINDINGS[slot]),
-          },
-        })),
-      resetCanvasMouseBindingsToPreset: (preset) =>
-        set({
-          canvasMouseBindingPreset: preset,
-          canvasMouseBindings: bindingsForCanvasMousePreset(preset),
-        }),
+      setCanvasLeftDragMode: (mode) =>
+        set({ canvasLeftDragMode: normalizeCanvasLeftDragMode(mode) }),
+      setCanvasWheelMode: (mode) =>
+        set({ canvasWheelMode: normalizeCanvasWheelMode(mode) }),
       setEnableCanvasWasdPan: (enabled) => set({ enableCanvasWasdPan: enabled }),
       setCanvasWasdPanSensitivity: (sensitivity) =>
         set({ canvasWasdPanSensitivity: normalizeCanvasWasdPanSensitivity(sensitivity) }),
@@ -1340,7 +1249,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'settings-storage',
-      version: 21,
+      version: 22,
       onRehydrateStorage: () => {
         return (_state, error) => {
           if (error) {
@@ -1371,8 +1280,8 @@ export const useSettingsStore = create<SettingsState>()(
           showStoryboardGenAdvancedRatioControls?: boolean;
           useLegacyPanoramaControlDirection?: boolean;
           panoramaControlSensitivity?: PanoramaControlSensitivity | string;
-          canvasMouseBindingPreset?: CanvasMouseBindingPreset | string;
-          canvasMouseBindings?: CanvasMouseBindings;
+          canvasLeftDragMode?: unknown;
+          canvasWheelMode?: unknown;
           enableCanvasWasdPan?: boolean;
           canvasWasdPanSensitivity?: number | string;
           storyboardGenAutoInferEmptyFrame?: boolean;
@@ -1392,6 +1301,11 @@ export const useSettingsStore = create<SettingsState>()(
         delete persistedWithoutPricing.usdToCnyRate;
         delete persistedWithoutPricing.preferDiscountedPrice;
         delete persistedWithoutPricing.grsaiCreditTierId;
+        for (const key of Object.keys(persistedWithoutPricing)) {
+          if (/^canvasMouse(?:BindingPreset|Bindings)$/.test(key)) {
+            delete persistedWithoutPricing[key];
+          }
+        }
 
         const migratedApiKeys = normalizeApiKeys(state.apiKeys);
         const ignoreAtTagWhenCopyingAndGenerating =
@@ -1422,12 +1336,8 @@ export const useSettingsStore = create<SettingsState>()(
           }
         );
         const promptPresets = normalizePromptPresets(state.promptPresets);
-        const canvasMouseBindingPreset = normalizeCanvasMouseBindingPreset(
-          state.canvasMouseBindingPreset
-        );
-        const canvasMouseBindings = canvasMouseBindingPreset === 'custom'
-          ? normalizeCanvasMouseBindings(state.canvasMouseBindings)
-          : bindingsForCanvasMousePreset(canvasMouseBindingPreset);
+        const canvasLeftDragMode = normalizeCanvasLeftDragMode(state.canvasLeftDragMode);
+        const canvasWheelMode = normalizeCanvasWheelMode(state.canvasWheelMode);
         const textAgents = normalizeTextAgents(state.textAgents);
         const imageHostSettings = normalizeImageHostSettings(state.imageHostSettings);
         const audioGenerationSettings = normalizeAudioGenerationSettings(state.audioGenerationSettings);
@@ -1459,8 +1369,8 @@ export const useSettingsStore = create<SettingsState>()(
             panoramaControlSensitivity: normalizePanoramaControlSensitivity(
               state.panoramaControlSensitivity
             ),
-            canvasMouseBindingPreset,
-            canvasMouseBindings,
+            canvasLeftDragMode,
+            canvasWheelMode,
             enableCanvasWasdPan: state.enableCanvasWasdPan ?? false,
             canvasWasdPanSensitivity: normalizeCanvasWasdPanSensitivity(
               state.canvasWasdPanSensitivity
@@ -1506,8 +1416,8 @@ export const useSettingsStore = create<SettingsState>()(
           panoramaControlSensitivity: normalizePanoramaControlSensitivity(
             state.panoramaControlSensitivity
           ),
-          canvasMouseBindingPreset,
-          canvasMouseBindings,
+          canvasLeftDragMode,
+          canvasWheelMode,
           enableCanvasWasdPan: state.enableCanvasWasdPan ?? false,
           canvasWasdPanSensitivity: normalizeCanvasWasdPanSensitivity(
             state.canvasWasdPanSensitivity

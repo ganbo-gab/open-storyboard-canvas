@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { create, type StateCreator, type StoreApi } from 'zustand';
 import {
   Connection,
   EdgeChange,
@@ -58,6 +58,11 @@ import {
   resolveSizeInsideTargetBox,
 } from '@/features/canvas/application/imageNodeSizing';
 import { findRelatedCanvasNodePositions } from '@/features/canvas/application/canvasNodePlacement';
+import {
+  carrySelection,
+  deriveSelectedNodeId,
+  selectNodesExclusive,
+} from '@/features/canvas/domain/canvasSelection';
 
 export type {
   ActiveToolDialog,
@@ -247,7 +252,10 @@ export interface CanvasState {
   groupNodes: (nodeIds: string[]) => string | null;
   ungroupNode: (groupNodeId: string) => boolean;
   deleteEdge: (edgeId: string) => void;
+  /** Select exactly one node (or none). Writes `node.selected`; `selectedNodeId` is derived. */
   setSelectedNode: (nodeId: string | null) => void;
+  /** Select exactly these nodes. */
+  setSelectedNodeIds: (nodeIds: string[]) => void;
   setActiveDirectorStudioNode: (nodeId: string | null) => void;
 
   openToolDialog: (dialog: ActiveToolDialog) => void;
@@ -1062,12 +1070,44 @@ function trimHistorySnapshots(snapshots: CanvasHistorySnapshot[]): CanvasHistory
   return snapshots.length > limit ? snapshots.slice(-limit) : snapshots;
 }
 
-function resolveSelectedNodeId(selectedNodeId: string | null, nodes: CanvasNode[]): string | null {
-  if (!selectedNodeId) {
-    return null;
+/**
+ * Selection invariant: `node.selected` is the only truth and `selectedNodeId` is always
+ * derived from it. A patch that names `selectedNodeId` explicitly expresses intent
+ * ("select exactly this node"), so the flags are rewritten to match before deriving.
+ * Applies to every write, including external `useCanvasStore.setState` callers.
+ */
+function reconcileSelectionPatch(
+  state: CanvasState,
+  patch: Partial<CanvasState>
+): Partial<CanvasState> {
+  const hasNodes = patch.nodes !== undefined;
+  const hasIntent = Object.prototype.hasOwnProperty.call(patch, 'selectedNodeId');
+  if (!hasNodes && !hasIntent) return patch;
+  let nodes = patch.nodes ?? state.nodes;
+  if (hasIntent) {
+    const intended = patch.selectedNodeId ?? null;
+    if (intended !== deriveSelectedNodeId(nodes)) {
+      nodes = selectNodesExclusive(nodes, intended ? [intended] : []);
+    }
   }
-  return nodes.some((node) => node.id === selectedNodeId) ? selectedNodeId : null;
+  return { ...patch, nodes, selectedNodeId: deriveSelectedNodeId(nodes) };
 }
+
+const withDerivedSelection = (
+  config: StateCreator<CanvasState>
+): StateCreator<CanvasState> => (set, get, api) => {
+  const reconcilingSet = ((partial: unknown, replace?: boolean) => {
+    set((state) => {
+      const patch = typeof partial === 'function'
+        ? (partial as (current: CanvasState) => Partial<CanvasState> | CanvasState)(state)
+        : partial as Partial<CanvasState>;
+      if (!patch || patch === state) return state;
+      return reconcileSelectionPatch(state, patch);
+    }, replace as false);
+  }) as StoreApi<CanvasState>['setState'];
+  api.setState = reconcilingSet;
+  return config(reconcilingSet, get, api);
+};
 
 function resolveActiveToolDialog(
   activeToolDialog: ActiveToolDialog | null,
@@ -1094,7 +1134,7 @@ function createDefaultStoryboardExportOptions(): StoryboardExportOptions {
   };
 }
 
-export const useCanvasStore = create<CanvasState>((set, get) => ({
+export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, get) => ({
   nodes: [],
   edges: [],
   revision: 0,
@@ -1217,7 +1257,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       return {
         nodes: nextNodes,
         revision: hasMeaningfulChange ? nextCanvasRevision(state.revision) : state.revision,
-        selectedNodeId: resolveSelectedNodeId(state.selectedNodeId, nextNodes),
         activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, nextNodes),
         history: nextHistory,
         dragHistorySnapshot: nextDragHistorySnapshot,
@@ -1280,10 +1319,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const normalizedEdges = normalizeEdgesWithNodes(migrated.edges, normalizedNodes);
 
     set((state) => ({
-      nodes: normalizedNodes,
+      // A freshly opened project starts with nothing selected, whatever was persisted.
+      nodes: selectNodesExclusive(normalizedNodes, []),
       edges: normalizedEdges,
       revision: nextCanvasRevision(state.revision),
-      selectedNodeId: null,
       activeDirectorStudioNodeId: null,
       activeToolDialog: null,
       history: normalizeHistory(history),
@@ -1412,7 +1451,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       return {
         nodes,
         edges,
-        selectedNodeId: resolveSelectedNodeId(selectedNodeId, nodes),
+        selectedNodeId,
         activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, nodes),
         activeDirectorStudioNodeId:
           state.activeDirectorStudioNodeId
@@ -1959,8 +1998,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         nodes: nextNodes,
         edges: nextEdges,
         revision: nextCanvasRevision(state.revision),
-        selectedNodeId:
-          state.selectedNodeId && deleteSet.has(state.selectedNodeId) ? null : state.selectedNodeId,
         activeToolDialog:
           state.activeToolDialog && deleteSet.has(state.activeToolDialog.nodeId)
             ? null
@@ -2164,7 +2201,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       nodes: nextNodes,
       edges: nextEdges,
       revision: nextCanvasRevision(state.revision),
-      selectedNodeId: state.selectedNodeId === groupNodeId ? null : state.selectedNodeId,
       activeToolDialog:
         state.activeToolDialog?.nodeId === groupNodeId ? null : state.activeToolDialog,
       history: {
@@ -2197,9 +2233,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   setSelectedNode: (nodeId) => {
-    // Close any open panel when switching nodes
-    usePanelStateStore.getState().closeAllPanels();
     set({ selectedNodeId: nodeId });
+  },
+
+  setSelectedNodeIds: (nodeIds) => {
+    set((state) => ({ nodes: selectNodesExclusive(state.nodes, nodeIds) }));
   },
 
   setActiveDirectorStudioNode: (nodeId) => {
@@ -2225,10 +2263,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const nextPast = state.history.past.slice(0, -1);
 
     set({
-      nodes: target.nodes,
+      nodes: carrySelection(target.nodes, state.nodes),
       edges: target.edges,
       revision: nextCanvasRevision(state.revision),
-      selectedNodeId: resolveSelectedNodeId(state.selectedNodeId, target.nodes),
       activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, target.nodes),
       history: {
         past: nextPast,
@@ -2250,10 +2287,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const nextFuture = state.history.future.slice(0, -1);
 
     set({
-      nodes: target.nodes,
+      nodes: carrySelection(target.nodes, state.nodes),
       edges: target.edges,
       revision: nextCanvasRevision(state.revision),
-      selectedNodeId: resolveSelectedNodeId(state.selectedNodeId, target.nodes),
       activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, target.nodes),
       history: {
         past: pushSnapshot(state.history.past, currentSnapshot),
@@ -2285,4 +2321,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       };
     });
   },
-}));
+})));
+
+// Panels belong to the single selected node; switching or clearing selection closes them.
+useCanvasStore.subscribe((state, previous) => {
+  if (state.selectedNodeId !== previous.selectedNodeId) {
+    usePanelStateStore.getState().closeAllPanels();
+  }
+});

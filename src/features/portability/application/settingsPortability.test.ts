@@ -7,6 +7,7 @@ import {
   applySettingsBundle,
   assertSettingsBundleSize,
   buildSettingsBundle,
+  parseSettingsBundle,
   previewSettingsImport,
   scanSensitiveSettingsExport,
   serializeSettingsBundle,
@@ -155,6 +156,69 @@ describe('settings portability security', () => {
     useSettingsStore.setState({ textAgents: [] });
     applySettingsBundle(bundle, new Set(['prompts']));
     expect(useSettingsStore.getState().textAgents).toEqual([legacyAgent]);
+  });
+
+  it.each([
+    ['select', 'auto'],
+    ['pan', 'zoom'],
+    ['select', 'pan'],
+  ] as const)('round-trips canvas gestures %s / %s', (canvasLeftDragMode, canvasWheelMode) => {
+    useSettingsStore.setState({ canvasLeftDragMode, canvasWheelMode });
+    const bundle = parseSettingsBundle(serializeSettingsBundle(false));
+    expect(bundle.categories.general).toMatchObject({ canvasLeftDragMode, canvasWheelMode });
+    expect(Object.keys(bundle.categories.general).some((key) => /^canvasMouse/.test(key))).toBe(false);
+
+    useSettingsStore.setState({ canvasLeftDragMode: 'pan', canvasWheelMode: 'pan' });
+    applySettingsBundle(bundle, new Set(['general']));
+    expect(useSettingsStore.getState()).toMatchObject({ canvasLeftDragMode, canvasWheelMode });
+  });
+
+  it.each([
+    ['canvasLeftDragMode', 'zoom'],
+    ['canvasLeftDragMode', null],
+    ['canvasLeftDragMode', ['select']],
+    ['canvasWheelMode', 'select'],
+    ['canvasWheelMode', 1],
+    ['canvasWheelMode', ['auto']],
+  ])('rejects invalid canvas enum %s = %j', (field, value) => {
+    const bundle = buildSettingsBundle(false);
+    bundle.categories.general[field as string] = value;
+    expect(() => applySettingsBundle(bundle, new Set(['general']))).toThrow(/is invalid/);
+    expect(useSettingsStore.getState().canvasLeftDragMode).toBe(originalSettings.canvasLeftDragMode);
+    expect(useSettingsStore.getState().canvasWheelMode).toBe(originalSettings.canvasWheelMode);
+  });
+
+  it('ignores retired mouse controls in older settings without mapping them or mutating the input', () => {
+    const bundle = buildSettingsBundle(false);
+    const legacyPrefix = 'canvasMouse';
+    const legacyFields = {
+      [`${legacyPrefix}BindingPreset`]: 'traditional',
+      [`${legacyPrefix}Bindings`]: { leftDrag: 'panCanvas', invalidLegacySlot: 'unused' },
+    };
+    delete bundle.categories.general.canvasLeftDragMode;
+    delete bundle.categories.general.canvasWheelMode;
+    Object.assign(bundle.categories.general, legacyFields);
+    bundle.categories.general.useUploadFilenameAsNodeTitle = false;
+    useSettingsStore.setState({ canvasLeftDragMode: 'select', canvasWheelMode: 'auto' });
+
+    const parsed = parseSettingsBundle(JSON.stringify(bundle));
+    expect(Object.keys(parsed.categories.general).some((key) => /^canvasMouse/.test(key))).toBe(false);
+    expect(bundle.categories.general).toMatchObject(legacyFields);
+    expect(previewSettingsImport(bundle).flatMap((diff) => diff.changedFields)
+      .some((key) => /^canvasMouse/.test(key))).toBe(false);
+    applySettingsBundle(bundle, new Set(['general']));
+    expect(useSettingsStore.getState()).toMatchObject({
+      canvasLeftDragMode: 'select',
+      canvasWheelMode: 'auto',
+      useUploadFilenameAsNodeTitle: false,
+    });
+    expect(Object.keys(useSettingsStore.getState()).some((key) => /^canvasMouse/.test(key))).toBe(false);
+  });
+
+  it('still rejects unknown general fields rather than treating them as retired controls', () => {
+    const bundle = buildSettingsBundle(false);
+    bundle.categories.general.canvasMouseUnknown = true;
+    expect(() => parseSettingsBundle(JSON.stringify(bundle))).toThrow(/not supported/i);
   });
 
   it('rejects oversized settings text before JSON parsing', () => {

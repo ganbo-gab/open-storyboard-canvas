@@ -113,65 +113,52 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
     targetY,
   ]);
 
-  const processingStroke = 'rgb(var(--accent-rgb) / 0.94)';
-  const processingDashStroke = 'rgb(var(--accent-rgb) / 1)';
-  const baseStrokeWidth = isProcessingEdge
-    ? (selected ? 2.7 : 2.2)
-    : (selected ? 2.4 : 1.9);
-
   return (
     <>
-      {isProcessingEdge && (
-        <path
-          d={edgePath}
-          fill="none"
-          stroke={processingDashStroke}
-          strokeWidth={selected ? 2.5 : 2.1}
-          strokeLinecap="round"
-          strokeDasharray="8 10"
-          className="canvas-processing-edge__flow"
-          style={{ pointerEvents: 'none' }}
-        />
-      )}
       <BaseEdge
         id={id}
         path={edgePath}
         markerEnd={markerEnd}
-        style={{
-          stroke: isProcessingEdge ? processingStroke : style?.stroke,
-          strokeWidth: baseStrokeWidth,
-          ...style,
-        }}
+        className={isProcessingEdge ? 'canvas-edge__base is-processing' : 'canvas-edge__base'}
+        style={style}
+      />
+      {/* Flowing highlight: always on while the target is generating, otherwise on hover/selection. */}
+      <path
+        d={edgePath}
+        fill="none"
+        className={isProcessingEdge ? 'canvas-edge__flow is-active' : 'canvas-edge__flow'}
+        style={{ pointerEvents: 'none' }}
       />
       <path
         d={edgePath}
         fill="none"
         stroke="transparent"
-        strokeWidth={24}
-        className="canvas-edge-hit"
+        strokeWidth={22}
+        className="canvas-edge__hit"
         style={{ pointerEvents: 'stroke' }}
         onPointerMove={(event) => {
           window.clearTimeout(leaveTimer.current);
+          // Scissors follow the pointer's projection on the curve, not a fixed midpoint.
           const pointer = screenToFlowPosition({ x: event.clientX, y: event.clientY });
           const path = event.currentTarget;
           const length = path.getTotalLength();
           let closest = { x: labelX, y: labelY };
           let distance = Infinity;
-          for (let index = 0; index <= 32; index++) {
-            const point = path.getPointAtLength(length * index / 32);
+          for (let index = 0; index <= 48; index++) {
+            const point = path.getPointAtLength(length * index / 48);
             const nextDistance = (point.x - pointer.x) ** 2 + (point.y - pointer.y) ** 2;
             if (nextDistance < distance) { closest = { x: point.x, y: point.y }; distance = nextDistance; }
           }
           setHoverPoint(closest);
         }}
-        onPointerLeave={() => { leaveTimer.current = window.setTimeout(() => setHoverPoint(null), 180); }}
+        onPointerLeave={() => { leaveTimer.current = window.setTimeout(() => setHoverPoint(null), 160); }}
       />
       {(selected || hoverPoint) && (
         <EdgeLabelRenderer>
           <button
             type="button"
-            className="nodrag nopan canvas-edge-disconnect absolute flex h-8 w-8 items-center justify-center rounded-full border border-border-dark bg-surface-dark text-text-muted shadow-lg transition-colors hover:border-red-400/50 hover:text-red-400 focus-visible:outline-2 focus-visible:outline-accent"
-            style={{ transform: `translate(-50%, -50%) translate(${hoverPoint?.x ?? labelX}px, ${hoverPoint?.y ?? labelY}px)`, pointerEvents: 'all' }}
+            className="nodrag nopan canvas-edge__cut"
+            style={{ transform: `translate(-50%, -50%) translate(${hoverPoint?.x ?? labelX}px, ${hoverPoint?.y ?? labelY}px) scale(var(--canvas-ui-scale, 1))` }}
             onPointerEnter={() => window.clearTimeout(leaveTimer.current)}
             onPointerLeave={() => setHoverPoint(null)}
             onPointerDown={(event) => event.stopPropagation()}
@@ -179,7 +166,7 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
             title={t('rework.canvas.disconnect')}
             aria-label={t('rework.canvas.disconnect')}
           >
-            <Scissors className="h-4 w-4" />
+            <Scissors className="h-3.5 w-3.5" />
           </button>
         </EdgeLabelRenderer>
       )}

@@ -2250,28 +2250,29 @@
     },
     "canvasInteraction": {
       "title": "Canvas Operation Habits",
-      "desc": "Configure mouse bindings, box selection, node context menus, and WASD canvas pan.",
-      "preset": "Operation Preset",
-      "resetDefault": "Reset Default",
-      "presets": {
-        "default": "Default Preset",
-        "traditional": "Traditional Preset",
-        "custom": "Custom"
+      "desc": "Choose left-drag and wheel behavior; all other canvas gestures stay consistent.",
+      "leftDrag": "Left-drag empty canvas",
+      "leftDragOptions": {
+        "select": "Box select",
+        "pan": "Pan canvas"
       },
-      "slots": {
-        "leftClick": "Left Click",
-        "leftDrag": "Left Drag",
-        "rightClick": "Right Click",
-        "rightDrag": "Right Drag",
-        "middleClick": "Middle Click",
-        "middleDrag": "Middle Drag"
+      "wheel": "Mouse wheel",
+      "wheelOptions": {
+        "auto": "Auto-detect",
+        "zoom": "Zoom",
+        "pan": "Pan"
       },
-      "actions": {
-        "none": "No Action",
-        "selectNode": "Select Node",
-        "panCanvas": "Move Canvas",
-        "selectionBox": "Box Select",
-        "nodeMenu": "Node Menu"
+      "wheelAutoHelp": "Auto-detect: trackpad scrolling pans; the mouse wheel zooms.",
+      "gesturesTitle": "Fixed canvas gestures",
+      "gestures": {
+        "panButtons": "Right- or middle-button drag: pan canvas (in any mode)",
+        "spacePan": "Space + left-drag: pan canvas",
+        "trackpad": "Two-finger trackpad scroll: pan; pinch: zoom",
+        "modifierZoom": "⌘/Ctrl + wheel: zoom",
+        "shiftSelect": "Shift + left-drag empty canvas: box select (when left-drag is set to Pan)",
+        "contextMenu": "Right-click: open menu",
+        "addNode": "Double-click empty canvas: add node",
+        "tools": "V: select tool; H: hand tool"
       },
       "wasdPan": "Enable WASD Canvas Pan",
       "wasdPanDesc": "When the canvas has focus and no input is active, W/A/S/D pans the view.",

@@ -130,21 +130,169 @@
     "fit": "Fit canvas",
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
+    "zoomLevel": "Zoom level",
     "minimap": "Minimap",
+    "snap": "Snap to grid",
+    "hideEdges": "Hide connections",
+    "showEdges": "Show connections",
+    "organize": "Tidy canvas",
+    "controls": "Canvas controls",
     "search": "Search nodes or run a command…",
     "commands": "Commands & nodes",
-    "empty": "Double-click the canvas",
-    "emptyHint": "Create a node",
+    "empty": "Start with an idea",
+    "emptyHint": "Pick a node to begin, or drop images, video or audio straight in.",
+    "emptyStart": {
+      "text": "Text",
+      "image": "Image",
+      "video": "Video",
+      "stage": "Stage"
+    },
+    "emptyGestures": {
+      "doubleClick": "Double-click",
+      "add": "add node",
+      "pan": "hold to pan",
+      "search": "search",
+      "shortcuts": "all shortcuts"
+    },
     "shortcuts": "Shortcuts",
     "undo": "Undo",
     "redo": "Redo",
     "selected": "{{count}} selected",
     "disconnect": "Disconnect",
-    "locate": "Locate node",
-    "keyboardHint": "V Select · H Hand · Hold Space to pan · ⌘K Search",
-    "nodes": "{{count}} nodes",
-    "quickAdd": "Quick add",
-    "connectionHint": "Drag the right connector to reference this media in your next shot"
+    "rail": {
+      "label": "Canvas tools",
+      "text": "Text",
+      "image": "Image",
+      "video": "Video",
+      "audio": "Audio",
+      "stage": "Stage",
+      "assets": "Canvas assets"
+    },
+    "nodes": {
+      "text": "Text",
+      "textHint": "Prompts, scripts or AI text",
+      "note": "Note",
+      "noteHint": "Annotation, not used for generation",
+      "image": "Image",
+      "imageHint": "Text-to-image, image-to-image, edits",
+      "video": "Video",
+      "videoHint": "Text-to-video, image-to-video",
+      "audio": "Audio",
+      "audioHint": "Voice, sound effects, music",
+      "stage": "Stage",
+      "stageHint": "Blocking, camera moves, previs",
+      "storyboard": "Storyboard",
+      "storyboardHint": "Generate several shots together",
+      "panorama": "Panorama",
+      "panoramaHint": "720° scene reference",
+      "json": "JSON card",
+      "jsonHint": "Structured data",
+      "tagGroup": "Tag group",
+      "tagGroupHint": "Tag a set of materials"
+    },
+    "addMenu": {
+      "search": "Search nodes…",
+      "generate": "Generate",
+      "content": "Content",
+      "resources": "Resources",
+      "fromConnection": "Generate from this node…",
+      "upload": "Upload files",
+      "uploadHint": "Images, video or audio",
+      "canvasAsset": "Pick image from canvas",
+      "canvasAssetHint": "Use an existing image as input"
+    },
+    "menu": {
+      "canvas": "Canvas menu",
+      "node": "Node menu",
+      "text": "Selected text",
+      "generate": "Generate",
+      "generateCount": "Generate {{count}} nodes",
+      "copyCount": "Copy {{count}} nodes",
+      "deleteCount": "Delete {{count}} nodes",
+      "duplicate": "Duplicate",
+      "copyImage": "Copy image",
+      "group": "Group",
+      "ungroup": "Ungroup",
+      "arrangeGrid": "Arrange in grid",
+      "focus": "Zoom to node",
+      "selectAll": "Select all",
+      "textToNote": "Save as text node"
+    },
+    "selection": {
+      "arrange": "Arrange",
+      "arrangeRow": "Arrange in a row",
+      "arrangeColumn": "Arrange in a column",
+      "generate": "Generate all",
+      "generateHint": "Submit every generatable node in order"
+    },
+    "assets": {
+      "selectTitle": "Choose an image",
+      "selectHint": "Pick an image on this canvas to connect to the node"
+    },
+    "node": {
+      "generating": "Generating"
+    },
+    "palette": {
+      "addPrefix": "Add"
+    },
+    "shortcutGroups": {
+      "tools": "Tools",
+      "edit": "Edit",
+      "organize": "Organize",
+      "view": "View",
+      "gestures": "Mouse & trackpad"
+    },
+    "shortcutNames": {
+      "tool": {
+        "select": "Select tool",
+        "hand": "Hand tool"
+      },
+      "node": {
+        "add": "Add node"
+      },
+      "edit": {
+        "undo": "Undo",
+        "redo": "Redo",
+        "copy": "Copy nodes",
+        "paste": "Paste",
+        "duplicate": "Duplicate",
+        "delete": "Delete",
+        "selectAll": "Select all"
+      },
+      "organize": {
+        "group": "Group",
+        "ungroup": "Ungroup",
+        "connect": "Connect the two selected nodes",
+        "tidy": "Tidy canvas"
+      },
+      "view": {
+        "zoomIn": "Zoom in",
+        "zoomOut": "Zoom out",
+        "fit": "Fit canvas",
+        "actualSize": "Zoom to 100%",
+        "palette": "Search & commands",
+        "shortcuts": "Shortcuts sheet"
+      },
+      "generate": {
+        "run": "Generate selected"
+      }
+    },
+    "gestures": {
+      "pan": "Pan",
+      "panKeys": "Space + drag, right/middle drag, two-finger scroll",
+      "zoom": "Zoom",
+      "zoomKeys": "Pinch, ⌘ + wheel",
+      "marquee": "Marquee select",
+      "marqueeKeys": "Drag empty space (Shift + drag in pan mode)",
+      "multi": "Add / remove from selection",
+      "multiKeys": "Shift or ⌘ + click",
+      "copyDrag": "Drag a copy",
+      "copyDragKeys": "Hold Alt while dragging",
+      "menu": "Context menu",
+      "menuKeys": "Right-click",
+      "add": "Add node here",
+      "addKeys": "Double-click empty space"
+    }
   },
   "comfy": {
     "title": "Workflow input mapping",

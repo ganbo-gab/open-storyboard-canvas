@@ -26,8 +26,8 @@ export const GENERAL_FIELDS = [
   'showStoryboardGenAdvancedRatioControls',
   'useLegacyPanoramaControlDirection',
   'panoramaControlSensitivity',
-  'canvasMouseBindingPreset',
-  'canvasMouseBindings',
+  'canvasLeftDragMode',
+  'canvasWheelMode',
   'enableCanvasWasdPan',
   'canvasWasdPanSensitivity',
   'canvasEdgeRoutingMode',
@@ -75,21 +75,6 @@ const GENERAL_BOOLEAN_FIELDS = new Set([
   'enableCanvasWasdPan',
   'autoCheckAppUpdateOnLaunch',
   'enableUpdateDialog',
-]);
-const CANVAS_MOUSE_BINDING_SLOTS = [
-  'leftClick',
-  'leftDrag',
-  'rightClick',
-  'rightDrag',
-  'middleClick',
-  'middleDrag',
-] as const;
-const CANVAS_MOUSE_ACTIONS = new Set([
-  'none',
-  'selectNode',
-  'panCanvas',
-  'selectionBox',
-  'nodeMenu',
 ]);
 const PROVIDER_FIELDS = new Set([
   'id',
@@ -276,15 +261,12 @@ function validateGeneralCategory(category: Record<string, unknown>): void {
     } else if (field === 'panoramaControlSensitivity'
       && !['low', 'medium', 'high'].includes(String(value))) {
       throw new Error(`general.${field} is invalid.`);
-    } else if (field === 'canvasMouseBindingPreset'
-      && !['default', 'traditional', 'custom'].includes(String(value))) {
+    } else if (field === 'canvasLeftDragMode'
+      && (typeof value !== 'string' || !['select', 'pan'].includes(value))) {
       throw new Error(`general.${field} is invalid.`);
-    } else if (field === 'canvasMouseBindings') {
-      if (!isPlainRecord(value)) throw new Error(`general.${field} must be an object.`);
-      assertKnownFields(value, new Set(CANVAS_MOUSE_BINDING_SLOTS), `general.${field}`);
-      if (CANVAS_MOUSE_BINDING_SLOTS.some((slot) => !CANVAS_MOUSE_ACTIONS.has(String(value[slot])))) {
-        throw new Error(`general.${field} contains an invalid action.`);
-      }
+    } else if (field === 'canvasWheelMode'
+      && (typeof value !== 'string' || !['auto', 'zoom', 'pan'].includes(value))) {
+      throw new Error(`general.${field} is invalid.`);
     } else if (field === 'canvasWasdPanSensitivity') {
       if (!Number.isFinite(value) || Number(value) < 10 || Number(value) > 180) {
         throw new Error(`general.${field} must be between 10 and 180.`);
@@ -416,7 +398,15 @@ function validateImageHostingCategory(category: Record<string, unknown>): void {
 }
 
 export function validatePortableSettingsPayload(input: unknown): SettingsBundlePayload {
-  const payload = validateSettingsBundle(input);
+  const validated = validateSettingsBundle(input);
+  const payload = { ...validated, categories: { ...validated.categories } };
+  if (payload.categories.general) {
+    payload.categories.general = Object.fromEntries(
+      Object.entries(payload.categories.general).filter(
+        ([field]) => !/^canvasMouse(?:BindingPreset|Bindings)$/.test(field)
+      )
+    );
+  }
   for (const [categoryName, category] of Object.entries(payload.categories)) {
     if (!SETTINGS_CATEGORIES.has(categoryName)) throw new Error(`Unknown settings category: ${categoryName}`);
     assertPortableJson(category, categoryName);

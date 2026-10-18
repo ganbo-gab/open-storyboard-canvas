@@ -165,6 +165,8 @@ describe('agent diagnostics', () => {
         customProxyUrl: 'http://user:secret-proxy-password@127.0.0.1:7890',
       },
       downloadPresetPaths: ['/Users/alice/exports'],
+      canvasLeftDragMode: 'pan',
+      canvasWheelMode: 'zoom',
       dreaminaStatus: {
         installed: true,
         loggedIn: true,
@@ -189,6 +191,7 @@ describe('agent diagnostics', () => {
       access: { providers: { grsai: 'configured', empty: 'missing' }, agnes: 'configured' },
       dreamina: { installed: true, loginState: 'logged_in', accountErrorState: 'present' },
       generation: { networkRoute: 'custom-proxy', customProxyState: 'configured' },
+      canvas: { canvasLeftDragMode: 'pan', canvasWheelMode: 'zoom' },
     });
     expect(serialized).not.toContain('secret-built-in-key');
     expect(serialized).not.toContain('secret-agnes-key');

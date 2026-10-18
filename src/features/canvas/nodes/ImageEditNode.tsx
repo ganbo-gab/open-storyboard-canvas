@@ -53,7 +53,7 @@ import {
   prepareNodeImageFromFile,
   resolveImageDisplayUrl,
 } from '@/features/canvas/application/imageData';
-import { resolveClipboardImageFile } from '@/features/canvas/hooks/useCanvasShortcuts';
+import { resolveClipboardImageFile } from '@/features/canvas/clipboard/usePasteBridge';
 import { appendGenerationParameterConstraints } from '@/features/canvas/application/generationPromptConstraints';
 import { normalizeImageRequestGeometry } from '@/features/canvas/application/imageRequestGeometry';
 import {

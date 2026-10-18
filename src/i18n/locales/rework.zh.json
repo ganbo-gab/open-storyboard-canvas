@@ -130,21 +130,169 @@
     "fit": "适合屏幕",
     "zoomIn": "放大",
     "zoomOut": "缩小",
+    "zoomLevel": "缩放比例",
     "minimap": "小地图",
+    "snap": "网格吸附",
+    "hideEdges": "隐藏连线",
+    "showEdges": "显示连线",
+    "organize": "整理画布",
+    "controls": "画布控制",
     "search": "搜索节点或执行操作…",
     "commands": "命令与节点",
-    "empty": "双击画布",
-    "emptyHint": "创建节点",
+    "empty": "从一个想法开始",
+    "emptyHint": "选一种节点开始，或把图片、视频、音频直接拖进来。",
+    "emptyStart": {
+      "text": "文本",
+      "image": "图片生成",
+      "video": "视频生成",
+      "stage": "导演台"
+    },
+    "emptyGestures": {
+      "doubleClick": "双击",
+      "add": "添加节点",
+      "pan": "按住平移",
+      "search": "搜索",
+      "shortcuts": "全部快捷键"
+    },
     "shortcuts": "快捷键",
     "undo": "撤销",
     "redo": "重做",
     "selected": "已选 {{count}} 个",
     "disconnect": "断开连线",
-    "locate": "定位节点",
-    "keyboardHint": "V 选择 · H 抓手 · 按住空格平移 · ⌘K 搜索",
-    "nodes": "{{count}} 个节点",
-    "quickAdd": "快速添加",
-    "connectionHint": "拖动右侧连接点，把素材作为下个镜头的参考"
+    "rail": {
+      "label": "画布工具",
+      "text": "文本",
+      "image": "图片生成",
+      "video": "视频生成",
+      "audio": "音频生成",
+      "stage": "导演台",
+      "assets": "画布资产"
+    },
+    "nodes": {
+      "text": "文本",
+      "textHint": "提示词、脚本或 AI 文本",
+      "note": "便签",
+      "noteHint": "不参与生成的说明文字",
+      "image": "图片生成",
+      "imageHint": "文生图、图生图与编辑",
+      "video": "视频生成",
+      "videoHint": "文生视频、图生视频",
+      "audio": "音频生成",
+      "audioHint": "配音、音效与音乐",
+      "stage": "导演台",
+      "stageHint": "摆位、运镜与预演",
+      "storyboard": "分镜组",
+      "storyboardHint": "多镜头整体生成",
+      "panorama": "全景图",
+      "panoramaHint": "720° 场景参考",
+      "json": "JSON 卡片",
+      "jsonHint": "结构化数据",
+      "tagGroup": "标签组",
+      "tagGroupHint": "给一组素材打标签"
+    },
+    "addMenu": {
+      "search": "搜索节点…",
+      "generate": "生成",
+      "content": "内容",
+      "resources": "资源",
+      "fromConnection": "用这个节点生成…",
+      "upload": "上传文件",
+      "uploadHint": "图片、视频或音频",
+      "canvasAsset": "从画布选图片",
+      "canvasAssetHint": "用已有图片作为输入"
+    },
+    "menu": {
+      "canvas": "画布菜单",
+      "node": "节点菜单",
+      "text": "选中文本",
+      "generate": "生成",
+      "generateCount": "生成 {{count}} 个节点",
+      "copyCount": "复制 {{count}} 个节点",
+      "deleteCount": "删除 {{count}} 个节点",
+      "duplicate": "创建副本",
+      "copyImage": "复制图片",
+      "group": "打组",
+      "ungroup": "解组",
+      "arrangeGrid": "宫格排列",
+      "focus": "定位到节点",
+      "selectAll": "全选",
+      "textToNote": "存为文本节点"
+    },
+    "selection": {
+      "arrange": "排列",
+      "arrangeRow": "水平排列",
+      "arrangeColumn": "垂直排列",
+      "generate": "整组生成",
+      "generateHint": "按顺序提交所有可生成的节点"
+    },
+    "assets": {
+      "selectTitle": "选择图片",
+      "selectHint": "选一张画布上的图片连接到这个节点"
+    },
+    "node": {
+      "generating": "生成中"
+    },
+    "palette": {
+      "addPrefix": "添加"
+    },
+    "shortcutGroups": {
+      "tools": "工具",
+      "edit": "编辑",
+      "organize": "组织",
+      "view": "视图",
+      "gestures": "鼠标与触控板"
+    },
+    "shortcutNames": {
+      "tool": {
+        "select": "选择工具",
+        "hand": "抓手工具"
+      },
+      "node": {
+        "add": "添加节点"
+      },
+      "edit": {
+        "undo": "撤销",
+        "redo": "重做",
+        "copy": "复制节点",
+        "paste": "粘贴",
+        "duplicate": "创建副本",
+        "delete": "删除",
+        "selectAll": "全选"
+      },
+      "organize": {
+        "group": "打组",
+        "ungroup": "解组",
+        "connect": "连接选中的两个节点",
+        "tidy": "整理画布"
+      },
+      "view": {
+        "zoomIn": "放大",
+        "zoomOut": "缩小",
+        "fit": "适合屏幕",
+        "actualSize": "缩放到 100%",
+        "palette": "搜索与命令",
+        "shortcuts": "快捷键面板"
+      },
+      "generate": {
+        "run": "生成选中节点"
+      }
+    },
+    "gestures": {
+      "pan": "平移画布",
+      "panKeys": "空格 + 拖动、右键/中键拖动、双指滑动",
+      "zoom": "缩放",
+      "zoomKeys": "双指捏合、⌘ + 滚轮",
+      "marquee": "框选",
+      "marqueeKeys": "拖动空白处（平移模式下 Shift + 拖动）",
+      "multi": "加选 / 减选",
+      "multiKeys": "Shift 或 ⌘ + 点击",
+      "copyDrag": "拖动复制",
+      "copyDragKeys": "按住 Alt 拖动节点",
+      "menu": "上下文菜单",
+      "menuKeys": "右键单击",
+      "add": "在此处添加节点",
+      "addKeys": "双击空白处"
+    }
   },
   "comfy": {
     "title": "工作流输入映射",

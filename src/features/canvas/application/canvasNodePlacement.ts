@@ -22,6 +22,8 @@ export interface RelatedCanvasPlacementInput {
   count?: number;
   relatedNodeId?: string;
   viewport?: CanvasPlacementViewport | null;
+  /** Treat leaving the viewport as near-collision: only fall back to it when nothing visible is free. */
+  strictViewport?: boolean;
 }
 
 const DEFAULT_NODE_HEIGHT = 200;
@@ -158,6 +160,7 @@ export function findRelatedCanvasNodePositions(input: RelatedCanvasPlacementInpu
       const upwardPenalty = point.y < anchor.y ? Math.abs(point.y - anchor.y) * 0.12 : 0;
       const score = relationshipDistance * 0.72
         + overflow * 7
+        + (input.strictViewport && overflow > 0 ? 100_000 : 0)
         + upwardPenalty
         - Math.min(clearance, 360) * 0.45;
       if (!best || score < best.score) best = { point, score };

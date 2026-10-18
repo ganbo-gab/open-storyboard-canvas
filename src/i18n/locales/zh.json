@@ -2246,28 +2246,29 @@
     },
     "canvasInteraction": {
       "title": "画布操作习惯",
-      "desc": "配置鼠标键位、框选、右键菜单和 WASD 画布平移。",
-      "preset": "操作预设",
-      "resetDefault": "恢复默认",
-      "presets": {
-        "default": "默认预设",
-        "traditional": "传统预设",
-        "custom": "自定义"
+      "desc": "选择左键拖动和滚轮的行为，其余画布手势保持一致。",
+      "leftDrag": "左键拖动空白处",
+      "leftDragOptions": {
+        "select": "框选",
+        "pan": "平移画布"
       },
-      "slots": {
-        "leftClick": "左键单击",
-        "leftDrag": "左键拖动",
-        "rightClick": "右键单击",
-        "rightDrag": "右键拖动",
-        "middleClick": "中键单击",
-        "middleDrag": "中键拖动"
+      "wheel": "鼠标滚轮",
+      "wheelOptions": {
+        "auto": "自动识别",
+        "zoom": "缩放",
+        "pan": "平移"
       },
-      "actions": {
-        "none": "无操作",
-        "selectNode": "选中节点",
-        "panCanvas": "移动画布",
-        "selectionBox": "框选",
-        "nodeMenu": "节点菜单"
+      "wheelAutoHelp": "自动识别：触控板滚动平移，鼠标滚轮缩放。",
+      "gesturesTitle": "固定画布手势",
+      "gestures": {
+        "panButtons": "右键或中键拖动：平移画布（任何模式）",
+        "spacePan": "空格 + 左键拖动：平移画布",
+        "trackpad": "触控板双指：平移；双指捏合：缩放",
+        "modifierZoom": "⌘/Ctrl + 滚轮：缩放",
+        "shiftSelect": "Shift + 左键拖动空白：框选（左键模式为“平移”时）",
+        "contextMenu": "右键单击：菜单",
+        "addNode": "双击空白：添加节点",
+        "tools": "V：选择工具；H：抓手工具"
       },
       "wasdPan": "开启 WASD 移动画布",
       "wasdPanDesc": "画布获得焦点且不在输入框内时，W/A/S/D 平移视图。",

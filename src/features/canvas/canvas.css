@@ -1,0 +1,1143 @@
+/*
+  Canvas visual system. Token-driven (see src/index.css); no !important, no hex.
+  Screen-constant chrome scales by --canvas-ui-scale, written by the engine on every
+  viewport change (1 / zoom, clamped) so nothing re-renders to stay readable.
+*/
+
+@layer components {
+  /* ---------- Surface & cursors ---------- */
+
+  .canvas-root {
+    --canvas-ui-scale: 1;
+    position: relative;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    outline: none;
+    background: var(--canvas-bg);
+  }
+
+  .canvas-root .react-flow {
+    background: var(--canvas-bg);
+  }
+
+  .canvas-root .react-flow__pane {
+    cursor: default;
+  }
+
+  .canvas-root[data-tool='hand'] .react-flow__pane,
+  .canvas-root[data-tool='hand'] .react-flow__node,
+  .canvas-root[data-space-pan] .react-flow__pane,
+  .canvas-root[data-space-pan] .react-flow__node {
+    cursor: grab;
+  }
+
+  .canvas-root[data-panning] .react-flow__pane,
+  .canvas-root[data-panning] .react-flow__node,
+  .canvas-root .react-flow__pane.dragging {
+    cursor: grabbing;
+  }
+
+  .canvas-root .react-flow__node {
+    border-radius: 0;
+  }
+
+  .canvas-root[data-edges-hidden] .react-flow__edges,
+  .canvas-root[data-edges-hidden] .react-flow__edgelabel-renderer {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* Marquee and the box that remains around a multi-selection. */
+  .canvas-root .react-flow__selection {
+    border: 1px solid rgb(var(--accent-rgb) / 0.7);
+    border-radius: 4px;
+    background: rgb(var(--accent-rgb) / 0.08);
+  }
+
+  .canvas-root .react-flow__nodesselection-rect {
+    border: 1px dashed rgb(var(--accent-rgb) / 0.55);
+    border-radius: 6px;
+    background: transparent;
+  }
+
+  /* ---------- Node frame ---------- */
+
+  .node-frame {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .node-frame__title {
+    position: absolute;
+    bottom: calc(100% + 6px * var(--canvas-ui-scale));
+    left: 0;
+    display: flex;
+    width: calc(100% / var(--canvas-ui-scale));
+    height: 22px;
+    align-items: center;
+    gap: 6px;
+    padding: 0 2px;
+    transform: scale(var(--canvas-ui-scale));
+    transform-origin: bottom left;
+    color: rgb(var(--text-muted-rgb));
+    font-size: 12.5px;
+    line-height: 22px;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .node-frame[data-selected] .node-frame__title {
+    color: rgb(var(--text-rgb));
+  }
+
+  .node-frame__icon {
+    display: inline-flex;
+    flex: none;
+  }
+
+  .node-frame__icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .node-frame__name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+    cursor: inherit;
+  }
+
+  .node-frame__title-input {
+    min-width: 80px;
+    max-width: 70%;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: var(--r-xs);
+    background: rgb(var(--raised-rgb));
+    box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.6);
+    color: rgb(var(--text-rgb));
+    font-size: 12.5px;
+    outline: none;
+  }
+
+  .node-frame__meta {
+    flex: none;
+    color: rgb(var(--text-subtle-rgb));
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .node-frame__spacer {
+    flex: 1;
+  }
+
+  .node-frame__actions {
+    display: inline-flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity var(--dur-1) ease;
+  }
+
+  .react-flow__node:hover .node-frame__actions,
+  .node-frame[data-selected] .node-frame__actions {
+    opacity: 1;
+  }
+
+  .node-frame__actions button {
+    display: inline-flex;
+    width: 20px;
+    height: 20px;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-xs);
+    color: rgb(var(--text-muted-rgb));
+  }
+
+  .node-frame__actions button:hover {
+    background: var(--hover);
+    color: rgb(var(--text-rgb));
+  }
+
+  .node-frame__actions svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .node-frame__badge {
+    flex: none;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--hover);
+    color: rgb(var(--text-muted-rgb));
+    font-size: 11px;
+    line-height: 18px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .node-frame__status {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .node-frame__status svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .node-frame__status[data-kind='generating'] {
+    background: rgb(var(--accent-rgb) / 0.14);
+    color: rgb(var(--accent-rgb));
+  }
+
+  .node-frame__status[data-kind='error'] {
+    background: rgb(var(--danger-rgb) / 0.12);
+    color: rgb(var(--danger-rgb));
+  }
+
+  .node-frame__status[data-kind='attention'] {
+    background: rgb(var(--warning-rgb) / 0.12);
+    color: rgb(var(--warning-rgb));
+  }
+
+  .node-frame__timer {
+    min-width: 34px;
+    text-align: right;
+    opacity: 0.85;
+  }
+
+  .node-frame__spin {
+    animation: ui-spin 0.9s linear infinite;
+  }
+
+  .node-frame__card {
+    position: relative;
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: var(--node-radius);
+    background: var(--canvas-node-bg);
+    box-shadow:
+      inset 0 0 0 1px var(--canvas-node-border),
+      var(--canvas-node-shadow);
+    transition: box-shadow var(--dur-1) ease;
+  }
+
+  .node-frame[data-variant='card'] .node-frame__card {
+    padding: 12px;
+  }
+
+  .node-frame[data-variant='media'] .node-frame__card {
+    background: var(--canvas-node-media-bg);
+  }
+
+  .react-flow__node:hover .node-frame__card {
+    box-shadow:
+      inset 0 0 0 1px var(--canvas-node-border-hover),
+      var(--canvas-node-shadow);
+  }
+
+  /* Selection ring stays ~2 screen px at any zoom. */
+  .node-frame[data-selected] .node-frame__card {
+    box-shadow:
+      0 0 0 calc(1.5px * var(--canvas-ui-scale)) rgb(var(--accent-rgb)),
+      0 0 0 calc(5px * var(--canvas-ui-scale)) rgb(var(--accent-rgb) / 0.16);
+  }
+
+  .node-frame[data-tone='error'] .node-frame__card {
+    box-shadow: inset 0 0 0 1px rgb(var(--danger-rgb) / 0.55);
+  }
+
+  .node-frame[data-tone='attention'] .node-frame__card {
+    box-shadow: inset 0 0 0 1px rgb(var(--warning-rgb) / 0.55);
+  }
+
+  .node-frame[data-tone='error'][data-selected] .node-frame__card {
+    box-shadow: 0 0 0 calc(1.5px * var(--canvas-ui-scale)) rgb(var(--danger-rgb));
+  }
+
+  /* Whole card is a drop target while dragging a connection. */
+  .canvas-root[data-connecting] .react-flow__node:hover .node-frame__card {
+    box-shadow:
+      0 0 0 calc(2px * var(--canvas-ui-scale)) rgb(var(--accent-rgb)),
+      0 0 0 calc(8px * var(--canvas-ui-scale)) rgb(var(--accent-rgb) / 0.18);
+  }
+
+  .node-frame[data-generating] .node-frame__card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      100deg,
+      transparent 20%,
+      rgb(var(--accent-rgb) / 0.1) 45%,
+      rgb(255 255 255 / 0.06) 50%,
+      rgb(var(--accent-rgb) / 0.1) 55%,
+      transparent 80%
+    );
+    background-size: 240% 100%;
+    animation: node-shimmer 1.8s linear infinite;
+    pointer-events: none;
+  }
+
+  /* Placeholder face for media nodes without a result yet. */
+  .node-face {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 16px;
+    color: rgb(var(--text-subtle-rgb));
+    text-align: center;
+  }
+
+  .node-face svg {
+    width: 26px;
+    height: 26px;
+    opacity: 0.7;
+  }
+
+  .node-face__title {
+    color: rgb(var(--text-muted-rgb));
+    font-size: 13px;
+  }
+
+  .node-face__hint {
+    max-width: 280px;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  .node-face__prompt {
+    display: -webkit-box;
+    max-width: 92%;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    color: rgb(var(--text-muted-rgb));
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  /* ---------- Connection handles (⊕) ---------- */
+
+  .canvas-root .node-handle {
+    width: 2px;
+    height: 2px;
+    min-width: 0;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow: visible;
+  }
+
+  /* Generous invisible hit area, constant on screen. */
+  .canvas-root .node-handle::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%) scale(var(--canvas-ui-scale));
+  }
+
+  .canvas-root .node-handle[data-passive]::before {
+    display: none;
+  }
+
+  .node-handle__dot {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    display: flex;
+    width: 22px;
+    height: 22px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgb(var(--elevated-rgb));
+    box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-pop);
+    color: rgb(var(--text-muted-rgb));
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -50%) scale(calc(var(--canvas-ui-scale) * 0.7));
+    transition:
+      opacity var(--dur-1) ease,
+      transform var(--dur-2) var(--ease-spring),
+      background-color var(--dur-1) ease,
+      color var(--dur-1) ease;
+  }
+
+  .node-handle__dot svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .react-flow__node:hover .node-handle__dot,
+  .react-flow__node.selected .node-handle__dot,
+  .canvas-root[data-connecting] .node-handle__dot {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(var(--canvas-ui-scale));
+  }
+
+  .canvas-root .node-handle:hover .node-handle__dot,
+  .canvas-root .node-handle.connectingto .node-handle__dot,
+  .canvas-root .node-handle.valid .node-handle__dot {
+    background: rgb(var(--accent-rgb));
+    color: var(--accent-fg);
+    box-shadow: 0 0 0 4px rgb(var(--accent-rgb) / 0.2);
+  }
+
+  .canvas-root .react-flow__connectionline path {
+    stroke: rgb(var(--accent-rgb));
+    stroke-width: 2;
+    stroke-dasharray: 6 6;
+    animation: edge-flow 0.6s linear infinite;
+  }
+
+  /* ---------- Resize corners ---------- */
+
+  .canvas-root .node-resize.react-flow__resize-control.handle {
+    width: calc(12px * var(--canvas-ui-scale));
+    height: calc(12px * var(--canvas-ui-scale));
+    border: calc(1.5px * var(--canvas-ui-scale)) solid rgb(var(--accent-rgb));
+    border-radius: calc(3px * var(--canvas-ui-scale));
+    background: rgb(var(--elevated-rgb));
+  }
+
+  /* ---------- Edges ---------- */
+
+  .canvas-root .canvas-edge__base {
+    stroke: var(--canvas-edge);
+    stroke-width: 1.6;
+    transition: stroke var(--dur-1) ease;
+  }
+
+  .canvas-root .canvas-edge__flow {
+    stroke: rgb(var(--accent-rgb));
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-dasharray: 2 10;
+    opacity: 0;
+    transition: opacity var(--dur-1) ease;
+  }
+
+  .canvas-root .react-flow__edge:hover .canvas-edge__base,
+  .canvas-root .react-flow__edge.selected .canvas-edge__base,
+  .canvas-root .canvas-edge__base.is-processing {
+    stroke: rgb(var(--accent-rgb) / 0.55);
+  }
+
+  .canvas-root .react-flow__edge:hover .canvas-edge__flow,
+  .canvas-root .react-flow__edge.selected .canvas-edge__flow,
+  .canvas-root .canvas-edge__flow.is-active {
+    opacity: 1;
+    animation: edge-flow 0.7s linear infinite;
+  }
+
+  .canvas-root .canvas-edge__hit {
+    cursor: pointer;
+  }
+
+  .canvas-edge__cut {
+    position: absolute;
+    display: flex;
+    width: 28px;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgb(var(--elevated-rgb));
+    box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-pop);
+    color: rgb(var(--text-muted-rgb));
+    pointer-events: all;
+    transition: color var(--dur-1) ease, background-color var(--dur-1) ease;
+  }
+
+  .canvas-edge__cut:hover {
+    background: rgb(var(--danger-rgb));
+    color: #fff;
+  }
+
+  /* ---------- Floating chrome (rail, controls, toolbars) ---------- */
+
+  .canvas-chrome {
+    position: absolute;
+    z-index: 30;
+    display: flex;
+    border-radius: var(--r-lg);
+    background: rgb(var(--elevated-rgb) / 0.92);
+    box-shadow: var(--shadow-pop);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+  }
+
+  .canvas-rail {
+    left: 12px;
+    top: 50%;
+    max-height: calc(100% - 132px);
+    width: 44px;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px;
+    overflow-y: auto;
+    scrollbar-width: none;
+    transform: translateY(-50%);
+  }
+
+  .canvas-rail::-webkit-scrollbar {
+    display: none;
+  }
+
+  .canvas-rail__rule {
+    width: 18px;
+    height: 1px;
+    flex: none;
+    margin: 4px 0;
+    background: var(--line);
+  }
+
+  .canvas-tool {
+    display: inline-flex;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-sm);
+    color: rgb(var(--text-muted-rgb));
+    transition:
+      background-color var(--dur-1) ease,
+      color var(--dur-1) ease,
+      transform var(--dur-1) ease;
+  }
+
+  .canvas-tool svg {
+    width: 17px;
+    height: 17px;
+    stroke-width: 1.8;
+  }
+
+  .canvas-tool:hover {
+    background: var(--hover);
+    color: rgb(var(--text-rgb));
+  }
+
+  .canvas-tool:active {
+    transform: scale(0.94);
+  }
+
+  .canvas-tool[aria-pressed='true'] {
+    background: var(--press);
+    color: rgb(var(--text-rgb));
+  }
+
+  .canvas-tool:disabled {
+    cursor: default;
+    opacity: 0.32;
+  }
+
+  .canvas-tool:disabled:hover {
+    background: transparent;
+  }
+
+  .canvas-tool--primary {
+    background: var(--primary-bg);
+    color: var(--primary-fg);
+  }
+
+  .canvas-tool--primary:hover {
+    background: var(--primary-hover);
+    color: var(--primary-fg);
+  }
+
+  .canvas-controls {
+    bottom: 12px;
+    left: 12px;
+    height: 40px;
+    align-items: center;
+    gap: 2px;
+    padding: 0 4px;
+  }
+
+  .canvas-controls .canvas-tool {
+    width: 30px;
+    height: 30px;
+  }
+
+  .canvas-controls__rule {
+    width: 1px;
+    height: 16px;
+    margin: 0 4px;
+    background: var(--line);
+  }
+
+  .canvas-controls__zoom {
+    height: 30px;
+    min-width: 52px;
+    padding: 0 6px;
+    border-radius: var(--r-sm);
+    color: rgb(var(--text-rgb) / 0.85);
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .canvas-controls__zoom:hover,
+  .canvas-controls__zoom[aria-expanded='true'] {
+    background: var(--hover);
+  }
+
+  .canvas-zoom-input {
+    display: flex;
+    height: 34px;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    padding: 0 10px;
+    border-radius: var(--r-md);
+    background: var(--hover);
+  }
+
+  .canvas-zoom-input input {
+    min-width: 0;
+    flex: 1;
+    background: transparent;
+    font-variant-numeric: tabular-nums;
+    outline: none;
+  }
+
+  .canvas-root .canvas-minimap {
+    position: absolute;
+    bottom: 60px;
+    left: 12px;
+    width: 200px;
+    height: 132px;
+    margin: 0;
+    overflow: hidden;
+    border-radius: var(--r-lg);
+    background: rgb(var(--elevated-rgb) / 0.94);
+    box-shadow: var(--shadow-pop);
+  }
+
+  .canvas-root .canvas-minimap .react-flow__minimap-mask {
+    fill: var(--canvas-minimap-mask);
+    stroke: var(--canvas-minimap-mask-stroke);
+    stroke-width: 1.5;
+  }
+
+  .canvas-root .canvas-minimap .react-flow__minimap-node {
+    fill: var(--canvas-minimap-node);
+  }
+
+  /* Multi-selection toolbar. */
+  .canvas-selection-bar {
+    z-index: 40;
+    height: 40px;
+    align-items: center;
+    gap: 2px;
+    padding: 0 4px;
+    /* `translate`, not `transform`: the pop-in animation owns `transform`. */
+    translate: -50% -100%;
+    animation: ui-pop var(--dur-2) var(--ease-out) both;
+  }
+
+  .canvas-selection-bar__count {
+    padding: 0 8px 0 6px;
+    color: rgb(var(--text-muted-rgb));
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .canvas-action {
+    display: inline-flex;
+    height: 30px;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    padding: 0 9px;
+    border-radius: var(--r-sm);
+    color: rgb(var(--text-rgb) / 0.9);
+    font-size: 12.5px;
+    white-space: nowrap;
+    transition: background-color var(--dur-1) ease;
+  }
+
+  .canvas-action svg {
+    width: 15px;
+    height: 15px;
+    color: rgb(var(--text-muted-rgb));
+  }
+
+  .canvas-action:hover,
+  .canvas-action[aria-expanded='true'] {
+    background: var(--hover);
+  }
+
+  .canvas-action:disabled {
+    cursor: default;
+    opacity: 0.38;
+  }
+
+  .canvas-action:disabled:hover {
+    background: transparent;
+  }
+
+  .canvas-action[data-tone='danger']:hover {
+    background: rgb(var(--danger-rgb) / 0.12);
+    color: rgb(var(--danger-rgb));
+  }
+
+  .canvas-action[data-tone='danger']:hover svg {
+    color: rgb(var(--danger-rgb));
+  }
+
+  .canvas-action--icon {
+    width: 30px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  /* ---------- Empty state & hints ---------- */
+
+  .canvas-empty {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .canvas-empty__card {
+    display: flex;
+    max-width: 520px;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    text-align: center;
+    pointer-events: auto;
+  }
+
+  .canvas-empty__title {
+    color: rgb(var(--text-rgb));
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .canvas-empty__hint {
+    color: rgb(var(--text-muted-rgb));
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .canvas-empty__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .canvas-empty__action {
+    display: inline-flex;
+    height: 36px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px;
+    border-radius: 999px;
+    background: rgb(var(--elevated-rgb));
+    box-shadow: inset 0 0 0 1px var(--line);
+    color: rgb(var(--text-rgb) / 0.92);
+    font-size: 13px;
+    transition: background-color var(--dur-1) ease, transform var(--dur-1) ease;
+  }
+
+  .canvas-empty__action svg {
+    width: 15px;
+    height: 15px;
+    color: rgb(var(--text-muted-rgb));
+  }
+
+  .canvas-empty__action:hover {
+    background: rgb(var(--raised-rgb));
+  }
+
+  .canvas-empty__action:active {
+    transform: scale(0.97);
+  }
+
+  .canvas-empty__gestures {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 14px;
+    color: rgb(var(--text-subtle-rgb));
+    font-size: 12px;
+  }
+
+  .canvas-empty__gestures .ui-kbd {
+    height: 20px;
+    margin-right: 4px;
+    font-size: 11px;
+  }
+
+  .canvas-connection-preview {
+    position: fixed;
+    inset: 0;
+    z-index: 13990;
+    pointer-events: none;
+  }
+
+  .canvas-connection-preview path {
+    fill: none;
+    stroke: rgb(var(--accent-rgb));
+    stroke-width: 2;
+    stroke-dasharray: 6 6;
+    stroke-linecap: round;
+  }
+
+  /* ---------- Screen-space node overlays (toolbar above, composer below) ---------- */
+
+  .node-overlay {
+    position: absolute;
+    z-index: 35;
+    animation: ui-pop var(--dur-2) var(--ease-out) both;
+  }
+
+  .node-toolbar {
+    display: flex;
+    max-width: 100%;
+    height: 40px;
+    align-items: center;
+    gap: 2px;
+    padding: 0 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-radius: var(--r-lg);
+    background: rgb(var(--elevated-rgb) / 0.96);
+    box-shadow: var(--shadow-pop);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .node-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .node-toolbar button {
+    display: inline-flex;
+    height: 30px;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    padding: 0 9px;
+    border-radius: var(--r-sm);
+    color: rgb(var(--text-rgb) / 0.9);
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+
+  .node-toolbar button:hover {
+    background: var(--hover);
+  }
+
+  .node-toolbar button svg {
+    width: 15px;
+    height: 15px;
+    color: rgb(var(--text-muted-rgb));
+  }
+
+  .node-composer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-radius: var(--r-xl);
+    background: rgb(var(--elevated-rgb));
+    box-shadow: var(--shadow-float);
+  }
+
+  .node-composer__field {
+    position: relative;
+    min-height: 0;
+    flex: 1;
+    border-radius: var(--r-md);
+  }
+
+  .node-composer__bar {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .btn-generate {
+    display: inline-flex;
+    height: 34px;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
+    border-radius: 999px;
+    background: var(--primary-bg);
+    color: var(--primary-fg);
+    font-size: 13px;
+    font-weight: 600;
+    transition: background-color var(--dur-1) ease, transform var(--dur-1) ease, opacity var(--dur-1) ease;
+  }
+
+  .btn-generate:hover {
+    background: var(--primary-hover);
+  }
+
+  .btn-generate:active {
+    transform: scale(0.97);
+  }
+
+  .btn-generate:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+
+  .btn-generate svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  /* ---------- Level of detail (far zoom) ---------- */
+
+  .node-lod {
+    position: relative;
+    height: 100%;
+    overflow: visible;
+  }
+
+  .node-lod__card {
+    height: 100%;
+    overflow: hidden;
+    border-radius: var(--node-radius);
+    background: var(--canvas-node-bg);
+    box-shadow: inset 0 0 0 1px var(--canvas-node-border);
+  }
+
+  .node-lod__card img {
+    height: 100%;
+    width: 100%;
+    object-fit: cover;
+  }
+
+  .node-lod__text {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 6;
+    padding: 20px;
+    color: rgb(var(--text-muted-rgb));
+    font-size: 15px;
+    line-height: 24px;
+  }
+
+  /* ---------- Sheets: command palette (⌘K) and shortcuts (?) ---------- */
+
+  .canvas-sheet-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 15000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--scrim);
+    animation: canvas-fade var(--dur-2) var(--ease-out) both;
+  }
+
+  .canvas-sheet-scrim.is-top {
+    align-items: flex-start;
+    padding-top: min(18vh, 160px);
+    background: transparent;
+  }
+
+  .canvas-palette,
+  .canvas-shortcuts {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: var(--r-xl, 16px);
+    background: rgb(var(--elevated-rgb));
+    box-shadow: var(--shadow-float);
+    color: rgb(var(--text-rgb));
+    animation: ui-pop var(--dur-2) var(--ease-out) both;
+  }
+
+  .canvas-palette {
+    width: min(600px, 100%);
+    max-height: min(480px, calc(100vh - 200px));
+  }
+
+  .canvas-palette__search {
+    display: flex;
+    height: 52px;
+    flex: none;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px;
+    box-shadow: inset 0 -1px 0 var(--line);
+    color: rgb(var(--text-subtle-rgb));
+  }
+
+  .canvas-palette__search input,
+  .canvas-shortcuts__filter input {
+    min-width: 0;
+    flex: 1;
+    background: transparent;
+    color: rgb(var(--text-rgb));
+    font-size: 14px;
+    outline: none;
+  }
+
+  .canvas-palette__list {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+  }
+
+  .canvas-palette__item {
+    display: flex;
+    width: 100%;
+    min-height: 40px;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: var(--r-md, 10px);
+    text-align: left;
+    font-size: 13px;
+  }
+
+  .canvas-palette__item[aria-selected='true'] {
+    background: var(--hover);
+  }
+
+  .canvas-shortcuts {
+    width: min(920px, 100%);
+    max-height: min(640px, calc(100vh - 48px));
+  }
+
+  .canvas-shortcuts__header {
+    display: flex;
+    height: 56px;
+    flex: none;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px 0 20px;
+    box-shadow: inset 0 -1px 0 var(--line);
+  }
+
+  .canvas-shortcuts__header h2 {
+    flex: 1;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .canvas-shortcuts__filter {
+    display: flex;
+    width: 220px;
+    height: 32px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    border-radius: var(--r-sm);
+    background: rgb(var(--raised-rgb));
+    color: rgb(var(--text-subtle-rgb));
+  }
+
+  .canvas-shortcuts__filter input {
+    font-size: 13px;
+  }
+
+  .canvas-shortcuts__grid {
+    display: grid;
+    min-height: 0;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px 28px;
+    overflow-y: auto;
+    padding: 18px 20px 22px;
+  }
+
+  .canvas-shortcuts__grid h3 {
+    margin-bottom: 8px;
+    color: rgb(var(--text-subtle-rgb));
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .canvas-shortcuts__row {
+    display: flex;
+    min-height: 30px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: rgb(var(--text-rgb) / 0.88);
+    font-size: 13px;
+  }
+}
+
+@keyframes canvas-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes edge-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+@keyframes node-shimmer {
+  from {
+    background-position: 120% 0;
+  }
+
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-root .react-flow__edge .canvas-edge__flow,
+  .node-frame[data-generating] .node-frame__card::after {
+    animation: none;
+  }
+}
+
+@media (max-height: 560px) {
+  .canvas-root .canvas-minimap {
+    display: none;
+  }
+}

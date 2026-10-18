@@ -34,7 +34,7 @@ import {
   applyPanoramaUpdate,
   applyStoryboardUpdate,
 } from './canvasWorkflowCommands';
-import { findRelatedCanvasNodePositions } from './canvasNodePlacement';
+import { findRelatedCanvasNodePositions, type CanvasPlacementViewport } from './canvasNodePlacement';
 
 export const CANVAS_GRAPH_COMMAND_TYPES = new Set<CanvasCommand['type']>([
   'node.create',
@@ -68,9 +68,11 @@ function nodeCreationDimensions(command: Extract<CanvasCommand, { type: 'node.cr
   }
 }
 
-export function resolveAgentNodeCreationPosition(
+/** Nearest free slot to the requested position; used when the caller has no exact drop point. */
+export function resolveCollisionFreeNodePosition(
   command: Extract<CanvasCommand, { type: 'node.create' }>,
   nodes: readonly CanvasNode[],
+  viewport?: CanvasPlacementViewport | null,
 ): { x: number; y: number } {
   const desired = command.input.position;
   const size = nodeCreationDimensions(command);
@@ -89,7 +91,7 @@ export function resolveAgentNodeCreationPosition(
       && desired.y + size.height + margin > node.position.y;
   });
   if (!desiredCollides) return { ...desired };
-  return findRelatedCanvasNodePositions({ nodes, desired, size })[0] ?? { ...desired };
+  return findRelatedCanvasNodePositions({ nodes, desired, size, viewport, strictViewport: Boolean(viewport) })[0] ?? { ...desired };
 }
 
 function impact(
@@ -345,7 +347,7 @@ function applyCreateNode(
   const node = nodeFactory.createNode(
     command.input.nodeType,
     origin === 'agent'
-      ? resolveAgentNodeCreationPosition(command, draft.nodes)
+      ? resolveCollisionFreeNodePosition(command, draft.nodes)
       : { ...command.input.position },
     createNodeData(command),
   );

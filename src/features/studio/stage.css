@@ -31,12 +31,6 @@
   box-shadow: 0 8px 48px rgba(0, 0, 0, 0.28);
 }
 
-.canvas-icon-button,
-.canvas-rail button,
-.canvas-dock button {
-  color: rgba(255, 255, 255, 0.72);
-}
-
 .canvas-icon-button {
   display: inline-flex;
   height: 32px;
@@ -45,127 +39,12 @@
   justify-content: center;
   border-radius: 8px;
   background: transparent;
+  color: rgba(255, 255, 255, 0.72);
 }
 
-.canvas-icon-button:hover,
-.canvas-rail button:hover,
-.canvas-dock button:hover {
+.canvas-icon-button:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #fafafa;
-}
-
-.canvas-dock button:disabled {
-  opacity: 0.28;
-}
-
-.canvas-rail {
-  position: absolute;
-  top: 50%;
-  left: 16px;
-  z-index: 20;
-  display: flex;
-  width: 48px;
-  max-height: calc(100% - 120px);
-  translate: 0 -50%;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  overflow: auto;
-  border: 1px solid #363636;
-  border-radius: 14px;
-  background: #1c1c1c;
-  padding: 6px;
-  scrollbar-width: none;
-}
-
-.canvas-rail button {
-  display: flex;
-  height: 36px;
-  width: 36px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  background: transparent;
-}
-
-.canvas-rail button[aria-pressed='true'] {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fafafa;
-}
-
-.canvas-rail__add {
-  height: 36px;
-  width: 36px;
-  border-radius: 10px;
-  background: #fafafa !important;
-  color: #141414 !important;
-}
-
-.canvas-rail__add:hover {
-  background: #ffffff !important;
-  color: #141414 !important;
-}
-
-.canvas-rail__rule {
-  width: 18px;
-  height: 1px;
-  margin: 4px 0;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.canvas-dock {
-  position: absolute;
-  bottom: 16px;
-  left: 76px;
-  z-index: 30;
-  display: flex;
-  height: 40px;
-  align-items: center;
-  gap: 2px;
-  border: 1px solid #363636;
-  border-radius: 12px;
-  background: rgba(20, 20, 20, 0.86);
-  padding: 0 6px;
-  backdrop-filter: blur(10px);
-}
-
-.canvas-dock button {
-  display: flex;
-  height: 28px;
-  min-width: 28px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  background: transparent;
-}
-
-.canvas-dock__zoom {
-  min-width: 44px;
-  padding: 0 6px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.78);
-}
-
-.canvas-dock__rule {
-  width: 1px;
-  height: 14px;
-  margin: 0 4px;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.canvas-empty {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 28px;
-  pointer-events: none;
-  color: rgba(255, 255, 255, 0.46);
-  font-size: 13px;
 }
 
 .canvas-agent-launcher {
@@ -296,54 +175,6 @@
 
 .stage-toolbar button:hover {
   background: rgba(255, 255, 255, 0.08) !important;
-}
-
-.canvas-flow .react-flow__handle {
-  width: 12px !important;
-  height: 12px !important;
-  min-width: 12px !important;
-  min-height: 12px !important;
-  border: 2px solid #141414 !important;
-  border-radius: 999px !important;
-  background: #f4f4f5 !important;
-  opacity: 0;
-}
-
-.canvas-flow .react-flow__node:hover .react-flow__handle,
-.canvas-flow .react-flow__node.selected .react-flow__handle,
-.canvas-flow .react-flow__handle.connecting,
-.canvas-flow .react-flow__handle.valid {
-  opacity: 1;
-  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.08);
-}
-
-.canvas-flow .react-flow__node.selected > div {
-  border-color: rgba(255, 255, 255, 0.78) !important;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38) !important;
-}
-
-.canvas-flow .react-flow__edge path.react-flow__edge-path {
-  stroke: #8b939c;
-}
-
-.canvas-flow .react-flow__edge.selected path,
-.canvas-flow .react-flow__edge:hover path:not(.canvas-edge-hit) {
-  stroke: #d5dbe2;
-}
-
-.canvas-flow .canvas-minimap {
-  border: 1px solid #363636 !important;
-  border-radius: 12px !important;
-  background: rgba(20, 20, 20, 0.9) !important;
-  box-shadow: none !important;
-}
-
-.canvas-command,
-.canvas-shortcuts {
-  border: 1px solid #363636;
-  border-radius: 16px;
-  background: #1c1c1c;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
 }
 
 @keyframes stage-spin {
