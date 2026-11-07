@@ -1235,13 +1235,16 @@ mod tests {
             });
             timeout(TEST_TIMEOUT, ready).await.unwrap().unwrap();
             if body_started {
-                // Wait for an observable completed write, not an arbitrary
-                // sleep, before canceling a stalled subsequent body read.
+                // Read the written bytes before canceling the subsequent body
+                // read. Windows directory-entry sizes can remain stale while
+                // the writer is open, so metadata is not a progress signal.
                 timeout(TEST_TIMEOUT, async {
                     loop {
-                        let written = std::fs::read_dir(directory.path())
-                            .unwrap()
-                            .any(|entry| entry.unwrap().metadata().unwrap().len() == 4);
+                        let written = std::fs::read_dir(directory.path()).unwrap().any(|entry| {
+                            let mut file = std::fs::File::open(entry.unwrap().path()).unwrap();
+                            let mut prefix = [0; 4];
+                            file.read_exact(&mut prefix).is_ok() && &prefix == b"glTF"
+                        });
                         if written {
                             break;
                         }

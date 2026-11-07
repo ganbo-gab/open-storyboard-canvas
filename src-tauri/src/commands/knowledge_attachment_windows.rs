@@ -8,7 +8,7 @@
 //! aliases are rejected. The .trash traversal is an explicit internal hop, never user input.
 
 use super::{KResult, KnowledgeError, MAX_ATTACHMENT_BYTES};
-use std::ffi::OsString;
+use std::ffi::{c_void, OsString};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::mem::{offset_of, size_of};
@@ -21,7 +21,7 @@ use windows_sys::Win32::Foundation::{
     INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateDirectoryW, CreateFileW, FileAttributeTagInfo, FileDispositionInfo, FileRenameInfo,
+    CreateDirectoryW, CreateFileW, FileAttributeTagInfo, FileDispositionInfo,
     GetFileInformationByHandleEx, GetFileType, GetFinalPathNameByHandleW,
     GetVolumeInformationByHandleW, SetFileInformationByHandle, CREATE_NEW, DELETE,
     FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
@@ -29,6 +29,34 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_SHARE_DELETE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK, OPEN_EXISTING, VOLUME_NAME_GUID,
 };
+
+// SetFileInformationByHandle's rename wrapper can convert its FileName through DOS
+// pathname resolution before calling the filesystem. That conflicts with a non-null
+// RootDirectory and a basename (and returns ERROR_INVALID_PARAMETER on Windows).
+// Use the native user-mode operation so the pinned destination handle remains the
+// sole namespace authority. FILE_RENAME_INFO has FILE_RENAME_INFORMATION's ABI for
+// the legacy ReplaceIfExists class on both 32-bit and 64-bit Windows.
+#[repr(C)]
+struct RenameIoStatus {
+    // IO_STATUS_BLOCK starts with a union of NTSTATUS and a pointer. Reserve the
+    // full pointer-sized slot; synchronous handles do not require reading it back.
+    status_or_pointer: *mut c_void,
+    information: usize,
+}
+
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn NtSetInformationFile(
+        file: HANDLE,
+        io_status: *mut RenameIoStatus,
+        information: *const c_void,
+        length: u32,
+        information_class: i32,
+    ) -> i32;
+    fn RtlNtStatusToDosError(status: i32) -> u32;
+}
+
+const FILE_RENAME_INFORMATION: i32 = 10;
 
 fn unsafe_path() -> KnowledgeError {
     KnowledgeError::new("UNSAFE_PATH", "Unsafe attachment path or reparse point")
@@ -471,14 +499,23 @@ fn rename(file: &File, destination: &Parent<'_>, replace: bool) -> KResult<()> {
                 .cast::<u16>(),
             length + 1,
         );
-        if SetFileInformationByHandle(
+        let mut io_status = RenameIoStatus {
+            status_or_pointer: std::ptr::null_mut(),
+            information: 0,
+        };
+        // Every handle comes from CreateFileW without FILE_FLAG_OVERLAPPED, so this
+        // call completes synchronously while all pins, buffer and IO status live.
+        let status = NtSetInformationFile(
             file.as_raw_handle(),
-            FileRenameInfo,
+            &mut io_status,
             header.cast(),
-            bytes as u32,
-        ) == 0
-        {
-            return Err(last_error());
+            bytes.max(size_of::<FILE_RENAME_INFO>()) as u32,
+            FILE_RENAME_INFORMATION,
+        );
+        if status < 0 {
+            return Err(win_error(io::Error::from_raw_os_error(
+                RtlNtStatusToDosError(status) as i32,
+            )));
         }
     }
     Ok(())
@@ -678,10 +715,14 @@ mod tests {
     }
 
     fn junction(link: &Path, target: &Path) {
+        // PathBuf::join accepts `/`, but cmd's mklink parses it as a switch even
+        // inside an absolute path ("Invalid switch - linked"). Use native spelling.
+        let link = link.as_os_str().to_string_lossy().replace('/', "\\");
+        let target = target.as_os_str().to_string_lossy().replace('/', "\\");
         let output = std::process::Command::new("cmd.exe")
             .args(["/D", "/C", "mklink", "/J"])
-            .arg(link)
-            .arg(target)
+            .arg(&link)
+            .arg(&target)
             .output()
             .unwrap();
         assert!(
@@ -689,6 +730,56 @@ mod tests {
             "junction fixture failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn windows_handle_relative_rename_uses_pinned_parent_and_basename() {
+        let (_directory, root) = setup();
+        fs::create_dir_all(root.join("attachments/source")).unwrap();
+        fs::create_dir_all(root.join("attachments/destination")).unwrap();
+        fs::write(root.join("attachments/source/input.bin"), b"preserved").unwrap();
+        let pinned = Root::open(&root).unwrap();
+        let source = pinned
+            .parent("attachments/source/input.bin", false)
+            .unwrap();
+        let (file, is_directory) = source.open_source(DELETE).unwrap();
+        assert!(!is_directory);
+        // Include a space and surrogate pair to exercise byte length vs UTF-16
+        // component length. The Win32 wrapper must not turn this into a CWD path.
+        let relative = "attachments/destination/output \u{1f4ce}.bin";
+        let destination = pinned.parent(relative, false).unwrap();
+        rename(&file, &destination, false).unwrap();
+        drop(file);
+        assert!(!root.join("attachments/source/input.bin").exists());
+        assert_eq!(fs::read(root.join(relative)).unwrap(), b"preserved");
+        no_staging(&root.join("attachments/destination"));
+    }
+
+    #[test]
+    fn windows_junction_fixture_handles_mixed_separators_spaces_and_unicode() {
+        let (_directory, root) = setup();
+        fs::create_dir_all(root.join("attachments/folder with spaces")).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("keep.bin"), b"outside").unwrap();
+        let link = root.join("attachments/folder with spaces/linked \u{1f4ce}");
+        junction(&link, outside.path());
+        let metadata = fs::symlink_metadata(&link).unwrap();
+        use std::os::windows::fs::MetadataExt;
+        assert_ne!(metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT, 0);
+        assert_eq!(
+            read(
+                &root,
+                "attachments/folder with spaces/linked \u{1f4ce}/keep.bin"
+            )
+            .unwrap_err()
+            .code,
+            "UNSAFE_PATH"
+        );
+        assert_eq!(
+            fs::read(outside.path().join("keep.bin")).unwrap(),
+            b"outside"
+        );
+        fs::remove_dir(link).unwrap();
     }
 
     fn no_staging(directory: &Path) {

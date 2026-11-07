@@ -1304,6 +1304,9 @@ mod tests {
         let oversized =
             fs::File::create(Path::new(&root).join("attachments/oversized.bin")).unwrap();
         oversized.set_len(MAX_ATTACHMENT_BYTES + 1).unwrap();
+        // The Windows reader intentionally refuses an existing writer through its
+        // share-access boundary; close the fixture before checking the size limit.
+        drop(oversized);
         assert_eq!(
             read_attachment(Path::new(&root), "attachments/oversized.bin")
                 .unwrap_err()
