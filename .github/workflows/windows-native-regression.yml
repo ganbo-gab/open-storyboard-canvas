@@ -1,0 +1,43 @@
+name: Windows native regression
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # Reuse the release workflow's native dependency cache without packaging.
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Force LF checkout policy
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --all -- --check
+      - name: Run knowledge filesystem regression
+        working-directory: src-tauri
+        run: cargo test --locked commands::knowledge -- --nocapture
+      - name: Run model download regression
+        working-directory: src-tauri
+        run: cargo test --locked commands::model
+      - name: Verify tracked sources stayed clean
+        shell: bash
+        run: git diff --exit-code
