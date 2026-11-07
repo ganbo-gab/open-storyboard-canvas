@@ -1,7 +1,11 @@
+import { UiButton, UiIconButton, UiInput, UiSegmented } from '@/components/ui';
 import { memo, useEffect, useMemo, useState } from 'react';
-import { Film, ImageIcon, Search, X } from 'lucide-react';
+import { AudioLines, ChevronRight, Film, ImageIcon, ListTree, Search, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { AssetMedia } from '@/features/assets/ui/AssetMedia';
+import type { CanvasNodeTreeGroup } from '@/features/canvas/application/canvasNodeTree';
 
-export type CanvasAssetKind = 'image' | 'video';
+export type CanvasAssetKind = 'image' | 'video' | 'audio';
 
 interface CanvasAssetItemBase {
   id: string;
@@ -13,23 +17,20 @@ interface CanvasAssetItemBase {
   order: number;
 }
 
+/** Sources are durable node values (asset-media refs, file paths, URLs); cards resolve them for display. */
 export interface CanvasImageAssetItem extends CanvasAssetItemBase {
   kind: 'image';
-  rawImageUrl: string;
-  rawPreviewImageUrl?: string | null;
   imageUrl: string;
-  previewImageUrl: string;
+  previewImageUrl?: string | null;
 }
 
 export interface CanvasVideoAssetItem extends CanvasAssetItemBase {
   kind: 'video';
-  rawVideoUrl: string;
-  rawThumbnailUrl?: string | null;
   videoUrl: string;
-  thumbnailUrl?: string | null;
 }
 
-export type CanvasAssetItem = CanvasImageAssetItem | CanvasVideoAssetItem;
+export interface CanvasAudioAssetItem extends CanvasAssetItemBase { kind: 'audio'; audioUrl: string }
+export type CanvasAssetItem = CanvasImageAssetItem | CanvasVideoAssetItem | CanvasAudioAssetItem;
 
 interface AssetPanelProps {
   isOpen: boolean;
@@ -41,6 +42,10 @@ interface AssetPanelProps {
   onClose: () => void;
   onActivate: (asset: CanvasAssetItem) => void;
   onRename?: (asset: CanvasAssetItem, title: string) => void;
+  /** Browse mode: every content node grouped by type (the drawer's "nodes" tab). */
+  tree?: CanvasNodeTreeGroup[];
+  onLocateNode?: (nodeId: string) => void;
+  onRenameNode?: (nodeId: string, title: string) => void;
 }
 
 function groupAssets(assets: CanvasAssetItem[]) {
@@ -64,22 +69,39 @@ export const AssetPanel = memo(({
   onClose,
   onActivate,
   onRename,
+  tree,
+  onLocateNode,
+  onRenameNode,
 }: AssetPanelProps) => {
+  const { t } = useTranslation();
+  const [renamingNode, setRenamingNode] = useState<{ id: string; title: string } | null>(null);
   const [query, setQuery] = useState('');
   const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
-  const [activeKind, setActiveKind] = useState<CanvasAssetKind>('image');
+  const [activeKind, setActiveKind] = useState<CanvasAssetKind | 'tree'>('image');
+  const showTree = mode === 'browse' && Boolean(tree);
   const imageCount = useMemo(() => assets.filter((asset) => asset.kind === 'image').length, [assets]);
   const videoCount = useMemo(() => assets.filter((asset) => asset.kind === 'video').length, [assets]);
 
   useEffect(() => {
     if (!isOpen) return;
+    if (activeKind === 'tree') {
+      if (!showTree) setActiveKind('image');
+      return;
+    }
     if (activeKind === 'image' && imageCount === 0 && videoCount > 0) {
       setActiveKind('video');
     }
     if (activeKind === 'video' && videoCount === 0 && imageCount > 0) {
       setActiveKind('image');
     }
-  }, [activeKind, imageCount, isOpen, videoCount]);
+  }, [activeKind, imageCount, isOpen, showTree, videoCount]);
+  const filteredTree = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!tree || !normalized) return tree ?? [];
+    return tree
+      .map((group) => ({ ...group, items: group.items.filter((item) => item.title.toLowerCase().includes(normalized)) }))
+      .filter((group) => group.items.length > 0);
+  }, [query, tree]);
 
   const filteredAssets = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -91,7 +113,7 @@ export const AssetPanel = memo(({
     });
   }, [activeKind, assets, query]);
   const groups = useMemo(() => groupAssets(filteredAssets), [filteredAssets]);
-  const activeKindLabel = activeKind === 'image' ? '图片' : '视频';
+  const activeKindLabel = activeKind === 'image' ? '图片' : activeKind === 'video' ? '视频' : activeKind === 'audio' ? '音频' : '节点';
 
   useEffect(() => {
     if (!isOpen) return;
@@ -134,99 +156,101 @@ export const AssetPanel = memo(({
 
   return (
     <div
-      className="fixed z-220 flex max-h-[540px] flex-col rounded-xl border border-white/12 bg-[#202020] shadow-2xl"
+      className="fixed z-220 flex max-h-[540px] flex-col rounded-xl border border-[var(--line)] bg-elevated shadow-[var(--shadow-pop)]"
       style={{ left: panelLeft, top: panelTop, width: panelWidth }}
       onClick={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
     >
-      <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-[var(--line)] px-4 py-3">
         <div>
-          <div className="text-sm font-semibold text-white">{title}</div>
-          <div className="mt-0.5 text-[11px] text-white/45">{subtitle}</div>
+          <div className="text-sm font-semibold text-text-dark">{title}</div>
+          <div className="mt-0.5 text-[11px] text-text-subtle">{subtitle}</div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-white/50 hover:bg-white/10 hover:text-white"
-          title="关闭资产面板"
-        >
+        <UiIconButton size="sm" onClick={onClose} aria-label="关闭资产面板" title="关闭资产面板">
           <X className="h-4 w-4" />
-        </button>
+        </UiIconButton>
       </div>
 
-      <div className="flex gap-1 border-b border-white/8 px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setActiveKind('image')}
-          className={`inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
-            activeKind === 'image'
-              ? 'bg-accent/85 text-white'
-              : 'bg-white/4 text-white/60 hover:bg-white/10 hover:text-white/85'
-          }`}
-        >
-          <ImageIcon className="h-3.5 w-3.5" />
-          图片
-          <span className="text-[10px] opacity-70">{imageCount}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveKind('video')}
-          className={`inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
-            activeKind === 'video'
-              ? 'bg-accent/85 text-white'
-              : 'bg-white/4 text-white/60 hover:bg-white/10 hover:text-white/85'
-          }`}
-        >
-          <Film className="h-3.5 w-3.5" />
-          视频
-          <span className="text-[10px] opacity-70">{videoCount}</span>
-        </button>
+      <div className="border-b border-[var(--line)] px-3 py-2">
+        <UiSegmented<CanvasAssetKind | 'tree'>
+          value={activeKind}
+          onChange={setActiveKind}
+          size="sm"
+          className="w-full"
+          options={[
+            { value: 'image', icon: <ImageIcon className="h-3.5 w-3.5" />, label: <>图片 <span className="text-[10px] opacity-70">{imageCount}</span></> },
+            { value: 'audio', label: t('rework.audio'), icon: <AudioLines /> },
+            { value: 'video', icon: <Film className="h-3.5 w-3.5" />, label: <>视频 <span className="text-[10px] opacity-70">{videoCount}</span></> },
+            ...(showTree ? [{ value: 'tree' as const, icon: <ListTree className="h-3.5 w-3.5" />, label: <>{t('rework.canvas.assets.nodes')} <span className="text-[10px] opacity-70">{tree?.reduce((sum, group) => sum + group.count, 0) ?? 0}</span></> }] : []),
+          ]}
+        />
       </div>
 
-      <div className="border-b border-white/8 px-3 py-2">
-        <label className="flex h-8 items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2 text-white/70 focus-within:border-accent/50">
-          <Search className="h-3.5 w-3.5 shrink-0 text-white/35" />
-          <input
+      <div className="border-b border-[var(--line)] px-3 py-2">
+        <label className="relative flex h-8 items-center">
+          <Search className="pointer-events-none absolute left-2 z-10 h-3.5 w-3.5 text-text-subtle" />
+          <UiInput
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={`搜索${activeKindLabel}名称`}
-            className="min-w-0 flex-1 bg-transparent text-xs text-white/85 outline-hidden placeholder:text-white/30"
+            className="h-8 min-w-0 flex-1 pl-7 pr-8 text-xs"
           />
           {query && (
-            <button
-              type="button"
-              onClick={() => setQuery('')}
-              className="rounded-sm p-0.5 text-white/35 hover:bg-white/10 hover:text-white/75"
-              title="清空搜索"
-            >
-              <X className="h-3 w-3" />
-            </button>
+            <UiIconButton size="sm" onClick={() => setQuery('')} aria-label="清空搜索" title="清空搜索" className="absolute right-1 h-6 w-6">
+              <X className="h-3.5 w-3.5" />
+            </UiIconButton>
           )}
         </label>
       </div>
 
       <div className="ui-scrollbar flex-1 overflow-y-auto p-3">
-        {assets.length === 0 ? (
-          <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-white/12 bg-white/3 px-6 text-center">
-            <ImageIcon className="mb-3 h-8 w-8 text-white/25" />
-            <div className="text-sm text-white/70">这个项目还没有资产</div>
-            <div className="mt-1 text-[11px] leading-5 text-white/40">
+        {activeKind === 'tree' ? (
+          filteredTree.length === 0 ? (
+            <p className="py-10 text-center text-xs text-text-muted">{t(query ? 'rework.noMatches' : 'rework.canvas.assets.noNodes')}</p>
+          ) : (
+            <div className="space-y-1">
+              {filteredTree.map((group) => (
+                <details key={group.kind} open={Boolean(query) || filteredTree.length <= 3} className="group/tree rounded-lg">
+                  <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-text-muted hover:bg-[var(--hover)] marker:content-none">
+                    <ChevronRight className="h-3.5 w-3.5 transition-transform group-open/tree:rotate-90" />
+                    <span className="flex-1">{t(`rework.canvas.assets.kinds.${group.kind}`)}</span>
+                    <span className="text-[10px] text-text-subtle">{group.items.length}</span>
+                  </summary>
+                  <ul className="ml-5 mt-0.5 space-y-0.5">
+                    {group.items.map((item) => (
+                      <li key={item.nodeId}>
+                        {renamingNode?.id === item.nodeId ? <input autoFocus className="ui-input h-8 w-full text-xs" value={renamingNode.title} onChange={(event) => setRenamingNode({ ...renamingNode, title: event.target.value })} onBlur={() => { if (renamingNode.title.trim()) onRenameNode?.(item.nodeId, renamingNode.title.trim()); setRenamingNode(null); }} onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') setRenamingNode(null); }} aria-label={t('rework.rename')} /> : <button type="button" className="w-full truncate rounded-md px-2 py-1 text-left text-xs text-text-dark hover:bg-[var(--hover)]"
+                          title={item.title} onClick={() => onLocateNode?.(item.nodeId)} onDoubleClick={() => setRenamingNode({ id: item.nodeId, title: item.title })}>
+                          {item.parentId ? <span className="mr-1 text-text-subtle">↳</span> : null}{item.title}
+                        </button>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ))}
+            </div>
+          )
+        ) : assets.length === 0 ? (
+          <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-[var(--line)] bg-[var(--hover)] px-6 text-center">
+            <ImageIcon className="mb-3 h-8 w-8 text-text-subtle" />
+            <div className="text-sm text-text-muted">这个项目还没有资产</div>
+            <div className="mt-1 text-[11px] leading-5 text-text-subtle">
               上传或生成图片、视频、故事板或全景图后，会自动出现在这里。
             </div>
           </div>
         ) : filteredAssets.length === 0 ? (
-          <div className="flex min-h-40 flex-col items-center justify-center rounded-lg border border-dashed border-white/12 bg-white/3 px-6 text-center">
+          <div className="flex min-h-40 flex-col items-center justify-center rounded-lg border border-dashed border-[var(--line)] bg-[var(--hover)] px-6 text-center">
             {query ? (
-              <Search className="mb-3 h-7 w-7 text-white/25" />
+              <Search className="mb-3 h-7 w-7 text-text-subtle" />
             ) : activeKind === 'image' ? (
-              <ImageIcon className="mb-3 h-7 w-7 text-white/25" />
+              <ImageIcon className="mb-3 h-7 w-7 text-text-subtle" />
             ) : (
-              <Film className="mb-3 h-7 w-7 text-white/25" />
+              <Film className="mb-3 h-7 w-7 text-text-subtle" />
             )}
-            <div className="text-sm text-white/70">
+            <div className="text-sm text-text-muted">
               {query ? `没有匹配的${activeKindLabel}` : `这个项目还没有${activeKindLabel}资产`}
             </div>
-            <div className="mt-1 text-[11px] leading-5 text-white/40">
+            <div className="mt-1 text-[11px] leading-5 text-text-subtle">
               {query ? '换个名称试试，或清空搜索查看全部资产。' : `切换到其他类型，或先在画布中创建${activeKindLabel}节点。`}
             </div>
           </div>
@@ -235,8 +259,8 @@ export const AssetPanel = memo(({
             {groups.map((group) => (
               <section key={group.label}>
                 <div className="mb-2 flex items-center justify-between">
-                  <h3 className="text-xs font-medium text-white/70">{group.label}</h3>
-                  <span className="text-[10px] text-white/35">
+                  <h3 className="text-xs font-medium text-text-muted">{group.label}</h3>
+                  <span className="text-[10px] text-text-subtle">
                     {group.items.length} {activeKind === 'image' ? '张' : '个'}
                   </span>
                 </div>
@@ -245,51 +269,45 @@ export const AssetPanel = memo(({
                     <div
                       key={asset.id}
                       title={mode === 'select' ? `${asset.title} · 选择并连接` : `${asset.title} · 双击定位`}
-                      className="group overflow-hidden rounded-lg border border-white/10 bg-white/4 text-left transition-colors hover:border-accent/70 hover:bg-accent/10"
+                      className="group overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--hover)] text-left transition-colors hover:border-accent/70 hover:bg-accent/10"
                     >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (mode === 'select') {
-                            onActivate(asset);
-                          }
-                        }}
-                        onDoubleClick={() => {
-                          if (mode === 'browse') {
-                            onActivate(asset);
-                          }
-                        }}
-                        className="block aspect-square w-full overflow-hidden bg-black/30"
-                        title={mode === 'select' ? `${asset.title} · 选择并连接` : `${asset.title} · 双击定位`}
-                      >
-                        {asset.kind === 'image' ? (
-                          <img
-                            src={asset.previewImageUrl}
-                            alt={asset.title}
-                            className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                            draggable={false}
+                      <UiButton variant="ghost" type="button"
+                      onClick={() => {
+                        if (mode === 'select') {
+                          onActivate(asset);
+                        }
+                      }}
+                      onDoubleClick={() => {
+                        if (mode === 'browse') {
+                          onActivate(asset);
+                        }
+                      }}
+                      className="block h-auto aspect-square w-full overflow-hidden rounded-none p-0"
+                      title={mode === 'select' ? `${asset.title} · 选择并连接` : `${asset.title} · 双击定位`}>{asset.kind === 'image' ? (
+                        <AssetMedia
+                          kind="image"
+                          source={asset.previewImageUrl || asset.imageUrl}
+                          alt={asset.title}
+                          className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                          draggable={false}
+                        />
+                      ) : (
+                        <div className="relative h-full w-full bg-black">
+                          <AssetMedia
+                            kind={asset.kind}
+                            source={asset.kind === 'audio' ? asset.audioUrl : asset.videoUrl}
+                            className="h-full w-full object-cover opacity-90 transition-transform group-hover:scale-105"
                           />
-                        ) : (
-                          <div className="relative h-full w-full bg-black">
-                            <video
-                              src={asset.videoUrl}
-                              poster={asset.thumbnailUrl ?? undefined}
-                              className="h-full w-full object-cover opacity-90 transition-transform group-hover:scale-105"
-                              muted
-                              playsInline
-                              preload="metadata"
-                            />
-                            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
-                              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white">
-                                <Film className="h-4 w-4" />
-                              </span>
-                            </div>
+                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
+                            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white">
+                              <Film className="h-4 w-4" />
+                            </span>
                           </div>
-                        )}
-                      </button>
+                        </div>
+                      )}</UiButton>
                       <div className="space-y-0.5 px-2 py-1.5">
                         {mode === 'browse' ? (
-                          <input
+                          <UiInput
                             value={nameDrafts[asset.id] ?? asset.title}
                             onChange={(event) => {
                               const nextValue = event.target.value;
@@ -308,15 +326,15 @@ export const AssetPanel = memo(({
                                 event.currentTarget.blur();
                               }
                             }}
-                            className="nodrag w-full rounded-sm border border-white/10 bg-black/25 px-1.5 py-0.5 text-[10px] font-medium text-white/80 outline-hidden transition-colors hover:border-white/20 hover:bg-black/35 focus:border-accent/60 focus:bg-black/40"
+                            className="nodrag h-6 w-full min-w-0 px-1.5 py-0.5 text-[10px] font-medium"
                             title="双击资产定位；这里可直接改名，允许同名"
                           />
                         ) : (
-                          <div className="truncate rounded-sm border border-transparent px-1.5 py-0.5 text-[10px] font-medium text-white/80">
+                          <div className="truncate rounded-sm border border-transparent px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
                             {asset.title}
                           </div>
                         )}
-                        <div className="truncate text-[9px] text-white/35">{asset.sourceLabel}</div>
+                        <div className="truncate text-[9px] text-text-subtle">{asset.sourceLabel}</div>
                       </div>
                     </div>
                   ))}

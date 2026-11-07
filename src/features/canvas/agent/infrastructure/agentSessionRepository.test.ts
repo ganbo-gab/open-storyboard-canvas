@@ -78,6 +78,41 @@ describe('AgentSessionRepository', () => {
     expect(await session.getItems()).toHaveLength(1);
   });
 
+  it('stores bounded SHA-256 identities without duplicating a large tool result, including simultaneous replay', async () => {
+    const repository = new AgentSessionRepository(null, () => 1, () => 'session-digest');
+    repository.createSession({ projectId: 'project', modelRef: 'model' });
+    const transaction = { operationId: 'once', transaction: { type: 'append_items' as const,
+      items: [{ role: 'user' as const, content: 'Large actual result '.repeat(2_000) }] } };
+    await Promise.all([
+      repository.applyHistoryTransaction('session-digest', transaction),
+      repository.applyHistoryTransaction('session-digest', transaction),
+    ]);
+    const saved = repository.getSession('session-digest')!;
+    expect(saved.items).toHaveLength(1);
+    expect(saved.appliedTransactions.once).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(saved.appliedTransactions.once.length).toBe(71);
+    expect(JSON.stringify(saved.appliedTransactions)).not.toContain('Large actual result');
+    await expect(repository.applyHistoryTransaction('session-digest', { ...transaction, transaction: { type: 'append_items', items: [{ role: 'user', content: 'Changed input' }] } }))
+      .rejects.toThrow('different input');
+    expect(repository.getSession('session-digest')!.items).toHaveLength(1);
+  });
+
+  it('recognizes a legacy full-payload fingerprint and upgrades its identity without appending the item again', async () => {
+    const storage = new MemoryStorage();
+    const repository = new AgentSessionRepository(storage, () => 1, () => 'legacy-session');
+    repository.createSession({ projectId: 'project', modelRef: 'model' });
+    const item = { role: 'user' as const, content: 'Original saved result' };
+    const saved = repository.getSession('legacy-session')!;
+    const fingerprint = '{"items":[{"content":"Original saved result","role":"user"}],"type":"append_items"}';
+    storage.setItem('storyboard-copilot:canvas-agent:sessions:v1', JSON.stringify({ version: 1,
+      sessions: [{ ...saved, items: [item], appliedTransactions: { legacy: fingerprint } }] }));
+    await repository.applyHistoryTransaction('legacy-session', { operationId: 'legacy', transaction: { type: 'append_items', items: [item] } });
+    expect(repository.getSession('legacy-session')!.items).toEqual([item]);
+    expect(repository.getSession('legacy-session')!.appliedTransactions.legacy).toMatch(/^sha256:[a-f0-9]{64}$/);
+    await expect(repository.applyHistoryTransaction('legacy-session', { operationId: 'legacy', transaction: { type: 'append_items', items: [{ ...item, content: 'Different' }] } }))
+      .rejects.toThrow('different input');
+  });
+
   it('stores resumable RunState separately with compatibility versions', () => {
     const storage = new MemoryStorage();
     const repository = new AgentSessionRepository(storage, () => 10, () => 'session-1');
@@ -97,6 +132,28 @@ describe('AgentSessionRepository', () => {
     });
     expect(repository.getSession('session-1')?.items).toEqual([]);
     expect(repository.getRunStateForResume('run-1').id).toBe('run-1');
+  });
+
+  it('retains the original run mode and selected generation declarations after a session changes mode', () => {
+    const storage = new MemoryStorage();
+    const repository = new AgentSessionRepository(storage, () => 100, () => 'session-run-context');
+    repository.createSession({ projectId: 'project-1', modelRef: 'custom:p:chat' });
+    const generationPreferences = { image: { modelId: 'custom:image:gpt-image-2.6', supportedResolutions: ['1024x1536'],
+      modes: [{ id: 'portrait', label: 'Portrait', operation: 'image.generate' as const, slots: [], params: [
+        { key: 'quality', label: 'Quality', type: 'enum' as const, values: ['high'], default: 'high' },
+      ] }] } };
+    const input = { id: 'run-context', sessionId: 'session-run-context', projectId: 'project-1', status: 'awaiting_approval' as const,
+      serializedState: '{}', executionMode: 'manual' as const, generationPreferences };
+    repository.saveRunState(input);
+    repository.updateSessionMetadata('session-run-context', { executionMode: 'full' });
+    repository.saveRunState({ ...input, executionMode: 'full' });
+    const restored = new AgentSessionRepository(storage, () => 101).getRunStateForResume('run-context');
+    expect(restored.executionMode).toBe('manual');
+    expect(restored.generationPreferences).toEqual(generationPreferences);
+    const unsafe = structuredClone(generationPreferences);
+    Object.assign(unsafe.image, { apiKey: 'MUST_NOT_BE_SAVED' });
+    expect(() => repository.saveRunState({ ...input, id: 'unsafe-context', generationPreferences: unsafe })).toThrow();
+    expect(storage.getItem('storyboard-copilot:canvas-agent:run-states:v1')).not.toContain('MUST_NOT_BE_SAVED');
   });
 
   it('stores full state only for resumable runs and compacts terminal payloads', () => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
-import { UiInput } from '@/components/ui';
+import { UiButton, UiInput } from '@/components/ui';
 import type { VisualToolEditorProps } from './types';
 
 const MIN_GRID_SIZE = 1;
@@ -199,14 +199,14 @@ function NumberStepper({ label, value, min, max, onChange }: NumberStepperProps)
     <div className="space-y-1.5">
       <div className="text-xs text-text-muted">{label}</div>
       <div className="flex items-center gap-2">
-        <button
+        <UiButton variant="secondary"
           type="button"
-          className="h-9 w-9 rounded-lg border border-[rgba(255,255,255,0.14)] bg-bg-dark/60 text-sm text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-45"
+          className="h-9 w-9 shrink-0 rounded-lg p-0 text-sm"
           onClick={() => onChange(value - 1)}
           disabled={decreaseDisabled}
         >
           -
-        </button>
+        </UiButton>
         <UiInput
           type="number"
           value={value}
@@ -216,14 +216,14 @@ function NumberStepper({ label, value, min, max, onChange }: NumberStepperProps)
           onChange={(event) => onChange(Number(event.target.value))}
           className="h-9 text-center"
         />
-        <button
+        <UiButton variant="secondary"
           type="button"
-          className="h-9 w-9 rounded-lg border border-[rgba(255,255,255,0.14)] bg-bg-dark/60 text-sm text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-45"
+          className="h-9 w-9 shrink-0 rounded-lg p-0 text-sm"
           onClick={() => onChange(value + 1)}
           disabled={increaseDisabled}
         >
           +
-        </button>
+        </UiButton>
       </div>
     </div>
   );
@@ -363,13 +363,13 @@ export function SplitStoryboardToolEditor({ sourceImageUrl, options, onOptionsCh
         </div>
 
         <div
-          className={`ui-scrollbar flex ${PREVIEW_VIEWPORT_HEIGHT} items-center justify-center overflow-auto rounded-xl border border-[rgba(255,255,255,0.12)] bg-bg-dark/70 p-3`}
+          className={`ui-scrollbar flex ${PREVIEW_VIEWPORT_HEIGHT} items-center justify-center overflow-auto rounded-xl border border-(--canvas-node-border) bg-(--canvas-node-media-bg) p-3`}
         >
           <div className="relative inline-flex items-center justify-center">
             <img
               src={displaySourceImageUrl}
               alt="split-preview"
-              className="max-h-full w-auto max-w-full rounded-lg border border-[rgba(255,255,255,0.08)] object-contain"
+              className="max-h-full w-auto max-w-full rounded-lg border border-(--canvas-node-border) object-contain"
               onLoad={(event) => {
                 const target = event.currentTarget;
                 setNaturalSize({
@@ -419,7 +419,7 @@ export function SplitStoryboardToolEditor({ sourceImageUrl, options, onOptionsCh
         </div>
       </div>
 
-      <div className="space-y-4 rounded-xl border border-[rgba(255,255,255,0.12)] bg-bg-dark/75 p-3.5">
+      <div className="space-y-4 rounded-xl border border-(--canvas-node-border) bg-(--canvas-node-subtle-bg) p-3.5">
         <div className="text-sm font-medium text-text-dark">切割参数</div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
@@ -454,7 +454,7 @@ export function SplitStoryboardToolEditor({ sourceImageUrl, options, onOptionsCh
             step={0.1}
             value={lineThicknessPercent}
             onChange={(event) => updateOptions({ lineThicknessPercent: Number(event.target.value) })}
-            className="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/15"
+            className="ui-range w-full"
           />
           <UiInput
             type="number"
@@ -467,7 +467,7 @@ export function SplitStoryboardToolEditor({ sourceImageUrl, options, onOptionsCh
           />
         </div>
 
-        <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-bg-dark/80 px-3 py-2 text-xs text-text-muted">
+        <div className="rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-3 py-2 text-xs text-text-muted">
           <div className="flex items-center justify-between">
             <span>输出小格数量</span>
             <span className="font-medium text-text-dark">{rows * cols}</span>
@@ -487,7 +487,7 @@ export function SplitStoryboardToolEditor({ sourceImageUrl, options, onOptionsCh
         </div>
 
         {hasLayoutError && (
-          <div className="rounded-lg border border-red-400/35 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          <div className="rounded-lg border border-danger/35 bg-danger/10 px-3 py-2 text-xs text-danger">
             当前分割线过粗，导致可切割区域不足。请减少线宽或降低行列数。
           </div>
         )}

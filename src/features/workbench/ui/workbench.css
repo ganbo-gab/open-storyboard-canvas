@@ -1,0 +1,104 @@
+/* Workbench (生成工作台): conversation feed, floating composer, generation cards. Uses only semantic tokens from src/index.css. */
+@layer components {
+  .workbench-layout { display: flex; height: 100%; min-height: 0; min-width: 0; }
+  .workbench-history { position: relative; display: flex; width: 252px; flex: none; flex-direction: column; gap: 16px; padding: 18px 12px; border-right: 1px solid var(--line); background: rgb(var(--chrome-rgb)); }
+  [data-history-collapsed] > .workbench-history { position: relative; display: none; }
+  .workbench-search { display: flex; height: 36px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; color: rgb(var(--text-subtle-rgb)); background: rgb(var(--bg-rgb)); }
+  .workbench-search input { min-width: 0; width: 100%; background: transparent; outline: none; color: rgb(var(--text-rgb)); font-size: 12px; }
+  .workbench-history-item { display: flex; align-items: center; gap: 4px; padding-right: 4px; border-radius: 10px; color: rgb(var(--text-muted-rgb)); }
+  .workbench-history-item:hover { background: var(--hover); }
+  .workbench-history-item[data-active] { background: rgb(var(--elevated-rgb)); box-shadow: inset 0 0 0 1px var(--line); color: rgb(var(--text-rgb)); }
+  .workbench-main { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
+  .workbench-header { display: flex; height: 64px; flex: none; align-items: center; gap: 12px; padding: 0 24px; border-bottom: 1px solid var(--line); }
+  .workbench-feed { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 28px 36px; }
+  .workbench-feed__content { display: flex; flex-direction: column; gap: 28px; max-width: 850px; margin: auto; }
+  .workbench-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: min(40vh, 380px); padding: 36px 12px; text-align: center; }
+  .workbench-empty__icon { display: grid; place-items: center; width: 64px; height: 64px; margin-bottom: 24px; border-radius: 20px; background: rgb(var(--surface-rgb)); border: 1px solid var(--line); color: rgb(var(--accent-rgb)); }
+  .workbench-empty h2 { font-size: clamp(22px, 2.5vw, 30px); font-weight: 600; letter-spacing: -.03em; }
+  .workbench-empty > p:not(:first-of-type) { max-width: 400px; margin-top: 14px; color: rgb(var(--text-muted-rgb)); font-size: 14px; line-height: 1.8; }
+  .workbench-composer-wrap { position: relative; width: calc(100% - 56px); max-width: 850px; margin: 0 auto 24px; padding-top: 12px; }
+  .workbench-jump { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); border-radius: 999px; box-shadow: var(--shadow-pop); }
+  .workbench-directory { position: absolute; right: 8px; top: 96px; display: flex; max-height: 42%; flex-direction: column; gap: 6px; overflow: auto; }
+  .workbench-directory button { width: 24px; height: 24px; border-radius: 6px; color: rgb(var(--text-subtle-rgb)); font-size: 10px; }
+  .workbench-directory button:hover { color: rgb(var(--text-rgb)); background: var(--hover); }
+  .workbench-history-scrim { display: none; }
+  @media (max-width: 1023px) { .workbench-history, [data-history-collapsed] > .workbench-history { position: relative; display: none; } .workbench-history[data-mobile-open] { display: flex; position: absolute; inset: 36px auto 0 0; z-index: 45; width: min(300px, 85vw); box-shadow: var(--shadow-pop); } .workbench-history-scrim { display: block; position: fixed; inset: 36px 0 0; z-index: 44; background: rgb(0 0 0 / .4); } }
+  @media (max-width: 600px) { .workbench-header { height: 56px; padding: 0 12px; } .workbench-feed { padding: 20px 12px; } .workbench-composer-wrap { width: calc(100% - 20px); margin-bottom: 12px; } .workbench-directory { display: none; } .workbench-empty { padding: 24px 8px; } }
+}
+@media (max-width: 600px) {
+  .workbench-composer-wrap [role='radiogroup'] { flex-wrap: wrap; }
+  .studio-generation { padding: 14px; }
+  .workbench-composer-wrap .studio-ref-tile { width: 36px; height: 42px; }
+}
+.workbench-composer-wrap .composer-prompt__field, .workbench-composer-wrap .composer-prompt__input { max-height: 40dvh; }
+.workbench-composer-wrap .composer-prompt__highlight, .workbench-composer-wrap .composer-prompt__input { padding-right: 26px; }
+/* Desktop composer shared with canvas: the same editor model as video-maker. */
+.studio-prompt-editor { min-width: 0; flex: 1; min-height: 82px; max-height: 36vh; overflow-y: auto; padding: 3px 28px 4px 4px; font-size: 15px; line-height: 1.75; cursor: text; }
+.studio-prompt-editor .tiptap { min-height: 78px; outline: none; white-space: pre-wrap; overflow-wrap: anywhere; caret-color: rgb(var(--accent-rgb)); }
+.studio-prompt-editor .tiptap p { margin: 0; }
+.studio-prompt-editor .tiptap p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: rgb(var(--text-subtle-rgb)); float: left; height: 0; pointer-events: none; }
+.studio-prompt-editor.is-expanded { min-height: 48vh; max-height: 65vh; }
+.studio-prompt-editor .composer-token { display: inline; padding: 2px 5px; border-radius: 5px; background: rgb(var(--accent-rgb) / .12); color: rgb(var(--accent-rgb)); font-size: .92em; }
+.composer-expand { position: absolute; right: 0; top: 0; z-index: 1; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; color: rgb(var(--text-subtle-rgb)); }
+.composer-expand:hover { color: rgb(var(--text-rgb)); background: var(--hover); }
+/* Port of video-maker's desktop composer hierarchy; existing channel services remain authoritative. */
+.vm-composer { padding: 0; border-radius: 22px; width: 100%; margin-inline: auto; transition: max-width 300ms var(--ease-out), border-radius 300ms var(--ease-out); }
+.vm-composer[data-collapsed] { max-width: 640px; border-radius: 28px; }
+.vm-composer-main { display: flex; gap: 10px; padding: 12px 14px 4px 10px; }
+.vm-side-tools { display: flex; flex: none; flex-direction: column; gap: 2px; }
+.vm-side-tools > button { display: flex; width: 40px; height: 34px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 8px; font-size: 10px; line-height: 1; color: rgb(var(--text-muted-rgb)); }
+.vm-side-tools > button:hover { background: var(--hover); color: rgb(var(--text-rgb)); }
+.vm-reference-stack { display: flex; flex: none; gap: 6px; align-items: flex-start; padding-top: 6px; }
+.vm-reference-stack[hidden] { display: none; }
+.vm-reference-stack .studio-ref-tile { width: 46px; height: 60px; transform: rotate(-4deg); border-radius: 10px; }
+.vm-stack-preview { position: relative; width: 56px; height: 64px; margin-right: 10px; }
+.vm-stack-preview > span { position: absolute; inset: 0 auto auto 0; display: grid; place-items: center; width: 46px; height: 58px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 8px; background: rgb(var(--raised-rgb)); }
+.vm-stack-preview b { position: absolute; bottom: 0; right: 0; z-index: 4; border-radius: 5px; background: rgb(var(--elevated-rgb)); padding: 1px 5px; font-size: 10px; }
+.vm-composer-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px 10px; }
+.vm-composer-controls { display: flex; min-width: 0; flex: 1; align-items: center; gap: 2px; }
+.vm-composer-chip, .vm-composer-controls .ui-chip { display: inline-flex; height: 32px; flex: none; align-items: center; gap: 6px; max-width: 220px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; box-shadow: none; font-size: 13px; color: rgb(var(--text-muted-rgb)); }
+.vm-composer-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vm-composer-chip svg { width: 15px; height: 15px; flex: none; }
+.vm-composer-chip:hover, .vm-composer-controls .ui-chip:hover { background: var(--hover); color: rgb(var(--text-rgb)); }
+.vm-composer-controls .ui-chip { max-width: 180px; }
+.vm-composer-collapse { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 8px; color: rgb(var(--text-subtle-rgb)); }
+.vm-composer-collapse:hover { background: var(--hover); }
+.vm-composer-popover { padding: 16px; max-height: min(560px, 70vh); overflow-y: auto; }
+.vm-composer-popover .ui-menu__item { min-height: 40px; }
+.vm-composer-popover input, .vm-composer-popover select { margin-top: 6px; }
+.vm-composer > [role='status'], .vm-composer > [role='alert'], .vm-composer > button { margin: 0 14px 12px; }
+.vm-frame-slots { padding: 4px 16px 12px 64px; }
+.vm-reference-tile { position: relative; width: 76px; height: 76px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); cursor: grab; }
+.vm-reference-tile > span { position: absolute; left: 4px; bottom: 4px; border-radius: 4px; background: rgb(0 0 0 / .6); color: white; padding: 1px 4px; font-size: 10px; }
+.vm-reference-tile > button { position: absolute; right: 3px; top: 3px; display: grid; place-items: center; width: 18px; height: 18px; background: rgb(0 0 0 / .6); border-radius: 50%; color: white; }
+.vm-ratio { display: flex; height: 58px; flex-direction: column; align-items: center; justify-content: center; gap: 7px; border-radius: 8px; font-size: 11px; background: rgb(var(--raised-rgb)); }
+.vm-ratio > span { display: block; border: 1.5px solid currentColor; border-radius: 2px; }
+.vm-ratio[data-active] { background: rgb(var(--accent-rgb) / .15); color: rgb(var(--accent-rgb)); }
+.vm-composer-mini { display: flex; height: 56px; gap: 12px; align-items: center; padding: 0 10px 0 16px; }
+.vm-composer-mini > button:first-child { display: flex; min-width: 0; flex: 1; gap: 12px; align-items: center; text-align: left; }
+.vm-composer-mini span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.vm-composer-mini small { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgb(var(--text-subtle-rgb)); }
+.vm-composer-mini .studio-send { display: grid; place-items: center; flex: none; width: 36px; height: 36px; }
+/* References stay in the text flow and show the same media as the attachment tray. */
+.studio-prompt-editor .composer-token { display: inline-flex; align-items: center; gap: 5px; vertical-align: middle; max-width: 180px; margin: 0 2px; padding: 2px 7px 2px 3px; border: 1px solid rgb(var(--accent-rgb) / .22); border-radius: 7px; line-height: 22px; }
+.composer-token__image { display: inline-flex; width: 24px; height: 24px; flex: none; border-radius: 4px; overflow: hidden; }
+.composer-token__image img { width: 100%; height: 100%; object-fit: cover; }
+.composer-ref-thumb { width: 30px; height: 30px; object-fit: cover; border-radius: 5px; }
+.ui-menu__item[data-active] { background: var(--hover); color: rgb(var(--text-rgb)); }
+.composer-mention-actions { display: flex; flex-direction: column; gap: 2px; padding: 7px 4px 2px; border-top: 1px solid var(--line); margin-top: 5px; }
+.composer-mention-actions button { padding: 7px 9px; text-align: left; border-radius: 6px; font-size: 12px; }
+.composer-mention-actions button:hover { background: var(--hover); }
+.composer-mention-actions > span { padding: 7px 9px 3px; color: rgb(var(--text-subtle-rgb)); font-size: 10px; }
+.vm-composer-controls { flex-wrap: wrap; row-gap: 4px; }
+.vm-composer-main { padding: 14px 14px 6px; gap: 12px; }
+.vm-side-tools { gap: 5px; padding-right: 4px; }
+.vm-composer .studio-prompt-editor { min-height: 88px; max-height: 260px; }
+.vm-composer-toolbar { padding: 8px 12px 12px; }
+.vm-composer-popover { width: min(420px, calc(100vw - 32px)); }
+
+@media (max-width: 1023px) { .workbench-history .ui-sidebar-resize { display: none; } }
+
+.vm-frame-slots--inline { flex: none; max-width: 250px; padding: 4px 0; }
+.vm-frame-slots--inline .studio-ref-tile { width: 48px; height: 60px; border-radius: 9px; transform: none; }
+.vm-frame-slots--inline > div { gap: 8px; }
+.vm-frame-slots--inline > div > div > div:last-child { max-width: 240px; flex-wrap: wrap; }

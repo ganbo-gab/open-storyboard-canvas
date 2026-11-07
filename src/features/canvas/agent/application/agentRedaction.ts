@@ -4,6 +4,13 @@ const DATA_PAYLOAD = /^(?:data:|blob:)/i;
 const RAW_BASE64 = /(?:^|[^A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{512,}={0,2}(?:$|[^A-Za-z0-9+/_=-])/;
 const CREDENTIAL_ASSIGNMENT = /((?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|secret|password)\s*[:=]\s*)[^\s,;&#]+/gi;
 const SECRET_QUERY_VALUE = /([?&](?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|signature|sig|auth|authorization|credential|x-amz-signature)=)[^&#]+/gi;
+/** Usage/limit counters such as `estimatedTokens` are metadata, not credentials. */
+const TOKEN_COUNT_KEY = /tokens$/i;
+
+function isSecretField(key: string, value: unknown): boolean {
+  if (TOKEN_COUNT_KEY.test(key) && typeof value === 'number' && Number.isFinite(value)) return false;
+  return SECRET_KEY.test(key);
+}
 
 export function redactSensitiveValue<T>(value: T, depth = 0): T {
   if (depth > 6) return '[redacted-depth]' as T;
@@ -21,7 +28,7 @@ export function redactSensitiveValue<T>(value: T, depth = 0): T {
   if (value && typeof value === 'object') {
     const output: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value)) {
-      output[key] = SECRET_KEY.test(key) ? '[configured]' : redactSensitiveValue(child, depth + 1);
+      output[key] = isSecretField(key, child) ? '[configured]' : redactSensitiveValue(child, depth + 1);
     }
     return output as T;
   }
@@ -45,7 +52,7 @@ export function scanForSensitiveOutput(value: unknown): string[] {
     }
     if (Array.isArray(current)) { current.forEach((item, index) => walk(item, `${path}[${index}]`, depth + 1)); return; }
     if (current && typeof current === 'object') Object.entries(current).forEach(([key, child]) => {
-      if (SECRET_KEY.test(key)) issues.push(`${path}.${key}: secret-key`);
+      if (isSecretField(key, child)) issues.push(`${path}.${key}: secret-key`);
       walk(child, `${path}.${key}`, depth + 1);
     });
   };

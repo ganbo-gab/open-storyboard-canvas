@@ -14,7 +14,8 @@ import {
   hasConfiguredCustomProvider,
 } from '@/features/canvas/application/providerAvailability';
 import type { CustomProviderConfig } from '@/stores/customProvidersStore';
-import { isImageCustomProvider, useCustomProvidersStore } from '@/stores/customProvidersStore';
+import { isImageCustomProvider } from '@/stores/customProvidersStore';
+import { getChannelCatalogProviders, resolveChannelCatalogModelId } from '@/features/channels/application/channelCatalog';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 export interface PanelModelConfigValue {
@@ -132,8 +133,10 @@ function resolveCustomModel(
   const parsed = parseCustomEntryId(entryId);
   const providerId = parsed?.providerId ?? '';
   const cfg = customProviders.find((provider) => provider.id === providerId);
-  const isImageProvider = cfg ? isImageCustomProvider(cfg) : false;
   const catalogEntry = catalog.find((entry) => entry.id === entryId);
+  const isImageProvider = cfg?.apiStyle === 'comfyui'
+    ? Boolean(catalogEntry)
+    : cfg ? isImageCustomProvider(cfg) : false;
   const allowsMissingApiKey = cfg ? customProviderAllowsMissingApiKey(cfg) : false;
   const supportedRatios = catalogEntry?.supportedRatios ?? normalizeSupportedRatios(
     cfg?.extraParams?.supportedRatios,
@@ -180,30 +183,6 @@ function resolveDreaminaModel(
   };
 }
 
-function resolveAgnesModel(
-  entryId: string,
-  ratio: string,
-  extraParams: Record<string, unknown>,
-  catalog: readonly CatalogEntry[],
-  resolvedByFallback: boolean,
-): ResolvedPanelModel {
-  const settings = useSettingsStore.getState();
-  const catalogEntry = catalog.find((entry) => entry.id === entryId);
-  return {
-    entryId,
-    modelForGateway: entryId,
-    providerId: 'agnes',
-    providerLabel: 'Agnes',
-    ratio,
-    builtinModel: null,
-    apiKey: settings.agnesApiKey,
-    requiresApiKey: true,
-    usable: hasText(settings.agnesApiKey) && (catalogEntry?.usable ?? false),
-    resolvedByFallback,
-    extraParams,
-    supportedRatios: catalogEntry?.supportedRatios ?? ['auto', '16:9', '9:16', '1:1', '4:3', '3:4'],
-  };
-}
 
 function resolvePanelModelConfig(
   config: PanelModelConfigValue,
@@ -211,7 +190,7 @@ function resolvePanelModelConfig(
   catalog: readonly CatalogEntry[],
   resolvedByFallback: boolean,
 ): ResolvedPanelModel {
-  const entryId = config.entryId;
+  const entryId = resolveChannelCatalogModelId(config.entryId);
   const ratio = normalizeRatioValue(config.ratio) || 'auto';
   const extraParams = config.extraParams ?? {};
 
@@ -228,9 +207,6 @@ function resolvePanelModelConfig(
     return resolveDreaminaModel(entryId, ratio, extraParams, catalog, resolvedByFallback);
   }
 
-  if (entryId.startsWith('agnes:image:')) {
-    return resolveAgnesModel(entryId, ratio, extraParams, catalog, resolvedByFallback);
-  }
 
   if (entryId.startsWith('custom:')) {
     return resolveCustomModel(entryId, ratio, extraParams, customProviders, catalog, resolvedByFallback);
@@ -262,11 +238,10 @@ export function resolveActiveModelForPanel(
   override?: PanelModelConfigValue | null,
 ): ResolvedPanelModel {
   const settings = useSettingsStore.getState();
-  const customProviders = useCustomProvidersStore.getState().providers;
+  const customProviders = getChannelCatalogProviders();
   const catalog = buildImageModelCatalog({
     customProviders,
     dreaminaStatus: settings.dreaminaStatus,
-    agnesApiKey: settings.agnesApiKey,
   });
   const requested = override ?? settings.lastModelConfigByPanel?.[panelKey] ?? null;
   const requestedResolved = requested

@@ -87,6 +87,7 @@ export function buildRetryGenerationFetchPatch(node: CanvasNode): Partial<Canvas
     generationClientSessionId: CURRENT_RUNTIME_SESSION_ID,
     generationError: null,
     generationErrorDetails: null,
+    generationFailure: null,
     generationRetryRequestedAt: Date.now(),
   };
   return patch;

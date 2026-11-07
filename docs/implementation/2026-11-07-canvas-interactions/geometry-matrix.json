@@ -1,0 +1,32 @@
+[
+  {
+    "zoom": "10%",
+    "sourceError": 0.20001865188995124,
+    "targetError": 0.20000529197818434
+  },
+  {
+    "zoom": "25%",
+    "sourceError": 0.24993896670685,
+    "targetError": 0.2500000004656613
+  },
+  {
+    "zoom": "57%",
+    "sourceError": 0.5698598227040653,
+    "targetError": 0.5700234342114184
+  },
+  {
+    "zoom": "71%",
+    "sourceError": 0.00018793626556478727,
+    "targetError": 0.000045045034117100265
+  },
+  {
+    "zoom": "100%",
+    "sourceError": 0.999969482421875,
+    "targetError": 1
+  },
+  {
+    "zoom": "150%",
+    "sourceError": 1.4999542236328125,
+    "targetError": 1.5
+  }
+]

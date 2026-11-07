@@ -23,14 +23,15 @@ const COMMON_NODE_COMMANDS: CanvasCommandType[] = [
   'node.rename',
   'node.move',
   'node.layout',
+  'node.setEnabled',
   'group.create',
   'selection.set',
+  'selection.connect',
   'viewport.focus',
 ];
 
 const TAG_NODE_COMMANDS: CanvasCommandType[] = [
   ...COMMON_NODE_COMMANDS,
-  'node.setEnabled',
   'node.duplicate',
   'tag.setColor',
   'edge.connect',
@@ -39,7 +40,6 @@ const TAG_NODE_COMMANDS: CanvasCommandType[] = [
 
 const TAG_GROUP_NODE_COMMANDS: CanvasCommandType[] = [
   ...COMMON_NODE_COMMANDS,
-  'node.setEnabled',
   'node.duplicate',
   'tagGroup.setAppearance',
   'tagGroup.setMembers',
@@ -59,6 +59,8 @@ const GENERATION_NODE_COMMANDS: CanvasCommandType[] = [
 const IMAGE_TOOL_NODE_COMMANDS: CanvasCommandType[] = [
   ...COMMON_NODE_COMMANDS,
   'node.tool.run',
+  'node.media.edit',
+  'storyboard.merge',
 ];
 
 export const CANVAS_GENERATION_NODE_TYPES = [
@@ -72,25 +74,25 @@ export const CANVAS_GENERATION_NODE_TYPES = [
 
 export const canvasNodeCapabilityManifest = {
   [CANVAS_NODE_TYPES.upload]: { status: 'supported', commands: IMAGE_TOOL_NODE_COMMANDS, directCreate: true },
-  [CANVAS_NODE_TYPES.imageEdit]: { status: 'supported', commands: [...GENERATION_NODE_COMMANDS, 'node.tool.run'], directCreate: true },
+  [CANVAS_NODE_TYPES.imageEdit]: { status: 'supported', commands: [...GENERATION_NODE_COMMANDS, 'node.tool.run', 'node.media.edit', 'storyboard.merge'], directCreate: true },
   [CANVAS_NODE_TYPES.aiVideo]: { status: 'supported', commands: GENERATION_NODE_COMMANDS, directCreate: true },
   [CANVAS_NODE_TYPES.aiText]: { status: 'supported', commands: GENERATION_NODE_COMMANDS, directCreate: true },
   [CANVAS_NODE_TYPES.aiAudio]: { status: 'supported', commands: GENERATION_NODE_COMMANDS, directCreate: true },
   [CANVAS_NODE_TYPES.exportImage]: {
     status: 'supported',
-    commands: [...COMMON_NODE_COMMANDS, 'asset.list', 'asset.locate', 'node.tool.run'],
+    commands: [...COMMON_NODE_COMMANDS, 'asset.list', 'asset.locate', 'node.tool.run', 'node.media.edit', 'batch.setPrimary', 'batch.setCollapsed', 'batch.split', 'storyboard.merge'],
     directCreate: false,
     directCreateReason: 'Image result nodes are created by validated generation or export workflows.',
   },
   [CANVAS_NODE_TYPES.video]: {
     status: 'supported',
-    commands: [...COMMON_NODE_COMMANDS, 'asset.list', 'asset.locate'],
+    commands: [...COMMON_NODE_COMMANDS, 'asset.list', 'asset.locate', 'node.media.edit', 'batch.setPrimary', 'batch.setCollapsed', 'batch.split'],
     directCreate: false,
     directCreateReason: 'Video result nodes are created by upload or generation workflows.',
   },
   [CANVAS_NODE_TYPES.audio]: {
     status: 'supported',
-    commands: [...COMMON_NODE_COMMANDS, 'asset.list', 'asset.locate'],
+    commands: [...COMMON_NODE_COMMANDS, 'asset.list', 'asset.locate', 'node.media.edit', 'batch.setPrimary', 'batch.setCollapsed', 'batch.split'],
     directCreate: false,
     directCreateReason: 'Audio result nodes are created by upload or generation workflows.',
   },
@@ -102,7 +104,7 @@ export const canvasNodeCapabilityManifest = {
   [CANVAS_NODE_TYPES.jsonCard]: { status: 'supported', commands: COMMON_NODE_COMMANDS, directCreate: true },
   [CANVAS_NODE_TYPES.group]: {
     status: 'supported',
-    commands: ['canvas.query', 'node.delete', 'node.rename', 'node.move', 'group.ungroup', 'selection.set', 'viewport.focus'],
+    commands: ['canvas.query', 'node.delete', 'node.rename', 'node.move', 'node.setEnabled', 'group.ungroup', 'selection.set', 'viewport.focus'],
     directCreate: false,
     directCreateReason: 'Groups must be created with group.create so membership remains valid.',
   },
@@ -122,10 +124,10 @@ export const canvasNodeCapabilityManifest = {
     directCreate: false,
     directCreateReason: 'Storyboard split nodes require validated frame data from the split workflow.',
   },
-  [CANVAS_NODE_TYPES.storyboardGen]: { status: 'supported', commands: GENERATION_NODE_COMMANDS, directCreate: true },
+  [CANVAS_NODE_TYPES.storyboardGen]: { status: 'supported', commands: [...GENERATION_NODE_COMMANDS, 'storyboard.merge'], directCreate: true },
   [CANVAS_NODE_TYPES.panorama]: {
     status: 'supported',
-    commands: [...COMMON_NODE_COMMANDS, 'panorama.update', 'asset.list', 'asset.locate', 'generation.submit', 'generation.status', 'generation.locateResult'],
+    commands: [...COMMON_NODE_COMMANDS, 'node.media.edit', 'panorama.update', 'asset.list', 'asset.locate', 'generation.submit', 'generation.status', 'generation.locateResult', 'storyboard.merge'],
     directCreate: true,
   },
   [CANVAS_NODE_TYPES.blueprint]: {
@@ -153,6 +155,12 @@ export const canvasActionCapabilityManifest = {
   'node.setEnabled': { status: 'supported' },
   'node.duplicate': { status: 'supported' },
   'node.tool.run': { status: 'supported' },
+  'batch.setPrimary': { status: 'supported' },
+  'batch.setCollapsed': { status: 'supported' },
+  'batch.split': { status: 'supported' },
+  'storyboard.merge': { status: 'supported' },
+  'selection.connect': { status: 'supported' },
+  'node.media.edit': { status: 'supported' },
   'storyboard.update': { status: 'supported' },
   'panorama.update': { status: 'supported' },
   'director.update': { status: 'supported' },

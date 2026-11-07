@@ -50,20 +50,23 @@ function drawLightSphere(
 ) {
   ctx.clearRect(0, 0, w, h);
 
+  const theme = getComputedStyle(ctx.canvas);
+  const textRgb = theme.getPropertyValue('--text-rgb').trim();
+
   const cx = w / 2;
   const cy = h / 2;
   const R = Math.min(w, h) / 2 - 4;
 
-  // Dark sphere background
+  // Theme-aware sphere surface; the simulated light below retains its physical colors.
   ctx.beginPath();
   ctx.arc(cx, cy, R, 0, Math.PI * 2);
-  ctx.fillStyle = '#111';
+  ctx.fillStyle = `rgb(${theme.getPropertyValue('--surface-rgb').trim()})`;
   ctx.fill();
 
   // Sphere outline
   ctx.beginPath();
   ctx.arc(cx, cy, R, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.strokeStyle = `rgb(${textRgb} / 0.2)`;
   ctx.lineWidth = 1;
   ctx.stroke();
 
@@ -102,7 +105,7 @@ function drawLightSphere(
       ctx.beginPath();
       ctx.moveTo(x, cy - R);
       ctx.lineTo(x, cy + R);
-      ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+      ctx.strokeStyle = `rgb(${textRgb} / 0.07)`;
       ctx.lineWidth = 0.7;
       ctx.stroke();
     }
@@ -111,7 +114,7 @@ function drawLightSphere(
       ctx.beginPath();
       ctx.moveTo(cx - R, y);
       ctx.lineTo(cx + R, y);
-      ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+      ctx.strokeStyle = `rgb(${textRgb} / 0.07)`;
       ctx.lineWidth = 0.7;
       ctx.stroke();
     }
@@ -122,7 +125,7 @@ function drawLightSphere(
       const baseY = cy - R * Math.sin(latRad);
       ctx.beginPath();
       ctx.ellipse(cx, baseY, r, r * 0.22, 0, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+      ctx.strokeStyle = `rgb(${textRgb} / 0.07)`;
       ctx.lineWidth = 0.7;
       ctx.stroke();
     }
@@ -130,7 +133,7 @@ function drawLightSphere(
       const angle = (i * Math.PI) / 4;
       ctx.beginPath();
       ctx.ellipse(cx, cy, R * Math.abs(Math.cos(angle)), R, 0, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+      ctx.strokeStyle = `rgb(${textRgb} / 0.07)`;
       ctx.lineWidth = 0.7;
       ctx.stroke();
     }
@@ -157,14 +160,14 @@ function drawLightSphere(
     // Silhouette placeholder
     const iw = R * 0.42;
     const ih = R * 0.65;
-    ctx.fillStyle = 'rgba(255,255,255,0.04)';
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillStyle = `rgb(${textRgb} / 0.04)`;
+    ctx.strokeStyle = `rgb(${textRgb} / 0.15)`;
     ctx.lineWidth = 1;
     ctx.fillRect(cx - iw / 2, cy - ih / 2, iw, ih);
     ctx.strokeRect(cx - iw / 2, cy - ih / 2, iw, ih);
 
     // Simple person shape
-    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillStyle = `rgb(${textRgb} / 0.2)`;
     // head
     const headR = iw * 0.18;
     ctx.beginPath();
@@ -216,7 +219,12 @@ export const LightingSphereControl = memo(
       drawLightSphere(ctx, SIZE, SIZE, azimuth, elevation, previewImageUrl, viewMode);
     }, [azimuth, elevation, previewImageUrl, viewMode]);
 
-    useEffect(() => { redraw(); }, [redraw]);
+    useEffect(() => {
+      redraw();
+      const observer = new MutationObserver(redraw);
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme-tone'] });
+      return () => observer.disconnect();
+    }, [redraw]);
 
     const handlePointerDown = useCallback((e: React.PointerEvent) => {
       e.preventDefault();

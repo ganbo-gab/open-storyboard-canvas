@@ -3,10 +3,12 @@ import type { OperationKind } from '../domain/profile';
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
-export type MediaKind = 'image' | 'video' | 'audio';
+export type MediaKind = 'image' | 'video' | 'audio' | 'model';
 
 export interface JobRef {
-  kind: MediaKind;
+  kind: Exclude<MediaKind, 'model'>;
+  /** Explicit mode reference slot; never inferred from reference order. */
+  slot?: string;
   assetId: string;
   /** Absolute local file path of the asset. */
   path: string;
@@ -28,14 +30,17 @@ export interface JobInput {
   jobId: string;
   channelId: string;
   modelId: string;
+  modeId?: string;
   operation: OperationKind;
-  /** Prompt already compiled for the model's mention dialect. */
+  /** Authoring prompt; the shared renderer compiles the model's declared mention dialect. */
   prompt: string;
   /** Chat operation only; when absent, renderers derive [{ role: 'user', content: prompt }]. */
   messages?: ChatMessage[];
   /** Chat-only JSON tool declarations; sent only if explicitly referenced by the template. */
   tools?: JsonValue;
   toolChoice?: JsonValue;
+  /** Ephemeral provider-native chat fields; templates must explicitly select each top-level field. */
+  chatPayload?: JsonValue;
   params: Record<string, JsonValue>;
   refs: JobRef[];
   count: number;
@@ -51,6 +56,7 @@ export type Output =
 
 export type ChannelErrorCategory =
   | 'auth'
+  | 'credential'
   | 'balance'
   | 'not_found'
   | 'too_large'
@@ -78,7 +84,7 @@ export type SubmitResult =
   | { state: 'unknown'; error: ChannelError };
 
 export type PollResult =
-  | { state: 'pending'; progress?: number; message?: string }
+  | { state: 'pending'; progress?: number; message?: string; diagnostic?: ChannelError }
   | { state: 'done'; outputs: Output[] }
   | { state: 'failed'; error: ChannelError };
 
@@ -87,7 +93,7 @@ export interface RequestPreview {
   url: string;
   /** Secrets masked. */
   headers: Record<string, string>;
-  body: { mode: 'json'; json: JsonValue } | { mode: 'multipart'; fields: { name: string; value: string }[] } | { mode: 'none' };
+  body: { mode: 'json'; json: JsonValue } | { mode: 'form-urlencoded'; fields: { name: string; value: string }[] } | { mode: 'multipart'; fields: { name: string; value: string }[] } | { mode: 'none' };
 }
 
 export interface ChannelAdapter {

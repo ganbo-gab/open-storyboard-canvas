@@ -2,6 +2,7 @@ import { resolveExternalAgentToolCall, type ExternalAgentToolResolution } from '
 import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
 import { CANVAS_COMMAND_VERSION, type CanvasCommand } from '@/features/canvas/domain/canvasCommands';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { closeCanvasHistoryGroup } from '@/stores/canvasHistory';
 import { useProjectStore } from '@/stores/projectStore';
 import {
   applyAgentGenerationNetworkPatch,
@@ -34,7 +35,8 @@ import { prepareCanvasAgentToolApproval, type AgentApprovalView } from './canvas
 import { redactSensitiveValue } from './agentRedaction';
 import type { ExternalAgentToolRequest } from '../domain/agentModel';
 import { loadDiagnosticEvents } from '@/features/canvas/application/diagnosticEvents';
-import { decideAgentAutoApproval, type CanvasAgentExecutionMode } from './agentAutoApprovalPolicy';
+import { shouldAutomaticallyResolveAgentApproval, type CanvasAgentExecutionMode } from './agentAutoApprovalPolicy';
+import { normalizeExternalAgentToolRequest, type ExternalAgentToolRequestInput } from './externalAgentToolRequest';
 
 export interface ExternalAgentToolExecutionResult {
   approvalId: string;
@@ -42,6 +44,26 @@ export interface ExternalAgentToolExecutionResult {
   output?: unknown;
   error?: string;
   status: 'approved' | 'denied' | 'error';
+}
+
+const preparingApprovals = new Map<string, Set<{ projectId: string; cancelled: boolean }>>();
+
+/** Revoke pending authority without interrupting an operation that has already started. */
+export function cancelExternalAgentToolRequest(input: {
+  projectId: string;
+  request: ExternalAgentToolRequestInput;
+}): void {
+  const request = normalizeExternalAgentToolRequest(input.request);
+  const approvalId = createApprovalId(request.turnId, request.toolName, request.callId);
+  for (const pending of preparingApprovals.get(approvalId) ?? []) {
+    if (pending.projectId === input.projectId) pending.cancelled = true;
+  }
+  const approval = canvasAgentApprovalStore.get(approvalId);
+  if (!approval || approval.projectId !== input.projectId) return;
+  if (['proposed', 'awaiting-approval', 'approved'].includes(approval.status)) {
+    canvasAgentApprovalStore.update(approvalId, { status: 'cancelled' });
+    canvasAgentBudgetLedger.release(input.projectId, approvalId);
+  }
 }
 
 class ExternalAgentResolutionDeliveryError extends Error {
@@ -96,9 +118,14 @@ async function persistCanvas(projectId: string): Promise<void> {
 async function executeCanvasCommand(
   request: ExternalAgentToolRequest,
   approval: AgentApprovalRecord,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   const command = commandFromArguments(request.arguments);
   const definition = canvasCommandRegistry.getDefinition(command.type);
+  const historyGroupId = definition.effect === 'graph' ? JSON.stringify([approval.projectId, request.turnId]) : undefined;
+  if (definition.effect !== 'graph' && approval.impact.effect !== 'read') {
+    useCanvasStore.setState((state) => ({ history: closeCanvasHistoryGroup(state.history) }));
+  }
   const graphWrite = approval.impact.effect === 'canvas-write'
     && (definition.effect === 'graph' || command.type === 'node.tool.run');
   const canvas = useCanvasStore.getState();
@@ -111,12 +138,18 @@ async function executeCanvasCommand(
       )
     : undefined;
   try {
-    const result = await canvasCommandRegistry.executeApproved(command, approval.baseRevision, 'agent');
+    const result = await canvasCommandRegistry.executeApproved(command, approval.baseRevision, 'agent', historyGroupId, { signal });
     if (!result.ok) {
       if (rollbackToken) canvasAgentRollbackStore.discard(rollbackToken);
       return result;
     }
-    if (rollbackToken) canvasAgentRollbackStore.complete(rollbackToken, result.revisionAfter);
+    if (rollbackToken) {
+      const history = useCanvasStore.getState().history;
+      const historyDepthBefore = historyGroupId && history.past.at(-1)?.groupId === historyGroupId
+        ? Math.max(0, history.past.length - 1)
+        : undefined;
+      canvasAgentRollbackStore.complete(rollbackToken, result.revisionAfter, historyDepthBefore);
+    }
     if (approval.impact.effect === 'canvas-write' || command.type === 'director.record') {
       await persistCanvas(approval.projectId);
     }
@@ -214,11 +247,16 @@ function currentConfigRevision(argumentsValue: unknown): string | null | undefin
 async function executeApprovedTool(
   request: ExternalAgentToolRequest,
   approval: AgentApprovalRecord,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   switch (request.toolName) {
-    case 'canvas_command': return executeCanvasCommand(request, approval);
+    case 'canvas_command': return executeCanvasCommand(request, approval, signal);
     case 'diagnostics': return executeDiagnostics(request.arguments);
-    case 'config_patch': return executeConfigPatch(request.arguments);
+    case 'config_patch':
+      if (approval.impact.effect === 'config-write') {
+        useCanvasStore.setState((state) => ({ history: closeCanvasHistoryGroup(state.history) }));
+      }
+      return executeConfigPatch(request.arguments);
     case 'asset_read':
       throw new Error('External image reads must use an explicitly attached, per-turn temporary resource.');
   }
@@ -226,31 +264,60 @@ async function executeApprovedTool(
 
 export async function prepareExternalAgentToolRequest(input: {
   projectId: string;
-  request: ExternalAgentToolRequest;
+  request: ExternalAgentToolRequestInput;
+  allowedToolNames?: readonly string[];
 }): Promise<AgentApprovalView> {
   if (useProjectStore.getState().currentProjectId !== input.projectId) {
     throw new Error('The active project changed before external Agent approval.');
   }
-  const prepared = await prepareCanvasAgentToolApproval({
-    runId: input.request.turnId,
-    projectId: input.projectId,
-    callId: input.request.callId,
-    toolName: input.request.toolName,
-    arguments: input.request.arguments,
-  });
-  return prepared.view;
+  const request = normalizeExternalAgentToolRequest(input.request);
+  if (input.allowedToolNames !== undefined && !input.allowedToolNames.includes(request.toolName)) {
+    throw new Error(`Tool ${request.toolName} is not allowed by the selected skill whitelist.`);
+  }
+  const approvalId = createApprovalId(request.turnId, request.toolName, request.callId);
+  const preparation = { projectId: input.projectId, cancelled: false };
+  const pending = preparingApprovals.get(approvalId) ?? new Set<typeof preparation>();
+  pending.add(preparation);
+  preparingApprovals.set(approvalId, pending);
+  try {
+    const prepared = await prepareCanvasAgentToolApproval({
+      runId: request.turnId,
+      projectId: input.projectId,
+      callId: request.callId,
+      toolName: request.toolName,
+      arguments: request.arguments,
+    });
+    if (preparation.cancelled) {
+      cancelExternalAgentToolRequest({ projectId: input.projectId, request });
+      throw new Error('The external Agent turn stopped before approval was ready.');
+    }
+    if (useProjectStore.getState().currentProjectId !== input.projectId) {
+      canvasAgentApprovalStore.update(approvalId, { status: 'conflicted' });
+      throw new Error('The active project changed before external Agent approval.');
+    }
+    if (prepared.record.projectId !== input.projectId || prepared.record.status !== 'awaiting-approval') {
+      throw new Error('The external Agent approval is already terminal.');
+    }
+    return prepared.view;
+  } finally {
+    pending.delete(preparation);
+    if (pending.size === 0) preparingApprovals.delete(approvalId);
+  }
 }
 
 /** Same risk policy as the SDK: paid/destructive operations never auto-approve. */
 export async function processExternalAgentToolRequest(input: {
   projectId: string;
-  request: ExternalAgentToolRequest;
+  request: ExternalAgentToolRequestInput;
   executionMode: CanvasAgentExecutionMode;
+  allowedToolNames?: readonly string[];
+  signal?: AbortSignal;
 }): Promise<{ approval: AgentApprovalView; result?: ExternalAgentToolExecutionResult }> {
+  const request = normalizeExternalAgentToolRequest(input.request);
+  input = { ...input, request };
   const approval = await prepareExternalAgentToolRequest(input);
-  const record = canvasAgentApprovalStore.get(createApprovalId(input.request.turnId, input.request.toolName, input.request.callId));
-  const automatic = record && ((record.impact.effect === 'read' && record.toolName !== 'asset_read')
-    || (input.executionMode === 'auto' && decideAgentAutoApproval({ record }).allowed));
+  const record = canvasAgentApprovalStore.get(createApprovalId(request.turnId, request.toolName, request.callId));
+  const automatic = record && shouldAutomaticallyResolveAgentApproval({ record }, input.executionMode);
   return automatic
     ? { approval, result: await resolveExternalAgentToolApproval({ ...input, approve: true }) }
     : { approval };
@@ -258,8 +325,19 @@ export async function processExternalAgentToolRequest(input: {
 
 export async function resolveExternalAgentToolApproval(input: {
   projectId: string;
+  request: ExternalAgentToolRequestInput;
+  approve: boolean;
+  signal?: AbortSignal;
+}): Promise<ExternalAgentToolExecutionResult> {
+  const request = normalizeExternalAgentToolRequest(input.request);
+  return resolveNormalizedExternalAgentToolApproval({ ...input, request });
+}
+
+async function resolveNormalizedExternalAgentToolApproval(input: {
+  projectId: string;
   request: ExternalAgentToolRequest;
   approve: boolean;
+  signal?: AbortSignal;
 }): Promise<ExternalAgentToolExecutionResult> {
   const approvalId = createApprovalId(input.request.turnId, input.request.toolName, input.request.callId);
   let approval: AgentApprovalRecord | undefined;
@@ -292,11 +370,13 @@ export async function resolveExternalAgentToolApproval(input: {
       return { approvalId, status: 'denied' };
     }
 
-    const budget = canvasAgentBudgetLedger.reserve(approval);
-    if (!budget.allowed) {
-      throw new Error(`Agent budget is insufficient; ${budget.remaining ?? 0} credits remain.`);
+    if (approval.status === 'awaiting-approval' || approval.status === 'approved') {
+      const budget = canvasAgentBudgetLedger.reserve(approval);
+      if (!budget.allowed) {
+        throw new Error(`Agent budget is insufficient; ${budget.remaining ?? 0} credits remain.`);
+      }
+      canvasAgentApprovalExecution.decide(approval.id, true);
     }
-    canvasAgentApprovalExecution.decide(approval.id, true);
     const execution = await canvasAgentApprovalExecution.executeOnce({
       approvalId: approval.id,
       runId: approval.runId,
@@ -317,8 +397,12 @@ export async function resolveExternalAgentToolApproval(input: {
             jobIds: [],
           }
         : undefined,
-      execute: () => executeApprovedTool(input.request, approvedRequest),
+      execute: () => executeApprovedTool(input.request, approvedRequest, input.signal),
       isSuccess: toolSuccess,
+      isConflict: (output) => isRecord(output)
+        && output.ok === false
+        && isRecord(output.error)
+        && output.error.code === 'revision_conflict',
       isAccepted: (output) => input.request.toolName === 'canvas_command'
         && commandFromArguments(input.request.arguments).type === 'generation.submit'
         && toolSuccess(output),
@@ -331,25 +415,28 @@ export async function resolveExternalAgentToolApproval(input: {
     });
     const output = redactSensitiveValue(execution.output);
     const succeeded = execution.receipt.status !== 'failed';
-    const resolution: ExternalAgentToolResolution = {
-      outcome: succeeded ? 'approved' : 'error',
-      result: output,
-      errorCode: succeeded ? undefined : execution.receipt.errorCode ?? 'canvas_tool_failed',
-      message: succeeded ? undefined : 'The approved Canvas operation failed.',
-      revision: canvasCommandRegistry.getRevision(),
-      receiptId: execution.receipt.id,
-    };
-    await deliverExternalToolResolution(input.request, resolution);
+    const failureMessage = !succeeded && isRecord(output) && isRecord(output.error) && typeof output.error.message === 'string'
+      ? output.error.message
+      : 'The approved Canvas operation failed.';
     if (execution.receipt.status === 'succeeded' || execution.receipt.status === 'accepted' || execution.receipt.status === 'unknown') {
       canvasAgentBudgetLedger.commit(input.projectId, approval.id);
     } else {
       canvasAgentBudgetLedger.release(input.projectId, approval.id);
     }
+    const resolution: ExternalAgentToolResolution = {
+      outcome: succeeded ? 'approved' : 'error',
+      result: output,
+      errorCode: succeeded ? undefined : execution.receipt.errorCode ?? 'canvas_tool_failed',
+      message: succeeded ? undefined : failureMessage,
+      revision: canvasCommandRegistry.getRevision(),
+      receiptId: execution.receipt.id,
+    };
+    await deliverExternalToolResolution(input.request, resolution);
     return {
       approvalId,
       receiptId: execution.receipt.id,
       output,
-      error: succeeded ? undefined : 'The approved Canvas operation failed.',
+      error: succeeded ? undefined : failureMessage,
       status: succeeded ? 'approved' : 'error',
     };
   } catch (error) {
@@ -357,7 +444,17 @@ export async function resolveExternalAgentToolApproval(input: {
       if (error.original instanceof Error) throw error.original;
       throw new Error(String(error.original));
     }
-    if (approval) canvasAgentBudgetLedger.release(input.projectId, approval.id);
+    if (approval) {
+      const current = canvasAgentApprovalStore.get(approval.id);
+      if (current && ['succeeded', 'unknown'].includes(current.status)) {
+        canvasAgentBudgetLedger.commit(input.projectId, approval.id);
+      } else if (current?.status !== 'executing') {
+        canvasAgentBudgetLedger.release(input.projectId, approval.id);
+      }
+      if (current && ['proposed', 'awaiting-approval', 'approved'].includes(current.status)) {
+        canvasAgentApprovalStore.update(approval.id, { status: 'failed' });
+      }
+    }
     const rawMessage = error instanceof Error ? error.message : String(error);
     const redactedMessage = redactSensitiveValue(rawMessage);
     const message = typeof redactedMessage === 'string'

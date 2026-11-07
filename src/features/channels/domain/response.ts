@@ -31,7 +31,7 @@ export function extractError(payload: unknown, errorPath?: string): string | und
 }
 export interface OutputContext { profile: ChannelProfileV2; apiKey: string; taskId?: string; submit?: unknown }
 export function extractOutputs(payload: unknown, specs: OutputSpec[], operation: OperationKind, context?: OutputContext): Output[] {
-  const kind: MediaKind = operation.startsWith('video.') ? 'video' : operation.startsWith('audio.') ? 'audio' : 'image';
+  const kind: MediaKind = operation.startsWith('model.') ? 'model' : operation.startsWith('video.') ? 'video' : operation.startsWith('audio.') ? 'audio' : 'image';
   const outputs: Output[] = [];
   const seen = new Set<string>();
   for (const spec of specs) {
@@ -64,7 +64,7 @@ export function extractOutputs(payload: unknown, specs: OutputSpec[], operation:
       const match = /^data:([^;,]+);base64,([\s\S]+)$/.exec(value);
       if (!match) continue;
       output = { kind: media, source: { type: 'base64', data: match[2], mime: match[1] } };
-    } else output = { kind: media, source: { type: 'base64', data: value, mime: media === 'video' ? 'video/mp4' : media === 'audio' ? 'audio/mpeg' : 'image/png' } };
+    } else output = { kind: media, source: { type: 'base64', data: value, mime: media === 'model' ? 'model/gltf-binary' : media === 'video' ? 'video/mp4' : media === 'audio' ? 'audio/mpeg' : 'image/png' } };
     const key = JSON.stringify(output);
     if (!seen.has(key)) { seen.add(key); outputs.push(output); }
     }

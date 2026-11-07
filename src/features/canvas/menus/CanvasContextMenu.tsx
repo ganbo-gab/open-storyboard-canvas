@@ -1,5 +1,7 @@
+import { SingleNodeMenu } from './SingleNodeMenu';
 import { useTranslation } from 'react-i18next';
 import {
+  Clapperboard,
   ClipboardPaste,
   Copy,
   CopyPlus,
@@ -11,6 +13,7 @@ import {
   Redo2,
   SquareDashedMousePointer,
   Trash2,
+  Star,
   Type,
   Undo2,
   Ungroup,
@@ -21,6 +24,9 @@ import {
 
 import { MenuItem, MenuSeparator, MenuSurface } from '@/components/ui';
 import { copyImageSourceToClipboard } from '@/commands/image';
+import { favoriteAsset } from '@/features/assets/application/assetCatalog';
+import { showErrorDialog } from '@/features/canvas/application/errorDialog';
+import { buildCanvasAssetCatalog } from '@/features/canvas/application/canvasAssetCatalog';
 import { CANVAS_GENERATION_NODE_TYPES } from '@/features/canvas/domain/canvasCapabilities';
 import { CANVAS_NODE_TYPES, type CanvasNodeType } from '@/features/canvas/domain/canvasNodes';
 import { useCanvasActions } from '@/features/canvas/engine/canvasActions';
@@ -30,6 +36,7 @@ import type { MaterialImportApi } from '@/features/canvas/io/useMaterialImport';
 import { MEDIA_FILE_ACCEPT, pickFiles } from '@/features/canvas/io/pickFiles';
 import { useCanvasUiStore, type ContextMenuState } from '@/features/canvas/state/canvasUiStore';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { useProjectStore } from '@/stores/projectStore';
 
 const GENERATION_TYPES = new Set<CanvasNodeType>(CANVAS_GENERATION_NODE_TYPES);
 
@@ -69,7 +76,7 @@ export function CanvasContextMenu({ menu, materialImport, scheduleCanvasPersist 
   if (menu.selectedText) {
     const text = menu.selectedText;
     return (
-      <MenuSurface anchor={{ x: menu.clientX, y: menu.clientY }} onClose={closeMenus} label={t('rework.canvas.menu.text')}>
+      <MenuSurface anchor={menu.anchor ?? { x: menu.clientX, y: menu.clientY }} onClose={closeMenus} label={t('rework.canvas.menu.text')}>
         <MenuItem icon={<Copy />} label={t('nodeToolbar.copyText')} onClick={close(() => void actions.clipboard.copyText(text))} />
         <MenuItem
           icon={<ImagePlus />}
@@ -92,14 +99,27 @@ export function CanvasContextMenu({ menu, materialImport, scheduleCanvasPersist 
     );
   }
 
+  if (node && !multi) return <SingleNodeMenu node={node} menu={menu} onClose={closeMenus} />;
+
   if (node) {
     const imageSource = imageSourceOf(node.data as Record<string, unknown>);
     const isGroup = node.type === CANVAS_NODE_TYPES.group;
+    // Canvas media is already indexed by the asset library; saving pins it as a favorite there.
+    const assetItems = buildCanvasAssetCatalog(multi ? selection : [node]);
+    const saveToAssets = async () => {
+      const projectId = useProjectStore.getState().currentProjectId;
+      if (!projectId) return;
+      try {
+        for (const item of assetItems) await favoriteAsset(`project:${projectId}:${item.id}`, true);
+      } catch (error) {
+        await showErrorDialog(error instanceof Error ? error.message : String(error), t('common.error'));
+      }
+    };
     const canGenerate = multi
       ? selection.some((item) => GENERATION_TYPES.has(item.type))
       : GENERATION_TYPES.has(node.type);
     return (
-      <MenuSurface anchor={{ x: menu.clientX, y: menu.clientY }} onClose={closeMenus} label={t('rework.canvas.menu.node')}>
+      <MenuSurface anchor={menu.anchor ?? { x: menu.clientX, y: menu.clientY }} onClose={closeMenus} label={t('rework.canvas.menu.node')}>
         {canGenerate ? (
           <>
             <MenuItem
@@ -131,6 +151,9 @@ export function CanvasContextMenu({ menu, materialImport, scheduleCanvasPersist 
             onClick={close(() => void copyImageSourceToClipboard(imageSource).catch((error) => console.warn('copy image failed', error)))}
           />
         ) : null}
+        {assetItems.length ? (
+          <MenuItem icon={<Star />} label={t('rework.canvas.menu.saveToAssets')} onClick={close(() => void saveToAssets())} />
+        ) : null}
         <MenuSeparator />
         {multi ? (
           <>
@@ -155,12 +178,24 @@ export function CanvasContextMenu({ menu, materialImport, scheduleCanvasPersist 
   }
 
   return (
-    <MenuSurface anchor={{ x: menu.clientX, y: menu.clientY }} onClose={closeMenus} label={t('rework.canvas.menu.canvas')}>
+    <MenuSurface anchor={menu.anchor ?? { x: menu.clientX, y: menu.clientY }} onClose={closeMenus} label={t('rework.canvas.menu.canvas')}>
       <MenuItem
         icon={<Plus />}
         label={t('rework.canvas.add')}
         shortcut={shortcutLabel('node.add')}
         onClick={() => openAddMenu({ clientX: menu.clientX, clientY: menu.clientY, flowPosition: menu.flowPosition })}
+      />
+      <MenuItem
+        icon={<Clapperboard />}
+        label={t('rework.canvas.menu.newPrevis')}
+        onClick={close(() => {
+          const nodeId = createCanvasNode({
+            type: CANVAS_NODE_TYPES.blueprint,
+            position: menu.flowPosition,
+            configuration: { openDirectorStudio: true, directorStudioMode: 'flat', directorStudioWorkspace: 'previs' },
+          });
+          if (nodeId) scheduleCanvasPersist(0);
+        })}
       />
       <MenuItem
         icon={<Upload />}

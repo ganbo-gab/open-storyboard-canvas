@@ -1,0 +1,67 @@
+/* Use the editor's available width: the window can be wide while its form is narrow. */
+.channel-size-setup { container-type: inline-size; }
+
+.channel-size-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 12px;
+}
+
+/* ui-tile's compact single-line defaults are unsuitable for title + description cards. */
+.ui-tile.channel-size-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 84px;
+  padding: 12px 14px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.channel-size-choice > * {
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.5;
+}
+
+.channel-size-choice:focus-visible {
+  outline: 2px solid rgb(var(--accent-rgb));
+  outline-offset: 2px;
+}
+
+.channel-size-mapping-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: 8px;
+}
+.channel-size-mapping-row > code { grid-column: 1 / -1; }
+.channel-size-mapping-row > * { min-width: 0; }
+
+@container (min-width: 26rem) {
+  .channel-size-mapping-row { grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 1fr)); }
+  .channel-size-mapping-row > code { grid-column: auto; }
+}
+
+.channel-frame-selection { container-type: inline-size; }
+.channel-frame-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 12px; }
+.channel-frame-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); gap: 8px; }
+.channel-frame-option { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); cursor: pointer; background: var(--field-bg); }
+.channel-frame-option[data-checked] { border-color: rgb(var(--accent-rgb) / .5); background: rgb(var(--accent-rgb) / .08); }
+.channel-frame-option:focus-within { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
+.channel-frame-option input { width: 15px; height: 15px; flex-shrink: 0; accent-color: rgb(var(--accent-rgb)); }
+.channel-frame-option strong { display: block; font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.channel-frame-option small { display: block; margin-top: 3px; font-size: 10px; color: rgb(var(--text-muted-rgb)); overflow-wrap: anywhere; }
+.channel-frame-more { border-top: 1px solid var(--line); padding-top: 12px; font-size: 12px; }
+.channel-frame-more > summary { cursor: pointer; color: rgb(var(--text-muted-rgb)); }
+.channel-frame-custom { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 12px; }
+.channel-frame-axis { display: flex; flex-wrap: wrap; gap: 8px; }
+.channel-frame-axis .channel-frame-option { min-width: 78px; }
+.channel-combination-mappings { display: grid; gap: 8px; max-height: 300px; overflow-y: auto; }
+.channel-combination-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: center; }

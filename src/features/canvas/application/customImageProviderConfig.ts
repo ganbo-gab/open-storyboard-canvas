@@ -1,4 +1,6 @@
 import type { CustomProviderConfig } from '@/stores/customProvidersStore';
+import { resolveComfyUIUrls } from '@/features/channels/adapters/comfyui/url';
+import { comfyWorkflowCollectionSchema, comfyWorkflowConfigSchema, readComfyUIWorkflows, resolveComfyUIWorkflow, withComfyUIWorkflows } from '@/features/channels/application/comfyWorkflows';
 import {
   normalizeProviderBaseUrl,
   normalizeProviderEndpointPath,
@@ -384,6 +386,9 @@ export function createEmptyCustomImageProviderDraft(): CustomImageProviderDraft 
 
 export function customImageProviderConfigToDraft(provider: CustomProviderConfig): CustomImageProviderDraft {
   const extraParams = isPlainRecord(provider.extraParams) ? { ...provider.extraParams } : {};
+  const selectedWorkflow = provider.apiStyle === 'comfyui' && provider.comfyWorkflows
+    ? resolveComfyUIWorkflow(provider) : undefined;
+  if (selectedWorkflow) extraParams.comfyui = structuredClone(selectedWorkflow.config);
   const resolvedContract = resolveCustomImageRequestContract(provider);
   const contract = resolvedContract.value;
   if (resolvedContract.source === 'legacy') {
@@ -396,6 +401,7 @@ export function customImageProviderConfigToDraft(provider: CustomProviderConfig)
   return {
     ...provider,
     id: provider.id,
+    ...(selectedWorkflow ? { models: [selectedWorkflow.id, ...provider.models.filter((id) => id !== selectedWorkflow.id)] } : {}),
     mediaType: provider.apiStyle === 'comfyui' && provider.mediaType === 'video' ? 'video' : 'image',
     endpointPath: provider.endpointPath ?? '',
     modelListEndpointPath: provider.modelListEndpointPath ?? '/models',
@@ -475,11 +481,23 @@ export function customImageProviderDraftFromUnknown(
     },
   };
   const imageRequestContract = normalizeImportedContract(input, fallbackProvider, issues);
+  const importedWorkflows = input.comfyWorkflows === undefined
+    ? undefined : comfyWorkflowCollectionSchema.safeParse(input.comfyWorkflows);
+  if (importedWorkflows && !importedWorkflows.success) {
+    issues.push({ path: 'comfyWorkflows', message: importedWorkflows.error.message });
+  }
+  const importedCollection = importedWorkflows?.success ? importedWorkflows.data : undefined;
+  const selectedImportedWorkflow = importedCollection?.workflows.find((workflow) => workflow.id === importedCollection.selectedWorkflowId);
+  if (importedCollection) {
+    delete extraParams.comfyui;
+    if (selectedImportedWorkflow) extraParams.comfyui = structuredClone(selectedImportedWorkflow.config);
+  }
 
   const value: CustomImageProviderDraft = {
     ...baseDraft,
+    ...(importedCollection ? { comfyWorkflows: importedCollection } : {}),
     id: typeof input.id === 'string' && input.id.trim() ? input.id.trim() : baseDraft.id,
-    mediaType: input.apiStyle === 'comfyui' && input.mediaType === 'video' ? 'video' : 'image',
+    mediaType: selectedImportedWorkflow?.mediaType ?? (input.apiStyle === 'comfyui' && input.mediaType === 'video' ? 'video' : 'image'),
     label: String(input.label ?? baseDraft.label ?? ''),
     baseUrl: String(input.baseUrl ?? baseDraft.baseUrl ?? ''),
     endpointPath,
@@ -487,7 +505,10 @@ export function customImageProviderDraftFromUnknown(
     httpMethod: method === 'GET' ? 'GET' : 'POST',
     apiKey: '',
     apiStyle: String(input.apiStyle ?? baseDraft.apiStyle ?? 'generic-json'),
-    models: uniqueStrings(input.models, baseDraft.models),
+    models: importedCollection ? [
+      ...(selectedImportedWorkflow ? [selectedImportedWorkflow.id] : []),
+      ...importedCollection.workflows.filter((workflow) => workflow.id !== selectedImportedWorkflow?.id).map((workflow) => workflow.id),
+    ] : uniqueStrings(input.models, baseDraft.models),
     supportsWebSearch: Boolean(input.supportsWebSearch ?? baseDraft.supportsWebSearch),
     supportedRatios: uniqueStrings(input.supportedRatios, baseDraft.supportedRatios),
     supportedResolutions: uniqueStrings(input.supportedResolutions, baseDraft.supportedResolutions),
@@ -538,13 +559,18 @@ export function customImageProviderDraftToConfig(
   const textEndpoint = normalizedContract.value.textToImage?.endpointPath;
   const configuredEndpoint = normalizeProviderEndpointPath(textEndpoint ?? draft.endpointPath ?? '');
   const configuredMethod = normalizedContract.value.textToImage?.method ?? draft.httpMethod ?? 'POST';
+  let baseUrl: string;
+  try {
+    baseUrl = draft.apiStyle === 'comfyui' ? resolveComfyUIUrls(draft.baseUrl).base : normalizeProviderBaseUrl(draft.baseUrl);
+  } catch (error) {
+    return { value: null, issues: [{ path: 'baseUrl', message: error instanceof Error ? error.message : String(error) }] };
+  }
 
-  return {
-    value: {
+  let value: CustomProviderConfig = {
       id: draft.id ?? fallbackId,
       label: draft.label.trim() || '未命名配置',
       mediaType,
-      baseUrl: normalizeProviderBaseUrl(draft.baseUrl),
+      baseUrl,
       endpointPath: configuredEndpoint,
       modelListEndpointPath: normalizeProviderEndpointPath(draft.modelListEndpointPath ?? ''),
       httpMethod: configuredMethod,
@@ -563,9 +589,24 @@ export function customImageProviderDraftToConfig(
         : undefined,
       extraParams,
       note: draft.note ?? '',
-    },
-    issues: [],
   };
+  if (draft.apiStyle === 'comfyui') {
+    try {
+      const collection = readComfyUIWorkflows({ ...value, comfyWorkflows: draft.comfyWorkflows });
+      const selected = collection.workflows.find((workflow) => workflow.id === collection.selectedWorkflowId);
+      if (selected) {
+        const config = comfyWorkflowConfigSchema.parse(extraParams.comfyui ?? selected.config);
+        value = withComfyUIWorkflows(value, {
+          ...collection,
+          workflows: collection.workflows.map((workflow) => workflow.id === collection.selectedWorkflowId
+            ? { ...workflow, mediaType, config } : workflow),
+        });
+      } else value = withComfyUIWorkflows(value, collection);
+    } catch (error) {
+      return { value: null, issues: [{ path: 'comfyWorkflows', message: error instanceof Error ? error.message : String(error) }] };
+    }
+  }
+  return { value, issues: [] };
 }
 
 export function extractCustomImageProviderJson(text: string): unknown {

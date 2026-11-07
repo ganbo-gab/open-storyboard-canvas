@@ -1,40 +1,41 @@
+import { SidebarResizeHandle, useSidebarWidth } from '@/components/ui/SidebarResizeHandle';
+import { customHttpRequest } from '@/commands/ai';
+import { ImageHostSection } from '@/components/settings/ImageHostSection';
+import { imageHostConfigurationError } from '@/features/settings/imageHostSettings';
+import { WorkspaceLayoutSettings } from '@/features/settings/WorkspaceLayoutSettings';
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { X, FolderOpen, Plus, Trash2, CheckCircle2, ExternalLink, RotateCcw, LoaderCircle, Network } from 'lucide-react';
+import { FolderOpen, Plus, Trash2, CheckCircle2, ExternalLink, Network, ArrowLeft, Settings2, Keyboard, Plug, Workflow, Image, Sparkles, Palette, Database, Info, Bot, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
 import { isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { customHttpRequest } from '@/commands/ai';
 import {
   DEFAULT_IMAGE_HOST_SETTINGS,
   useSettingsStore,
   type CanvasLeftDragMode,
   type CanvasWheelMode,
-  type ImageHostProvider,
   type ImageHostSettings,
   type GenerationNetworkRoute,
   type PanoramaControlSensitivity,
 } from '@/stores/settingsStore';
-import { UiCheckbox, UiSelect } from '@/components/ui';
+import { UiButton, UiCheckbox, UiIconButton, UiInput, UiSegmented, UiSelect, UiSlider } from '@/components/ui';
 import { UI_CONTENT_OVERLAY_INSET_CLASS, UI_DIALOG_TRANSITION_MS } from '@/components/ui/motion';
 import { useDialogTransition } from '@/components/ui/useDialogTransition';
 import { useModalFocus } from '@/components/ui/useModalFocus';
 import { listModelProviders } from '@/features/canvas/models';
 import type { SettingsCategory } from '@/features/settings/settingsEvents';
-import { CustomProvidersSection } from '@/components/settings/CustomProvidersSection';
 import { ComfyUISettingsSection } from '@/components/settings/ComfyUISettingsSection';
 import { ChannelSettingsPage } from '@/features/settings/channels/ChannelSettingsPage';
-import type { AddProviderTab } from '@/components/settings/AddProvidersSection';
 import { AgnesSettingsSection } from '@/components/settings/AgnesSettingsSection';
 import { DreaminaSection } from '@/components/settings/DreaminaSection';
 import { PromptManagementSection } from '@/components/settings/PromptManagementSection';
 import { PromptPresetsSection } from '@/components/settings/PromptPresetsSection';
-import { AudioModelsSection } from '@/components/settings/AudioModelsSection';
 import { SettingsPortabilitySection } from '@/components/settings/SettingsPortabilitySection';
 import { ExternalAgentConnectionPanel } from '@/features/canvas/agent/ui/ExternalAgentConnectionPanel';
 import { buildExternalCanvasMcpManifest } from '@/features/canvas/agent/application/externalAgentToolManifest';
 import { useProjectStore } from '@/stores/projectStore';
+import { AppearanceThemeSettings } from '@/features/theme/AppearanceThemeSettings';
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -50,31 +51,33 @@ interface SettingsCheckboxCardProps {
   onCheckedChange: (checked: boolean) => void;
 }
 
-type ImageHostSettingsPatch =
-  Partial<Omit<ImageHostSettings, 'pixhost' | 'seedvault'>>
-  & {
-    pixhost?: Partial<ImageHostSettings['pixhost']>;
-    seedvault?: Partial<ImageHostSettings['seedvault']>;
-  };
-
-const _UNUSED_PROVIDER_URLS_KEPT_FOR_FUTURE_USE: Record<string, string> = {
-  ppio: 'https://ppio.com/user/register?invited_by=WGY0DZ',
-  grsai: 'https://grsai.com',
-  kie: 'https://kie.ai?ref=eef20ef0b0595cad227d45b29c635f6c',
-  fal: 'https://fal.ai',
-  ppio_keys: 'https://ppio.com/settings/key-management',
-  grsai_keys: 'https://grsai.com/zh/dashboard/api-keys',
-  kie_keys: 'https://kie.ai/api-key',
-  fal_keys: 'https://fal.ai/dashboard/keys',
-};
-void _UNUSED_PROVIDER_URLS_KEPT_FOR_FUTURE_USE;
-
 const PROJECT_REPOSITORY_URL = 'https://github.com/ganbo-gab/open-storyboard-canvas';
 const ORIGINAL_PROJECT_URL = 'https://github.com/henjicc/Storyboard-Copilot';
-const IMAGE_HOST_PROVIDERS: ImageHostProvider[] = ['pixhost', 'seedvault'];
+
+const SETTINGS_NAVIGATION = [
+  [
+    { id: 'providersAdd', label: 'ui.channels.market.nav', icon: Plug },
+    { id: 'comfyui', label: 'ComfyUI', icon: Workflow },
+    { id: 'dreamina', label: 'settings.dreamina.title', icon: Sparkles },
+    { id: 'agnes', label: 'Agnes', icon: Image },
+  ],
+  [
+    { id: 'general', label: 'settings.general', icon: Settings2 },
+    { id: 'keybindings', label: 'settings.keybindings', icon: Keyboard },
+    { id: 'appearance', label: 'settings.appearance', icon: Palette },
+    { id: 'imageHosting', label: 'settings.imageHosting.title', icon: Image },
+    { id: 'promptManagement', label: 'settings.promptManagement.title', icon: FileText },
+    { id: 'promptPresets', label: 'settings.promptPresets.title', icon: Sparkles },
+    { id: 'externalAgents', label: 'settings.externalAgents', icon: Bot },
+  ],
+  [
+    { id: 'portability', label: 'portability.settings.nav', icon: Database },
+    { id: 'about', label: 'settings.about', icon: Info },
+  ],
+] as const satisfies readonly (readonly { id: SettingsCategory; label: string; icon: typeof Plug }[])[];
 
 function normalizeSettingsCategory(category: SettingsCategory): SettingsCategory {
-  if (category === 'providers' || category === 'providersNew' || category === 'providersOld' || category === 'providersChat') {
+  if (category === 'customProviders' || category === 'providers' || category === 'providersNew' || category === 'providersOld' || category === 'providersChat') {
     return 'providersAdd';
   }
   if (category === 'textAgents') {
@@ -83,91 +86,8 @@ function normalizeSettingsCategory(category: SettingsCategory): SettingsCategory
   return category;
 }
 
-function providerTabFromSettingsCategory(category: SettingsCategory): AddProviderTab {
-  if (category === 'providersOld') {
-    return 'imageOld';
-  }
-  if (category === 'providersChat' || category === 'textAgents') {
-    return 'chat';
-  }
-  return 'imageNew';
-}
-
 function cloneImageHostSettings(settings: ImageHostSettings): ImageHostSettings {
-  return {
-    enabled: settings.enabled,
-    provider: settings.provider,
-    pixhost: { ...settings.pixhost },
-    seedvault: { ...settings.seedvault },
-  };
-}
-
-function joinApiPath(baseUrl: string, path: string): string {
-  return `${baseUrl.trim().replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
-}
-
-function extractSeedvaultToken(responseText: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(responseText);
-  } catch {
-    throw new Error('settings.imageHosting.errors.invalidTokenResponse');
-  }
-
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error('settings.imageHosting.errors.invalidTokenResponse');
-  }
-
-  const data = (parsed as { data?: unknown }).data;
-  const token = data && typeof data === 'object'
-    ? (data as { token?: unknown }).token
-    : undefined;
-  if (typeof token !== 'string' || !token.trim()) {
-    throw new Error('settings.imageHosting.errors.invalidTokenResponse');
-  }
-  return token.trim();
-}
-
-function hasSeedvaultCredentialsChanged(
-  nextSettings: ImageHostSettings,
-  savedSettings: ImageHostSettings
-): boolean {
-  const nextEmail = nextSettings.seedvault.email.trim();
-  const savedEmail = savedSettings.seedvault.email.trim();
-  return (
-    nextEmail.length > 0
-    && nextSettings.seedvault.password.length > 0
-    && (
-      nextEmail !== savedEmail
-      || nextSettings.seedvault.password !== savedSettings.seedvault.password
-      || !savedSettings.seedvault.token.trim()
-    )
-  );
-}
-
-async function requestSeedvaultToken(settings: ImageHostSettings): Promise<string> {
-  const email = settings.seedvault.email.trim();
-  const password = settings.seedvault.password;
-  if (!email || !password) {
-    throw new Error('settings.imageHosting.errors.missingSeedvaultCredentials');
-  }
-
-  const response = await customHttpRequest({
-    url: joinApiPath(settings.seedvault.apiBaseUrl, '/tokens'),
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-    },
-    bodyMode: 'json',
-    body: { email, password },
-    timeoutMs: 30000,
-  });
-
-  if (response.status < 200 || response.status >= 300) {
-    throw new Error('settings.imageHosting.errors.tokenRequestFailed');
-  }
-
-  return extractSeedvaultToken(response.text);
+  return { ...settings, extraHeaders: { ...settings.extraHeaders } };
 }
 
 function SettingsCheckboxCard({
@@ -187,11 +107,12 @@ function SettingsCheckboxCard({
           onCheckedChange(!checked);
         }
       }}
-      className="w-full rounded-lg border border-border-dark bg-bg-dark p-4 text-left transition-colors hover:border-[rgba(255,255,255,0.2)]"
+      className="w-full rounded-xl border border-[var(--line)] bg-surface p-4 text-left transition-colors hover:bg-[var(--hover)]"
     >
       <div className="flex items-start gap-3">
         <UiCheckbox
           checked={checked}
+          aria-label={title}
           onCheckedChange={(nextChecked) => onCheckedChange(nextChecked)}
           onClick={(event) => event.stopPropagation()}
           className="mt-0.5 shrink-0"
@@ -234,9 +155,6 @@ export function SettingsDialog({
     canvasWheelMode,
     enableCanvasWasdPan,
     canvasWasdPanSensitivity,
-    uiRadiusPreset,
-    themeTonePreset,
-    accentColor,
     canvasEdgeRoutingMode,
     autoCheckAppUpdateOnLaunch,
     enableUpdateDialog,
@@ -262,9 +180,6 @@ export function SettingsDialog({
     setCanvasWheelMode,
     setEnableCanvasWasdPan,
     setCanvasWasdPanSensitivity,
-    setUiRadiusPreset,
-    setThemeTonePreset,
-    setAccentColor,
     setCanvasEdgeRoutingMode,
     setAutoCheckAppUpdateOnLaunch,
     setEnableUpdateDialog,
@@ -281,11 +196,9 @@ export function SettingsDialog({
   const externalAgentTools = useMemo(() => buildExternalCanvasMcpManifest([
     'canvas', 'diagnostics', 'config', 'asset-read',
   ]).tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations, requiresApproval: true })), []);
+  const sidebar = useSidebarWidth('settings-navigation', 240, 180, 340, 480);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>(
     normalizeSettingsCategory(initialCategory)
-  );
-  const [, setActiveProviderAddTab] = useState<AddProviderTab>(
-    providerTabFromSettingsCategory(initialCategory)
   );
   const [appVersion, setAppVersion] = useState<string>('');
   const [localApiKeys, setLocalApiKeys] = useState<Record<string, string>>(apiKeys);
@@ -336,9 +249,6 @@ export function SettingsDialog({
     useState(enableCanvasWasdPan);
   const [localCanvasWasdPanSensitivity, setLocalCanvasWasdPanSensitivity] =
     useState(canvasWasdPanSensitivity);
-  const [localUiRadiusPreset, setLocalUiRadiusPreset] = useState(uiRadiusPreset);
-  const [localThemeTonePreset, setLocalThemeTonePreset] = useState(themeTonePreset);
-  const [localAccentColor, setLocalAccentColor] = useState(accentColor);
   const [localCanvasEdgeRoutingMode, setLocalCanvasEdgeRoutingMode] = useState(canvasEdgeRoutingMode);
   const [localAutoCheckAppUpdateOnLaunch, setLocalAutoCheckAppUpdateOnLaunch] = useState(
     autoCheckAppUpdateOnLaunch
@@ -347,7 +257,6 @@ export function SettingsDialog({
   const [localImageHostSettings, setLocalImageHostSettings] = useState<ImageHostSettings>(
     () => cloneImageHostSettings(imageHostSettings ?? DEFAULT_IMAGE_HOST_SETTINGS)
   );
-  const [forceSeedvaultTokenRefresh, setForceSeedvaultTokenRefresh] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsSaveError, setSettingsSaveError] = useState<string>('');
   const [checkUpdateStatus, setCheckUpdateStatus] = useState<'' | 'checking' | 'has-update' | 'up-to-date' | 'failed'>('');
@@ -413,14 +322,10 @@ export function SettingsDialog({
     setLocalCanvasWheelMode(canvasWheelMode);
     setLocalEnableCanvasWasdPan(enableCanvasWasdPan);
     setLocalCanvasWasdPanSensitivity(canvasWasdPanSensitivity);
-    setLocalUiRadiusPreset(uiRadiusPreset);
-    setLocalThemeTonePreset(themeTonePreset);
-    setLocalAccentColor(accentColor);
     setLocalCanvasEdgeRoutingMode(canvasEdgeRoutingMode);
     setLocalAutoCheckAppUpdateOnLaunch(autoCheckAppUpdateOnLaunch);
     setLocalEnableUpdateDialog(enableUpdateDialog);
     setLocalImageHostSettings(cloneImageHostSettings(imageHostSettings ?? DEFAULT_IMAGE_HOST_SETTINGS));
-    setForceSeedvaultTokenRefresh(false);
     setSettingsSaveError('');
     setIsSavingSettings(false);
     setCheckUpdateStatus('');
@@ -453,7 +358,6 @@ export function SettingsDialog({
     }
 
     setActiveCategory(normalizeSettingsCategory(initialCategory));
-    setActiveProviderAddTab(providerTabFromSettingsCategory(initialCategory));
   }, [initialCategory, isOpen]);
 
   const handleSave = useCallback(async () => {
@@ -465,28 +369,8 @@ export function SettingsDialog({
     setSettingsSaveError('');
     try {
       const nextImageHostSettings = cloneImageHostSettings(localImageHostSettings);
-      const hasSeedvaultCredentialPair = Boolean(
-        nextImageHostSettings.seedvault.email.trim()
-        && nextImageHostSettings.seedvault.password
-      );
-      const shouldRefreshSeedvaultToken =
-        nextImageHostSettings.provider === 'seedvault'
-        && hasSeedvaultCredentialPair
-        && (
-          forceSeedvaultTokenRefresh
-          || hasSeedvaultCredentialsChanged(nextImageHostSettings, imageHostSettings)
-        );
-
-      if (shouldRefreshSeedvaultToken) {
-        nextImageHostSettings.seedvault.token = await requestSeedvaultToken(nextImageHostSettings);
-      }
-      if (
-        nextImageHostSettings.enabled
-        && nextImageHostSettings.provider === 'seedvault'
-        && !nextImageHostSettings.seedvault.token.trim()
-      ) {
-        throw new Error('settings.imageHosting.errors.missingSeedvaultCredentials');
-      }
+      const imageHostError = nextImageHostSettings.enabled ? imageHostConfigurationError(nextImageHostSettings) : null;
+      if (imageHostError) throw new Error(imageHostError);
       if (localGenerationNetworkRoute === 'custom-proxy') {
         try {
           const proxyUrl = new URL(localCustomProxyUrl.trim());
@@ -498,9 +382,9 @@ export function SettingsDialog({
         }
       }
 
-      providers.forEach((provider) => {
-        setProviderApiKey(provider.id, localApiKeys[provider.id] ?? '');
-      });
+      // Vault-backed writes: await so a locked/failed vault surfaces in settingsSaveError instead of a silent unhandled rejection.
+      await Promise.all(providers.map((provider) => setProviderApiKey(provider.id, localApiKeys[provider.id] ?? '')));
+      await setImageHostSettings(nextImageHostSettings);
       setGrsaiNanoBananaProModel(localGrsaiNanoBananaProModel);
       setDownloadPresetPaths(localDownloadPresetPaths);
       setUseUploadFilenameAsNodeTitle(localUseUploadFilenameAsNodeTitle);
@@ -524,15 +408,10 @@ export function SettingsDialog({
       setCanvasWheelMode(localCanvasWheelMode);
       setEnableCanvasWasdPan(localEnableCanvasWasdPan);
       setCanvasWasdPanSensitivity(localCanvasWasdPanSensitivity);
-      setUiRadiusPreset(localUiRadiusPreset);
-      setThemeTonePreset(localThemeTonePreset);
-      setAccentColor(localAccentColor);
       setCanvasEdgeRoutingMode(localCanvasEdgeRoutingMode);
       setAutoCheckAppUpdateOnLaunch(localAutoCheckAppUpdateOnLaunch);
       setEnableUpdateDialog(localEnableUpdateDialog);
-      setImageHostSettings(nextImageHostSettings);
-      setLocalImageHostSettings(nextImageHostSettings);
-      setForceSeedvaultTokenRefresh(false);
+      setLocalImageHostSettings(cloneImageHostSettings(useSettingsStore.getState().imageHostSettings));
       setSettingsSaved(true);
       window.setTimeout(() => setSettingsSaved(false), 1500);
     } catch (error) {
@@ -570,14 +449,10 @@ export function SettingsDialog({
     localCanvasWheelMode,
     localEnableCanvasWasdPan,
     localCanvasWasdPanSensitivity,
-    localUiRadiusPreset,
-    localThemeTonePreset,
-    localAccentColor,
     localCanvasEdgeRoutingMode,
     localAutoCheckAppUpdateOnLaunch,
     localEnableUpdateDialog,
     localImageHostSettings,
-    forceSeedvaultTokenRefresh,
     imageHostSettings,
     providers,
     t,
@@ -602,9 +477,6 @@ export function SettingsDialog({
     setCanvasWheelMode,
     setEnableCanvasWasdPan,
     setCanvasWasdPanSensitivity,
-    setUiRadiusPreset,
-    setThemeTonePreset,
-    setAccentColor,
     setCanvasEdgeRoutingMode,
     setAutoCheckAppUpdateOnLaunch,
     setEnableUpdateDialog,
@@ -667,44 +539,11 @@ export function SettingsDialog({
     setLocalDownloadPresetPaths((previous) => previous.filter((value) => value !== path));
   }, []);
 
-  const updateLocalImageHostSettings = useCallback((patch: ImageHostSettingsPatch) => {
-    setLocalImageHostSettings((previous) => ({
-      ...previous,
-      ...patch,
-      pixhost: {
-        ...previous.pixhost,
-        ...(patch.pixhost ?? {}),
-      },
-      seedvault: {
-        ...previous.seedvault,
-        ...(patch.seedvault ?? {}),
-      },
-    }));
-    setSettingsSaveError('');
-  }, []);
-
-  const updateSeedvaultCredentials = useCallback(
-    (patch: Partial<ImageHostSettings['seedvault']>) => {
-      updateLocalImageHostSettings({
-        seedvault: patch,
-      });
-      if (Object.prototype.hasOwnProperty.call(patch, 'email')
-        || Object.prototype.hasOwnProperty.call(patch, 'password')) {
-        setForceSeedvaultTokenRefresh(true);
-      }
-    },
-    [updateLocalImageHostSettings]
-  );
-
   if (!shouldRender) return null;
 
   return (
-    <div className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-50 flex items-center justify-center`}>
-      <div
-        className={`absolute inset-0 bg-black/90 transition-opacity duration-180 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
-        onClick={requestClose}
-      />
-      <div className="relative w-[min(96vw,1120px)]">
+    <div className={`fixed ${UI_CONTENT_OVERLAY_INSET_CLASS} z-[12500] bg-bg`}>
+      <div className="h-full w-full">
         <div
           ref={dialogRef}
           role="dialog"
@@ -712,636 +551,122 @@ export function SettingsDialog({
           aria-label={t('settings.title')}
           tabIndex={-1}
           onKeyDown={onKeyDown}
-          className={`relative mx-auto flex h-[min(86dvh,760px)] w-full flex-col overflow-hidden rounded-lg border border-border-dark bg-surface-dark shadow-xl transition-[opacity,transform,translate,scale,rotate] duration-180 ease-out sm:flex-row ${isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-1 scale-[0.99] opacity-0'}`}
+          className={`relative flex h-full w-full flex-col overflow-hidden bg-bg transition-[opacity,transform] duration-180 ease-out sm:flex-row ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'}`}
         >
-          {/* Close button */}
-          <button
-            type="button"
-            onClick={requestClose}
-            className="absolute right-2 top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark sm:right-3 sm:top-3"
-            aria-label={t('common.close')}
-            title={t('common.close')}
-          >
-            <X className="h-4 w-4" />
-          </button>
-
-          {/* Sidebar */}
-          <div className="ui-scrollbar flex w-full shrink-0 flex-col overflow-hidden border-b border-border-dark bg-bg-dark sm:h-auto sm:w-[180px] sm:overflow-y-auto sm:border-b-0 sm:border-r">
-            <div className="hidden px-4 py-4 sm:block">
-              <span className="text-xs font-medium text-text-muted uppercase tracking-wider">
-                {t('settings.title')}
-              </span>
+          <aside ref={sidebar.ref} className="relative flex w-full shrink-0 flex-col border-b border-[var(--line)] bg-surface sm:w-60 sm:border-b-0 sm:border-r">
+            <div className="flex h-14 shrink-0 items-center gap-2 px-3">
+              <UiIconButton onClick={requestClose} aria-label={t('common.close')} title={t('common.close')}>
+                <ArrowLeft />
+              </UiIconButton>
+              <h1 className="text-[15px] font-semibold text-text-dark">{t('settings.title')}</h1>
             </div>
-
-            <nav className="ui-scrollbar mr-12 flex flex-1 overflow-x-auto [&>button]:w-auto [&>button]:shrink-0 sm:mr-0 sm:block sm:overflow-visible sm:[&>button]:w-full">
-              <button
-                onClick={() => setActiveCategory('general')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'general'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.general')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('keybindings')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'keybindings'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.keybindings')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('providersAdd')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'providersAdd'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.addProvider')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('customProviders')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'customProviders'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.myConfigurations')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('comfyui')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${activeCategory === 'comfyui' ? 'border-l-2 border-accent bg-accent/10 text-text-dark' : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'}`}
-              >
-                <span className="text-sm">ComfyUI</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('dreamina')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'dreamina'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.dreamina.title')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('agnes')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'agnes'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">Agnes</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('imageHosting')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'imageHosting'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.imageHosting.title')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('audioModels')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'audioModels'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.audioModels.title')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('promptManagement')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'promptManagement'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.promptManagement.title')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('promptPresets')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'promptPresets'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.promptPresets.title')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('appearance')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'appearance'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.appearance')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('externalAgents')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'externalAgents'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.externalAgents')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('portability')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'portability'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('portability.settings.nav')}</span>
-              </button>
-
-              <button
-                onClick={() => setActiveCategory('about')}
-                className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left
-                transition-colors
-                ${activeCategory === 'about'
-                    ? 'bg-accent/10 text-text-dark border-l-2 border-accent'
-                    : 'text-text-muted hover:bg-bg-dark hover:text-text-dark'
-                  }
-              `}
-              >
-                <span className="text-sm">{t('settings.about')}</span>
-              </button>
+            <nav aria-label={t('settings.title')} className="ui-scrollbar flex min-h-0 flex-1 gap-1 overflow-x-auto px-3 pb-3 sm:block sm:overflow-y-auto">
+              {SETTINGS_NAVIGATION.map((group, index) => (
+                <div key={index} className="shrink-0 sm:mb-4">
+                  <div className="hidden h-2 sm:block" />
+                  {group.map(({ id, label, icon: Icon }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className="studio-nav-item sm:mb-0.5"
+                      aria-current={activeCategory === id ? 'page' : undefined}
+                      onClick={() => setActiveCategory(id)}
+                    >
+                      <Icon />
+                      <span className="whitespace-nowrap">{t(label)}</span>
+                    </button>
+                  ))}
+                </div>
+              ))}
             </nav>
-          </div>
+            <SidebarResizeHandle {...sidebar} label="设置导航宽度" />
+          </aside>
 
           {/* Content */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="studio-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {activeCategory === 'portability' && <SettingsPortabilitySection />}
             {activeCategory === 'externalAgents' && (
-              <div className="ui-scrollbar flex-1 overflow-y-auto p-6">
-                <div className="mb-4"><h2 className="text-lg font-semibold text-text-dark">{t('settings.externalAgents')}</h2><p className="mt-1 text-sm text-text-muted">{t('settings.externalAgentsDescription')}</p></div>
-                <ExternalAgentConnectionPanel projectId={externalAgentProject?.id ?? null} projectName={externalAgentProject?.name ?? null} tools={externalAgentTools} />
-              </div>
-            )}
-            {activeCategory === 'customProviders' && (
-              <div className="flex flex-1 flex-col overflow-hidden">
-                <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">
-                  <CustomProvidersSection
-                    mode="list"
-                    onRequestAdd={(target) => {
-                      if (target === 'comfyui') {
-                        setActiveCategory('comfyui');
-                        return;
-                      }
-                      setActiveProviderAddTab(
-                        target === 'old' ? 'imageOld' : target === 'video' ? 'video' : target === 'chat' ? 'chat' : 'imageNew'
-                      );
-                      setActiveCategory('providersAdd');
-                    }}
-                  />
+              <>
+                <div className="px-6 py-5 border-b border-[var(--line)]">
+                  <h2 className="text-[15px] font-semibold text-text-dark">{t('settings.externalAgents')}</h2>
+                  <p className="mt-1 text-[13px] text-text-muted">{t('settings.externalAgentsDescription')}</p>
                 </div>
-              </div>
-            )}
-
-            {activeCategory === 'comfyui' && (
-              <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">
-                <ComfyUISettingsSection />
-              </div>
-            )}
-
-            {activeCategory === 'dreamina' && (
-              <div className="flex flex-1 flex-col overflow-hidden">
-                <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">
-                  <DreaminaSection />
+                <div className="ui-scrollbar flex-1 overflow-y-auto p-6 space-y-4">
+                  <ExternalAgentConnectionPanel projectId={externalAgentProject?.id ?? null} projectName={externalAgentProject?.name ?? null} tools={externalAgentTools} />
                 </div>
-              </div>
+              </>
             )}
+            {activeCategory === 'comfyui' && <ComfyUISettingsSection />}
+
+            {activeCategory === 'dreamina' && <DreaminaSection />}
 
             {activeCategory === 'promptManagement' && <PromptManagementSection />}
 
             {activeCategory === 'promptPresets' && <PromptPresetsSection />}
 
-            {activeCategory === 'audioModels' && <AudioModelsSection />}
 
             {activeCategory === 'providersAdd' && (
               <div className="flex flex-1 flex-col overflow-hidden">
                 <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">
-                  <ChannelSettingsPage />
+                  <ChannelSettingsPage onClose={onClose} />
                 </div>
 
-                <div className="shrink-0 flex justify-end border-t border-border-dark px-6 py-4">
-                  <button
-                    onClick={requestClose}
-                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
-                  >
-                    {t('common.close')}
-                  </button>
-                </div>
               </div>
             )}
 
-            {activeCategory === 'agnes' && (
-              <div className="flex flex-1 flex-col overflow-hidden">
-                <div className="ui-scrollbar flex-1 overflow-y-auto px-6 py-5">
-                  <AgnesSettingsSection />
-                </div>
-
-                <div className="shrink-0 flex justify-end border-t border-border-dark px-6 py-4">
-                  <button
-                    onClick={requestClose}
-                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
-                  >
-                    {t('common.close')}
-                  </button>
-                </div>
-              </div>
-            )}
+            {activeCategory === 'agnes' && <AgnesSettingsSection />}
 
             {activeCategory === 'imageHosting' && (
               <>
-                <div className="px-6 py-5 border-b border-border-dark">
-                  <h2 className="text-lg font-semibold text-text-dark">
+                <div className="px-6 py-5 border-b border-[var(--line)]">
+                  <h2 className="text-[15px] font-semibold text-text-dark">
                     {t('settings.imageHosting.title')}
                   </h2>
-                  <p className="text-sm text-text-muted mt-1">
+                  <p className="text-[13px] text-text-muted mt-1">
                     {t('settings.imageHosting.desc')}
                   </p>
                 </div>
 
-                <div className="ui-scrollbar flex-1 space-y-4 overflow-y-auto p-6">
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-                    <div className="flex items-start gap-3">
-                      <UiCheckbox
-                        checked={localImageHostSettings.enabled}
-                        onCheckedChange={(checked) =>
-                          updateLocalImageHostSettings({ enabled: checked })
-                        }
-                        className="mt-0.5 shrink-0"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-sm font-medium text-text-dark">
-                          {t('settings.imageHosting.enable')}
-                        </h3>
-                        <p className="mt-1 text-xs text-text-muted">
-                          {t('settings.imageHosting.enableDesc')}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-                    <div className="mb-3">
-                      <h3 className="text-sm font-medium text-text-dark">
-                        {t('settings.imageHosting.provider')}
-                      </h3>
-                      <p className="mt-1 text-xs text-text-muted">
-                        {t('settings.imageHosting.providerDesc')}
-                      </p>
-                    </div>
-                    <UiSelect
-                      value={localImageHostSettings.provider}
-                      onChange={(event) =>
-                        updateLocalImageHostSettings({
-                          provider: event.target.value as ImageHostProvider,
-                        })
-                      }
-                      aria-label={t('settings.imageHosting.provider')}
-                    >
-                      {IMAGE_HOST_PROVIDERS.map((provider) => (
-                        <option key={provider} value={provider}>
-                          {t(`settings.imageHosting.providers.${provider}`)}
-                        </option>
-                      ))}
-                    </UiSelect>
-                  </div>
-
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-medium text-text-dark">
-                          {t('settings.imageHosting.pixhost.title')}
-                        </h3>
-                        <p className="mt-1 text-xs text-text-muted">
-                          {t('settings.imageHosting.pixhost.desc')}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-border-dark bg-surface-dark px-2.5 text-xs text-text-dark transition-colors hover:bg-bg-dark"
-                        onClick={() =>
-                          updateLocalImageHostSettings({
-                            pixhost: { ...DEFAULT_IMAGE_HOST_SETTINGS.pixhost },
-                          })
-                        }
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        {t('settings.imageHosting.restoreDefaults')}
-                      </button>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="text-xs font-medium text-text-muted sm:col-span-2">
-                        {t('settings.imageHosting.apiBaseUrl')}
-                        <input
-                          value={localImageHostSettings.pixhost.apiBaseUrl}
-                          onChange={(event) =>
-                            updateLocalImageHostSettings({
-                              pixhost: { apiBaseUrl: event.target.value },
-                            })
-                          }
-                          placeholder="https://api.pixhost.to"
-                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
-                        />
-                      </label>
-
-                      <label className="text-xs font-medium text-text-muted">
-                        {t('settings.imageHosting.pixhost.contentType')}
-                        <UiSelect
-                          value={localImageHostSettings.pixhost.contentType}
-                          onChange={(event) =>
-                            updateLocalImageHostSettings({
-                              pixhost: { contentType: event.target.value },
-                            })
-                          }
-                          className="mt-1"
-                          aria-label={t('settings.imageHosting.pixhost.contentType')}
-                        >
-                          <option value="0">{t('settings.imageHosting.pixhost.contentTypes.family')}</option>
-                          <option value="1">{t('settings.imageHosting.pixhost.contentTypes.adult')}</option>
-                        </UiSelect>
-                      </label>
-
-                      <label className="text-xs font-medium text-text-muted">
-                        {t('settings.imageHosting.pixhost.maxThumbnailSize')}
-                        <input
-                          type="number"
-                          min={100}
-                          max={500}
-                          step={10}
-                          value={localImageHostSettings.pixhost.maxThumbnailSize}
-                          onChange={(event) =>
-                            updateLocalImageHostSettings({
-                              pixhost: { maxThumbnailSize: event.target.value },
-                            })
-                          }
-                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
-                        />
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-medium text-text-dark">
-                          {t('settings.imageHosting.seedvault.title')}
-                        </h3>
-                        <p className="mt-1 text-xs text-text-muted">
-                          {t('settings.imageHosting.seedvault.desc')}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-border-dark bg-surface-dark px-2.5 text-xs text-text-dark transition-colors hover:bg-bg-dark"
-                        onClick={() =>
-                          updateLocalImageHostSettings({
-                            seedvault: { ...DEFAULT_IMAGE_HOST_SETTINGS.seedvault },
-                          })
-                        }
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        {t('settings.imageHosting.restoreDefaults')}
-                      </button>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="text-xs font-medium text-text-muted sm:col-span-2">
-                        {t('settings.imageHosting.apiBaseUrl')}
-                        <input
-                          value={localImageHostSettings.seedvault.apiBaseUrl}
-                          onChange={(event) =>
-                            updateLocalImageHostSettings({
-                              seedvault: { apiBaseUrl: event.target.value },
-                            })
-                          }
-                          placeholder="https://img.seedvault.cn/api/v1"
-                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
-                        />
-                      </label>
-
-                      <label className="text-xs font-medium text-text-muted">
-                        {t('settings.imageHosting.seedvault.email')}
-                        <input
-                          type="email"
-                          value={localImageHostSettings.seedvault.email}
-                          onChange={(event) =>
-                            updateSeedvaultCredentials({ email: event.target.value })
-                          }
-                          autoComplete="username"
-                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
-                        />
-                      </label>
-
-                      <label className="text-xs font-medium text-text-muted">
-                        {t('settings.imageHosting.seedvault.password')}
-                        <input
-                          type="password"
-                          value={localImageHostSettings.seedvault.password}
-                          onChange={(event) =>
-                            updateSeedvaultCredentials({ password: event.target.value })
-                          }
-                          autoComplete="current-password"
-                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
-                        />
-                      </label>
-
-                      <label className="text-xs font-medium text-text-muted">
-                        {t('settings.imageHosting.seedvault.strategyId')}
-                        <input
-                          value={localImageHostSettings.seedvault.strategyId}
-                          onChange={(event) =>
-                            updateLocalImageHostSettings({
-                              seedvault: { strategyId: event.target.value },
-                            })
-                          }
-                          placeholder={t('settings.imageHosting.seedvault.strategyIdPlaceholder')}
-                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
-                        />
-                      </label>
-
-                      <label className="text-xs font-medium text-text-muted">
-                        {t('settings.imageHosting.seedvault.token')}
-                        <input
-                          value={localImageHostSettings.seedvault.token}
-                          onChange={(event) =>
-                            updateLocalImageHostSettings({
-                              seedvault: { token: event.target.value },
-                            })
-                          }
-                          placeholder={t('settings.imageHosting.seedvault.tokenPlaceholder')}
-                          className="mt-1 h-9 w-full rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
-                        />
-                      </label>
-                    </div>
-
-                    <p className="mt-3 text-xs leading-5 text-text-muted">
-                      {forceSeedvaultTokenRefresh
-                        ? t('settings.imageHosting.seedvault.tokenWillRefresh')
-                        : t('settings.imageHosting.seedvault.tokenHint')}
-                    </p>
-                  </div>
-
-                  {settingsSaveError && (
-                    <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-200">
-                      {settingsSaveError}
-                    </div>
-                  )}
+                <div className="ui-scrollbar flex-1 overflow-y-auto p-6">
+                  <ImageHostSection value={localImageHostSettings} onChange={(next) => { setLocalImageHostSettings(next); setSettingsSaveError(''); }} />
+                  {settingsSaveError && <div role="alert" className="mt-4 rounded-lg border border-danger/25 bg-danger/8 p-3 text-xs text-danger">{settingsSaveError}</div>}
                 </div>
 
-                <div className="flex justify-end gap-2 border-t border-border-dark px-6 py-4">
-                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
-                  <button
-                    onClick={requestClose}
-                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark"
-                    disabled={isSavingSettings}
-                  >
+                <div className="shrink-0 flex justify-end gap-2 border-t border-[var(--line)] px-6 py-4">
+                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-success"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
+                  <UiButton variant="ghost" onClick={requestClose} disabled={isSavingSettings}>
                     {t('common.close')}
-                  </button>
-                  <button
+                  </UiButton>
+                  <UiButton
+                    variant="primary"
                     onClick={() => {
                       void handleSave();
                     }}
-                    className="rounded-sm bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={isSavingSettings}
+                    loading={isSavingSettings}
                   >
                     {isSavingSettings ? t('common.saving') : t('common.save')}
-                  </button>
+                  </UiButton>
                 </div>
               </>
             )}
 
             {activeCategory === 'appearance' && (
               <>
-                <div className="px-6 py-5 border-b border-border-dark">
-                  <h2 className="text-lg font-semibold text-text-dark">
+                <div className="px-6 py-5 border-b border-[var(--line)]">
+                  <h2 className="text-[15px] font-semibold text-text-dark">
                     {t('settings.appearance')}
                   </h2>
-                  <p className="text-sm text-text-muted mt-1">
+                  <p className="text-[13px] text-text-muted mt-1">
                     {t('settings.appearanceDesc')}
                   </p>
                 </div>
 
                 <div className="ui-scrollbar flex-1 space-y-4 overflow-y-auto p-6">
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-                    <h3 className="text-sm font-medium text-text-dark">
-                      {t('settings.radiusPreset')}
-                    </h3>
-                    <p className="mt-1 text-xs text-text-muted">
-                      {t('settings.radiusPresetDesc')}
-                    </p>
-                    <div className="mt-3">
-                      <UiSelect
-                        value={localUiRadiusPreset}
-                        onChange={(event) =>
-                          setLocalUiRadiusPreset(event.target.value as typeof localUiRadiusPreset)
-                        }
-                        className="h-9 text-sm"
-                      >
-                        <option value="compact">{t('settings.radiusCompact')}</option>
-                        <option value="default">{t('settings.radiusDefault')}</option>
-                        <option value="large">{t('settings.radiusLarge')}</option>
-                      </UiSelect>
-                    </div>
-                  </div>
+                  <p className="text-xs text-text-subtle">{t('ui.theme.instantHint')}</p>
+                  <AppearanceThemeSettings />
+                  <WorkspaceLayoutSettings />
 
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-                    <h3 className="text-sm font-medium text-text-dark">
-                      {t('settings.themeTone')}
-                    </h3>
-                    <p className="mt-1 text-xs text-text-muted">
-                      {t('settings.themeToneDesc')}
-                    </p>
-                    <div className="mt-3">
-                      <UiSelect
-                        value={localThemeTonePreset}
-                        onChange={(event) =>
-                          setLocalThemeTonePreset(event.target.value as typeof localThemeTonePreset)
-                        }
-                        className="h-9 text-sm"
-                      >
-                        <option value="neutral">{t('settings.toneNeutral')}</option>
-                        <option value="warm">{t('settings.toneWarm')}</option>
-                        <option value="cool">{t('settings.toneCool')}</option>
-                      </UiSelect>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
+                  <div className="rounded-xl border border-[var(--line)] bg-surface p-4">
                     <h3 className="text-sm font-medium text-text-dark">
                       {t('settings.edgeRoutingMode')}
                     </h3>
@@ -1365,70 +690,33 @@ export function SettingsDialog({
                     </div>
                   </div>
 
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-                    <h3 className="text-sm font-medium text-text-dark">
-                      {t('settings.accentColor')}
-                    </h3>
-                    <p className="mt-1 text-xs text-text-muted">
-                      {t('settings.accentColorDesc')}
-                    </p>
-                    <div className="mt-3 flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={localAccentColor}
-                        onChange={(event) => setLocalAccentColor(event.target.value)}
-                        className="h-9 w-12 rounded-sm border border-border-dark bg-surface-dark p-1"
-                      />
-                      <input
-                        value={localAccentColor}
-                        onChange={(event) => setLocalAccentColor(event.target.value)}
-                        placeholder="#3B82F6"
-                        className="h-9 flex-1 rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
-                      />
-                      <button
-                        type="button"
-                        className="inline-flex h-9 items-center justify-center rounded-sm border border-border-dark bg-surface-dark px-3 text-xs text-text-dark transition-colors hover:bg-bg-dark"
-                        onClick={() => setLocalAccentColor('#3B82F6')}
-                      >
-                        {t('settings.resetAccentColor')}
-                      </button>
-                    </div>
-                  </div>
                 </div>
 
-                <div className="flex justify-end gap-2 border-t border-border-dark px-6 py-4">
-                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
-                  <button
-                    onClick={requestClose}
-                    disabled={isSavingSettings}
-                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
-                  >
+                <div className="shrink-0 flex justify-end gap-2 border-t border-[var(--line)] px-6 py-4">
+                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-success"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
+                  <UiButton variant="ghost" onClick={requestClose} disabled={isSavingSettings}>
                     {t('common.close')}
-                  </button>
-                  <button
-                    onClick={handleSave}
-                    disabled={isSavingSettings}
-                    className="rounded-sm bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
+                  </UiButton>
+                  <UiButton variant="primary" onClick={handleSave} loading={isSavingSettings}>
                     {isSavingSettings ? t('common.saving') : t('common.save')}
-                  </button>
+                  </UiButton>
                 </div>
               </>
             )}
 
             {activeCategory === 'keybindings' && (
               <>
-                <div className="px-6 py-5 border-b border-border-dark">
-                  <h2 className="text-lg font-semibold text-text-dark">
+                <div className="px-6 py-5 border-b border-[var(--line)]">
+                  <h2 className="text-[15px] font-semibold text-text-dark">
                     {t('settings.keybindings')}
                   </h2>
-                  <p className="text-sm text-text-muted mt-1">
+                  <p className="text-[13px] text-text-muted mt-1">
                     {t('settings.keybindingsDesc')}
                   </p>
                 </div>
 
                 <div className="ui-scrollbar flex-1 space-y-4 overflow-y-auto p-6">
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
+                  <div className="rounded-xl border border-[var(--line)] bg-surface p-4">
                     <div className="mb-4">
                       <h3 className="text-sm font-medium text-text-dark">
                         {t('settings.canvasInteraction.title')}
@@ -1443,52 +731,40 @@ export function SettingsDialog({
                         <legend className="mb-2 text-xs font-medium text-text-muted">
                           {t('settings.canvasInteraction.leftDrag')}
                         </legend>
-                        <div className="grid grid-cols-2 gap-1 rounded-md border border-border-dark bg-surface-dark p-1">
-                          {(['select', 'pan'] as const).map((mode) => (
-                            <label key={mode} className="relative min-w-0 cursor-pointer">
-                              <input
-                                type="radio"
-                                name="canvasLeftDragMode"
-                                value={mode}
-                                checked={localCanvasLeftDragMode === mode}
-                                onChange={() => setLocalCanvasLeftDragMode(mode)}
-                                className="peer sr-only"
-                              />
-                              <span className="flex h-full items-center justify-center rounded-sm px-2 py-2 text-center text-xs text-text-muted transition-colors hover:bg-bg-dark peer-checked:bg-accent peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent">
-                                {t(`settings.canvasInteraction.leftDragOptions.${mode}`)}
-                              </span>
-                            </label>
-                          ))}
-                        </div>
+                        <UiSegmented<CanvasLeftDragMode>
+                          value={localCanvasLeftDragMode}
+                          options={(['select', 'pan'] as const).map((mode) => ({
+                            value: mode,
+                            label: t(`settings.canvasInteraction.leftDragOptions.${mode}`),
+                          }))}
+                          onChange={setLocalCanvasLeftDragMode}
+                          aria-label={t('settings.canvasInteraction.leftDrag')}
+                          className="w-full"
+                          size="sm"
+                        />
                       </fieldset>
                       <fieldset className="min-w-0">
                         <legend className="mb-2 text-xs font-medium text-text-muted">
                           {t('settings.canvasInteraction.wheel')}
                         </legend>
-                        <div className="grid grid-cols-3 gap-1 rounded-md border border-border-dark bg-surface-dark p-1">
-                          {(['auto', 'zoom', 'pan'] as const).map((mode) => (
-                            <label key={mode} className="relative min-w-0 cursor-pointer">
-                              <input
-                                type="radio"
-                                name="canvasWheelMode"
-                                value={mode}
-                                checked={localCanvasWheelMode === mode}
-                                onChange={() => setLocalCanvasWheelMode(mode)}
-                                className="peer sr-only"
-                              />
-                              <span className="flex h-full items-center justify-center rounded-sm px-2 py-2 text-center text-xs text-text-muted transition-colors hover:bg-bg-dark peer-checked:bg-accent peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent">
-                                {t(`settings.canvasInteraction.wheelOptions.${mode}`)}
-                              </span>
-                            </label>
-                          ))}
-                        </div>
+                        <UiSegmented<CanvasWheelMode>
+                          value={localCanvasWheelMode}
+                          options={(['auto', 'zoom', 'pan'] as const).map((mode) => ({
+                            value: mode,
+                            label: t(`settings.canvasInteraction.wheelOptions.${mode}`),
+                          }))}
+                          onChange={setLocalCanvasWheelMode}
+                          aria-label={t('settings.canvasInteraction.wheel')}
+                          className="w-full"
+                          size="sm"
+                        />
                         <p className="mt-2 text-xs text-text-muted">
                           {t('settings.canvasInteraction.wheelAutoHelp')}
                         </p>
                       </fieldset>
                     </div>
 
-                    <div className="mb-4 rounded-md border border-border-dark bg-surface-dark/60 p-3">
+                    <div className="mb-4 rounded-lg border border-[var(--line)] bg-elevated p-3">
                       <h4 className="mb-2 text-xs font-medium text-text-dark">
                         {t('settings.canvasInteraction.gesturesTitle')}
                       </h4>
@@ -1499,7 +775,7 @@ export function SettingsDialog({
                       </ul>
                     </div>
 
-                    <div className="rounded-md border border-border-dark bg-surface-dark/60 p-3">
+                    <div className="rounded-lg border border-[var(--line)] bg-elevated p-3">
                       <div className="flex items-start gap-3">
                         <UiCheckbox
                           checked={localEnableCanvasWasdPan}
@@ -1514,16 +790,13 @@ export function SettingsDialog({
                             {t('settings.canvasInteraction.wasdPanDesc')}
                           </p>
                           <div className="mt-3 flex flex-wrap items-center gap-3">
-                            <input
-                              type="range"
+                            <UiSlider
                               min={10}
                               max={180}
                               step={5}
                               value={localCanvasWasdPanSensitivity}
-                              onChange={(event) =>
-                                setLocalCanvasWasdPanSensitivity(Number(event.target.value))
-                              }
-                              className="w-48 accent-accent"
+                              onChange={setLocalCanvasWasdPanSensitivity}
+                              className="w-48"
                               aria-label={t('settings.canvasInteraction.wasdSensitivity')}
                             />
                             <span className="text-xs text-text-muted">
@@ -1538,33 +811,25 @@ export function SettingsDialog({
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-2 border-t border-border-dark px-6 py-4">
-                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
-                  <button
-                    onClick={requestClose}
-                    disabled={isSavingSettings}
-                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
-                  >
+                <div className="shrink-0 flex justify-end gap-2 border-t border-[var(--line)] px-6 py-4">
+                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-success"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
+                  <UiButton variant="ghost" onClick={requestClose} disabled={isSavingSettings}>
                     {t('common.close')}
-                  </button>
-                  <button
-                    onClick={handleSave}
-                    disabled={isSavingSettings}
-                    className="rounded-sm bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
+                  </UiButton>
+                  <UiButton variant="primary" onClick={handleSave} loading={isSavingSettings}>
                     {isSavingSettings ? t('common.saving') : t('common.save')}
-                  </button>
+                  </UiButton>
                 </div>
               </>
             )}
 
             {activeCategory === 'general' && (
               <>
-                <div className="px-6 py-5 border-b border-border-dark">
-                  <h2 className="text-lg font-semibold text-text-dark">
+                <div className="px-6 py-5 border-b border-[var(--line)]">
+                  <h2 className="text-[15px] font-semibold text-text-dark">
                     {t('settings.general')}
                   </h2>
-                  <p className="text-sm text-text-muted mt-1">
+                  <p className="text-[13px] text-text-muted mt-1">
                     {t('settings.generalDesc')}
                   </p>
                 </div>
@@ -1605,7 +870,7 @@ export function SettingsDialog({
                     description={t('settings.showNodePayloadPreviewDesc')}
                   />
 
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
+                  <div className="rounded-xl border border-[var(--line)] bg-surface p-4">
                     <div className="mb-3 flex items-start gap-3">
                       <Network className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
                       <div>
@@ -1630,38 +895,35 @@ export function SettingsDialog({
                         <option value="direct">{t('settings.generationNetworkDirect')}</option>
                         <option value="custom-proxy">{t('settings.generationNetworkCustomProxy')}</option>
                       </UiSelect>
-                      <button
-                        type="button"
+                      <UiButton
+                        size="sm"
                         onClick={() => void handleTestGenerationNetwork()}
-                        disabled={networkTestStatus === 'testing'}
-                        className="inline-flex min-h-9 items-center justify-center gap-2 rounded-sm border border-border-dark px-3 text-xs font-medium text-text-dark transition-colors hover:bg-bg-hover disabled:cursor-wait disabled:opacity-60"
+                        loading={networkTestStatus === 'testing'}
+                        icon={<Network className="h-3.5 w-3.5" aria-hidden="true" />}
                       >
-                        {networkTestStatus === 'testing'
-                          ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                          : <Network className="h-3.5 w-3.5" aria-hidden="true" />}
                         {t('settings.generationNetworkTest')}
-                      </button>
+                      </UiButton>
                     </div>
                     {localGenerationNetworkRoute === 'custom-proxy' && (
-                      <input
+                      <UiInput
                         value={localCustomProxyUrl}
                         onChange={(event) => {
                           setLocalCustomProxyUrl(event.target.value);
                           setNetworkTestStatus('');
                         }}
                         placeholder="http://127.0.0.1:7890"
-                        className="mt-3 w-full rounded-sm border border-border-dark bg-bg-darker px-3 py-2 text-sm text-text-dark outline-hidden transition-colors placeholder:text-text-muted focus:border-accent"
+                        className="mt-3 w-full"
                         aria-label={t('settings.generationNetworkProxyUrl')}
                         spellCheck={false}
                       />
                     )}
                     {networkTestStatus === 'success' && (
-                      <p role="status" className="mt-2 text-xs text-emerald-400">
+                      <p role="status" className="mt-2 text-xs text-success">
                         {t('settings.generationNetworkTestSuccess')}
                       </p>
                     )}
                     {networkTestStatus === 'failed' && (
-                      <p role="alert" className="mt-2 text-xs text-red-400">
+                      <p role="alert" className="mt-2 text-xs text-danger">
                         {t('settings.generationNetworkTestFailed')}
                       </p>
                     )}
@@ -1681,7 +943,7 @@ export function SettingsDialog({
                     description={t('settings.useLegacyPanoramaControlDirectionDesc')}
                   />
 
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
+                  <div className="rounded-xl border border-[var(--line)] bg-surface p-4">
                     <div className="mb-3">
                       <h3 className="text-sm font-medium text-text-dark">
                         {t('settings.panoramaControlSensitivity')}
@@ -1740,7 +1002,7 @@ export function SettingsDialog({
                     description={t('settings.useUploadFilenameAsNodeTitleDesc')}
                   />
 
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
+                  <div className="rounded-xl border border-[var(--line)] bg-surface p-4">
                     <div className="mb-3">
                       <h3 className="text-sm font-medium text-text-dark">
                         {t('settings.downloadPresetPaths')}
@@ -1751,30 +1013,28 @@ export function SettingsDialog({
                     </div>
 
                     <div className="mb-2 flex items-center gap-2">
-                      <input
+                      <UiInput
                         value={localDownloadPathInput}
                         onChange={(event) => setLocalDownloadPathInput(event.target.value)}
                         placeholder={t('settings.downloadPathPlaceholder')}
-                        className="h-9 flex-1 rounded-sm border border-border-dark bg-surface-dark px-3 text-sm text-text-dark outline-hidden placeholder:text-text-muted"
+                        className="min-w-0 flex-1"
                       />
-                      <button
-                        type="button"
-                        className="inline-flex h-9 items-center justify-center rounded-sm border border-border-dark bg-surface-dark px-3 text-xs text-text-dark transition-colors hover:bg-bg-dark"
+                      <UiButton
+                        size="sm"
+                        icon={<Plus className="h-3.5 w-3.5" />}
                         onClick={handleAddDownloadPathFromInput}
                       >
-                        <Plus className="mr-1 h-3.5 w-3.5" />
                         {t('settings.addPath')}
-                      </button>
-                      <button
-                        type="button"
-                        className="inline-flex h-9 items-center justify-center rounded-sm border border-border-dark bg-surface-dark px-3 text-xs text-text-dark transition-colors hover:bg-bg-dark"
+                      </UiButton>
+                      <UiButton
+                        size="sm"
+                        icon={<FolderOpen className="h-3.5 w-3.5" />}
                         onClick={() => {
                           void handlePickDownloadPath();
                         }}
                       >
-                        <FolderOpen className="mr-1 h-3.5 w-3.5" />
                         {t('settings.chooseFolder')}
-                      </button>
+                      </UiButton>
                     </div>
 
                     <div className="space-y-1">
@@ -1782,17 +1042,18 @@ export function SettingsDialog({
                         localDownloadPresetPaths.map((path) => (
                           <div
                             key={path}
-                            className="flex items-center gap-2 rounded-sm border border-border-dark bg-surface-dark px-2 py-1.5"
+                            className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--line)] bg-elevated px-2 py-1.5"
                           >
                             <span className="truncate text-xs text-text-dark">{path}</span>
-                            <button
-                              type="button"
-                              className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-sm text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
+                            <UiIconButton
+                              size="sm"
+                              className="ml-auto"
                               onClick={() => handleRemoveDownloadPath(path)}
                               title={t('common.delete')}
+                              aria-label={t('common.delete')}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                            </UiIconButton>
                           </div>
                         ))
                       ) : (
@@ -1802,44 +1063,36 @@ export function SettingsDialog({
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-2 border-t border-border-dark px-6 py-4">
-                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
-                  <button
-                    onClick={requestClose}
-                    disabled={isSavingSettings}
-                    className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
-                  >
+                <div className="shrink-0 flex justify-end gap-2 border-t border-[var(--line)] px-6 py-4">
+                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-success"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
+                  <UiButton variant="ghost" onClick={requestClose} disabled={isSavingSettings}>
                     {t('common.close')}
-                  </button>
-                  <button
-                    onClick={handleSave}
-                    disabled={isSavingSettings}
-                    className="rounded-sm bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
+                  </UiButton>
+                  <UiButton variant="primary" onClick={handleSave} loading={isSavingSettings}>
                     {isSavingSettings ? t('common.saving') : t('common.save')}
-                  </button>
+                  </UiButton>
                 </div>
               </>
             )}
 
             {activeCategory === 'about' && (
               <>
-                <div className="px-6 py-5 border-b border-border-dark">
-                  <h2 className="text-lg font-semibold text-text-dark">
+                <div className="px-6 py-5 border-b border-[var(--line)]">
+                  <h2 className="text-[15px] font-semibold text-text-dark">
                     {t('settings.about')}
                   </h2>
-                  <p className="text-sm text-text-muted mt-1">
+                  <p className="text-[13px] text-text-muted mt-1">
                     {t('settings.aboutDesc')}
                   </p>
                 </div>
 
                 <div className="ui-scrollbar flex-1 space-y-4 overflow-y-auto p-6">
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
+                  <div className="rounded-xl border border-[var(--line)] bg-surface p-4">
                     <div className="flex items-start gap-4">
                       <img
                         src="/app-icon.png"
                         alt={t('settings.aboutAppName')}
-                        className="h-14 w-14 rounded-lg border border-border-dark object-cover"
+                        className="h-14 w-14 rounded-lg border border-[var(--line)] object-cover"
                       />
                       <div className="min-w-0 flex-1">
                         <div className="text-base font-semibold text-text-dark">
@@ -1852,7 +1105,7 @@ export function SettingsDialog({
                     </div>
                   </div>
 
-                  <div className="rounded-lg border border-border-dark bg-bg-dark p-4 space-y-2 text-sm">
+                  <div className="rounded-xl border border-[var(--line)] bg-surface p-4 space-y-2 text-sm">
                     <p className="text-text-dark">
                       {t('settings.aboutVersionLabel')}: <span className="text-text-muted">{appVersion || t('settings.aboutVersionUnknown')}</span>
                     </p>
@@ -1861,28 +1114,30 @@ export function SettingsDialog({
                     </p>
                     <div className="flex flex-wrap items-center gap-2 text-text-dark">
                       <span>{t('settings.aboutRepositoryLabel')}:</span>
-                      <button
-                        type="button"
+                      <UiButton
+                        variant="ghost"
+                        size="sm"
                         onClick={handleOpenRepository}
-                        className="inline-flex items-center gap-1 break-all text-left text-accent hover:underline"
+                        className="max-w-full text-left text-accent"
+                        icon={<ExternalLink className="h-3.5 w-3.5 shrink-0" />}
                       >
-                        <span>{t('settings.aboutRepositoryUrl')}</span>
-                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-                      </button>
+                        <span className="break-all">{t('settings.aboutRepositoryUrl')}</span>
+                      </UiButton>
                     </div>
                     <p className="text-text-dark">
                       {t('settings.aboutOriginalAuthorLabel')}: <span className="text-text-muted">{t('settings.aboutOriginalAuthor')}</span>
                     </p>
                     <div className="flex flex-wrap items-center gap-2 text-text-dark">
                       <span>{t('settings.aboutOriginalProjectLabel')}:</span>
-                      <button
-                        type="button"
+                      <UiButton
+                        variant="ghost"
+                        size="sm"
                         onClick={handleOpenOriginalProject}
-                        className="inline-flex items-center gap-1 break-all text-left text-accent hover:underline"
+                        className="max-w-full text-left text-accent"
+                        icon={<ExternalLink className="h-3.5 w-3.5 shrink-0" />}
                       >
-                        <span>{t('settings.aboutOriginalProjectUrl')}</span>
-                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-                      </button>
+                        <span className="break-all">{t('settings.aboutOriginalProjectUrl')}</span>
+                      </UiButton>
                     </div>
                     <p className="text-xs leading-relaxed text-text-muted">
                       {t('settings.aboutOriginalAttributionNote')}
@@ -1903,18 +1158,16 @@ export function SettingsDialog({
                       description={t('settings.enableUpdateDialogDesc')}
                     />
                     <div className="pt-1">
-                      <button
-                        type="button"
+                      <UiButton
                         onClick={() => {
                           void handleCheckUpdate();
                         }}
-                        className="rounded-sm border border-border-dark bg-surface-dark px-3 py-2 text-sm text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={checkUpdateStatus === 'checking'}
+                        loading={checkUpdateStatus === 'checking'}
                       >
                         {checkUpdateStatus === 'checking'
                           ? t('settings.checkingUpdate')
                           : t('settings.checkUpdateNow')}
-                      </button>
+                      </UiButton>
                       {checkUpdateStatus !== '' && (
                         <p className="mt-2 text-xs text-text-muted">
                           {checkUpdateStatus === 'has-update' && t('settings.checkUpdateHasUpdate')}
@@ -1927,23 +1180,15 @@ export function SettingsDialog({
                   </div>
                 </div>
 
-                <div className="flex justify-end border-t border-border-dark px-6 py-4">
-                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
+                <div className="shrink-0 flex justify-end border-t border-[var(--line)] px-6 py-4">
+                  {settingsSaved && <span role="status" className="mr-auto inline-flex items-center gap-1 text-xs text-success"><CheckCircle2 className="h-3.5 w-3.5" /> {t('common.saved')}</span>}
                   <div className="flex gap-2">
-                    <button
-                      onClick={requestClose}
-                      disabled={isSavingSettings}
-                      className="rounded-sm border border-border-dark px-4 py-2 text-sm font-medium text-text-dark transition-colors hover:bg-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
-                    >
+                    <UiButton variant="ghost" onClick={requestClose} disabled={isSavingSettings}>
                       {t('common.close')}
-                    </button>
-                    <button
-                      onClick={handleSave}
-                      disabled={isSavingSettings}
-                      className="rounded-sm bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
+                    </UiButton>
+                    <UiButton variant="primary" onClick={handleSave} loading={isSavingSettings}>
                       {isSavingSettings ? t('common.saving') : t('common.save')}
-                    </button>
+                    </UiButton>
                   </div>
                 </div>
               </>

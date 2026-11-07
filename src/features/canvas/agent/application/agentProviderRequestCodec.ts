@@ -5,6 +5,7 @@ import type {
   AgentModelTurnRequest,
 } from '../domain/agentModel';
 import {
+  getPath,
   parseToolArguments,
   wireToolName,
   type JsonRecord,
@@ -42,7 +43,12 @@ function openAiResponsesInput(request: AgentModelTurnRequest): unknown[] {
     && request.model.capabilities.toolSearch
     && request.toolPolicy?.mode === 'responses-tool-search';
   const input: unknown[] = [];
+  const replayed: string[] = [];
   for (const item of request.input) {
+    if ((item.type === 'function_call' || (item.type === 'message' && item.role === 'assistant')) && item.continuation?.kind === 'responses-output' && item.responseGroup) {
+      if (!replayed.includes(item.responseGroup)) { input.push(...item.continuation.items); replayed.push(item.responseGroup); }
+      continue;
+    }
     if (item.type === 'message') {
       if (item.role === 'system') continue;
       const content = item.content.map((part) => {
@@ -109,45 +115,45 @@ function openAiChatMessages(request: AgentModelTurnRequest): JsonRecord[] {
   const messages: JsonRecord[] = [];
   const instructions = systemInstructions(request);
   if (instructions) messages.push({ role: 'system', content: instructions });
-
+  let lastGroup: string | undefined;
+  const deferredImages: AgentModelContentPart[][] = [];
+  const flushToolImages = () => {
+    for (const images of deferredImages) messages.push({ role: 'user', content: chatContent(images) });
+    deferredImages.length = 0;
+  };
   for (const item of request.input) {
+    // A Chat Completions assistant's complete tool-result batch must precede
+    // any ordinary message. Asset images are carried as user content, so hold
+    // them until all contiguous results have been written, without reordering
+    // the results themselves or moving images across an assistant turn.
+    if (item.type !== 'function_call_result') flushToolImages();
     if (item.type === 'message') {
       if (item.role === 'system') continue;
-      messages.push({ role: item.role, content: chatContent(item.content) });
+      messages.push({ role: item.role, content: chatContent(item.content),
+        ...(item.role === 'assistant' && item.continuation?.kind === 'chat-reasoning' ? { reasoning_content: item.continuation.reasoningContent } : {}) });
+      lastGroup = item.role === 'assistant' ? item.responseGroup : undefined;
       continue;
     }
     if (item.type === 'function_call') {
       const previous = messages[messages.length - 1];
-      if (previous?.role === 'assistant' && Array.isArray(previous.tool_calls)) {
-        previous.tool_calls.push({
-          id: item.callId,
-          type: 'function',
-          function: { name: wireToolName(item), arguments: item.arguments },
-        });
+      const call = { id: item.callId, type: 'function', function: { name: wireToolName(item), arguments: item.arguments } };
+      const sameResponse = item.responseGroup ? item.responseGroup === lastGroup : Array.isArray(previous?.tool_calls);
+      if (previous?.role === 'assistant' && sameResponse) {
+        previous.tool_calls = [...(Array.isArray(previous.tool_calls) ? previous.tool_calls : []), call];
+        if (item.continuation?.kind === 'chat-reasoning') previous.reasoning_content = item.continuation.reasoningContent;
       } else {
-        messages.push({
-          role: 'assistant',
-          content: null,
-          tool_calls: [{
-            id: item.callId,
-            type: 'function',
-            function: { name: wireToolName(item), arguments: item.arguments },
-          }],
-        });
+        messages.push({ role: 'assistant', content: null, tool_calls: [call],
+          ...(item.continuation?.kind === 'chat-reasoning' ? { reasoning_content: item.continuation.reasoningContent } : {}) });
       }
+      lastGroup = item.responseGroup;
       continue;
     }
-    messages.push({
-      role: 'tool',
-      tool_call_id: item.callId,
-      name: wireToolName(item),
-      content: item.output,
-    });
+    messages.push({ role: 'tool', tool_call_id: item.callId, name: wireToolName(item), content: item.output });
+    lastGroup = undefined;
     const images = imageParts(item.content);
-    if (images.length) {
-      messages.push({ role: 'user', content: chatContent(images) });
-    }
+    if (images.length) deferredImages.push(images);
   }
+  flushToolImages();
   return messages;
 }
 
@@ -166,7 +172,12 @@ function anthropicContent(parts: readonly AgentModelContentPart[]): unknown[] {
 
 function anthropicMessages(request: AgentModelTurnRequest): JsonRecord[] {
   const messages: JsonRecord[] = [];
+  const replayed: string[] = [];
   for (const item of request.input) {
+    if ((item.type === 'function_call' || (item.type === 'message' && item.role === 'assistant')) && item.continuation?.kind === 'anthropic-content' && item.responseGroup) {
+      if (!replayed.includes(item.responseGroup)) { messages.push({ role: 'assistant', content: item.continuation.items }); replayed.push(item.responseGroup); }
+      continue;
+    }
     if (item.type === 'message') {
       if (item.role === 'system') continue;
       messages.push({
@@ -216,7 +227,22 @@ function parseToolResult(value: string): unknown {
 
 function geminiContents(request: AgentModelTurnRequest): JsonRecord[] {
   const contents: JsonRecord[] = [];
+  const replayed: string[] = [];
+  const resultParts: unknown[] = [];
+  const resultImages: AgentModelContentPart[] = [];
+  const flushToolResults = () => {
+    if (resultParts.length) contents.push({ role: 'user', parts: [...resultParts, ...geminiParts(resultImages)] });
+    resultParts.length = 0;
+    resultImages.length = 0;
+  };
   for (const item of request.input) {
+    // Gemini parallel function responses belong to one user turn. Ordinary
+    // image parts follow every response in that turn, never between them.
+    if (item.type !== 'function_call_result') flushToolResults();
+    if ((item.type === 'function_call' || (item.type === 'message' && item.role === 'assistant')) && item.continuation?.kind === 'gemini-parts' && item.responseGroup) {
+      if (!replayed.includes(item.responseGroup)) { contents.push({ role: 'model', parts: item.continuation.items }); replayed.push(item.responseGroup); }
+      continue;
+    }
     if (item.type === 'message') {
       if (item.role === 'system') continue;
       contents.push({
@@ -232,13 +258,13 @@ function geminiContents(request: AgentModelTurnRequest): JsonRecord[] {
       });
       continue;
     }
-    contents.push({
-      role: 'user',
-      parts: [{ functionResponse: { name: wireToolName(item), response: parseToolResult(item.output) } }],
-    });
-    const images = imageParts(item.content);
-    if (images.length) contents.push({ role: 'user', parts: geminiParts(images) });
+    const call = request.input.find(entry => entry.type === 'function_call' && entry.callId === item.callId);
+    const nativeId = call?.type === 'function_call' && call.continuation?.kind === 'gemini-parts'
+      && call.continuation.items.some(part => getPath(part, ['functionCall', 'id']) === item.callId) ? item.callId : undefined;
+    resultParts.push({ functionResponse: { ...(nativeId ? { id: nativeId } : {}), name: wireToolName(item), response: parseToolResult(item.output) } });
+    resultImages.push(...imageParts(item.content));
   }
+  flushToolResults();
   return contents;
 }
 

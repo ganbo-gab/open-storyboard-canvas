@@ -1,0 +1,51 @@
+{
+  "selectTool": "选择工具",
+  "orbitTool": "旋转视角",
+  "orbitToolHint": "左键拖动环绕视角；右键或 Shift 拖动平移，滚轮缩放。不会移动场景对象。",
+  "durationConflict": "现有关键帧或动作超出了新的结束时间。请先移动或删除末尾内容，再缩短时长。",
+  "selection": {
+    "actions": "选区操作",
+    "count": "已选 {{count}} 个",
+    "hide": "隐藏",
+    "show": "显示",
+    "lock": "锁定",
+    "unlock": "解锁",
+    "lockedHint": "“{{name}}”已锁定，请先在对象列表解锁。",
+    "help": "拖空白处框选 · Shift / ⌘ 加选 · Alt 拖动旋转视角"
+  },
+  "capture": {
+    "title": "取景与四视图",
+    "current": "当前画面",
+    "exact": "指定时刻",
+    "time": "时间（秒）",
+    "capture": "拍摄一张",
+    "four": "拍摄四视图",
+    "busy": "正在取景…",
+    "front": "正面",
+    "right": "右侧",
+    "back": "背面",
+    "left": "左侧",
+    "open": "查看大图",
+    "send": "送到画布",
+    "sent": "已添加到画布，可撤销",
+    "empty": "选择当前画面或指定时刻，生成的图片会保留在这里。",
+    "cancel": "停止取景",
+    "error": "取景失败，请等待场景加载后重试。"
+  },
+  "rig": {
+    "split": "在播放头分割",
+    "duplicate": "复制机位片段",
+    "front": "置顶",
+    "priority": "优先级",
+    "editError": "无法完成此操作，请检查播放头与片段范围。"
+  },
+  "route": {
+    "duration": "时长",
+    "durationHint": "轨迹时长，可拖动标签或输入秒数",
+    "close": "闭合轨迹，返回起点",
+    "open": "打开轨迹，移除返回起点的末点"
+  },
+  "camera": {
+    "bakeFirst": "当前机位由自动运镜控制。请先在机位面板将这段运镜烘焙为关键帧，再编辑看向或旋转。"
+  }
+}

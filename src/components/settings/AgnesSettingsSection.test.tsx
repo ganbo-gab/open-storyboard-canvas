@@ -17,7 +17,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }));
 
-vi.mock('@/features/canvas/infrastructure/customProviderGateway', () => ({
+vi.mock('@/features/channels/runtime/agnesChannel', () => ({
   verifyAgnesKey: runtimeMocks.verifyAgnesKey,
 }));
 

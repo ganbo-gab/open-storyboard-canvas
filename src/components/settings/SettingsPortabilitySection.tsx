@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { AlertTriangle, Download, FolderArchive, Settings2, ShieldAlert, Upload } from 'lucide-react';
+import { Download, FolderArchive, Settings2, ShieldCheck, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { readPortabilityTextFile, writePortabilityTextFile } from '@/commands/portability';
 import { UiButton, UiCheckbox, UiModal } from '@/components/ui';
@@ -9,7 +9,6 @@ import {
   SETTINGS_BUNDLE_MAX_BYTES,
   type SettingsBundlePayload,
   type SettingsCategoryDiff,
-  type SettingsPreviewValue,
 } from '@/features/portability/application/types';
 import {
   applySettingsBundle,
@@ -34,30 +33,17 @@ function ensureSettingsExtension(path: string): string {
 export function SettingsPortabilitySection() {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [includeCredentials, setIncludeCredentials] = useState(false);
-  const [showCredentialExportConfirm, setShowCredentialExportConfirm] = useState(false);
-  const [showCredentialImportConfirm, setShowCredentialImportConfirm] = useState(false);
   const [importPayload, setImportPayload] = useState<SettingsBundlePayload | null>(null);
   const [diffs, setDiffs] = useState<SettingsCategoryDiff[]>([]);
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [isWorking, setIsWorking] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
 
-  const previewValue = (value: SettingsPreviewValue): string => {
-    if (value.kind === 'credential') {
-      return value.configuredCount > 0
-        ? t('portability.settings.credentialConfigured', { count: value.configuredCount })
-        : t('portability.settings.credentialMissing');
-    }
-    return value.text;
-  };
-
   const performExport = async () => {
-    setShowCredentialExportConfirm(false);
     setIsWorking(true);
     setFeedback(null);
     try {
-      const content = serializeSettingsBundle(includeCredentials);
+      const content = serializeSettingsBundle();
       const filename = `open-storyboard-${new Date().toISOString().slice(0, 10)}.osc-settings.json`;
       if (isTauri()) {
         const selected = await saveDialog({
@@ -82,11 +68,7 @@ export function SettingsPortabilitySection() {
     const nextDiffs = previewSettingsImport(payload);
     setImportPayload(payload);
     setDiffs(nextDiffs);
-    setSelectedCategories(new Set(
-      nextDiffs
-        .filter((diff) => diff.category !== 'credentials')
-        .map((diff) => diff.category)
-    ));
+    setSelectedCategories(new Set(nextDiffs.map((diff) => diff.category)));
   };
 
   const handleChooseImport = async () => {
@@ -118,7 +100,6 @@ export function SettingsPortabilitySection() {
     try {
       applySettingsBundle(importPayload, selectedCategories);
       setImportPayload(null);
-      setShowCredentialImportConfirm(false);
       setFeedback({ kind: 'success', message: t('portability.settings.importSuccess') });
     } catch (error) {
       setFeedback({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
@@ -138,14 +119,14 @@ export function SettingsPortabilitySection() {
 
   return (
     <>
-      <div className="border-b border-border-dark px-6 py-5">
-        <h2 className="text-lg font-semibold text-text-dark">{t('portability.settings.title')}</h2>
-        <p className="mt-1 text-sm text-text-muted">{t('portability.settings.description')}</p>
+      <div className="border-b border-[var(--line)] px-6 py-5">
+        <h2 className="text-[15px] font-semibold text-text-dark">{t('portability.settings.title')}</h2>
+        <p className="mt-1 text-[13px] text-text-muted">{t('portability.settings.description')}</p>
       </div>
 
-      <div className="ui-scrollbar flex-1 space-y-6 overflow-y-auto p-6">
-        <div className="grid gap-3 md:grid-cols-2">
-          <section className="rounded-xl border border-border-dark bg-surface-dark/55 p-4">
+      <div className="ui-scrollbar flex-1 space-y-4 overflow-y-auto p-6">
+        <div className="grid gap-4 md:grid-cols-2">
+          <section className="rounded-xl border border-[var(--line)] bg-surface p-4">
             <div className="flex items-center gap-2 text-sm font-medium text-text-dark">
               <FolderArchive className="h-4 w-4 text-accent" />
               {t('portability.settings.projectTransferTitle')}
@@ -163,45 +144,35 @@ export function SettingsPortabilitySection() {
           </section>
         </div>
 
-        <section>
+        <section className="rounded-xl border border-[var(--line)] bg-surface p-4">
           <h3 className="text-sm font-medium text-text-dark">{t('portability.settings.exportTitle')}</h3>
           <p className="mt-1 text-xs text-text-muted">{t('portability.settings.exportDescription')}</p>
-          <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-md border border-border-dark bg-bg-dark p-3">
-            <UiCheckbox
-              checked={includeCredentials}
-              onCheckedChange={setIncludeCredentials}
-              className="mt-0.5 shrink-0"
-            />
-            <span>
-              <span className="block text-sm text-text-dark">{t('portability.settings.includeCredentials')}</span>
-              <span className="mt-1 block text-xs text-amber-700 dark:text-amber-300">{t('portability.settings.credentialsPlaintextHint')}</span>
-            </span>
-          </label>
+          <p className="mt-4 flex items-start gap-2 rounded-lg border border-[var(--line)] bg-[var(--field-bg)] p-3 text-xs leading-5 text-text-muted">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+            {t('secrets.exportRefsOnly')}
+          </p>
           <UiButton
             type="button"
             variant="primary"
+            icon={<Download />}
             disabled={isWorking}
-            className="mt-4 gap-2"
-            onClick={() => {
-              if (includeCredentials) setShowCredentialExportConfirm(true);
-              else void performExport();
-            }}
+            className="mt-4"
+            onClick={() => void performExport()}
           >
-            <Download className="h-4 w-4" />
             {t('portability.settings.exportAction')}
           </UiButton>
         </section>
 
-        <section className="border-t border-border-dark pt-6">
+        <section className="rounded-xl border border-[var(--line)] bg-surface p-4">
           <h3 className="text-sm font-medium text-text-dark">{t('portability.settings.importTitle')}</h3>
           <p className="mt-1 text-xs text-text-muted">{t('portability.settings.importDescription')}</p>
           <UiButton
             type="button"
+            icon={<Upload />}
             disabled={isWorking}
-            className="mt-4 gap-2"
+            className="mt-4"
             onClick={() => void handleChooseImport()}
           >
-            <Upload className="h-4 w-4" />
             {t('portability.settings.importAction')}
           </UiButton>
           <input
@@ -229,50 +200,30 @@ export function SettingsPortabilitySection() {
         </section>
 
         {feedback && (
-          <div className={`rounded-md border p-3 text-sm ${feedback.kind === 'error' ? 'border-red-500/30 bg-red-500/5 text-red-700 dark:text-red-300' : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300'}`}>
+          <div
+            role={feedback.kind === 'error' ? 'alert' : 'status'}
+            className={`rounded-lg border p-3 text-sm ${feedback.kind === 'error' ? 'border-danger/30 bg-danger/10 text-danger' : 'border-success/30 bg-success/10 text-success'}`}
+          >
             {feedback.message}
           </div>
         )}
       </div>
 
       <UiModal
-        isOpen={showCredentialExportConfirm}
-        title={t('portability.settings.credentialsWarningTitle')}
-        onClose={() => setShowCredentialExportConfirm(false)}
-        widthClassName="w-[min(92vw,460px)]"
-        containerClassName="z-70"
-        footer={(
-          <>
-            <UiButton type="button" onClick={() => setShowCredentialExportConfirm(false)}>{t('common.cancel')}</UiButton>
-            <UiButton type="button" variant="primary" className="bg-red-600 hover:bg-red-500" onClick={() => void performExport()}>
-              {t('portability.settings.exportUnencrypted')}
-            </UiButton>
-          </>
-        )}
-      >
-        <div className="flex gap-3 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-text-dark">
-          <ShieldAlert className="h-5 w-5 shrink-0 text-red-400" />
-          <p>{t('portability.settings.credentialsWarningDescription')}</p>
-        </div>
-      </UiModal>
-
-      <UiModal
-        isOpen={Boolean(importPayload) && !showCredentialImportConfirm}
+        isOpen={Boolean(importPayload)}
         title={t('portability.settings.previewTitle')}
         onClose={() => !isWorking && setImportPayload(null)}
         widthClassName="w-[min(92vw,680px)]"
         containerClassName="z-70"
         footer={(
           <>
-            <UiButton type="button" onClick={() => setImportPayload(null)}>{t('common.cancel')}</UiButton>
+            <UiButton type="button" variant="ghost" onClick={() => setImportPayload(null)}>{t('common.cancel')}</UiButton>
             <UiButton
               type="button"
               variant="primary"
+              loading={isWorking}
               disabled={isWorking || selectedCategories.size === 0}
-              onClick={() => {
-                if (selectedCategories.has('credentials')) setShowCredentialImportConfirm(true);
-                else handleApply();
-              }}
+              onClick={handleApply}
             >
               {t('portability.settings.applySelected')}
             </UiButton>
@@ -285,17 +236,11 @@ export function SettingsPortabilitySection() {
               <span>{t('portability.settings.appVersion')}: {importPayload.appVersion}</span>
               <span>{t('portability.settings.schemaVersion')}: {importPayload.schemaVersion}</span>
             </div>
-            {importPayload.includesCredentials && (
-              <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                {t('portability.settings.importCredentialsWarning')}
-              </div>
-            )}
-            <div className="max-h-[46vh] overflow-y-auto border-y border-border-dark">
+            <div className="ui-scrollbar max-h-[46vh] overflow-y-auto border-y border-[var(--line)]">
               {diffs.map((diff) => (
                 <div
                   key={diff.category}
-                  className="flex w-full items-start gap-3 border-b border-border-dark px-2 py-3 text-left last:border-b-0 hover:bg-bg-dark/60"
+                  className="flex w-full items-start gap-3 border-b border-[var(--line)] px-2 py-3 text-left last:border-b-0"
                 >
                   <UiCheckbox
                     checked={selectedCategories.has(diff.category)}
@@ -308,7 +253,7 @@ export function SettingsPortabilitySection() {
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2 text-sm text-text-dark">
                       {t(`portability.settings.categories.${diff.category}`)}
-                      <span className={`text-[11px] ${diff.status === 'conflict' ? 'text-amber-700 dark:text-amber-300' : 'text-text-muted'}`}>
+                      <span className={`text-[11px] ${diff.status === 'conflict' ? 'text-warning' : 'text-text-muted'}`}>
                         {t(`portability.settings.status.${diff.status}`)}
                       </span>
                     </span>
@@ -319,9 +264,9 @@ export function SettingsPortabilitySection() {
                             <span className="block font-medium text-text-muted">{field.field}</span>
                             <span className="mt-0.5 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-2 text-text-muted">
                               <span>{t('portability.settings.before')}</span>
-                              <span className="break-all font-mono text-[11px] text-text-dark">{previewValue(field.before)}</span>
+                              <span className="break-all font-mono text-[11px] text-text-dark">{field.before}</span>
                               <span>{t('portability.settings.after')}</span>
-                              <span className="break-all font-mono text-[11px] text-text-dark">{previewValue(field.after)}</span>
+                              <span className="break-all font-mono text-[11px] text-text-dark">{field.after}</span>
                             </span>
                           </span>
                         ))}
@@ -335,27 +280,6 @@ export function SettingsPortabilitySection() {
             </div>
           </div>
         )}
-      </UiModal>
-
-      <UiModal
-        isOpen={showCredentialImportConfirm}
-        title={t('portability.settings.importCredentialsConfirmTitle')}
-        onClose={() => setShowCredentialImportConfirm(false)}
-        widthClassName="w-[min(92vw,460px)]"
-        containerClassName="z-70"
-        footer={(
-          <>
-            <UiButton type="button" onClick={() => setShowCredentialImportConfirm(false)}>{t('common.cancel')}</UiButton>
-            <UiButton type="button" variant="primary" className="bg-red-600 hover:bg-red-500" onClick={handleApply}>
-              {t('portability.settings.importCredentialsConfirmAction')}
-            </UiButton>
-          </>
-        )}
-      >
-        <div className="flex gap-3 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-text-dark">
-          <ShieldAlert className="h-5 w-5 shrink-0 text-red-400" />
-          <p>{t('portability.settings.importCredentialsConfirmDescription')}</p>
-        </div>
       </UiModal>
     </>
   );

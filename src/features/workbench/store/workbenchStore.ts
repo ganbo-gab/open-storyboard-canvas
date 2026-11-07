@@ -1,26 +1,55 @@
 import { create } from 'zustand';
+import { appendWorkbenchReferences } from '../application/appendReferences';
+import type { WorkbenchReference } from '../domain/types';
 import { saveAsset } from '@/features/assets/application/assetCatalog';
 import { classifyWorkbenchFailure, emptyWorkbenchData, type WorkbenchData, type WorkbenchDraft, type WorkbenchResult, type WorkbenchSubmitInput, type WorkbenchTask } from '../domain/types';
 import { workbenchDocument, type LocalDocument, type LocalStorageStatus } from '../application/workbenchPersistence';
 import { workbenchTransport, type WorkbenchTransport } from '../application/workbenchTransport';
 import { importWorkbenchResult } from '../application/importWorkbenchResult';
 import { externalizeAssetMedia, persistAssetMedia } from '@/features/assets/application/assetMediaStorage';
+import { withWorkbenchChannelDefaults } from '../application/nativeChannelInput';
+import { resolveWorkbenchMode, usesAutomaticImageMode } from '../application/workbenchImageMode';
+import { resolveNativeChannelModel } from '@/features/channels/application/channelService';
+import { hostChannelReferenceSlot } from '@/features/channels/application/referenceHosting';
+import { canDeleteWorkbenchTask, isWorkbenchTaskRunning } from '../application/taskSelectors';
+import { hasWorkbenchJobProgress, isWorkbenchTaskStalled } from '../application/taskHealth';
+import { selectWorkbenchConversations } from '../application/conversationSelectors';
+import { getWorkbenchValidationContext, validateWorkbenchDraft, WorkbenchDraftValidationError } from '../application/workbenchValidation';
+import { normalizeAssetMetadata } from '@/features/assets/application/assetMetadata';
+export {
+  canDeleteWorkbenchTask, selectActiveTasks, selectActiveTaskCount, selectActiveTaskCounts,
+  isWorkbenchTaskRunning,
+  selectRunningTasks, selectRunningTaskCount, selectRunningTaskCounts,
+  selectAttentionTasks, selectAttentionTaskCount, selectAttentionTaskCounts,
+  selectUnresolvedTasks, selectUnresolvedTaskCount, selectUnresolvedTaskCounts,
+} from '../application/taskSelectors';
+export { selectWorkbenchConversations } from '../application/conversationSelectors';
 
 export interface WorkbenchState extends WorkbenchData {
   initialized: boolean;
   storageStatus: LocalStorageStatus;
   initialize(): Promise<void>;
-  createConversation(title?: string): string;
+  reconcileTasks(): void;
+  createConversation(title?: string, projectId?: string | null): string;
   renameConversation(id: string, title: string): void;
+  setConversationPinned(id: string, pinned: boolean): void;
+  associateConversationProject(id: string, projectId: string | null): void;
   deleteConversation(id: string): void;
   selectConversation(id: string): void;
   setDraft(patch: Partial<WorkbenchDraft>): void;
+  addReferences(references: readonly WorkbenchReference[]): void;
   submit(input: WorkbenchSubmitInput): Promise<string>;
+  /** Explicit paid action: creates a new task in the original conversation. */
+  regenerate(taskId: string): Promise<string>;
+  /** Refuses unresolved tasks (including paused, unknown and recoverable work); never removes assets. */
+  deleteTask(taskId: string): void;
+  /** After explicit confirmation: host the failed slot's images and submit a new task with the public URLs. */
+  retryWithHostedReference(taskId: string, confirmation: { confirmed: true }): Promise<string>;
   poll(taskId: string): Promise<void>;
   resume(taskId: string): Promise<void>;
   recoverResult(taskId: string): Promise<void>;
   cancelWaiting(taskId: string): void;
-  importResult(taskId: string, projectId: string, resultIndex?: number): Promise<string>;
+  importResult(taskId: string, projectId: string, resultIndex?: number, position?: { x: number; y: number }): Promise<string>;
 }
 export interface WorkbenchDependencies {
   document: LocalDocument<WorkbenchData>;
@@ -57,9 +86,12 @@ export function createWorkbenchStore(dependencies: WorkbenchDependencies) {
       if (!task) return;
       if (!results.length || results.some((item) => !item.source.trim())) throw new Error('结果为空，未报告生成成功');
       try {
-        results = await Promise.all(results.map(async (result) => ({ ...result, source: result.kind === 'text' ? result.source : await persistAssetMedia(result.source, true, result.kind) })));
+        results = await Promise.all(results.map(async (result) => ({ ...result, source: result.kind === 'text' || result.kind === 'model' ? result.source : await persistAssetMedia(result.source, true, result.kind),
+          ...(result.kind === 'model' ? { importedModelId: result.importedModelId ?? result.source } : {}) })));
       } catch (error) {
-        changeTask(id, { status: 'recoverable_wait', results, failure: { kind: 'network', message: `上游已返回结果，本地保存失败；可仅取回结果，不会重新提交：${classifyWorkbenchFailure(error).message}` } });
+        if (task.status === 'succeeded' && task.results.length) {
+          changeTask(id, { failure: { kind: 'storage', message: `已有生成结果已保留；补充结果保存失败：${classifyWorkbenchFailure(error).message}` } });
+        } else changeTask(id, { status: 'recoverable_wait', results, failure: { kind: 'network', message: `上游已返回结果，本地保存失败；可仅取回结果，不会重新提交：${classifyWorkbenchFailure(error).message}` } });
         await storage.flush?.();
         return;
       }
@@ -72,9 +104,12 @@ export function createWorkbenchStore(dependencies: WorkbenchDependencies) {
       const saved: WorkbenchResult[] = [];
       try {
         for (const [index, result] of results.entries()) {
+          if (result.kind === 'model') { saved.push(result); continue; } // The durable model library owns these assets.
           const asset = await (dependencies.saveResult ?? saveAsset)({ id: `workbench:${id}:${index}`, name: task.input.prompt.slice(0, 80),
             kind: result.kind, source: result.source, origin: 'generated', taskId: id,
-            metadata: { prompt: task.input.prompt, model: task.input.model, config: task.input.config ?? {}, references: task.input.references ?? [], jobId: task.jobId, durationMs: Date.now() - task.createdAt } });
+            ...(get().conversations[task.conversationId]?.projectId ? { projectId: get().conversations[task.conversationId].projectId ?? undefined } : {}),
+            metadata: normalizeAssetMetadata({ prompt: task.input.prompt, model: task.input.model, config: task.input.config ?? {}, references: task.input.references ?? [],
+              channelModeId: task.input.channelModeId, jobId: task.jobId, durationMs: Date.now() - task.createdAt }) });
           saved.push({ ...result, source: asset.source, assetId: asset.id });
         }
         changeTask(id, { results: saved });
@@ -85,9 +120,16 @@ export function createWorkbenchStore(dependencies: WorkbenchDependencies) {
     };
     const schedule = (id: string) => {
       if (timers.has(id)) clearTimeout(timers.get(id));
+      timers.delete(id);
+      get().reconcileTasks();
       const task = get().tasks[id];
-      if (!task || task.waitingCanceled || !['queued', 'submitting', 'running', 'materializing'].includes(task.status)) return;
-      timers.set(id, setTimeout(() => { timers.delete(id); void get().poll(id); }, 2000));
+      if (!task?.jobId || !isWorkbenchTaskRunning(task)) return;
+      timers.set(id, setTimeout(() => {
+        timers.delete(id);
+        get().reconcileTasks();
+        const current = get().tasks[id];
+        if (current?.jobId && isWorkbenchTaskRunning(current)) void get().poll(id);
+      }, 2000));
     };
     return {
       ...emptyWorkbenchData(), initialized: false, storageStatus: { mode: 'persistent' },
@@ -107,12 +149,30 @@ export function createWorkbenchStore(dependencies: WorkbenchDependencies) {
           }
         }
         set({ ...data, tasks, initialized: true, storageStatus: storage.status() });
-        for (const task of Object.values(tasks)) if (task.jobId && !task.waitingCanceled) schedule(task.id);
+        if (Object.keys(tasks).some((id) => tasks[id] !== data.tasks[id])) persist();
+        get().reconcileTasks();
+        for (const task of Object.values(get().tasks)) if (task.jobId && !task.waitingCanceled) schedule(task.id);
       },
-      createConversation(title = '新对话') {
+      reconcileTasks() {
+        if (!get().initialized) return;
+        const now = Date.now();
+        const tasks = { ...get().tasks };
+        let changed = false;
+        for (const task of Object.values(tasks)) {
+          if (!isWorkbenchTaskRunning(task) || !isWorkbenchTaskStalled(task, now)) continue;
+          clearTimeout(timers.get(task.id)); timers.delete(task.id);
+          tasks[task.id] = { ...task, updatedAt: now, waitingCanceled: true, failure: { kind: 'interrupted', code: 'task.stalled',
+            message: '超过 6 小时未观察到任务进展，已暂停本地等待。上游是否完成仍需核对；原任务编号与结果线索已保留，不会自动重新提交。' } };
+          changed = true;
+        }
+        if (changed) { set({ tasks }); persist(); }
+      },
+      createConversation(title = '新对话', projectId = null) {
         if (!get().initialized) void get().initialize();
         const id = crypto.randomUUID(); const now = Date.now();
-        set({ conversations: { ...get().conversations, [id]: { id, title: title.trim() || '新对话', createdAt: now, updatedAt: now } }, selectedConversationId: id });
+        if (projectId !== null && !projectId.trim()) throw new Error('Project id must be non-empty');
+        set({ conversations: { ...get().conversations, [id]: { id, title: title.trim() || '新对话', createdAt: now, updatedAt: now,
+          pinnedAt: null, projectId: projectId?.trim() ?? null } }, selectedConversationId: id });
         persist(); return id;
       },
       renameConversation(id, title) {
@@ -120,17 +180,48 @@ export function createWorkbenchStore(dependencies: WorkbenchDependencies) {
         if (!current || !title.trim()) throw new Error('Conversation and non-empty title are required');
         set({ conversations: { ...get().conversations, [id]: { ...current, title: title.trim(), updatedAt: Date.now() } } }); persist();
       },
+      setConversationPinned(id, pinned) {
+        const conversation = get().conversations[id];
+        if (!conversation) throw new Error('Conversation not found');
+        if ((conversation.pinnedAt !== null) === pinned) return;
+        set({ conversations: { ...get().conversations, [id]: { ...conversation, pinnedAt: pinned ? Date.now() : null } } });
+        persist();
+      },
+      associateConversationProject(id, projectId) {
+        const conversation = get().conversations[id];
+        if (!conversation) throw new Error('Conversation not found');
+        if (projectId !== null && !projectId.trim()) throw new Error('Project id must be non-empty');
+        set({ conversations: { ...get().conversations, [id]: { ...conversation, projectId: projectId?.trim() ?? null } } });
+        persist();
+      },
       deleteConversation(id) {
+        if (Object.values(get().tasks).some((task) => task.conversationId === id && !canDeleteWorkbenchTask(task))) throw new Error('workbench.taskActive');
         const conversations = { ...get().conversations }; delete conversations[id];
         for (const task of Object.values(get().tasks)) if (task.conversationId === id) { clearTimeout(timers.get(task.id)); timers.delete(task.id); }
         set({ conversations, messages: Object.fromEntries(Object.entries(get().messages).filter(([, item]) => item.conversationId !== id)),
           tasks: Object.fromEntries(Object.entries(get().tasks).filter(([, item]) => item.conversationId !== id)),
-          selectedConversationId: get().selectedConversationId === id ? Object.keys(conversations)[0] ?? null : get().selectedConversationId }); persist();
+          selectedConversationId: get().selectedConversationId === id ? selectWorkbenchConversations({ conversations })[0]?.id ?? null : get().selectedConversationId }); persist();
+      },
+      async regenerate(id) {
+        await get().initialize();
+        const task = get().tasks[id];
+        if (!task) throw new Error('workbench.taskNotFound');
+        return await get().submit(structuredClone({ ...task.input, conversationId: task.conversationId }));
+      },
+      deleteTask(id) {
+        const task = get().tasks[id];
+        if (!task) return;
+        if (!canDeleteWorkbenchTask(task)) throw new Error('workbench.taskActive');
+        clearTimeout(timers.get(id)); timers.delete(id);
+        const tasks = { ...get().tasks }; delete tasks[id];
+        set({ tasks, messages: Object.fromEntries(Object.entries(get().messages).filter(([, message]) => message.taskId !== id)) });
+        persist();
       },
       selectConversation(id) {
         if (!get().conversations[id]) throw new Error('Conversation not found');
         set({ selectedConversationId: id }); persist();
       },
+      addReferences(references) { get().setDraft(appendWorkbenchReferences(get().draft, references)); },
       setDraft(patch) {
         const allowed: Partial<WorkbenchDraft> = {};
         if (patch.kind !== undefined) allowed.kind = patch.kind;
@@ -138,11 +229,22 @@ export function createWorkbenchStore(dependencies: WorkbenchDependencies) {
         if (patch.model !== undefined) allowed.model = patch.model;
         if ('config' in patch) allowed.config = patch.config;
         if ('references' in patch) allowed.references = patch.references;
+        if ('channelModeId' in patch) allowed.channelModeId = patch.channelModeId;
+        if ('referenceSlots' in patch) allowed.referenceSlots = patch.referenceSlots;
         if (!get().initialized) pendingDraft = { ...pendingDraft, ...allowed };
         const draft = get().draft;
-        set({ draft: { kind: allowed.kind ?? draft.kind, prompt: allowed.prompt ?? draft.prompt,
+        const native = resolveNativeChannelModel(allowed.model ?? draft.model);
+        const automaticReferencesChanged = native && usesAutomaticImageMode({ ...draft, ...allowed }, native.model) && ('references' in allowed || 'referenceSlots' in allowed);
+        const next = withWorkbenchChannelDefaults({ kind: allowed.kind ?? draft.kind, prompt: allowed.prompt ?? draft.prompt,
           model: allowed.model ?? draft.model, config: 'config' in allowed ? allowed.config : draft.config,
-          references: 'references' in allowed ? allowed.references : draft.references } });
+          channelModeId: 'channelModeId' in allowed ? allowed.channelModeId : draft.channelModeId,
+          referenceSlots: 'referenceSlots' in allowed ? allowed.referenceSlots : draft.referenceSlots,
+          references: 'references' in allowed ? allowed.references : draft.references },
+          Boolean(automaticReferencesChanged) || ('model' in allowed && allowed.model !== draft.model) || ('channelModeId' in allowed && allowed.channelModeId !== draft.channelModeId));
+        if (!get().initialized && next.config !== ('config' in allowed ? allowed.config : draft.config)) {
+          pendingDraft = { ...pendingDraft, config: next.config, channelModeId: next.channelModeId };
+        }
+        set({ draft: next });
         persist();
         if ('references' in allowed && allowed.references?.some((reference) => /^(data:|blob:)/.test(reference.source))) {
           const originalReferences = allowed.references;
@@ -158,8 +260,12 @@ export function createWorkbenchStore(dependencies: WorkbenchDependencies) {
       },
       async submit(input) {
         await get().initialize();
-        if (!input.prompt.trim() || !input.model.trim()) throw new Error('提示词和模型不能为空');
-        if (input.config?.seconds !== undefined && (!Number.isFinite(input.config.seconds) || input.config.seconds <= 0)) throw new Error('视频时长必须大于零');
+        input = withWorkbenchChannelDefaults(input);
+        const validation = validateWorkbenchDraft(input, getWorkbenchValidationContext(input));
+        if (validation.blocking) throw new WorkbenchDraftValidationError(validation.issues);
+        const native = resolveNativeChannelModel(input.model);
+        // Persist the actual submitted mode: replay/history must not reinterpret a previous request.
+        if (native && usesAutomaticImageMode(input, native.model)) input = { ...input, channelModeId: resolveWorkbenchMode(input, native.model).mode.id };
         const rejectSecrets = (value: unknown): void => {
           if (!value || typeof value !== 'object') return;
           for (const [key, entry] of Object.entries(value)) {
@@ -168,14 +274,14 @@ export function createWorkbenchStore(dependencies: WorkbenchDependencies) {
           }
         };
         rejectSecrets(input.config?.extraParams);
+        const conversationId = input.conversationId ?? get().selectedConversationId ?? get().createConversation(input.prompt.slice(0, 32));
         const normalized = await externalizeAssetMedia(structuredClone(input));
         normalized.prompt = input.prompt.trim();
-        const conversationId = input.conversationId ?? get().selectedConversationId ?? get().createConversation(input.prompt.slice(0, 32));
         const conversation = get().conversations[conversationId];
         if (!conversation) throw new Error('Conversation not found');
         const history = Object.values(get().messages).filter((item) => item.conversationId === conversationId).sort((a, b) => a.createdAt - b.createdAt);
         const id = crypto.randomUUID(); const now = Date.now();
-        const task: WorkbenchTask = { id, conversationId, input: { ...normalized, conversationId }, status: 'submitting', results: [], waitingCanceled: false, createdAt: now, updatedAt: now };
+        const task: WorkbenchTask = { id, conversationId, input: { ...normalized, conversationId }, status: 'submitting', results: [], waitingCanceled: false, createdAt: now, updatedAt: now, tracking: { startedAt: now, lastProgressAt: now } };
         set({ tasks: { ...get().tasks, [id]: task }, conversations: { ...get().conversations, [conversationId]: { ...conversation, updatedAt: now } },
           messages: { ...get().messages, [id]: { id, conversationId, role: 'user', text: normalized.prompt, taskId: id, createdAt: now } } });
         persist();
@@ -198,6 +304,16 @@ export function createWorkbenchStore(dependencies: WorkbenchDependencies) {
         }
         return id;
       },
+      async retryWithHostedReference(id, confirmation) {
+        const task = get().tasks[id];
+        const failure = task?.failure;
+        const slots = task?.input.referenceSlots;
+        if (!task || failure?.code !== 'reference.needsPublicUrl' || !failure.slotKey || !failure.slotKind || !slots?.[failure.slotKey]?.length) {
+          throw new Error('reference.retryUnavailable');
+        }
+        const referenceSlots = await hostChannelReferenceSlot(slots, failure.slotKey, failure.slotKind, confirmation);
+        return await get().submit({ ...task.input, referenceSlots });
+      },
       async poll(id) {
         if (polling.has(id)) return await polling.get(id);
         const task = get().tasks[id];
@@ -205,16 +321,30 @@ export function createWorkbenchStore(dependencies: WorkbenchDependencies) {
         const pending = (async () => {
           try {
             const job = await dependencies.transport.poll(task);
-            if (!get().tasks[id]) return;
-            if (job.status === 'succeeded' && job.result) {
+            const current = get().tasks[id];
+            if (!current) return;
+            const completed = current.status === 'succeeded' && current.results.length > 0;
+            const results = job.results?.length ? job.results : job.result
+              ? [{ kind: task.input.kind === 'chat' ? 'text' as const : task.input.kind, source: job.result }] : [];
+            if (job.status === 'succeeded' && results.length) {
               changeTask(id, { job });
-              if (get().tasks[id].status !== 'succeeded') await finish(id, [{ kind: task.input.kind === 'chat' ? 'text' : task.input.kind, source: job.result }]);
+              if (get().tasks[id].status !== 'succeeded' || results.length > get().tasks[id].results.length) await finish(id, results);
+            } else if (completed) {
+              // A history backfill cannot invalidate durable results already owned by the workbench.
+              return;
             } else if (job.status === 'not_found' || job.status === 'succeeded') {
               changeTask(id, { job, status: 'recoverable_wait', failure: { kind: 'network', message: job.error || '暂未找到任务或结果，保留原任务编号；不会重新提交。' } });
             } else {
-              changeTask(id, { job, status: job.status, failure: job.error ? classifyWorkbenchFailure(job.error) : undefined });
+              const tracking = current.tracking ?? { startedAt: current.createdAt, lastProgressAt: current.createdAt };
+              changeTask(id, { job, status: job.status,
+                tracking: hasWorkbenchJobProgress(current.job, job) ? { ...tracking, lastProgressAt: Date.now() } : tracking,
+                failure: current.waitingCanceled && current.failure?.code === 'task.stalled' && isWorkbenchTaskRunning({ ...current, status: job.status, waitingCanceled: false })
+                  ? current.failure : job.error ? classifyWorkbenchFailure(job.error) : undefined });
             }
-          } catch (error) { changeTask(id, { status: 'recoverable_wait', failure: classifyWorkbenchFailure(error) }); }
+          } catch (error) {
+            const current = get().tasks[id];
+            if (!(current?.status === 'succeeded' && current.results.length)) changeTask(id, { status: 'recoverable_wait', failure: classifyWorkbenchFailure(error) });
+          }
           finally { polling.delete(id); schedule(id); }
         })();
         polling.set(id, pending); await pending;
@@ -223,26 +353,28 @@ export function createWorkbenchStore(dependencies: WorkbenchDependencies) {
         const task = get().tasks[id];
         if (task && !task.jobId && task.results.length) { changeTask(id, { waitingCanceled: false }); await finish(id, task.results); return; }
         if (!task?.jobId) throw new Error('没有安全恢复编号；不会重新提交');
-        changeTask(id, { waitingCanceled: false });
+        changeTask(id, { waitingCanceled: false, tracking: { startedAt: Date.now(), lastProgressAt: Date.now() },
+          ...(task.failure?.code === 'task.stalled' ? { failure: undefined } : {}) });
         await get().poll(id);
       },
       async recoverResult(id) {
         const task = get().tasks[id];
-        if (task && task.results.length && task.status !== 'succeeded' && (!task.jobId || task.failure?.kind !== 'interrupted')) { changeTask(id, { waitingCanceled: false }); await finish(id, task.results); return; }
+        if (task && task.results.length && task.status !== 'succeeded' && !task.jobId) { changeTask(id, { waitingCanceled: false }); await finish(id, task.results); return; }
         if (!task?.jobId) throw new Error('没有安全恢复编号；不会重新提交');
-        changeTask(id, { waitingCanceled: false });
-        try { await dependencies.transport.recover(task); await get().poll(id); }
+        changeTask(id, { waitingCanceled: false, tracking: { startedAt: Date.now(), lastProgressAt: Date.now() },
+          ...(task.failure?.code === 'task.stalled' ? { failure: undefined } : {}) });
+        try { await dependencies.transport.recover(task); changeTask(id, { status: 'materializing' }); await get().poll(id); }
         catch (error) { changeTask(id, { status: 'recoverable_wait', failure: classifyWorkbenchFailure(error) }); }
       },
       cancelWaiting(id) {
         clearTimeout(timers.get(id)); timers.delete(id);
         changeTask(id, { waitingCanceled: true });
       },
-      async importResult(id, projectId, resultIndex = 0) {
+      async importResult(id, projectId, resultIndex = 0, position) {
         const task = get().tasks[id];
         const result = task?.results[resultIndex];
         if (!result) throw new Error('Result not found');
-        return await importWorkbenchResult(result, task, projectId);
+        return await importWorkbenchResult(result, task, projectId, position);
       },
     };
   });

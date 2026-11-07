@@ -101,28 +101,24 @@ describe('project portability validation', () => {
     })).toThrow(/historyJson/i);
   });
 
-  it('rejects malformed or inconsistently declared settings credentials', () => {
+  it('discards legacy settings credentials without validating or returning their values', () => {
     const base = {
       format: 'open-storyboard-settings',
       schemaVersion: 1,
       appVersion: '1.0.0',
-      createdAt: new Date().toISOString(),
+      createdAt: '1970-01-01T00:00:00.000Z',
       categories: { general: {} },
     };
-    expect(() => validateSettingsBundle({
-      ...base,
-      includesCredentials: false,
-      credentials: { providerApiKeys: { provider: 'secret' } },
-    })).toThrow(/not allowed/i);
-    expect(() => validateSettingsBundle({
-      ...base,
-      includesCredentials: true,
-      credentials: { providerApiKeys: { provider: 42 } },
-    })).toThrow(/string map/i);
-    expect(() => validateSettingsBundle({
-      ...base,
-      includesCredentials: true,
-      credentials: { imageHost: { token: ['bad'] } },
-    })).toThrow(/must be a string/i);
+    for (const credentials of [
+      { providerApiKeys: { provider: 'sentinel-secret' } },
+      { providerApiKeys: { provider: 42 } },
+      { imageHost: { token: ['sentinel-malformed'] } },
+      { legacyProviderBackups: { old: '{"apiKey":"sentinel-backup"}' } },
+    ]) {
+      const payload = validateSettingsBundle({ ...base, includesCredentials: true, credentials });
+      expect(payload.includesCredentials).toBe(false);
+      expect(payload).not.toHaveProperty('credentials');
+      expect(JSON.stringify(payload)).not.toContain('sentinel-');
+    }
   });
 });

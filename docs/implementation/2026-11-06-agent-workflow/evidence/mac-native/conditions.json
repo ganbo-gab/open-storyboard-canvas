@@ -1,0 +1,37 @@
+{
+  "platform": {
+    "chip": "Apple M3",
+    "os": "macOS 15.7.4",
+    "memoryGB": 16,
+    "engine": "Tauri release / WKWebView",
+    "viewport": [
+      1440,
+      937
+    ],
+    "dpr": 2
+  },
+  "fixture": {
+    "nodes": 1000,
+    "edges": 1000,
+    "edgeType": "disconnectableEdge",
+    "images": 350,
+    "imagePixels": [
+      512,
+      320
+    ],
+    "directorNodes": 20,
+    "executedDAG": false
+  },
+  "limits": [
+    "Synthetic render stress graph; some connections are not runnable workflow relations.",
+    "Native benchmark input is scripted and untrusted; human input separately recorded.",
+    "rAF interval does not equal presentation FPS or input-to-photon latency.",
+    "Original Chromium fixture used fallback edges and is not full product edge evidence.",
+    "No original user project, channel, credential or provider API was touched."
+  ],
+  "discard": [
+    "Human input after CUA scroll moved graph out of view: mounted0; cannot count performance.",
+    "native-suite-4-interfered.json overlaps helper tests; diagnostic only.",
+    "Tests whose viewport visibility is hidden, or no input/transform change, excluded."
+  ]
+}

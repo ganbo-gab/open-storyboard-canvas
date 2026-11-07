@@ -1,5 +1,6 @@
 import { memo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { UiButton } from '@/components/ui';
 
 interface CustomGridSelectorProps {
   rows: number;
@@ -58,9 +59,9 @@ export const CustomGridSelector = memo(({ rows, cols, onChange }: CustomGridSele
                   hoverCell && rowIndex < hoverCell.row && colIndex < hoverCell.col;
 
                 return (
-                  <div
+                  <UiButton variant="ghost"
                     key={`cell-${rowIndex}-${colIndex}`}
-                    className={`h-6 w-6 cursor-pointer rounded-sm transition-[background-color,box-shadow] duration-150 ${isSelected ? 'bg-accent' : 'bg-white/10 hover:bg-white/20'} ${isHovered && !isSelected ? 'bg-accent/40' : ''}`}
+                    className={`h-6 w-6 min-w-0 cursor-pointer rounded-sm p-0 transition-[background-color,box-shadow] duration-150 ${isSelected ? 'bg-accent' : 'bg-(--press) hover:bg-(--hover)'} ${isHovered && !isSelected ? 'bg-accent/40' : ''}`}
                     onMouseEnter={() => handleCellEnter(rowIndex + 1, colIndex + 1)}
                     onClick={() => handleCellClick(rowIndex + 1, colIndex + 1)}
                   />

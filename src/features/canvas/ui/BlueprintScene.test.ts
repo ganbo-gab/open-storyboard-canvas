@@ -12,12 +12,12 @@ describe('Director Studio floor rendering', () => {
     expect(hitTarget.name).toBe('__floor');
   });
 
-  it('builds visible floor and line layers for an empty scene', () => {
+  it('builds visible floor layers including a shadow-receiving catcher', () => {
     const grid = createDirectorFloorGrid();
 
     expect(grid.visible).toBe(true);
-    expect(grid.children).toHaveLength(5);
     expect(grid.children.every((child: { visible: boolean }) => child.visible)).toBe(true);
-    expect(grid.children.slice(1).every((child: { type: string }) => child.type === 'Mesh')).toBe(true);
+    expect(grid.children.some((child: { receiveShadow?: boolean; material?: { type?: string } }) =>
+      child.receiveShadow === true && child.material?.type === 'ShadowMaterial')).toBe(true);
   });
 });

@@ -1,5 +1,7 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Move3d, MousePointer2, Trash2 } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
+import { ChevronDown, Move3d, MousePointer2, PersonStanding, Trash2 } from 'lucide-react';
+import { UiButton, UiCheckbox, UiChipButton, UiIconButton, UiInput, UiSegmented, UiTextArea } from '@/components/ui';
 
 import type { BlueprintItem } from '@/features/canvas/domain/canvasNodes';
 import {
@@ -49,7 +51,9 @@ export interface BlueprintObjectConsoleProps {
   /** Subset of action presets that the user added themselves (deletable). */
   customActions: string[];
   onRemoveCustomAction: (action: string) => void;
-  onOpenCustomActionModal: () => void;
+  /** Viewport pose mode for the selected person (skeleton handles + pose inspector). */
+  poseEditActive: boolean;
+  onTogglePoseEdit: () => void;
   /** Camera-follow toggle, owned by the 3D scene parent. */
   followSelectedItem: boolean;
   onFollowChange: (next: boolean) => void;
@@ -70,7 +74,8 @@ export const BlueprintObjectConsole = memo(function BlueprintObjectConsole(props
     actionPresets,
     customActions,
     onRemoveCustomAction,
-    onOpenCustomActionModal,
+    poseEditActive,
+    onTogglePoseEdit,
     followSelectedItem,
     onFollowChange,
   } = props;
@@ -78,21 +83,21 @@ export const BlueprintObjectConsole = memo(function BlueprintObjectConsole(props
   const handleSave = useCallback(() => onSelect(null), [onSelect]);
 
   return (
-    <aside className="flex min-h-[740px] flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.035] p-3">
+    <aside className="flex min-h-[740px] flex-col gap-3 rounded-xl border border-[var(--line)] bg-[var(--field-bg)] p-3">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-xs font-semibold text-white/82">对象控制台</div>
-          <div className="mt-0.5 text-[10px] text-white/38">修改选中对象</div>
+          <div className="text-xs font-semibold text-text-dark">对象控制台</div>
+          <div className="mt-0.5 text-[10px] text-text-subtle">修改选中对象</div>
         </div>
         {selectedItem && (
-          <button
+          <UiButton variant="danger" size="sm" aria-label="删除当前对象"
             type="button"
             onClick={() => onDeleteItem(selectedItem)}
-            className="flex h-7 w-7 items-center justify-center rounded-md bg-red-500/75 text-white hover:bg-red-500"
+            className="h-7 w-7 p-0"
             title="删除当前对象"
           >
             <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          </UiButton>
         )}
       </div>
 
@@ -101,36 +106,31 @@ export const BlueprintObjectConsole = memo(function BlueprintObjectConsole(props
       {selectedItem ? (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="grid grid-cols-[32px_minmax(0,1fr)] gap-2">
-            <input
+            <UiInput
               type="color"
               value={selectedItem.color}
               onChange={(event) => onUpdateItem(selectedItem.id, { color: event.target.value })}
-              className="h-8 w-8 rounded-sm border border-white/10 bg-transparent"
+              className="h-8 w-8 rounded-sm p-0.5"
             />
-            <input
+            <UiInput
               value={selectedItem.label}
               onChange={(event) => onUpdateItem(selectedItem.id, { label: event.target.value })}
-              className="min-w-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-white/85 outline-hidden focus:border-white/25"
+              className="h-8 min-w-0 px-2.5 text-xs"
             />
           </div>
 
           {onChangeCategory && (
-            <div className="grid grid-cols-3 gap-1">
-              {(['person', 'object', 'scene'] as const).map((cat) => (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => onChangeCategory(selectedItem.id, cat)}
-                  className={`rounded-md px-2 py-1 text-xs ${
-                    selectedItem.category === cat
-                      ? 'bg-white text-black'
-                      : 'bg-white/8 text-white/70 hover:bg-white/14'
-                  }`}
-                >
-                  {cat === 'person' ? '人' : cat === 'object' ? '事物' : '场景'}
-                </button>
-              ))}
-            </div>
+            <UiSegmented<'person' | 'object' | 'scene' | ''>
+              value={selectedItem.category ?? ''}
+              size="sm"
+              className="w-full"
+              options={([
+                { value: 'person', label: '人' },
+                { value: 'object', label: '事物' },
+                { value: 'scene', label: '场景' },
+              ] as const)}
+              onChange={(cat) => { if (cat) onChangeCategory(selectedItem.id, cat); }}
+            />
           )}
 
           {selectedItem.category !== 'scene' && (
@@ -156,21 +156,22 @@ export const BlueprintObjectConsole = memo(function BlueprintObjectConsole(props
               activeAction={selectedItem.action}
               onPick={(action) => onUpdateItem(selectedItem.id, { action })}
               onRemoveCustom={onRemoveCustomAction}
-              onOpenModal={onOpenCustomActionModal}
+              poseEditActive={poseEditActive}
+              onTogglePoseEdit={onTogglePoseEdit}
             />
           )}
 
-          <button
+          <UiButton size="sm"
             type="button"
             onClick={handleSave}
-            className="mt-auto rounded-md bg-white px-3 py-1.5 text-xs text-black hover:bg-gray-100"
+            className="mt-auto text-xs"
           >
             保存
-          </button>
+          </UiButton>
         </div>
       ) : (
-        <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-white/12 px-4 text-center text-[11px] leading-5 text-white/42">
-          <MousePointer2 className="mb-2 h-6 w-6 text-white/25" />
+        <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-[var(--line)] px-4 text-center text-[11px] leading-5 text-text-subtle">
+          <MousePointer2 className="mb-2 h-6 w-6 text-text-subtle" />
           选择对象后，这里会显示坐标、描述和动作。
         </div>
       )}
@@ -190,25 +191,23 @@ interface ObjectListSidebarProps {
 
 function ObjectListSidebar({ items, selectedItemId, onSelect }: ObjectListSidebarProps) {
   return (
-    <div className="ui-scrollbar nowheel max-h-40 overflow-y-auto rounded-lg border border-white/8 bg-black/16 p-1.5">
+    <div className="ui-scrollbar nowheel max-h-40 overflow-y-auto rounded-lg border border-[var(--line)] bg-[var(--field-bg)] p-1.5">
       {items.length === 0 ? (
-        <div className="px-2 py-6 text-center text-[11px] text-white/35">还没有对象</div>
+        <div className="px-2 py-6 text-center text-[11px] text-text-subtle">还没有对象</div>
       ) : (
         <div className="space-y-1">
           {items.map((item) => {
             const active = item.id === selectedItemId;
             return (
-              <button
+              <UiChipButton active={active}
                 key={item.id}
                 type="button"
                 onClick={() => onSelect(item.id)}
-                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
-                  active ? 'bg-white text-black' : 'bg-white/5 text-white/72 hover:bg-white/10'
-                }`}
+                className="h-auto w-full justify-start gap-2 rounded-md px-2 py-1.5 text-left"
               >
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
                 <span className="min-w-0 flex-1 truncate text-[11px]">{item.label}</span>
-              </button>
+              </UiChipButton>
             );
           })}
         </div>
@@ -226,17 +225,16 @@ interface AxisBlockProps {
 
 function AxisBlock({ selectedItem, followSelectedItem, onFollowChange, onCoordinateChange }: AxisBlockProps) {
   return (
-    <div className="rounded-lg border border-white/8 bg-black/18 p-3">
-      <div className="mb-3 flex items-center justify-between gap-2 text-[11px] text-white/52">
+    <div className="rounded-lg border border-[var(--line)] bg-[var(--field-bg)] p-3">
+      <div className="mb-3 flex items-center justify-between gap-2 text-[11px] text-text-muted">
         <span className="inline-flex items-center gap-1.5">
-          <Move3d className="h-3.5 w-3.5" /> 坐标轴 <span className="text-white/35">· X 朝屏, Y 左右, Z 高度</span>
+          <Move3d className="h-3.5 w-3.5" /> 坐标轴 <span className="text-text-subtle">· X 朝屏, Y 左右, Z 高度</span>
         </span>
-        <label className="inline-flex cursor-pointer items-center gap-1.5 text-white/60">
-          <input
-            type="checkbox"
+        <label className="inline-flex cursor-pointer items-center gap-1.5 text-text-muted">
+          <UiCheckbox
             checked={followSelectedItem}
-            onChange={(event) => onFollowChange(event.target.checked)}
-            className="h-3.5 w-3.5 accent-accent"
+            onCheckedChange={onFollowChange}
+            className="h-3.5 w-3.5"
           />
           视角跟随
         </label>
@@ -291,17 +289,17 @@ function AxisSlider({ axis, value, min, max, color, onChange }: AxisSliderProps)
         onPointerUp={(event) => event.stopPropagation()}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
-        className="nodrag nopan"
-        style={{ accentColor: color }}
+        className="ui-range nodrag nopan [&::-webkit-slider-runnable-track]:bg-[linear-gradient(to_right,var(--axis-color)_var(--fill),var(--press)_var(--fill))] [&::-moz-range-progress]:bg-[var(--axis-color)]"
+        style={{ accentColor: color, '--axis-color': color, '--fill': `${((value - min) / (max - min)) * 100}%` } as CSSProperties}
       />
-      <input
+      <UiInput
         type="number"
         step={0.1}
         value={value.toFixed(1)}
         onChange={(event) => onChange(Number(event.target.value))}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
-        className="nodrag nopan rounded-sm border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-white/85 outline-hidden focus:border-accent/50"
+        className="nodrag nopan h-7 min-w-0 rounded-sm px-2 text-[11px]"
       />
     </label>
   );
@@ -454,7 +452,7 @@ function RelationField({ value, mentionTokens, onChange, onAppendMention }: Rela
 
   return (
     <div className="relative space-y-1.5">
-      <textarea
+      <UiTextArea
         ref={textareaRef}
         value={value}
         onChange={handleChange}
@@ -467,15 +465,15 @@ function RelationField({ value, mentionTokens, onChange, onAppendMention }: Rela
         }}
         placeholder="描述对象在干什么、和谁有关联，输入 @ 触发自动补全"
         rows={3}
-        className="nodrag nowheel w-full resize-none rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-white/85 outline-hidden placeholder:text-white/30 focus:border-white/25"
+        className="nodrag nowheel w-full resize-none px-2.5 py-2 text-xs"
       />
 
       {mention.open && filteredSuggestions.length > 0 && (
-        <div className="absolute left-0 right-0 top-[calc(100%-1.4rem)] z-50 max-h-44 overflow-y-auto rounded-lg border border-white/12 bg-[#181818] py-1 shadow-2xl">
+        <div className="absolute left-0 right-0 top-[calc(100%-1.4rem)] z-50 max-h-44 overflow-y-auto rounded-lg border border-[var(--line)] bg-elevated py-1 shadow-[var(--shadow-pop)]">
           {filteredSuggestions.map((token, index) => {
             const active = index === mention.activeIndex;
             return (
-              <button
+              <UiButton variant="ghost" size="sm"
                 key={token}
                 type="button"
                 onMouseDown={(event) => {
@@ -484,12 +482,10 @@ function RelationField({ value, mentionTokens, onChange, onAppendMention }: Rela
                   insertToken(token);
                 }}
                 onMouseEnter={() => setMention((prev) => ({ ...prev, activeIndex: index }))}
-                className={`block w-full px-3 py-1.5 text-left text-xs transition-colors ${
-                  active ? 'bg-white/12 text-white' : 'text-white/70 hover:bg-white/8 hover:text-white'
-                }`}
+                className={`ui-menu__item h-auto min-h-0 justify-start px-3 py-1.5 text-left text-xs ${active ? 'bg-[var(--press)]' : ''}`}
               >
                 {token}
-              </button>
+              </UiButton>
             );
           })}
         </div>
@@ -497,27 +493,27 @@ function RelationField({ value, mentionTokens, onChange, onAppendMention }: Rela
 
       {mentionTokens.length > 0 && (
         <div className="space-y-1">
-          <button
+          <UiButton variant="ghost" size="sm"
             type="button"
             onClick={() => setChipRowExpanded((v) => !v)}
-            className="inline-flex items-center gap-0.5 text-[10px] text-white/40 hover:text-white/70"
+            className="h-auto gap-0.5 px-0 py-0.5 text-[10px]"
           >
             <ChevronDown
               className={`h-3 w-3 transition-transform ${chipRowExpanded ? 'rotate-180' : ''}`}
             />
             可用 @ 标签 ({mentionTokens.length})
-          </button>
+          </UiButton>
           {chipRowExpanded && (
             <div className="flex max-h-12 flex-wrap gap-1 overflow-y-auto pr-1">
               {mentionTokens.slice(0, 16).map((token) => (
-                <button
+                <UiChipButton
                   key={token}
                   type="button"
                   onClick={() => onAppendMention(token)}
-                  className="rounded-sm bg-white/8 px-1.5 py-0.5 text-[10px] text-white/62 hover:bg-white/14 hover:text-white"
+                  className="h-auto rounded-sm px-1.5 py-0.5 text-[10px]"
                 >
                   {token}
-                </button>
+                </UiChipButton>
               ))}
             </div>
           )}
@@ -533,16 +529,18 @@ interface ActionPresetGridProps {
   activeAction?: string;
   onPick: (action: string) => void;
   onRemoveCustom: (action: string) => void;
-  onOpenModal: () => void;
+  poseEditActive: boolean;
+  onTogglePoseEdit: () => void;
 }
 
-function ActionPresetGrid({ presets, customActions, activeAction, onPick, onRemoveCustom, onOpenModal }: ActionPresetGridProps) {
+function ActionPresetGrid({ presets, customActions, activeAction, onPick, onRemoveCustom, poseEditActive, onTogglePoseEdit }: ActionPresetGridProps) {
+  const { t } = useTranslation();
   return (
-    <div className="rounded-lg border border-white/12 bg-black/22 p-3">
-      <div className="mb-2 flex items-center gap-1.5 text-[11px] text-white/65">
+    <div className="rounded-lg border border-[var(--line)] bg-[var(--field-bg)] p-3">
+      <div className="mb-2 flex items-center gap-1.5 text-[11px] text-text-muted">
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
         <span className="font-semibold">动作预设</span>
-        <span className="text-white/35">· 点击应用到当前人物</span>
+        <span className="text-text-subtle">· 点击应用到当前人物</span>
       </div>
       <div className="ui-scrollbar nowheel grid max-h-56 grid-cols-3 gap-1.5 overflow-y-auto pr-1">
         {presets.map((action) => {
@@ -555,44 +553,41 @@ function ActionPresetGrid({ presets, customActions, activeAction, onPick, onRemo
           return (
             <div
               key={action}
-              className={`group relative flex min-h-[44px] items-center justify-center rounded-md border text-xs transition-[background-color,border-color,color,box-shadow] duration-150 ${
-                isActive
-                  ? 'border-accent bg-accent text-white shadow-[0_0_0_2px_rgba(255,255,255,0.05)_inset]'
-                  : 'border-white/10 bg-white/5 text-white/78 hover:border-white/30 hover:bg-white/12 hover:text-white'
-              }`}
+              className="group relative flex min-h-[44px] items-center justify-center text-xs"
               title={fullLabel}
             >
-              <button
+              <UiChipButton active={isActive}
                 type="button"
                 onClick={() => onPick(action)}
-                className="flex-1 truncate px-2 py-2 text-center"
+                className="h-full min-h-11 w-full flex-1 truncate rounded-md px-2 py-2 text-center text-xs"
               >
                 {displayLabel}
-              </button>
+              </UiChipButton>
               {isCustom && (
-                <button
+                <UiIconButton size="sm" aria-label="删除自定义动作"
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
                     onRemoveCustom(action);
                   }}
-                  className="absolute right-0 top-0 flex h-5 w-5 items-center justify-center rounded-bl-md border-b border-l border-white/10 bg-black/40 text-[11px] text-white/40 opacity-0 transition-opacity hover:bg-red-500/80 hover:text-white group-hover:opacity-100"
+                  className="absolute right-0 top-0 h-5 w-5 rounded-bl-md opacity-0 transition-opacity hover:bg-danger/12 hover:text-danger group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
                   title="删除自定义动作"
                 >
                   ×
-                </button>
+                </UiIconButton>
               )}
             </div>
           );
         })}
       </div>
-      <button
+      <UiChipButton active={poseEditActive}
         type="button"
-        onClick={onOpenModal}
-        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-white/20 bg-white/4 px-2 py-2 text-[11px] text-white/72 hover:border-accent/60 hover:bg-accent/10 hover:text-white"
+        onClick={onTogglePoseEdit}
+        title={t('directorStudio.pose.viewportHint')}
+        className="mt-2 flex h-auto w-full items-center justify-center gap-1.5 rounded-md px-2 py-2 text-[11px]"
       >
-        <span className="text-base leading-none">+</span> 自定义动作 / 编辑姿态
-      </button>
+        <PersonStanding className="h-3.5 w-3.5" />{t(poseEditActive ? 'directorStudio.pose.exit' : 'directorStudio.pose.enter')}
+      </UiChipButton>
     </div>
   );
 }

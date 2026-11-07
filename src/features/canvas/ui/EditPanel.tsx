@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { UiButton, UiIconButton } from '@/components/ui';
 import { NODE_TOOL_TYPES } from '@/features/canvas/domain/canvasNodes';
 import type { CanvasNode } from '@/features/canvas/domain/canvasNodes';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -125,7 +126,7 @@ export const EditPanel = memo(({ node, isOpen, onClose, buttonRect }: EditPanelP
 
   return (
     <div
-      className="fixed z-100 min-w-[300px] rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-dark/95 p-2 shadow-2xl backdrop-blur-xs"
+      className="ui-popover fixed z-100 min-w-[300px] rounded-xl p-2"
       style={{
         left: `${buttonRect.left}px`,
         top: `${buttonRect.bottom + 4}px`,
@@ -138,36 +139,33 @@ export const EditPanel = memo(({ node, isOpen, onClose, buttonRect }: EditPanelP
           <PenLine className="h-4 w-4 text-accent" />
           <span className="text-sm font-medium text-text-dark">{t('nodeToolbar.edit')}</span>
         </div>
-        <button
-          onClick={onClose}
-          className="rounded-md p-1 text-text-muted hover:bg-bg-dark hover:text-text-dark transition-colors"
-        >
+        <UiIconButton size="sm" onClick={onClose} aria-label={t('common.close')} title={t('common.close')} className="h-7 w-7 p-1">
           <X className="h-3.5 w-3.5" />
-        </button>
+        </UiIconButton>
       </div>
 
       <div className="px-2 pb-1">
         <ModelConfigPicker
           panelKey="edit"
-          className="rounded-lg border border-white/10 bg-black/20 px-2 py-1.5"
+          className="rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-subtle-bg) px-2 py-1.5"
         />
       </div>
 
       {/* Divider */}
-      <div className="my-1.5 h-px bg-[rgba(255,255,255,0.1)]" />
+      <div className="my-1.5 h-px bg-(--canvas-node-divider)" />
 
       {/* AI Edit section */}
       <div className="space-y-0.5">
         {EDIT_ITEMS.map((item) => {
           const IconComponent = item.icon;
           return (
-            <button
+            <UiButton variant="ghost"
               key={item.id}
               type="button"
-              className="flex w-full items-start gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors hover:bg-bg-dark"
+              className="h-auto w-full items-start justify-start gap-3 rounded-lg px-2.5 py-2.5 text-left whitespace-normal"
               onClick={() => handleAIPrompt(item)}
             >
-              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-bg-dark/80">
+              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-bg/80">
                 <IconComponent className="h-4 w-4 text-accent" />
               </div>
               <div className="min-w-0 flex-1">
@@ -178,23 +176,23 @@ export const EditPanel = memo(({ node, isOpen, onClose, buttonRect }: EditPanelP
                   {t(item.descKey)}
                 </div>
               </div>
-            </button>
+            </UiButton>
           );
         })}
       </div>
 
       {/* Separator */}
-      <div className="my-2 h-px bg-[rgba(255,255,255,0.1)]" />
+      <div className="my-2 h-px bg-(--canvas-node-divider)" />
 
       {/* Existing tools section */}
       <div className="space-y-0.5">
         {/* Crop */}
-        <button
+        <UiButton variant="ghost"
           type="button"
-          className="flex w-full items-start gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors hover:bg-bg-dark"
+          className="h-auto w-full items-start justify-start gap-3 rounded-lg px-2.5 py-2.5 text-left whitespace-normal"
           onClick={handleCrop}
         >
-          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-bg-dark/80">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-bg/80">
             <Crop className="h-4 w-4 text-accent" />
           </div>
           <div className="min-w-0 flex-1">
@@ -205,15 +203,15 @@ export const EditPanel = memo(({ node, isOpen, onClose, buttonRect }: EditPanelP
               {t('edit.crop.desc')}
             </div>
           </div>
-        </button>
+        </UiButton>
 
         {/* Annotate */}
-        <button
+        <UiButton variant="ghost"
           type="button"
-          className="flex w-full items-start gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors hover:bg-bg-dark"
+          className="h-auto w-full items-start justify-start gap-3 rounded-lg px-2.5 py-2.5 text-left whitespace-normal"
           onClick={handleAnnotate}
         >
-          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-bg-dark/80">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-bg/80">
             <PenLine className="h-4 w-4 text-accent" />
           </div>
           <div className="min-w-0 flex-1">
@@ -224,7 +222,7 @@ export const EditPanel = memo(({ node, isOpen, onClose, buttonRect }: EditPanelP
               {t('edit.annotate.desc')}
             </div>
           </div>
-        </button>
+        </UiButton>
       </div>
     </div>
   );

@@ -57,6 +57,12 @@ export function useDirectorTooltips() {
       const rect = activeControl.getBoundingClientRect();
       const tipWidth = tip.offsetWidth;
       const tipHeight = tip.offsetHeight;
+      // Vertical rails ask for a side tooltip so it never covers the neighbouring tools.
+      if (activeControl.dataset.directorTooltipSide === 'right' && rect.right + tipWidth + margin * 2 <= x + width) {
+        tip.style.left = `${rect.right + margin}px`;
+        tip.style.top = `${Math.max(y + margin, Math.min(y + height - tipHeight - margin, rect.top + rect.height / 2 - tipHeight / 2))}px`;
+        return;
+      }
       const left = Math.max(x + margin, Math.min(x + width - tipWidth - margin, rect.left + rect.width / 2 - tipWidth / 2));
       const below = rect.bottom + tipHeight + margin * 2 <= y + height;
       const preferredTop = below ? rect.bottom + margin : rect.top - tipHeight - margin;
@@ -67,13 +73,23 @@ export function useDirectorTooltips() {
     const show = (target: EventTarget | null) => {
       const control = findControl(target);
       if (control !== dismissedControl) dismissedControl = null;
-      if (!control || control === dismissedControl) return hide();
+      // An open menu/listbox already shows the choices; its trigger's tooltip would cover them.
+      if (!control || control === dismissedControl || control.getAttribute('aria-expanded') === 'true') return hide();
       const label = getLabel(control);
       if (!label) return hide();
-      if (activeControl === control && !tip.hidden && tip.textContent === label) return;
+      const keys = control.dataset.directorTooltipKeys?.trim() ?? '';
+      const signature = `${label}\u0000${keys}`;
+      if (activeControl === control && !tip.hidden && tip.dataset.signature === signature) return;
       hide();
       activeControl = control;
-      tip.textContent = label;
+      tip.dataset.signature = signature;
+      tip.replaceChildren(document.createTextNode(label));
+      if (keys) {
+        const kbd = document.createElement('kbd');
+        kbd.className = 'stage-kbd ml-2 align-middle';
+        kbd.textContent = keys;
+        tip.append(kbd);
+      }
       tip.hidden = false;
       const describedBy = new Set((control.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean));
       describedBy.add(tip.id);
@@ -85,7 +101,7 @@ export function useDirectorTooltips() {
         subtree: true,
         childList: true,
         attributes: true,
-        attributeFilter: ['data-director-tooltip', 'title', 'aria-label', 'disabled'],
+        attributeFilter: ['data-director-tooltip', 'data-director-tooltip-keys', 'title', 'aria-label', 'disabled', 'aria-expanded'],
       });
     };
     const observer = new MutationObserver(() => {

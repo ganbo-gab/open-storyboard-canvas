@@ -9,6 +9,10 @@ export interface GenerateRequest {
   reference_images?: string[];
   reference_videos?: string[];
   reference_audios?: string[];
+  channel_mode_id?: string;
+  reference_slots?: Record<string, string[]>;
+  /** Requested output count; v2 channels map this to a declared native count parameter. */
+  count?: number;
   extra_params?: Record<string, unknown>;
 }
 
@@ -24,13 +28,38 @@ export type GenerationJobState =
   | 'unknown'
   | 'canceled';
 
-export type GenerationMediaType = 'image' | 'video' | 'audio' | 'unknown';
+export type GenerationMediaType = 'image' | 'video' | 'audio' | 'model' | 'unknown';
 export type GenerationNetworkRoute = 'system' | 'direct' | 'custom-proxy';
+
+export interface GenerationJobResult {
+  kind: 'image' | 'video' | 'audio' | 'model' | 'text';
+  source: string;
+  /** Model results reference a durable imported-model library entry, never a remote URL. */
+  importedModelId?: string;
+}
+
+/** Normalize old single-result DTOs at consumer boundaries without losing new mixed-media outputs. */
+export function normalizeGenerationJobResults(job: Pick<GenerationJobStatus, 'results' | 'result' | 'media_type'>): GenerationJobResult[] {
+  if (job.results?.length) return job.results.filter((result) => typeof result.source === 'string' && result.source.length > 0);
+  if (!job.result) return [];
+  return [{ kind: job.media_type === 'video' || job.media_type === 'audio' || job.media_type === 'model' ? job.media_type : 'image', source: job.result,
+    ...(job.media_type === 'model' ? { importedModelId: job.result } : {}) }];
+}
 
 export interface GenerationJobStatus {
   job_id: string;
   status: GenerationJobState;
   result?: string | null;
+  results?: GenerationJobResult[];
+  /** Live sampling fraction, 0..1; never a fabricated overall completion percentage. */
+  progress?: number;
+  current_node?: string;
+  step?: number;
+  total_steps?: number;
+  /** Ephemeral transport availability; a polling job has no synthetic progress. */
+  progress_transport?: 'websocket' | 'polling';
+  /** Native filesystem observation; never inferred merely from a renderer error. */
+  local_result_missing?: boolean;
   error?: string | null;
   /** Non-fatal provider diagnostic, for example an upstream aspect-ratio mismatch. */
   warning?: string | null;
@@ -43,6 +72,8 @@ export interface GenerationJobStatus {
   poll_descriptor?: Record<string, unknown> | null;
   result_url?: string | null;
   error_category?: string | null;
+  error_status?: number;
+  error_raw?: string;
   network_route?: GenerationNetworkRoute;
   submit_attempts?: number;
   consecutive_network_errors?: number;

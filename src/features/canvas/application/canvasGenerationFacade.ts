@@ -3,9 +3,10 @@ import {
   type CanvasEdge,
   type CanvasNode,
 } from '../domain/canvasNodes';
-import type { CanvasEventBus } from './ports';
-import { supportsCanvasGenerationTrigger } from './canvasGenerationTriggers';
 import { recoverPersistedGenerationResult, type GenerationRecoveryResult } from './generationRecovery';
+import { isGenerationNodeType, submitNodeGeneration } from './generation';
+import { getCanvasHistoryAgentTurn } from '@/stores/canvasHistory';
+import { classifyGenerationFailure, type GenerationFailureClassification } from './generationErrorReport';
 
 export type CanvasGenerationStatus =
   | 'idle'
@@ -28,6 +29,7 @@ export interface CanvasGenerationStatusProjection {
   resultNodeIds: string[];
   hasResult: boolean;
   error: string | null;
+  failure: GenerationFailureClassification | null;
 }
 
 export interface CanvasGenerationSubmitResult {
@@ -42,6 +44,8 @@ type GenerationData = {
   generationJobState?: unknown;
   generationError?: unknown;
   lastError?: unknown;
+  generationErrorDetails?: unknown;
+  generationFailure?: unknown;
   resultNodeId?: unknown;
   imageUrl?: unknown;
   videoUrl?: unknown;
@@ -88,6 +92,9 @@ function projectNodeStatus(node: CanvasNode): CanvasGenerationStatusProjection {
   } else if (hasResult) {
     status = 'succeeded';
   }
+  const classification = (status === 'failed' || error) && status !== 'succeeded'
+    ? classifyGenerationFailure({ error: data.generationFailure, details: data.generationErrorDetails, message: error })
+    : null;
 
   return {
     nodeId: node.id,
@@ -98,6 +105,7 @@ function projectNodeStatus(node: CanvasNode): CanvasGenerationStatusProjection {
     resultNodeIds: explicitResultNodeId ? [explicitResultNodeId] : [],
     hasResult,
     error,
+    failure: classification ? { ...classification, retryable: status === 'failed' && classification.retryable } : null,
   };
 }
 
@@ -173,6 +181,7 @@ function aggregateSourceStatus(
     ?? projections.find((projection) => projection.error)?.error
     ?? null;
   const allProjections = [sourceProjection, ...projections];
+  const failure = sourceProjection.failure ?? projections.find((projection) => projection.failure)?.failure ?? null;
   let status: CanvasGenerationStatus = 'idle';
   if (allProjections.some((projection) => projection.status === 'unknown')) {
     status = 'unknown';
@@ -203,28 +212,25 @@ function aggregateSourceStatus(
     resultNodeIds,
     hasResult: projections.some((projection) => projection.hasResult),
     error,
+    failure: failure ? { ...failure, retryable: status === 'failed' && failure.retryable } : null,
   };
 }
 
 export class CanvasGenerationFacade {
-  constructor(private readonly eventBus: CanvasEventBus) {}
 
   supportsNode(node: CanvasNode): boolean {
-    return supportsCanvasGenerationTrigger(node.type);
+    return isGenerationNodeType(node.type);
   }
 
-  submit(nodeIds: string[], nodes: CanvasNode[]): CanvasGenerationSubmitResult {
+  async submit(nodeIds: string[], nodes: CanvasNode[], historySurface: 'canvas' | 'agent' = 'canvas'): Promise<CanvasGenerationSubmitResult> {
     const nodeById = new Map(nodes.map((node) => [node.id, node] as const));
-    const acceptedNodeIds: string[] = [];
-
-    for (const nodeId of Array.from(new Set(nodeIds))) {
+    const candidates = Array.from(new Set(nodeIds)).filter(nodeId => {
       const node = nodeById.get(nodeId);
-      if (!node || !this.supportsNode(node)) {
-        continue;
-      }
-      this.eventBus.publish('generation-node/trigger', { nodeId });
-      acceptedNodeIds.push(nodeId);
-    }
+      return node && node.data.enabled !== false && this.supportsNode(node);
+    });
+    const agentTurnId = getCanvasHistoryAgentTurn();
+    const outcomes = await Promise.all(candidates.map(nodeId => submitNodeGeneration(nodeId, { historySurface, agentTurnId })));
+    const acceptedNodeIds = outcomes.filter(outcome => outcome.ok).map(outcome => outcome.nodeId);
 
     return { acceptedNodeIds, status: 'accepted' };
   }

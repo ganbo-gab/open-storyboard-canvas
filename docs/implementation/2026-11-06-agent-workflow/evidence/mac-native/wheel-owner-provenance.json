@@ -1,0 +1,8 @@
+{
+  "sourceHashes": {
+    "src/features/canvas/canvas.css": "004f04ae26523fcf51a31a8264e806027e166c75e5f4d611fcd54272f6cb1eac",
+    "src/features/canvas/engine/canvasZoomRendering.ts": "734c957e8d5c7cd3ba4c1d9e64d89b1e6293ba0a22031932da9e9354fbd50f0e",
+    "src/features/canvas/engine/useCanvasBridges.ts": "10c153ee5968cce1f4ffd88c382bb22ef12ba1328c5f512ce0cafdab4a59e0cc"
+  },
+  "qaBinarySha256": "55b93ea30984c31c2bb43468cfc5c130772abc61bee10e79d6662f8094cc5b7c"
+}

@@ -5,11 +5,12 @@ import {
   type CanvasEdge,
   type ImageSize,
   type CanvasNode,
+  type CanvasNodeType,
   type CanvasNodeData,
   isEligibleTagGroupMember,
   isTagGroupNode,
-  isTagNode,
 } from '../domain/canvasNodes';
+import { getNodeDefinition } from '../domain/nodeRegistry';
 import {
   canCreateCanvasNodeDirectly,
   canvasNodeCapabilityManifest,
@@ -33,39 +34,64 @@ import {
   applyDirectorUpdate,
   applyPanoramaUpdate,
   applyStoryboardUpdate,
+  applyStoryboardMerge,
 } from './canvasWorkflowCommands';
-import { findRelatedCanvasNodePositions, type CanvasPlacementViewport } from './canvasNodePlacement';
+import {
+  collidesWithNodes,
+  findRelatedCanvasNodePositions,
+  type CanvasPlacementViewport,
+} from './canvasNodePlacement';
+import { duplicateCanvasGraph } from '../clipboard/canvasDuplication';
+import { sortNodesForDuplication } from '../clipboard/clipboardIO';
+import { normalizeBatchStacks, selectBatchStack, splitBatchStack, updateBatchStack } from './stacks';
 
-export const CANVAS_GRAPH_COMMAND_TYPES = new Set<CanvasCommand['type']>([
-  'node.create',
-  'node.delete',
-  'node.rename',
-  'node.setPrompt',
-  'node.setModelConfig',
-  'node.move',
-  'node.layout',
-  'node.setEnabled',
-  'node.duplicate',
-  'storyboard.update',
-  'panorama.update',
-  'director.update',
-  'tag.setColor',
-  'tagGroup.setMembers',
-  'tagGroup.setAppearance',
-  'edge.connect',
-  'edge.disconnect',
-  'group.create',
-  'group.ungroup',
-]);
+const GRAPH_COMMAND_TYPES: Partial<Record<CanvasCommandType, true>> = {
+  'node.create': true,
+  'node.delete': true,
+  'node.rename': true,
+  'node.setPrompt': true,
+  'node.setModelConfig': true,
+  'node.move': true,
+  'node.layout': true,
+  'node.setEnabled': true,
+  'node.duplicate': true,
+  'batch.setPrimary': true,
+  'batch.setCollapsed': true,
+  'batch.split': true,
+  'storyboard.update': true,
+  'storyboard.merge': true,
+  'panorama.update': true,
+  'director.update': true,
+  'tag.setColor': true,
+  'tagGroup.setMembers': true,
+  'tagGroup.setAppearance': true,
+  'edge.connect': true,
+  'edge.disconnect': true,
+  'selection.connect': true,
+  'group.create': true,
+  'group.ungroup': true,
+};
+
+export function isAtomicCanvasGraphCommand(type: CanvasCommandType): boolean {
+  return GRAPH_COMMAND_TYPES[type] === true;
+}
+
+/**
+ * Rendered footprint of a node that does not exist yet. Registry `defaultSize` wins; the rest
+ * mirror the minimum sizes the node components render at, so placement never under-estimates.
+ */
+const CREATION_FOOTPRINTS: Partial<Record<CanvasNodeType, { width: number; height: number }>> = {
+  [CANVAS_NODE_TYPES.video]: { width: 384, height: 288 },
+  [CANVAS_NODE_TYPES.audio]: { width: 360, height: 170 },
+  [CANVAS_NODE_TYPES.textAnnotation]: { width: DEFAULT_NODE_WIDTH, height: 140 },
+};
 
 function nodeCreationDimensions(command: Extract<CanvasCommand, { type: 'node.create' }>): { width: number; height: number } {
   if (command.input.dimensions) return command.input.dimensions;
-  switch (command.input.nodeType) {
-    case CANVAS_NODE_TYPES.imageEdit: return { width: DEFAULT_NODE_WIDTH, height: 380 };
-    case CANVAS_NODE_TYPES.video: return { width: DEFAULT_NODE_WIDTH, height: 288 };
-    case CANVAS_NODE_TYPES.aiVideo: return { width: DEFAULT_NODE_WIDTH, height: 360 };
-    default: return { width: DEFAULT_NODE_WIDTH, height: 220 };
-  }
+  const type = command.input.nodeType;
+  return getNodeDefinition(type).defaultSize
+    ?? CREATION_FOOTPRINTS[type]
+    ?? { width: DEFAULT_NODE_WIDTH, height: 220 };
 }
 
 /** Nearest free slot to the requested position; used when the caller has no exact drop point. */
@@ -76,21 +102,7 @@ export function resolveCollisionFreeNodePosition(
 ): { x: number; y: number } {
   const desired = command.input.position;
   const size = nodeCreationDimensions(command);
-  const margin = 18;
-  const desiredCollides = nodes.some((node) => {
-    const style = node.style as { width?: unknown; height?: unknown } | undefined;
-    const width = node.measured?.width
-      ?? node.width
-      ?? (typeof style?.width === 'number' ? style.width : DEFAULT_NODE_WIDTH);
-    const height = node.measured?.height
-      ?? node.height
-      ?? (typeof style?.height === 'number' ? style.height : 220);
-    return desired.x < node.position.x + width + margin
-      && desired.x + size.width + margin > node.position.x
-      && desired.y < node.position.y + height + margin
-      && desired.y + size.height + margin > node.position.y;
-  });
-  if (!desiredCollides) return { ...desired };
+  if (!collidesWithNodes({ ...desired, ...size }, nodes)) return { ...desired };
   return findRelatedCanvasNodePositions({ nodes, desired, size, viewport, strictViewport: Boolean(viewport) })[0] ?? { ...desired };
 }
 
@@ -118,8 +130,12 @@ function success(
   return { ok: true, draft, impact: commandImpact, output, changed };
 }
 
-function reject(message: string, code: CanvasCommandErrorCode = 'invalid_command'): CanvasGraphCommandPreparation {
-  return { ok: false, error: { code, message } };
+function reject(
+  message: string,
+  code: CanvasCommandErrorCode = 'invalid_command',
+  details?: Record<string, unknown>,
+): CanvasGraphCommandPreparation {
+  return { ok: false, error: { code, message, ...(details ? { details } : {}) } };
 }
 
 function uniqueNonEmpty(values: string[]): string[] {
@@ -219,9 +235,15 @@ function createNodeData(command: Extract<CanvasCommand, { type: 'node.create' }>
       data.label = configuration.displayName;
     }
   }
+  if (configuration.imageUrl !== undefined
+    && (command.input.nodeType === CANVAS_NODE_TYPES.imageEdit || command.input.nodeType === CANVAS_NODE_TYPES.upload)) {
+    data.imageUrl = configuration.imageUrl;
+  }
   if (configuration.prompt !== undefined) {
     data.prompt = configuration.prompt;
   }
+  if (configuration.modeId !== undefined) data.channelModeId = configuration.modeId;
+  if (configuration.referenceSlots !== undefined) data.referenceSlots = cloneJsonValue(configuration.referenceSlots);
   if (configuration.content !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.textAnnotation) {
     data.content = configuration.content;
   }
@@ -283,16 +305,12 @@ function createNodeData(command: Extract<CanvasCommand, { type: 'node.create' }>
     data.providerId = configuration.providerId;
   }
   if (configuration.openDirectorStudio && command.input.nodeType === CANVAS_NODE_TYPES.blueprint) {
-    data.openDirectorStudioOnCreate = true;
+    data.openDirectorStudioOnCreate = configuration.directorStudioWorkspace === 'previs' ? 'previs' : true;
   }
   if (configuration.directorStudioMode !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.blueprint) {
     data.mode = configuration.directorStudioMode;
   }
-  if (
-    configuration.enabled !== undefined
-    && (command.input.nodeType === CANVAS_NODE_TYPES.tag
-      || command.input.nodeType === CANVAS_NODE_TYPES.tagGroup)
-  ) {
+  if (configuration.enabled !== undefined) {
     data.enabled = configuration.enabled;
   }
   if (configuration.tagColor !== undefined && command.input.nodeType === CANVAS_NODE_TYPES.tag) {
@@ -407,7 +425,7 @@ function applyDeleteNodes(
     });
   return success(
     {
-      nodes: survivingNodes,
+      nodes: normalizeBatchStacks(survivingNodes, draft.nodes),
       edges: draft.edges.filter((edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target)),
       selectedNodeId: draft.selectedNodeId && deletedIds.has(draft.selectedNodeId) ? null : draft.selectedNodeId,
     },
@@ -512,6 +530,8 @@ function buildModelPatch(
         ? current.extraParams as Record<string, unknown>
         : (node.data as { extraParams?: Record<string, unknown> }).extraParams));
     return {
+      ...(input.modeId !== undefined ? { channelModeId: input.modeId } : {}),
+      ...(input.referenceSlots !== undefined ? { referenceSlots: cloneJsonValue(input.referenceSlots) } : {}),
       modelConfig: {
         entryId: input.modelId,
         duration: input.duration ?? (typeof current.duration === 'string' ? current.duration : '5'),
@@ -559,6 +579,8 @@ function buildModelPatch(
     ? input.resolution as ImageSize
     : current.size;
   return {
+    ...(input.modeId !== undefined ? { channelModeId: input.modeId } : {}),
+    ...(input.referenceSlots !== undefined ? { referenceSlots: cloneJsonValue(input.referenceSlots) } : {}),
     model: input.modelId,
     modelConfig: {
       entryId: input.modelId,
@@ -581,15 +603,16 @@ function findUnsupportedModelConfigFields(
     ['resolution', input.resolution],
     ['duration', input.duration],
     ['extraParams', input.extraParams],
+    ['modeId', input.modeId],
+    ['referenceSlots', input.referenceSlots],
   ].filter((entry) => entry[1] !== undefined).map(([key]) => key as string);
-  const allowedFields = node.type === CANVAS_NODE_TYPES.aiText
-    ? new Set(['providerId'])
+  const allowedFields: Record<string, true> = node.type === CANVAS_NODE_TYPES.aiText
+    ? { providerId: true }
     : node.type === CANVAS_NODE_TYPES.aiAudio
-      ? new Set(['extraParams'])
-      : node.type === CANVAS_NODE_TYPES.aiVideo
-        ? new Set(['aspectRatio', 'resolution', 'duration', 'extraParams'])
-        : new Set(['aspectRatio', 'resolution', 'extraParams']);
-  return providedOptionalFields.filter((field) => !allowedFields.has(field));
+      ? { extraParams: true }
+      : { aspectRatio: true, resolution: true, extraParams: true, modeId: true, referenceSlots: true,
+        ...(node.type === CANVAS_NODE_TYPES.aiVideo ? { duration: true as const } : {}) };
+  return providedOptionalFields.filter((field) => !Object.hasOwn(allowedFields, field));
 }
 
 function applySetModelConfig(
@@ -663,7 +686,8 @@ function applyLayoutNodes(
   if (missingIndex >= 0) {
     return reject(`Node ${nodeIds[missingIndex]} does not exist.`, 'not_found');
   }
-  const selectedNodes = selected as CanvasNode[];
+  const selectedNodes = (selected as CanvasNode[]).filter((node) => !node.hidden);
+  if (!selectedNodes.length) return success(draft, impact('No visible nodes to lay out.'), { references: { nodeIds: [] } }, false);
   const origin = command.input.origin ?? selectedNodes.reduce(
     (current, node) => ({ x: Math.min(current.x, node.position.x), y: Math.min(current.y, node.position.y) }),
     { x: Number.POSITIVE_INFINITY, y: Number.POSITIVE_INFINITY },
@@ -709,13 +733,6 @@ function applySetNodeEnabled(
   const nodesById = new Map(draft.nodes.map((node) => [node.id, node] as const));
   const missingId = nodeIds.find((nodeId) => !nodesById.has(nodeId));
   if (missingId) return reject(`Node ${missingId} does not exist.`, 'not_found');
-  const unsupportedId = nodeIds.find((nodeId) => {
-    const node = nodesById.get(nodeId);
-    return node?.type !== CANVAS_NODE_TYPES.tag && node?.type !== CANVAS_NODE_TYPES.tagGroup;
-  });
-  if (unsupportedId) {
-    return reject(`Node ${unsupportedId} does not support enabled state.`, 'unsupported_command');
-  }
   const idSet = new Set(nodeIds);
   let changed = false;
   const nodes = draft.nodes.map((node) => {
@@ -725,7 +742,7 @@ function applySetNodeEnabled(
   });
   return success(
     { ...draft, nodes },
-    impact(`${command.input.enabled ? 'Enable' : 'Disable'} ${nodeIds.length} tag item(s).`, {
+    impact(`${command.input.enabled ? 'Enable' : 'Disable'} ${nodeIds.length} node(s).`, {
       affectedNodeIds: nodeIds,
     }),
     { references: { nodeIds } },
@@ -733,30 +750,41 @@ function applySetNodeEnabled(
   );
 }
 
-function visibleTagMetadata(node: CanvasNode): Partial<CanvasNodeData> | null {
-  if (isTagNode(node)) {
-    return {
-      displayName: node.data.displayName,
-      label: node.data.label,
-      enabled: node.data.enabled,
-      color: node.data.color,
-    } as Partial<CanvasNodeData>;
+function applyBatchStack(
+  command: Extract<CanvasCommand, { type: 'batch.setPrimary' | 'batch.setCollapsed' }>,
+  draft: CanvasGraphDraft,
+): CanvasGraphCommandPreparation {
+  const stack = selectBatchStack(draft.nodes, command.input.batchId);
+  if (!stack.primaryId) return reject(`Batch ${command.input.batchId} does not exist.`, 'not_found');
+  if (command.type === 'batch.setPrimary' && !stack.memberIds.includes(command.input.nodeId)) {
+    return reject('Primary node must belong to the requested batch.', 'invalid_command');
   }
-  if (isTagGroupNode(node)) {
-    return {
-      displayName: node.data.displayName,
-      label: node.data.label,
-      enabled: node.data.enabled,
-      color: node.data.color,
-      shape: node.data.shape,
-      schemaVersion: 2,
-      memberNodeIds: [...node.data.memberNodeIds],
-      unresolvedMemberIds: [...(node.data.unresolvedMemberIds ?? [])],
-      legacyMemberTagIds: [...(node.data.legacyMemberTagIds ?? [])],
-    } as Partial<CanvasNodeData>;
-  }
-  return null;
+  const nodes = updateBatchStack(draft.nodes, command.input.batchId, command.type === 'batch.setPrimary'
+    ? { primaryId: command.input.nodeId } : { collapsed: command.input.collapsed });
+  const nextStack = selectBatchStack(nodes, command.input.batchId);
+  return success(
+    { ...draft, nodes },
+    impact(`Update result stack ${command.input.batchId}.`, { affectedNodeIds: stack.memberIds }),
+    { references: { nodeId: nextStack.primaryId ?? undefined, nodeIds: stack.memberIds }, value: nextStack },
+    nodes !== draft.nodes,
+  );
 }
+
+function applySplitBatch(
+  command: Extract<CanvasCommand, { type: 'batch.split' }>,
+  draft: CanvasGraphDraft,
+): CanvasGraphCommandPreparation {
+  const stack = selectBatchStack(draft.nodes, command.input.batchId);
+  if (!stack.primaryId) return reject(`Batch ${command.input.batchId} does not exist.`, 'not_found');
+  const nodes = splitBatchStack(draft.nodes, command.input.batchId);
+  return success(
+    { ...draft, nodes },
+    impact(`Separate result stack ${command.input.batchId}.`, { affectedNodeIds: stack.memberIds }),
+    { references: { nodeIds: stack.memberIds }, value: { batchId: command.input.batchId, nodeIds: stack.memberIds } },
+    nodes !== draft.nodes,
+  );
+}
+
 
 function applyDuplicateNodes(
   command: Extract<CanvasCommand, { type: 'node.duplicate' }>,
@@ -765,49 +793,50 @@ function applyDuplicateNodes(
 ): CanvasGraphCommandPreparation {
   const existingIds = new Set(draft.nodes.map((node) => node.id));
   const requestedIds = new Set<string>();
-  const createdNodes: CanvasNode[] = [];
-  const sourceToCreated = new Map<string, string>();
-
+  const requests = new Map(command.input.copies.map((copy) => [copy.sourceNodeId, copy]));
+  if (requests.size !== command.input.copies.length) return reject('A node can only be duplicated once per command.', 'conflict');
   for (const copy of command.input.copies) {
-    const source = draft.nodes.find((node) => node.id === copy.sourceNodeId);
-    if (!source) return reject(`Node ${copy.sourceNodeId} does not exist.`, 'not_found');
-    const data = visibleTagMetadata(source);
-    if (!data) {
-      return reject(`Node ${source.id} cannot be duplicated through the safe tag command.`, 'unsupported_command');
+    if (!draft.nodes.some((node) => node.id === copy.sourceNodeId)) {
+      return reject(`Node ${copy.sourceNodeId} does not exist.`, 'not_found');
     }
-    if (copy.nodeId && (existingIds.has(copy.nodeId) || requestedIds.has(copy.nodeId))) {
-      return reject(`Node ${copy.nodeId} already exists.`, 'conflict');
-    }
-    const created = nodeFactory.createNode(
-      source.type,
-      copy.position ?? { x: source.position.x + 44, y: source.position.y + 30 },
-      data,
-    );
-    if (copy.nodeId) created.id = copy.nodeId;
-    requestedIds.add(created.id);
-    createdNodes.push(created);
-    sourceToCreated.set(source.id, created.id);
   }
-
-  const createdIds = createdNodes.map((node) => node.id);
+  const sourceIds = collectNodeIdsWithDescendants(draft.nodes, [...requests.keys()]);
+  const sourceNodes = sortNodesForDuplication(draft.nodes.filter((node) => sourceIds.has(node.id)));
+  const copies = [];
+  for (const source of sourceNodes) {
+    const requested = requests.get(source.id);
+    const nodeId = requested?.nodeId ?? nodeFactory.createNode(source.type, source.position, {}).id;
+    if (existingIds.has(nodeId) || requestedIds.has(nodeId)) {
+      return reject(`Node ${nodeId} already exists.`, 'conflict');
+    }
+    requestedIds.add(nodeId);
+    copies.push({ sourceNodeId: source.id, nodeId, position: requested?.position });
+  }
+  const duplicated = duplicateCanvasGraph({
+    sourceNodes,
+    sourceEdges: draft.edges,
+    existingNodes: draft.nodes,
+    existingEdges: draft.edges,
+    copies,
+  });
+  const createdIds = duplicated.nodes.map((node) => node.id);
+  const createdEdgeIds = duplicated.edges.map((edge) => edge.id);
   return success(
-    { ...draft, nodes: [...draft.nodes, ...createdNodes] },
-    impact(`Duplicate ${createdNodes.length} tag item(s) without graph edges.`, {
-      affectedNodeIds: [
-        ...Array.from(sourceToCreated.keys()),
-        ...createdIds,
-      ],
+    { ...draft, nodes: [...draft.nodes, ...duplicated.nodes], edges: [...draft.edges, ...duplicated.edges] },
+    impact(`Duplicate ${createdIds.length} node(s) with all graph connections.`, {
+      affectedNodeIds: [...sourceIds, ...createdIds],
+      affectedEdgeIds: createdEdgeIds,
       creates: {
-        nodes: createdNodes.length,
-        edges: 0,
-        groups: createdNodes.filter((node) => node.type === CANVAS_NODE_TYPES.tagGroup).length,
+        nodes: createdIds.length,
+        edges: createdEdgeIds.length,
+        groups: duplicated.nodes.filter((node) => node.type === CANVAS_NODE_TYPES.group || node.type === CANVAS_NODE_TYPES.tagGroup).length,
       },
     }),
     {
-      references: { nodeIds: createdIds },
-      value: { sourceToCreated: Object.fromEntries(sourceToCreated) },
+      references: { nodeIds: createdIds, edgeIds: createdEdgeIds },
+      value: { sourceToCreated: Object.fromEntries(duplicated.idMap) },
     },
-    createdNodes.length > 0,
+    createdIds.length > 0,
   );
 }
 
@@ -919,7 +948,12 @@ function applyConnectEdge(
         || validation.code === 'self-connection'
         ? 'conflict'
         : 'unsupported_command';
-    return reject(validation.message ?? 'Cannot connect these nodes.', code);
+    return reject(validation.message ?? 'Cannot connect these nodes.', code, {
+      sourceNodeId: command.input.sourceNodeId,
+      targetNodeId: command.input.targetNodeId,
+      connectionCode: validation.code,
+      reason: validation.reason,
+    });
   }
   const existing = validation.existingEdgeId
     ? draft.edges.find((edge) => edge.id === validation.existingEdgeId)
@@ -955,6 +989,34 @@ function applyConnectEdge(
   );
 }
 
+function applyConnectSelection(
+  command: Extract<CanvasCommand, { type: 'selection.connect' }>,
+  draft: CanvasGraphDraft,
+): CanvasGraphCommandPreparation {
+  const sourceNodeIds = uniqueNonEmpty(command.input.sourceNodeIds);
+  let nextDraft = draft;
+  const edgeIds: string[] = [];
+  for (const sourceNodeId of sourceNodeIds) {
+    const result = applyConnectEdge({
+      type: 'edge.connect', version: command.version,
+      input: { sourceNodeId, targetNodeId: command.input.targetNodeId },
+    }, nextDraft);
+    if (!result.ok) return result;
+    nextDraft = result.draft;
+    edgeIds.push(...(result.output.references.edgeIds ?? []));
+  }
+  const nodeIds = [...sourceNodeIds, command.input.targetNodeId];
+  return success(
+    nextDraft,
+    impact(`Connect ${sourceNodeIds.length} source node(s) to ${command.input.targetNodeId}.`, {
+      affectedNodeIds: nodeIds, affectedEdgeIds: edgeIds,
+      creates: { nodes: 0, edges: nextDraft.edges.length - draft.edges.length, groups: 0 },
+    }),
+    { references: { nodeIds, edgeIds } },
+    nextDraft.edges !== draft.edges,
+  );
+}
+
 function applyDisconnectEdges(
   command: Extract<CanvasCommand, { type: 'edge.disconnect' }>,
   draft: CanvasGraphDraft,
@@ -980,6 +1042,45 @@ function applyDisconnectEdges(
   );
 }
 
+/** Expanding a container rebases its direct children, leaving their absolute positions intact. */
+function fitGroupAncestors(nodes: CanvasNode[], childId: string): { nodes: CanvasNode[]; affectedNodeIds: string[] } {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const affected = new Set<string>();
+  const visited = new Set<string>();
+  let child = nodesById.get(childId);
+  while (child?.parentId && !visited.has(child.parentId)) {
+    visited.add(child.parentId);
+    const parent = nodesById.get(child.parentId);
+    if (!parent || parent.type !== CANVAS_NODE_TYPES.group) break;
+    const parentSize = getNodeSize(parent);
+    const childSize = getNodeSize(child);
+    const dx = Math.min(0, child.position.x);
+    const dy = Math.min(0, child.position.y);
+    const width = Math.max(parentSize.width - dx, child.position.x + childSize.width - dx);
+    const height = Math.max(parentSize.height - dy, child.position.y + childSize.height - dy);
+    if (dx === 0 && dy === 0 && width === parentSize.width && height === parentSize.height) break;
+    const nextParent: CanvasNode = {
+      ...parent, position: { x: parent.position.x + dx, y: parent.position.y + dy },
+      width, height, style: { ...parent.style, width, height },
+      ...(parent.measured ? { measured: { ...parent.measured, width, height } } : {}),
+    };
+    nodesById.set(parent.id, nextParent);
+    affected.add(parent.id);
+    if (dx !== 0 || dy !== 0) {
+      for (const member of nodesById.values()) {
+        if (member.parentId !== parent.id) continue;
+        nodesById.set(member.id, { ...member, position: { x: member.position.x - dx, y: member.position.y - dy } });
+        affected.add(member.id);
+      }
+    }
+    child = nextParent;
+  }
+  return {
+    nodes: affected.size ? nodes.map((node) => nodesById.get(node.id) ?? node) : nodes,
+    affectedNodeIds: [...affected],
+  };
+}
+
 function applyCreateGroup(
   command: Extract<CanvasCommand, { type: 'group.create' }>,
   draft: CanvasGraphDraft,
@@ -994,7 +1095,9 @@ function applyCreateGroup(
   const requestedSet = new Set(requestedIds);
   const memberIds = requestedIds.filter((nodeId) => {
     let parentId = nodesById.get(nodeId)?.parentId;
-    while (parentId) {
+    const visited = new Set<string>();
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId);
       if (requestedSet.has(parentId)) {
         return false;
       }
@@ -1009,6 +1112,19 @@ function applyCreateGroup(
     return reject(`Node ${command.input.groupId} already exists.`, 'conflict');
   }
   const members = memberIds.map((nodeId) => nodesById.get(nodeId) as CanvasNode);
+  const ancestorIds = (node: CanvasNode): string[] => {
+    const ids: string[] = [];
+    let parentId = node.parentId;
+    while (parentId && !ids.includes(parentId)) {
+      ids.push(parentId);
+      parentId = nodesById.get(parentId)?.parentId;
+    }
+    return ids;
+  };
+  const memberAncestors = members.map(ancestorIds);
+  const parentId = memberAncestors[0].find((id) => memberAncestors.every((ids) => ids.includes(id)));
+  const parent = parentId ? nodesById.get(parentId) : undefined;
+  const parentPosition = parent ? resolveAbsolutePosition(parent, nodesById) : { x: 0, y: 0 };
   const bounds = members.reduce((current, node) => {
     const position = resolveAbsolutePosition(node, nodesById);
     const size = getNodeSize(node);
@@ -1024,20 +1140,27 @@ function applyCreateGroup(
     maxX: Number.NEGATIVE_INFINITY,
     maxY: Number.NEGATIVE_INFINITY,
   });
-  const groupX = Math.round(bounds.minX - 20);
-  const groupY = Math.round(bounds.minY - 34);
+  const groupX = bounds.minX - 20;
+  const groupY = bounds.minY - 34;
   const groupName = command.input.displayName?.trim()
     || `组 ${draft.nodes.filter((node) => node.type === CANVAS_NODE_TYPES.group).length + 1}`;
-  const group = nodeFactory.createNode(CANVAS_NODE_TYPES.group, { x: groupX, y: groupY }, {
+  const group = nodeFactory.createNode(CANVAS_NODE_TYPES.group, {
+    x: groupX - parentPosition.x, y: groupY - parentPosition.y,
+  }, {
     displayName: groupName,
     label: groupName,
   } as Partial<CanvasNodeData>);
   if (command.input.groupId) {
     group.id = command.input.groupId;
   }
+  if (nodesById.has(group.id)) return reject(`Node ${group.id} already exists.`, 'conflict');
+  if (parent) {
+    group.parentId = parent.id;
+    group.extent = 'parent';
+  }
   group.style = {
-    width: Math.max(220, Math.round(bounds.maxX - bounds.minX + 40)),
-    height: Math.max(140, Math.round(bounds.maxY - bounds.minY + 54)),
+    width: Math.max(220, bounds.maxX - bounds.minX + 40),
+    height: Math.max(140, bounds.maxY - bounds.minY + 54),
   };
   const memberSet = new Set(memberIds);
   group.selected = true;
@@ -1058,17 +1181,19 @@ function applyCreateGroup(
       ...node,
       parentId: group.id,
       extent: 'parent' as const,
-      position: { x: Math.round(absolute.x - groupX), y: Math.round(absolute.y - groupY) },
+      position: { x: absolute.x - groupX, y: absolute.y - groupY },
       selected: false,
     });
   });
+  const fitted = parent ? fitGroupAncestors(nodes, group.id) : { nodes, affectedNodeIds: [] };
+  const affectedNodeIds = [...new Set([group.id, ...memberIds, ...fitted.affectedNodeIds])];
   return success(
-    { ...draft, nodes, selectedNodeId: group.id },
+    { ...draft, nodes: fitted.nodes, selectedNodeId: group.id },
     impact(`Group ${memberIds.length} node(s).`, {
-      affectedNodeIds: [group.id, ...memberIds],
+      affectedNodeIds,
       creates: { nodes: 1, edges: 0, groups: 1 },
     }),
-    { references: { nodeId: group.id, nodeIds: [group.id, ...memberIds] } },
+    { references: { nodeId: group.id, nodeIds: affectedNodeIds } },
   );
 }
 
@@ -1085,7 +1210,6 @@ function applyUngroup(
     if (!group) {
       return reject(`Group ${groupId} does not exist.`, 'not_found');
     }
-    const nodesById = new Map(nextDraft.nodes.map((node) => [node.id, node] as const));
     const children = nextDraft.nodes.filter((node) => node.parentId === groupId);
     if (children.length === 0) {
       return reject(`Group ${groupId} has no children.`, 'conflict');
@@ -1100,9 +1224,9 @@ function applyUngroup(
         .map((node) => node.parentId === groupId
           ? {
               ...node,
-              parentId: undefined,
-              extent: undefined,
-              position: resolveAbsolutePosition(node, nodesById),
+              parentId: group.parentId,
+              extent: group.parentId ? group.extent : undefined,
+              position: { x: group.position.x + node.position.x, y: group.position.y + node.position.y },
             }
           : node),
       edges: nextDraft.edges.filter((edge) => edge.source !== groupId && edge.target !== groupId),
@@ -1144,10 +1268,17 @@ export function applyCanvasGraphCommand(
       return applyLayoutNodes(command, draft);
     case 'node.setEnabled':
       return applySetNodeEnabled(command, draft);
+    case 'batch.setPrimary':
+    case 'batch.setCollapsed':
+      return applyBatchStack(command, draft);
+    case 'batch.split':
+      return applySplitBatch(command, draft);
     case 'node.duplicate':
       return applyDuplicateNodes(command, draft, nodeFactory);
     case 'storyboard.update':
       return applyStoryboardUpdate(command, draft);
+    case 'storyboard.merge':
+      return applyStoryboardMerge(command, draft, nodeFactory);
     case 'panorama.update':
       return applyPanoramaUpdate(command, draft);
     case 'director.update':
@@ -1160,6 +1291,8 @@ export function applyCanvasGraphCommand(
       return applySetTagGroupAppearance(command, draft);
     case 'edge.connect':
       return applyConnectEdge(command, draft);
+    case 'selection.connect':
+      return applyConnectSelection(command, draft);
     case 'edge.disconnect':
       return applyDisconnectEdges(command, draft);
     case 'group.create':

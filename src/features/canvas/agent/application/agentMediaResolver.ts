@@ -219,6 +219,10 @@ export function revokeAgentMediaRun(runId: string): void {
   for (const [id, grant] of grants) if (grant.runId === runId) grants.delete(id);
 }
 
+export function revokeAgentMediaReference(referenceId: string): void {
+  grants.delete(referenceId);
+}
+
 export function inspectAgentMediaReference(id: string, now = Date.now()): { runId: string; nodeId: string; mimeType: string; expiresAt: number } | null {
   const grant = grants.get(id);
   if (!grant || grant.expiresAt <= now) return null;

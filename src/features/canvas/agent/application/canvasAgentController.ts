@@ -1,6 +1,10 @@
-import type { RunState, Agent, RunToolApprovalItem } from '@openai/agents';
+import { completeInterruptedAgentHistory, recoverInterruptedAgentHistory, recoverInterruptedAgentRequestHistory } from './agentInterruptedHistory';
+import { requestUserInputSchema, readAgentUserInputAnswer } from './agentUserInput';
+import type { RunState, Agent, RunToolApprovalItem, AgentInputItem } from '@openai/agents';
 import type { CanvasAgentSdkRuntimeModule } from './agentRuntimeLoader';
 import type { ChatCatalogEntry } from '@/features/canvas/application/chatModelCatalog';
+import { buildChatModelCatalog } from '@/features/canvas/application/chatModelCatalog';
+import { getChannelCatalogProviders } from '@/features/channels/application/channelCatalog';
 import { resolveAgentModelReference } from './agentModelCapabilities';
 import { loadCanvasAgentSdkRuntime } from './agentRuntimeLoader';
 import { AgentSessionRepository } from '../infrastructure/agentSessionRepository';
@@ -13,14 +17,16 @@ import {
 } from '../domain/agentModel';
 import type { AgentScope } from '../domain/agentModel';
 import { getScopedAgentTools, inspectScopedAgentTool } from '@/features/agents/application/scopedAgentTools';
+import { integrationDraftApprovalSummary } from '@/features/agents/application/scopedIntegrationTools';
 import { redactSensitiveValue } from './agentRedaction';
-import type { CanvasAgentToolEvent } from '../infrastructure/sdkRuntime';
+import { redactAgentRunError } from './agentFailurePolicy';
+import type { AgentModelRetryNotice, CanvasAgentToolEvent } from '../infrastructure/sdkRuntime';
 import {
   createAgentMediaReference,
   inspectAgentMediaReference,
-  prepareAgentMediaSource,
-  validateAgentTurnMediaInputs,
+  resolveAgentMediaReference,
 } from './agentMediaResolver';
+import { buildAgentAttachmentContext, prepareRegisteredAgentMedia, restoreAgentSessionMedia } from './agentSessionMedia';
 import { buildSkillContext, resolveAgentToolPolicy, type SkillRoutingContext } from './agentSkills';
 import { getAgentGenerationNetworkRevision, getAgentProviderRevision } from './agentConfigPatch';
 import { canvasAgentBudgetLedger } from './agentBudget';
@@ -29,22 +35,30 @@ import { buildCanvasAssetCatalog } from '@/features/canvas/application/canvasAss
 import { CANVAS_COMMAND_TYPES, CANVAS_COMMAND_VERSION, type CanvasCommand } from '@/features/canvas/domain/canvasCommands';
 import { useProjectStore } from '@/stores/projectStore';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { resolveAgentDefaults } from '@/stores/settingsStore';
 import {
   cancelPendingApprovals,
   canvasAgentApprovalExecution,
   canvasAgentApprovalStore,
   createAgentRequestFingerprint,
   createApprovalId,
+  createIdempotencyKey,
   createApprovalRecord,
   type AgentEffect,
   type AgentImpactSummary,
   type AgentApprovalRecord,
 } from './agentApproval';
 import { consumeAgentRunStream } from './agentRunStreamReader';
-import { decideAgentAutoApproval, type CanvasAgentExecutionMode } from './agentAutoApprovalPolicy';
+import { shouldAutomaticallyResolveAgentApproval, type CanvasAgentExecutionMode } from './agentAutoApprovalPolicy';
+import { AGENT_TURN_TOOL_CALL_LIMIT, AgentTurnSafety, AgentTurnLimitError, normalizeAgentTurnSafetySnapshot, type AgentTurnSafetySnapshot } from './agentTurnSafety';
+import { createKnowledgeModelPort } from '@/features/knowledge/infrastructure/chatKnowledgeModel';
+import { independentSiblingApprovalIds, type AgentGraphApprovalTargets } from './agentSiblingApprovalRebase';
+import { agentGenerationPreferencesSchema, type AgentGenerationPreferences } from './agentGenerationPreferences';
 
 const repository = new AgentSessionRepository();
 const activeRuns = new Map<string, ActiveRun>();
+const sessionTurnLocks = new Set<string>();
+const runResolutionLocks = new Set<string>();
 const approvalResolutionLocks = new Map<string, { approve: boolean; pending: Promise<CanvasAgentTurnResult> }>();
 
 interface ActiveRun {
@@ -54,12 +68,22 @@ interface ActiveRun {
   executionMode: CanvasAgentExecutionMode;
   projectId: string;
   modelRef: string;
+  generationPreferences?: AgentGenerationPreferences;
   supportsStreaming: boolean;
   runtime: CanvasAgentSdkRuntimeModule;
   orchestrator: ReturnType<CanvasAgentSdkRuntimeModule['createStoryboardAgentRuntime']>;
   agent: Agent<any, any>;
   invalidRepairKeys: Set<string>;
+  turnSafety: AgentTurnSafety;
   skillRoutingContext: SkillRoutingContext;
+  allowedToolNames?: readonly string[];
+  requestHistory: { items?: AgentInputItem[] };
+  feedback: {
+    signal: AbortSignal;
+    onRetry?: (notice: AgentModelRetryNotice) => void;
+    onToolEvent?: (event: CanvasAgentToolEvent) => void;
+    onTurnStopped?: (error: AgentTurnLimitError) => void;
+  };
   state: RunState<any, any>;
 }
 
@@ -148,7 +172,8 @@ function generationApprovalDetails(nodeIds: unknown): { model?: string; summary:
 }
 
 function invalidCanvasCommandReason(toolName: string, args: unknown, scope: AgentScope = 'canvas'): string | null {
-  if (scope !== 'canvas') {
+  if (toolName === 'request_user_input') return requestUserInputSchema.safeParse(args).success ? null : '询问参数无效，请提供有效问题与选项。';
+  if (scope !== 'canvas' || getScopedAgentTools(scope).some((tool) => tool.name === toolName)) {
     try { inspectScopedAgentTool(scope, toolName, args); return null; }
     catch (error) { return error instanceof Error ? error.message : String(error); }
   }
@@ -175,12 +200,13 @@ function invalidCanvasCommandReason(toolName: string, args: unknown, scope: Agen
   return `画布工具参数校验失败：${detail || '命令结构无效。'} ${repair} 只纠正一次；不要重复提交相同无效参数。若信息不足，先询问用户。`;
 }
 
-function buildApprovalImpact(toolName: string, args: unknown): {
+function buildApprovalImpact(toolName: string, args: unknown, scope: AgentScope = 'canvas', selectedModel?: string): {
   impact: AgentImpactSummary;
   baseRevision: number;
   baseConfigRevision?: string;
 } {
-  const scoped = (['home', 'stage'] as const).flatMap((scope) => getScopedAgentTools(scope)).find((tool) => tool.name === toolName);
+  if (toolName === 'request_user_input') return { baseRevision: canvasCommandRegistry.getRevision(), impact: { effect: 'read', title: 'request_user_input', summary: requestUserInputSchema.parse(args).questions.map(q => q.title).join('；'), affectedNodeCount: 0, affectedEdgeCount: 0, externalSideEffect: false } };
+  const scoped = getScopedAgentTools(scope).find((tool) => tool.name === toolName);
   if (scoped) {
     const { risk, input } = inspectScopedAgentTool(scoped.scope, toolName, args);
     const values = input && typeof input === 'object' ? input as Record<string, unknown> : {};
@@ -189,9 +215,9 @@ function buildApprovalImpact(toolName: string, args: unknown): {
       impact: {
         effect: risk === 'paid' ? 'external-submit' : risk === 'read' ? 'read' : 'canvas-write',
         title: `${scoped.scope}: ${toolName}`,
-        summary: `${risk === 'paid' ? '付费操作（费用未知），需明确确认：' : risk === 'destructive' ? '破坏性操作，需确认：' : ''}${scoped.description}`,
-        affectedNodeCount: 1, affectedEdgeCount: 0,
-        model: typeof values.model === 'string' ? values.model : typeof values.modelId === 'string' ? values.modelId : undefined,
+        summary: `${risk === 'paid' ? '付费操作（费用未知），需明确确认：' : risk === 'destructive' ? '破坏性操作，需确认：' : ''}${scoped.description}${toolName.startsWith('integration_') && toolName.endsWith('_apply') && typeof values.draftId === 'string' ? `\n${integrationDraftApprovalSummary(values.draftId) ?? '草稿已失效，请重新预览。'}` : ''}`,
+        affectedNodeCount: toolName === 'project_create' || toolName === 'project_open' ? 0 : 1, affectedEdgeCount: 0,
+        model: typeof values.model === 'string' ? values.model : typeof values.modelId === 'string' ? values.modelId : selectedModel,
         estimatedCost: risk === 'paid' ? { confidence: 'unknown' } : undefined,
         externalSideEffect: risk === 'paid',
       },
@@ -298,7 +324,10 @@ export async function prepareCanvasAgentToolApproval(input: {
   arguments: unknown;
   persist?: boolean;
   scope?: AgentScope;
+  allowedToolNames?: readonly string[];
+  selectedModel?: string;
 }): Promise<PreparedCanvasAgentApproval> {
+  if (input.allowedToolNames && !input.allowedToolNames.includes(input.toolName)) throw new Error('Tool is not allowed by the selected skills.');
   const invalidReason = invalidCanvasCommandReason(input.toolName, input.arguments, input.scope);
   if (invalidReason) throw new Error(invalidReason);
   const safe = redactSensitiveValue(input.arguments);
@@ -309,7 +338,7 @@ export async function prepareCanvasAgentToolApproval(input: {
     canvasAgentApprovalStore.update(existing.id, { status: 'conflicted' });
     throw new Error('Agent callId was reused with different tool arguments; the old approval was invalidated.');
   }
-  const details = buildApprovalImpact(input.toolName, input.arguments);
+  const details = buildApprovalImpact(input.toolName, input.arguments, input.scope, input.selectedModel);
   const record = existing ?? createApprovalRecord({
     id,
     runId: input.runId,
@@ -373,6 +402,8 @@ async function prepareApproval(
   runId: string,
   projectId: string,
   scope: AgentScope,
+  allowedToolNames?: readonly string[],
+  selectedModel?: string,
 ): Promise<PreparedCanvasAgentApproval> {
   let args: unknown = item.arguments ?? {};
   if (typeof args === 'string') {
@@ -388,7 +419,22 @@ async function prepareApproval(
     arguments: args,
     persist: false,
     scope,
+    allowedToolNames,
+    selectedModel,
   });
+}
+
+function graphApprovalTargets(record: AgentApprovalRecord, args: unknown): AgentGraphApprovalTargets | null {
+  if (record.toolName !== 'canvas_command' || record.impact.effect !== 'canvas-write') return null;
+  const command = canvasCommandFromArguments(args);
+  if (!command || canvasCommandRegistry.getDefinition(command.type).effect !== 'graph') return null;
+  const preview = canvasCommandRegistry.inspect(command, 'agent');
+  if (!preview.valid) return null;
+  return {
+    approvalId: record.id,
+    nodeIds: Array.from(new Set(preview.impacts.flatMap((impact) => impact.affectedNodeIds))),
+    edgeIds: Array.from(new Set(preview.impacts.flatMap((impact) => impact.affectedEdgeIds))),
+  };
 }
 
 function persistRunCheckpoint(
@@ -396,6 +442,7 @@ function persistRunCheckpoint(
   state: RunState<any, any>,
   prepared: PreparedCanvasAgentApproval[],
 ): void {
+  active.turnSafety.assertActive();
   const serializedState = active.runtime.serializeStoryboardRunState(state);
   if (prepared.length > 0) {
     canvasAgentApprovalStore.putRunRecovery(
@@ -408,11 +455,19 @@ function persistRunCheckpoint(
         agentDefinitionVersion: CANVAS_AGENT_DEFINITION_VERSION,
         commandSchemaVersion: CANVAS_COMMAND_VERSION,
         serializedState,
+        turnSafety: active.turnSafety.snapshot(),
+        skillRoutingContext: active.skillRoutingContext,
+        allowedToolNames: active.allowedToolNames,
+        modelRef: active.modelRef,
+        generationPreferences: active.generationPreferences,
+        executionMode: active.executionMode,
         createdAt: Date.now(),
       },
     );
   } else {
     canvasAgentApprovalStore.deleteRunRecovery(active.runId);
+    active.turnSafety.dispose();
+    activeRuns.delete(active.runId);
   }
   repository.saveRunState({
     id: active.runId,
@@ -420,6 +475,12 @@ function persistRunCheckpoint(
     projectId: active.projectId,
     status: prepared.length ? 'awaiting_approval' : 'completed',
     serializedState,
+    turnSafety: active.turnSafety.snapshot(),
+    skillRoutingContext: active.skillRoutingContext,
+    allowedToolNames: active.allowedToolNames,
+    modelRef: active.modelRef,
+    generationPreferences: active.generationPreferences,
+    executionMode: active.executionMode,
   });
 }
 
@@ -428,9 +489,19 @@ function getRunStateForResume(runId: string): {
   sessionId: string;
   projectId: string;
   serializedState: string;
+  createdAt: number;
+  turnSafety?: AgentTurnSafetySnapshot;
+  skillRoutingContext?: SkillRoutingContext;
+  allowedToolNames?: readonly string[];
+  modelRef?: string;
+  generationPreferences?: AgentGenerationPreferences;
+  executionMode?: CanvasAgentExecutionMode;
 } {
   const persisted = repository.getRunState(runId);
-  if (persisted) return repository.getRunStateForResume(runId);
+  if (persisted) {
+    const record = repository.getRunStateForResume(runId);
+    return { ...record, turnSafety: normalizeAgentTurnSafetySnapshot(record.turnSafety, record.createdAt, record.serializedState) };
+  }
   const recovery = canvasAgentApprovalStore.getRunRecovery(runId);
   if (!recovery) throw new Error(`Agent RunState ${runId} does not exist.`);
   const reasons = [
@@ -444,6 +515,13 @@ function getRunStateForResume(runId: string): {
     sessionId: recovery.sessionId,
     projectId: recovery.projectId,
     serializedState: recovery.serializedState,
+    createdAt: recovery.createdAt,
+    turnSafety: normalizeAgentTurnSafetySnapshot(recovery.turnSafety, recovery.createdAt, recovery.serializedState),
+    skillRoutingContext: recovery.skillRoutingContext,
+    allowedToolNames: recovery.allowedToolNames,
+    modelRef: recovery.modelRef,
+    generationPreferences: recovery.generationPreferences,
+    executionMode: recovery.executionMode,
   };
 }
 
@@ -459,50 +537,105 @@ async function createActiveRun(input: {
   generationPreferences?: Parameters<CanvasAgentSdkRuntimeModule['createCanvasAgent']>[0]['generationPreferences'];
   onToolEvent?: (event: CanvasAgentToolEvent) => void;
   executionMode?: CanvasAgentExecutionMode;
+  explicitSkillIds?: string[];
+  restoredSkillRoutingContext?: SkillRoutingContext;
+  allowedToolNames?: readonly string[];
   signal?: AbortSignal;
+  startedAt?: number;
+  turnSafety?: AgentTurnSafetySnapshot;
+  onTurnStopped?: (error: AgentTurnLimitError) => void;
+  onRetry?: (notice: AgentModelRetryNotice) => void;
 }): Promise<Omit<ActiveRun, 'state'>> {
-  const runtime = await loadCanvasAgentSdkRuntime();
-  const reference = resolveAgentModelReference(input.model);
-  const orchestrator = runtime.createStoryboardAgentRuntime({ resolveModel: () => reference });
+  const reference = { ...resolveAgentModelReference(input.model), contextSessionId: input.sessionId };
+  const generationPreferences = input.generationPreferences === undefined ? undefined : agentGenerationPreferencesSchema.parse(input.generationPreferences);
+  const feedback: ActiveRun['feedback'] = { signal: input.signal ?? new AbortController().signal,
+    onRetry: input.onRetry, onToolEvent: input.onToolEvent, onTurnStopped: input.onTurnStopped };
+  const turnSafety = new AgentTurnSafety(input.turnSafety ?? { startedAt: input.startedAt ?? Date.now(), toolCalls: 0 }, (error) => {
+    cancelPendingApprovals(canvasAgentApprovalStore, input.runId);
+    canvasAgentApprovalStore.deleteRunRecovery(input.runId);
+    activeRuns.delete(input.runId);
+    feedback.onTurnStopped?.(error);
+    void (async () => {
+      repository.saveRunState({ id: input.runId, sessionId: input.sessionId, projectId: input.projectId, status: 'failed', serializedState: '{}', turnSafety: turnSafety.snapshot() });
+      await repository.createSdkSession(input.sessionId).addItems([{
+        type: 'message',
+        role: 'assistant',
+        status: 'completed',
+        content: [{ type: 'output_text', text: error.message }],
+      }]);
+    })().catch(() => undefined);
+  });
+  feedback.signal = turnSafety.signalFor(input.signal);
+  turnSafety.assertActive();
+  let runtime: CanvasAgentSdkRuntimeModule;
+  let sessionMedia: AgentSessionMediaReferenceView[] = [];
+  try {
+    sessionMedia = await turnSafety.run(() => refreshCanvasAgentSessionMedia(input.sessionId), input.signal);
+    runtime = await turnSafety.run(() => loadCanvasAgentSdkRuntime(), input.signal);
+  } catch (error) {
+    turnSafety.dispose();
+    throw error;
+  }
+  const requestHistory: { items?: AgentInputItem[] } = {};
+  const orchestrator = runtime.createStoryboardAgentRuntime({ resolveModel: () => reference, turnSafety, onRetry: notice => feedback.onRetry?.(notice),
+    onModelInput: (items) => { requestHistory.items = typeof items === 'string' ? [{ role: 'user', content: items }] : items.slice(); },
+  });
   const recentUserText = getCanvasAgentSessionMessages(input.sessionId)
     .filter((message) => message.role === 'user')
     .slice(-6)
     .map((message) => message.text)
     .join('\n');
-  const skillRoutingContext: SkillRoutingContext = {
+  const skillRoutingContext: SkillRoutingContext = input.restoredSkillRoutingContext ?? {
+    surface: input.scope ?? 'canvas',
+    explicitSkillIds: input.explicitSkillIds,
     text: input.message,
     recentUserText,
     attachmentKinds: input.media?.length ? ['image'] : [],
   };
-  const agent = runtime.createCanvasAgent({
-    runtime: orchestrator,
-    scope: input.scope,
-    modelName: reference.catalogId,
-    skillContext: skillRoutingContext,
-    projectContext: input.projectContext,
-    supportsVision: reference.capabilities.vision,
-    supportsToolSearch: reference.capabilities.toolSearch,
-    protocol: reference.capabilities.protocol,
-    generationPreferences: input.generationPreferences,
-    executionMode: input.executionMode,
-    context: {
-      projectId: input.projectId,
-      runId: input.runId,
-      signal: input.signal,
-      onToolEvent: input.onToolEvent,
-      getActiveProjectId: () => input.scope === 'home' ? input.projectId : useProjectStore.getState().currentProjectId,
-      getCanvasRevision: () => canvasCommandRegistry.getRevision(),
-      persistCanvasCheckpoint: async () => {
-        const projectStore = useProjectStore.getState();
-        if (projectStore.currentProjectId !== input.projectId) {
-          throw new Error('当前项目已切换，画布检查点没有写入其他项目。');
-        }
-        const canvas = useCanvasStore.getState();
-        projectStore.saveCurrentProject(canvas.nodes, canvas.edges, canvas.currentViewport, canvas.history);
-        await projectStore.waitForProjectPersistence(input.projectId);
+  const selectedTools = buildSkillContext(skillRoutingContext).allowedToolNames;
+  const allowedToolNames = input.allowedToolNames
+    ? input.allowedToolNames.filter((name) => !selectedTools || selectedTools.includes(name))
+    : selectedTools;
+  const allowedWithQuestions = allowedToolNames ? [...new Set([...allowedToolNames, 'request_user_input'])] : undefined;
+  let agent: ActiveRun['agent'];
+  try {
+    agent = runtime.createCanvasAgent({
+      runtime: orchestrator,
+      scope: input.scope,
+      modelName: reference.catalogId,
+      skillContext: skillRoutingContext,
+      projectContext: input.projectContext,
+      attachmentContext: buildAgentAttachmentContext({ scope: input.scope ?? 'canvas', projectId: input.projectId, current: input.media, history: sessionMedia }),
+      supportsVision: reference.capabilities.vision,
+      supportsToolSearch: reference.capabilities.toolSearch,
+      protocol: reference.capabilities.protocol,
+      generationPreferences,
+      executionMode: input.executionMode,
+      context: {
+        projectId: input.projectId,
+        runId: input.runId,
+        selectedTurnModel: input.model,
+        knowledgeModel: createKnowledgeModelPort(input.model),
+        allowedToolNames: allowedWithQuestions,
+        get signal() { return feedback.signal; },
+        onToolEvent: event => feedback.onToolEvent?.(event),
+        getActiveProjectId: () => input.scope === 'home' ? input.projectId : useProjectStore.getState().currentProjectId,
+        getCanvasRevision: () => canvasCommandRegistry.getRevision(),
+        persistCanvasCheckpoint: async () => {
+          const projectStore = useProjectStore.getState();
+          if (projectStore.currentProjectId !== input.projectId) {
+            throw new Error('当前项目已切换，画布检查点没有写入其他项目。');
+          }
+          const canvas = useCanvasStore.getState();
+          projectStore.saveCurrentProject(canvas.nodes, canvas.edges, canvas.currentViewport, canvas.history);
+          await projectStore.waitForProjectPersistence(input.projectId);
+        },
       },
-    },
-  });
+    });
+  } catch (error) {
+    turnSafety.dispose();
+    throw error;
+  }
   return {
     runId: input.runId,
     sessionId: input.sessionId,
@@ -510,12 +643,17 @@ async function createActiveRun(input: {
     scope: input.scope ?? 'canvas',
     executionMode: input.executionMode ?? 'manual',
     modelRef: reference.catalogId,
+    generationPreferences,
     supportsStreaming: input.model.supportsStreaming,
     runtime,
     orchestrator,
     agent,
     invalidRepairKeys: new Set<string>(),
+    turnSafety,
     skillRoutingContext,
+    allowedToolNames: allowedWithQuestions,
+    requestHistory,
+    feedback,
   };
 }
 
@@ -541,28 +679,32 @@ async function runAgentWithFeedback(input: {
   onReasoningDelta?: (delta: string) => void;
 }) {
   if (input.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
-  const options = {
-    context: { projectId: input.active.projectId, runId: input.active.runId },
-    session: repository.createSdkSession(input.sessionId),
-    signal: input.signal,
-    maxTurns: 24,
-  };
-  if (!input.active.supportsStreaming) {
-    return input.active.orchestrator.runner.run(input.active.agent, input.turnInput, options);
-  }
-  const streamed = await input.active.orchestrator.runner.run(input.active.agent, input.turnInput, { ...options, stream: true });
-  await consumeAgentRunStream(streamed, (event) => {
-    const delta = streamDelta(event);
-    if (delta?.kind === 'text') input.onTextDelta?.(delta.delta);
-    else if (delta?.kind === 'reasoning') input.onReasoningDelta?.(delta.delta);
-  });
-  if (streamed.error) throw streamed.error;
-  if (streamed.cancelled || input.signal?.aborted) {
-    const error = new DOMException('The Agent run was cancelled.', 'AbortError') as DOMException & { state?: RunState<any, any> };
-    error.state = streamed.state;
-    throw error;
-  }
-  return streamed;
+  return input.active.turnSafety.run(async (signal) => {
+    const options = {
+      context: { projectId: input.active.projectId, runId: input.active.runId },
+      session: repository.createSdkSession(input.sessionId),
+      signal,
+      maxTurns: AGENT_TURN_TOOL_CALL_LIMIT + 1,
+    };
+    if (!input.active.supportsStreaming) {
+      return input.active.orchestrator.runner.run(input.active.agent, input.turnInput, options);
+    }
+    const streamed = await input.active.orchestrator.runner.run(input.active.agent, input.turnInput, { ...options, stream: true });
+    try {
+      await consumeAgentRunStream(streamed, (event) => {
+        const delta = streamDelta(event);
+        if (delta?.kind === 'text') input.onTextDelta?.(delta.delta);
+        else if (delta?.kind === 'reasoning') input.onReasoningDelta?.(delta.delta);
+      });
+      if (streamed.error) throw streamed.error;
+    } catch (error) {
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { state: streamed.state });
+    }
+    if (streamed.cancelled || signal.aborted) {
+      throw Object.assign(new DOMException('The Agent run was cancelled.', 'AbortError'), { state: streamed.state });
+    }
+    return streamed;
+  }, input.signal);
 }
 
 async function continuePastInvalidToolRequests(input: {
@@ -666,10 +808,7 @@ function isAbortError(error: unknown, signal?: AbortSignal): boolean {
 
 function redactedRunError(error: unknown, signal?: AbortSignal): unknown {
   if (isAbortError(error, signal)) return error;
-  const message = redactSensitiveValue(error instanceof Error ? error.message : String(error));
-  const safe = new Error(message);
-  safe.name = error instanceof Error ? error.name : 'Error';
-  return safe;
+  return redactAgentRunError(error);
 }
 
 function persistFailedRun(
@@ -678,32 +817,77 @@ function persistFailedRun(
   signal?: AbortSignal,
 ): void {
   const state = errorRunState(error) ?? ('state' in active ? active.state : undefined);
+  active.turnSafety.dispose();
   const cancelled = isAbortError(error, signal);
-  if (cancelled) cancelPendingApprovals(canvasAgentApprovalStore, active.runId);
+  cancelPendingApprovals(canvasAgentApprovalStore, active.runId);
   canvasAgentApprovalStore.deleteRunRecovery(active.runId);
   activeRuns.delete(active.runId);
+  // A terminal state needs no resumable SDK payload. Cleanup must survive unsafe/oversized history.
   repository.saveRunState({
     id: active.runId,
     sessionId: active.sessionId,
     projectId: active.projectId,
     status: cancelled ? 'cancelled' : 'failed',
-    serializedState: state ? active.runtime.serializeStoryboardRunState(state) : '{}',
+    serializedState: '{}',
   });
+  try {
+    const saved = repository.getSession(active.sessionId)?.items;
+    if (saved) {
+      const receiptFor = (call: Extract<(typeof saved)[number], { type: 'function_call' }>) =>
+        canvasAgentApprovalStore.getReceipt(createIdempotencyKey(active.runId, call.name, call.callId));
+      let recovered: AgentInputItem[] | undefined;
+      if (state) {
+        try { recovered = recoverInterruptedAgentHistory(saved, state, receiptFor); }
+        catch { /* Fall back to the portable model input when the SDK snapshot cannot serialize. */ }
+      }
+      recovered ??= active.requestHistory.items
+        ? recoverInterruptedAgentRequestHistory(saved, active.requestHistory.items, receiptFor) : undefined;
+      // A different turn may have appended history while this run stopped.
+      // In that case preserve the current session rather than replacing it.
+      if (!recovered) return;
+      repository.replaceItems(active.sessionId, recovered);
+    }
+  } catch {
+    // Keep the last valid session and receipts. Recovery failure must not revive tool authority
+    // or replace the actual provider error with a storage error.
+    console.warn('[Agent] Interrupted history could not be saved; previous history and receipts retained.');
+  }
 }
 
 export function cancelCanvasAgentRun(runId: string): void {
   cancelPendingApprovals(canvasAgentApprovalStore, runId);
+  activeRuns.get(runId)?.turnSafety.dispose();
   canvasAgentApprovalStore.deleteRunRecovery(runId);
   const record = repository.getRunState(runId);
   if (record) repository.saveRunState({ ...record, status: 'cancelled', serializedState: '{}' });
   activeRuns.delete(runId);
 }
 
-export async function runCanvasAgentTurn(input: {
+/** A session owns one advancing runner; a failed/new turn cannot rewrite a waiting approval. */
+export async function runCanvasAgentTurn(input: Parameters<typeof performCanvasAgentTurn>[0]): Promise<CanvasAgentTurnResult> {
+  let ownedSession: string | undefined;
+  const reserve = (sessionId: string) => {
+    if (sessionTurnLocks.has(sessionId) || [...activeRuns.values()].some(run => run.sessionId === sessionId)
+      || listPendingCanvasAgentApprovals(input.projectId, sessionId, input.scope ?? 'canvas').length) {
+      throw new Error('此会话仍有正在运行或等待确认的回合，请先停止或完成审批。');
+    }
+    sessionTurnLocks.add(sessionId); ownedSession = sessionId;
+  };
+  if (input.sessionId) reserve(input.sessionId);
+  try {
+    return await performCanvasAgentTurn({ ...input, onRunStarted: identity => {
+      if (!ownedSession) reserve(identity.sessionId);
+      input.onRunStarted?.(identity);
+    } });
+  } finally { if (ownedSession) sessionTurnLocks.delete(ownedSession); }
+}
+
+async function performCanvasAgentTurn(input: {
   projectId: string;
   scope?: AgentScope;
   sessionId?: string;
-  model: ChatCatalogEntry;
+  onRunStarted?: (identity: { sessionId: string; runId: string }) => void;
+  model?: ChatCatalogEntry;
   message: string;
   media?: AgentTurnMediaInput[];
   projectContext?: { brief: string; pinnedNodeIds: string[] };
@@ -713,31 +897,51 @@ export async function runCanvasAgentTurn(input: {
   onTextDelta?: (delta: string) => void;
   onReasoningDelta?: (delta: string) => void;
   executionMode?: CanvasAgentExecutionMode;
+  explicitSkillIds?: string[];
+  onTurnStopped?: (error: AgentTurnLimitError) => void;
+  onRetry?: (notice: AgentModelRetryNotice) => void;
 }): Promise<CanvasAgentTurnResult> {
   if (input.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+  const startedAt = Date.now();
   if (input.scope !== 'home' && useProjectStore.getState().currentProjectId !== input.projectId) {
     throw new Error('Agent 请求的项目不是当前打开的项目。');
   }
-  if (input.media?.length && !input.model.supportsMultimodal) {
+  const previousSession = input.sessionId ? repository.getSession(input.sessionId) : null;
+  if (input.sessionId && (!previousSession || previousSession.projectId !== input.projectId
+    || (previousSession.scope ?? 'canvas') !== (input.scope ?? 'canvas'))) {
+    throw new Error('Agent 对话不属于当前项目或作用域。');
+  }
+  const defaults = resolveAgentDefaults({
+    modelId: input.model?.id ?? previousSession?.modelRef,
+    executionMode: input.executionMode ?? previousSession?.executionMode,
+  });
+  const model = input.model ?? buildChatModelCatalog(getChannelCatalogProviders()).find((entry) => entry.id === defaults.modelId);
+  if (!model) throw new Error('请选择可用的 Agent 模型；保存的模型不会自动切换到其他渠道。');
+  if (input.media?.length && !model.supportsMultimodal) {
     throw new Error('当前文本模型不支持图片理解，请移除附件或切换到支持视觉的模型。');
   }
-  const preparedMedia = input.media?.length
-    ? validateAgentTurnMediaInputs(await Promise.all(input.media.map(async (media) => ({
-        ...media,
-        source: await prepareAgentMediaSource(media.source),
-      }))))
-    : [];
+  const preparationSafety = new AgentTurnSafety({ startedAt, toolCalls: 0 }, input.onTurnStopped);
+  let preparedMedia: AgentTurnMediaInput[];
+  try {
+    preparedMedia = await preparationSafety.run(async () => input.media?.length
+      ? prepareRegisteredAgentMedia(input.media, useCanvasStore.getState().nodes)
+      : [], input.signal);
+  } finally {
+    preparationSafety.dispose();
+  }
   if (input.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
   const createdSession = !input.sessionId;
   const session = input.sessionId
     ? repository.getSession(input.sessionId)
-    : repository.createSession({ projectId: input.projectId, scope: input.scope, title: input.message.slice(0, 36), modelRef: input.model.id });
+    : repository.createSession({ projectId: input.projectId, scope: input.scope, title: input.message.slice(0, 36), modelRef: model.id });
   if (!session || session.projectId !== input.projectId || (session.scope ?? 'canvas') !== (input.scope ?? 'canvas')) throw new Error('Agent 对话不属于当前项目或作用域。');
-  repository.updateSessionMetadata(session.id, { executionMode: input.executionMode ?? session.executionMode ?? 'manual' });
   const runId = nextId('run');
+  if (previousSession) repository.replaceItems(session.id, completeInterruptedAgentHistory(session.items));
+  input.onRunStarted?.({ sessionId: session.id, runId });
+  repository.updateSessionMetadata(session.id, { executionMode: defaults.executionMode, modelRef: model.id });
   let partial: Awaited<ReturnType<typeof createActiveRun>>;
   try {
-    partial = await createActiveRun({ ...input, media: preparedMedia, runId, sessionId: session.id });
+    partial = await createActiveRun({ ...input, model, executionMode: defaults.executionMode, startedAt, media: preparedMedia, runId, sessionId: session.id });
   } catch (error) {
     if (createdSession && repository.getSession(session.id)?.items.length === 0) {
       repository.deleteSession(session.id);
@@ -801,23 +1005,25 @@ export async function runCanvasAgentTurn(input: {
     throw redactedRunError(error, input.signal);
   }
   const state = result.state;
-  let prepared = await Promise.all(result.interruptions.map((item) => prepareApproval(item, runId, input.projectId, partial.scope)));
+  let prepared = await Promise.all(result.interruptions.map((item) => prepareApproval(item, runId, input.projectId, partial.scope, partial.allowedToolNames, partial.modelRef)));
   activeRuns.set(runId, { ...partial, state });
   persistRunCheckpoint(partial, state, prepared);
   if (prepared.length) {
     let iterations = 0;
-    while (prepared.length > 0 && iterations < 32) {
-      const nextAutoApproval = prepared.find((approval) => (approval.record.impact.effect === 'read' && approval.record.toolName !== 'asset_read') || (input.executionMode === 'auto' && decideAgentAutoApproval(approval).allowed));
+    while (prepared.length > 0 && iterations < AGENT_TURN_TOOL_CALL_LIMIT) {
+      const nextAutoApproval = prepared.find((approval) => shouldAutomaticallyResolveAgentApproval(approval, defaults.executionMode));
       if (!nextAutoApproval) break;
       const resumed = await performCanvasAgentApprovalResolution({
         runId,
         approvalId: nextAutoApproval.view.id,
         approve: true,
-        model: input.model,
+        model,
         signal: input.signal,
         onToolEvent: input.onToolEvent,
         onTextDelta: input.onTextDelta,
         onReasoningDelta: input.onReasoningDelta,
+        onRetry: input.onRetry,
+        onTurnStopped: input.onTurnStopped,
       });
       if (resumed.status === 'completed') return resumed;
       prepared = restorePreparedCanvasAgentApprovals(runId, resumed.approvals);
@@ -828,14 +1034,14 @@ export async function runCanvasAgentTurn(input: {
   const skillContext = buildSkillContext(partial.skillRoutingContext);
   const toolPolicy = resolveAgentToolPolicy({
     skillContext,
-    supportsVision: input.model.supportsMultimodal,
-    supportsToolSearch: input.model.supportsToolSearch,
-    protocol: input.model.agentProtocol,
+    supportsVision: model.supportsMultimodal,
+    supportsToolSearch: model.supportsToolSearch,
+    protocol: model.agentProtocol,
   });
   return {
     runId,
     sessionId: session.id,
-    finalText: typeof result.finalOutput === 'string' ? result.finalOutput : undefined,
+    finalText: !approvals.length && typeof result.finalOutput === 'string' ? result.finalOutput : undefined,
     approvals,
     status: approvals.length ? 'awaiting-approval' : 'completed',
     skillSelection: {
@@ -858,6 +1064,8 @@ async function performCanvasAgentApprovalResolution(input: {
   onToolEvent?: (event: CanvasAgentToolEvent) => void;
   onTextDelta?: (delta: string) => void;
   onReasoningDelta?: (delta: string) => void;
+  onTurnStopped?: (error: AgentTurnLimitError) => void;
+  onRetry?: (notice: AgentModelRetryNotice) => void;
 }): Promise<CanvasAgentTurnResult> {
   if (input.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
   let active = activeRuns.get(input.runId);
@@ -869,11 +1077,22 @@ async function performCanvasAgentApprovalResolution(input: {
     const record = getRunStateForResume(input.runId);
     const session = repository.getSession(record.sessionId);
     if (!session) throw new Error('Agent 对话已不存在。');
-    const partial = await createActiveRun({ runId: record.id, sessionId: record.sessionId, projectId: record.projectId, scope: session.scope ?? 'canvas', executionMode: session.executionMode, model: input.model, message: '恢复已中断的工具审批', onToolEvent: input.onToolEvent, signal: input.signal });
+    const selectedModel = record.modelRef
+      ? buildChatModelCatalog(getChannelCatalogProviders()).find((model) => model.id === record.modelRef && model.usable)
+      : input.model;
+    if (!selectedModel) throw new Error('The original selected turn model is unavailable; start a new turn with an available model.');
+    const partial = await createActiveRun({ runId: record.id, sessionId: record.sessionId, projectId: record.projectId, scope: session.scope ?? 'canvas', executionMode: record.executionMode ?? 'manual', generationPreferences: record.generationPreferences, model: selectedModel, message: '恢复已中断的工具审批', restoredSkillRoutingContext: record.skillRoutingContext, allowedToolNames: record.allowedToolNames, onToolEvent: input.onToolEvent, signal: input.signal, onTurnStopped: input.onTurnStopped, onRetry: input.onRetry, turnSafety: record.turnSafety });
     const context = { projectId: record.projectId, runId: record.id, onToolEvent: input.onToolEvent };
     const restored = await partial.runtime.restoreStoryboardRunState(partial.agent as any, record.serializedState, { context } as any);
     active = { ...partial, state: restored };
   }
+  // Approval continues the same tool closures, but the UI owns a fresh operation
+  // epoch and abort controller. Route feedback and cancellation to this operation.
+  active.feedback.signal = active.turnSafety.signalFor(input.signal);
+  if (input.onRetry) active.feedback.onRetry = input.onRetry;
+  if (input.onToolEvent) active.feedback.onToolEvent = input.onToolEvent;
+  if (input.onTurnStopped) active.feedback.onTurnStopped = input.onTurnStopped;
+  active.turnSafety.assertActive();
   if (active.scope !== 'home' && useProjectStore.getState().currentProjectId !== active.projectId) {
     const interruption = active.state.getInterruptions().find((item) => approvalId(item) === input.approvalId);
     if (interruption) {
@@ -892,6 +1111,7 @@ async function performCanvasAgentApprovalResolution(input: {
     throw new Error('该审批已失效或已处理。');
   }
   const toolName = interruption.name ?? interruption.toolName ?? 'tool';
+  if (input.approve && active.allowedToolNames && !active.allowedToolNames.includes(toolName)) throw new Error('Tool is no longer allowed by the selected skills; reject this approval or start a new turn.');
   let interruptionArgs: unknown = interruption.arguments ?? {};
   if (typeof interruptionArgs === 'string') {
     try { interruptionArgs = JSON.parse(interruptionArgs); } catch { interruptionArgs = { raw: interruptionArgs }; }
@@ -904,6 +1124,25 @@ async function performCanvasAgentApprovalResolution(input: {
     if (storedApproval) canvasAgentApprovalStore.update(storedApproval.id, { status: 'conflicted' });
     throw new Error('工具参数与持久审批不一致，原审批已失效。');
   }
+  const executedTargets = input.approve && storedApproval.baseRevision === canvasCommandRegistry.getRevision()
+    ? graphApprovalTargets(storedApproval, interruptionArgs) : null;
+  const siblingBindings = executedTargets ? active.state.getInterruptions().flatMap((item) => {
+    const name = item.name ?? item.toolName ?? 'tool';
+    const record = canvasAgentApprovalStore.get(createApprovalId(active.runId, name, approvalId(item)));
+    if (!record || record.id === storedApprovalId || record.status !== 'awaiting-approval'
+      || record.runId !== active.runId || record.projectId !== active.projectId
+      || record.baseRevision !== storedApproval.baseRevision) return [];
+    let args: unknown = item.arguments ?? {};
+    if (typeof args === 'string') {
+      try { args = JSON.parse(args); } catch { return []; }
+    }
+    const targets = graphApprovalTargets(record, args);
+    return targets ? [{ record, args, targets }] : [];
+  }) : [];
+  const graphBefore = siblingBindings.length ? {
+    nodes: useCanvasStore.getState().nodes, edges: useCanvasStore.getState().edges,
+  } : undefined;
+  if (input.approve && toolName === 'request_user_input' && !readAgentUserInputAnswer({ projectId: active.projectId, runId: active.runId, callId: input.approvalId }, requestUserInputSchema.parse(interruptionArgs))) throw new Error('请先在询问卡中回答问题。');
   if (input.approve) {
     const budget = canvasAgentBudgetLedger.reserve(storedApproval);
     if (!budget.allowed) {
@@ -951,8 +1190,23 @@ async function performCanvasAgentApprovalResolution(input: {
   }
   active.state = result.state;
   activeRuns.set(active.runId, active);
-  const prepared = await Promise.all(result.interruptions.map((item) => prepareApproval(item, active.runId, active.projectId, active.scope)));
   const completedApprovalStatus = canvasAgentApprovalStore.get(storedApprovalId)?.status;
+  if (executedTargets && graphBefore && completedApprovalStatus === 'succeeded') {
+    const revision = canvasCommandRegistry.getRevision();
+    const graphAfter = { nodes: useCanvasStore.getState().nodes, edges: useCanvasStore.getState().edges };
+    for (const id of independentSiblingApprovalIds(executedTargets, siblingBindings.map((binding) => binding.targets), graphBefore, graphAfter)) {
+      const binding = siblingBindings.find((candidate) => candidate.record.id === id)!;
+      const current = canvasAgentApprovalStore.get(id);
+      if (!current || current.status !== 'awaiting-approval' || current.expiresAt <= Date.now()
+        || current.baseRevision !== storedApproval.baseRevision || current.requestFingerprint !== binding.record.requestFingerprint) continue;
+      const targets = graphApprovalTargets(current, binding.args);
+      if (!targets || targets.nodeIds.length !== binding.targets.nodeIds.length || targets.edgeIds.length !== binding.targets.edgeIds.length
+        || !targets.nodeIds.every((nodeId) => binding.targets.nodeIds.includes(nodeId))
+        || !targets.edgeIds.every((edgeId) => binding.targets.edgeIds.includes(edgeId))) continue;
+      canvasAgentApprovalStore.update(id, { baseRevision: revision });
+    }
+  }
+  const prepared = await Promise.all(result.interruptions.map((item) => prepareApproval(item, active.runId, active.projectId, active.scope, active.allowedToolNames, active.modelRef)));
   if (completedApprovalStatus === 'succeeded' || completedApprovalStatus === 'unknown') {
     canvasAgentBudgetLedger.commit(storedApproval.projectId, storedApproval.id);
   } else {
@@ -963,7 +1217,7 @@ async function performCanvasAgentApprovalResolution(input: {
   return {
     runId: active.runId,
     sessionId: active.sessionId,
-    finalText: typeof result.finalOutput === 'string' ? result.finalOutput : undefined,
+    finalText: !approvals.length && typeof result.finalOutput === 'string' ? result.finalOutput : undefined,
     approvals,
     status: approvals.length ? 'awaiting-approval' : 'completed',
     skillSelection: { skillIds: [], reason: '', estimatedTokens: 0, toolCount: 0, mode: 'minimal', deferredToolCount: 0 },
@@ -979,6 +1233,8 @@ export async function resolveCanvasAgentApproval(input: {
   onToolEvent?: (event: CanvasAgentToolEvent) => void;
   onTextDelta?: (delta: string) => void;
   onReasoningDelta?: (delta: string) => void;
+  onTurnStopped?: (error: AgentTurnLimitError) => void;
+  onRetry?: (notice: AgentModelRetryNotice) => void;
 }): Promise<CanvasAgentTurnResult> {
   const lockKey = `${input.runId}:${input.approvalId}`;
   const existing = approvalResolutionLocks.get(lockKey);
@@ -986,16 +1242,19 @@ export async function resolveCanvasAgentApproval(input: {
     if (existing.approve !== input.approve) throw new Error('该审批正在处理相反的决定，请等待当前操作完成。');
     return existing.pending;
   }
+  const ownerSession = activeRuns.get(input.runId)?.sessionId ?? repository.getRunState(input.runId)?.sessionId;
+  if (runResolutionLocks.has(input.runId) || (ownerSession && sessionTurnLocks.has(ownerSession))) throw new Error('此回合正在处理另一个操作，请等待完成。');
+  runResolutionLocks.add(input.runId);
   const pending = performCanvasAgentApprovalResolution(input);
   approvalResolutionLocks.set(lockKey, { approve: input.approve, pending });
   try {
     let result = await pending;
-    for (let iteration = 0; iteration < 32 && result.approvals.length; iteration += 1) {
+    for (let iteration = 0; iteration < AGENT_TURN_TOOL_CALL_LIMIT && result.approvals.length; iteration += 1) {
       const active = activeRuns.get(input.runId);
       if (!active) break;
       const next = result.approvals.find((view) => {
         const record = canvasAgentApprovalStore.get(createApprovalId(input.runId, view.toolName, view.id));
-        return record && ((record.impact.effect === 'read' && record.toolName !== 'asset_read') || (active.executionMode === 'auto' && decideAgentAutoApproval({ record }).allowed));
+        return record && shouldAutomaticallyResolveAgentApproval({ record }, active.executionMode);
       });
       if (!next) break;
       result = await performCanvasAgentApprovalResolution({ ...input, approvalId: next.id, approve: true });
@@ -1003,6 +1262,7 @@ export async function resolveCanvasAgentApproval(input: {
     return result;
   } finally {
     approvalResolutionLocks.delete(lockKey);
+    runResolutionLocks.delete(input.runId);
   }
 }
 
@@ -1108,7 +1368,8 @@ function projectSessionMediaReference(
   const available = inspectAgentMediaReference(reference.referenceId) !== null
     || (reference.origin === 'canvas-asset'
       && assets.some((asset) => asset.id === reference.assetId && asset.kind === 'image'));
-  return { ...reference, availability: available ? 'available' : 'missing' };
+  return { ...reference, availability: available ? 'available' : 'missing',
+    previewSource: resolveAgentMediaReference(reference.referenceId) ?? undefined };
 }
 
 export function getCanvasAgentSessionMediaReferences(
@@ -1117,6 +1378,13 @@ export function getCanvasAgentSessionMediaReferences(
   const assets = buildCanvasAssetCatalog(useCanvasStore.getState().nodes);
   return repository.getMediaReferences(sessionId)
     .map((reference) => projectSessionMediaReference(reference, assets));
+}
+
+export async function refreshCanvasAgentSessionMedia(sessionId: string): Promise<AgentSessionMediaReferenceView[]> {
+  const session = repository.getSession(sessionId);
+  if (!session) return [];
+  const nodes = useProjectStore.getState().currentProjectId === session.projectId ? useCanvasStore.getState().nodes : [];
+  return await restoreAgentSessionMedia(session, nodes);
 }
 
 export function getCanvasAgentSessionMessages(sessionId: string): CanvasAgentSessionMessage[] {

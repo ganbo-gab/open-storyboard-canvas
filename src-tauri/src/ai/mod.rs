@@ -52,6 +52,10 @@ pub trait AIProvider: Send + Sync {
         )))
     }
 
+    async fn credential_ref(&self) -> Option<crate::commands::secrets::SecretRef> {
+        None
+    }
+
     fn supports_task_resume(&self) -> bool {
         false
     }

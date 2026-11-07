@@ -2,10 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine as _,
+};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -44,6 +48,330 @@ const MEDIA_VALUE_KEYS: &[&str] = &[
     "localAudioUrl",
 ];
 const MEDIA_LIST_KEYS: &[&str] = &["snapshotHistory", "imagePool"];
+
+static PORTABLE_SECRET_KEY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)((api|access|private|client|x)[-_ ]?key|comfyOrgKey|token|password|passwd|passphrase|secret|session|authorization|cookie|credential|signature|bearer|dreamina|^auth$|^sig$)").expect("constant credential key pattern")
+});
+static PORTABLE_USERINFO: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(\b[a-z][a-z\d+.-]*://)[^/\s?#]*@").expect("constant URL userinfo pattern")
+});
+static PORTABLE_QUERY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(^|[?&#])([^?&#=\s]+)=([^&#\s]*)").expect("constant URL query pattern")
+});
+static PORTABLE_AUTH_VALUE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(Bearer|Basic)\s+([A-Za-z0-9+/_.~=-]+)")
+        .expect("constant authorization pattern")
+});
+static PORTABLE_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(?:Bearer\s+|Basic\s+)?\{\{[^{}]+\}\}$")
+        .expect("constant credential template pattern")
+});
+static PORTABLE_ENCODED_FIELD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"["']([^"']+)["']\s*:"#).expect("constant encoded field pattern")
+});
+static PORTABLE_HEADER_LINE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^([\w-]+)[ \t]*:[ \t]*([^\r\n]*)$").expect("constant header line pattern")
+});
+
+fn is_portable_secret_key(key: &str) -> bool {
+    !matches!(
+        key,
+        "maxOutputTokens" | "maxTokens" | "max_tokens" | "max_output_tokens" | "contextWindow"
+    ) && PORTABLE_SECRET_KEY.is_match(key)
+}
+
+fn is_portable_secret_ref(value: &Value) -> bool {
+    let Some(reference) = value.as_object() else {
+        return false;
+    };
+    reference.len() == 2
+        && matches!(
+            reference.get("namespace").and_then(Value::as_str),
+            Some("channel" | "provider" | "settings" | "image-host" | "agent-model" | "comfyui")
+        )
+        && reference
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|id| {
+                !id.is_empty() && id.chars().count() <= 1024 && !id.chars().any(char::is_control)
+            })
+}
+
+fn is_portable_secret_token(value: &str) -> bool {
+    value
+        .strip_prefix("__SC_SECRET_")
+        .and_then(|value| value.strip_suffix("__"))
+        .and_then(|encoded| URL_SAFE_NO_PAD.decode(encoded).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .is_some_and(|reference| is_portable_secret_ref(&reference))
+}
+
+fn is_portable_reference_map(value: &Value) -> bool {
+    value.as_object().is_some_and(|values| {
+        values.values().all(|value| {
+            is_portable_secret_ref(value) || value.as_str().is_some_and(is_portable_secret_token)
+        })
+    })
+}
+
+fn redact_portable_string(value: &mut String, auth_names: &HashSet<String>, changed: &mut bool) {
+    if matches!(value.trim_start().as_bytes().first(), Some(b'{' | b'[')) {
+        if let Ok(mut encoded) = serde_json::from_str::<Value>(value) {
+            let mut encoded_changed = false;
+            redact_portable_value(&mut encoded, "", auth_names, &mut encoded_changed);
+            if encoded_changed {
+                *value = encoded.to_string();
+                *changed = true;
+            }
+            return;
+        }
+        if PORTABLE_ENCODED_FIELD
+            .captures_iter(value)
+            .any(|captures| is_portable_secret_key(&captures[1]))
+        {
+            *value = "[redacted: invalid encoded credentials]".to_string();
+            *changed = true;
+            return;
+        }
+    }
+    if let std::borrow::Cow::Owned(redacted) = PORTABLE_USERINFO.replace_all(value, "$1") {
+        *value = redacted;
+        *changed = true;
+    }
+    if let std::borrow::Cow::Owned(redacted) =
+        PORTABLE_QUERY.replace_all(value, |captures: &regex::Captures<'_>| {
+            let name = urlencoding::decode(&captures[2])
+                .unwrap_or_else(|_| std::borrow::Cow::Borrowed(&captures[2]));
+            let content = urlencoding::decode(&captures[3])
+                .unwrap_or_else(|_| std::borrow::Cow::Borrowed(&captures[3]));
+            if (is_portable_secret_key(&name)
+                || name.eq_ignore_ascii_case("key")
+                || auth_names
+                    .iter()
+                    .any(|auth| auth.eq_ignore_ascii_case(&name)))
+                && !is_portable_secret_token(&content)
+                && !PORTABLE_TEMPLATE.is_match(&content)
+            {
+                format!("{}{}=", &captures[1], &captures[2])
+            } else {
+                captures[0].to_string()
+            }
+        })
+    {
+        if *value != redacted {
+            *value = redacted;
+            *changed = true;
+        }
+    }
+    if let std::borrow::Cow::Owned(redacted) =
+        PORTABLE_HEADER_LINE.replace_all(value, |captures: &regex::Captures<'_>| {
+            let content = captures[2].trim();
+            let token = content
+                .split_once(' ')
+                .filter(|(scheme, _)| {
+                    scheme.eq_ignore_ascii_case("Bearer") || scheme.eq_ignore_ascii_case("Basic")
+                })
+                .map_or(content, |(_, value)| value.trim());
+            if (is_portable_secret_key(&captures[1])
+                || auth_names
+                    .iter()
+                    .any(|auth| auth.eq_ignore_ascii_case(&captures[1])))
+                && !is_portable_secret_token(token)
+                && !PORTABLE_TEMPLATE.is_match(content)
+            {
+                format!("{}: [redacted]", &captures[1])
+            } else {
+                captures[0].to_string()
+            }
+        })
+    {
+        if *value != redacted {
+            *value = redacted;
+            *changed = true;
+        }
+    }
+    if let std::borrow::Cow::Owned(redacted) =
+        PORTABLE_AUTH_VALUE.replace_all(value, |captures: &regex::Captures<'_>| {
+            if is_portable_secret_token(&captures[2]) {
+                captures[0].to_string()
+            } else {
+                format!("{} [redacted]", &captures[1])
+            }
+        })
+    {
+        if *value != redacted {
+            *value = redacted;
+            *changed = true;
+        }
+    }
+}
+
+/// Sanitizes legacy request snapshots and settings in place; never reads or writes the vault.
+fn redact_portable_value(
+    value: &mut Value,
+    key: &str,
+    inherited_auth_names: &HashSet<String>,
+    changed: &mut bool,
+) -> bool {
+    if matches!(key, "__proto__" | "prototype" | "constructor") {
+        *changed = true;
+        return false;
+    }
+    if key == "includesCredentials" && value == &Value::Bool(false) {
+        return true;
+    }
+    if is_portable_secret_key(key) {
+        if is_portable_secret_ref(value)
+            || is_portable_reference_map(value)
+            || value.as_str().is_some_and(|value| {
+                is_portable_secret_token(value) || PORTABLE_TEMPLATE.is_match(value)
+            })
+        {
+            return true;
+        }
+        if key == "auth" {
+            if value.is_boolean() {
+                return true;
+            }
+            if let Some(auth) = value.as_object_mut() {
+                let transport_field = if auth.contains_key("type") {
+                    "type"
+                } else {
+                    "mode"
+                };
+                if matches!(
+                    auth.get(transport_field).and_then(Value::as_str),
+                    Some("bearer" | "header" | "query" | "none")
+                ) {
+                    auth.retain(|field, _| {
+                        let keep =
+                            field == transport_field || matches!(field.as_str(), "name" | "prefix");
+                        if !keep {
+                            *changed = true;
+                        }
+                        keep
+                    });
+                    if let Some(Value::String(prefix)) = auth.get_mut("prefix") {
+                        redact_portable_string(prefix, inherited_auth_names, changed);
+                    }
+                    return true;
+                }
+            }
+        }
+        *changed = true;
+        return false;
+    }
+    match value {
+        Value::String(value) => redact_portable_string(value, inherited_auth_names, changed),
+        Value::Array(values) => values
+            .retain_mut(|value| redact_portable_value(value, "", inherited_auth_names, changed)),
+        Value::Object(values) => {
+            let scoped_auth_names;
+            let declared_names = [
+                values.get("auth").and_then(|auth| auth.get("name")),
+                values
+                    .get("extraParams")
+                    .and_then(|extra| extra.get("auth"))
+                    .and_then(|auth| auth.get("name")),
+                values.get("authName"),
+                values
+                    .get("extraParams")
+                    .and_then(|extra| extra.get("authName")),
+            ];
+            let auth_names = if declared_names
+                .iter()
+                .any(|name| name.and_then(Value::as_str).is_some())
+            {
+                let mut names = inherited_auth_names.clone();
+                names.extend(
+                    declared_names
+                        .into_iter()
+                        .filter_map(|name| name.and_then(Value::as_str))
+                        .map(str::to_owned),
+                );
+                scoped_auth_names = names;
+                &scoped_auth_names
+            } else {
+                inherited_auth_names
+            };
+            let sensitive_entry = values
+                .get("key")
+                .or_else(|| values.get("name"))
+                .and_then(Value::as_str)
+                .is_some_and(|name| {
+                    is_portable_secret_key(name)
+                        || auth_names
+                            .iter()
+                            .any(|auth| auth.eq_ignore_ascii_case(name))
+                });
+            values.retain(|child_key, child| {
+                if sensitive_entry
+                    && matches!(child_key.as_str(), "value" | "default" | "content")
+                    && !child.as_str().is_some_and(|value| {
+                        is_portable_secret_token(value) || PORTABLE_TEMPLATE.is_match(value)
+                    })
+                {
+                    if child.as_str() != Some("[redacted]") {
+                        *child = Value::String("[redacted]".to_string());
+                        *changed = true;
+                    }
+                    return true;
+                }
+                if (auth_names
+                    .iter()
+                    .any(|auth| auth.eq_ignore_ascii_case(child_key))
+                    || (matches!(key, "queryParams" | "query" | "headers" | "extraHeaders")
+                        && child_key.eq_ignore_ascii_case("key")))
+                    && !child.as_str().is_some_and(|value| {
+                        is_portable_secret_token(value) || PORTABLE_TEMPLATE.is_match(value)
+                    })
+                {
+                    *changed = true;
+                    return false;
+                }
+                redact_portable_value(child, child_key, auth_names, changed)
+            });
+        }
+        _ => {}
+    }
+    true
+}
+
+fn redact_project_credentials(mut record: ProjectRecord) -> ProjectRecord {
+    let auth_names = HashSet::new();
+    let mut changed = false;
+    for value in [
+        &mut record.id,
+        &mut record.name,
+        &mut record.nodes_json,
+        &mut record.edges_json,
+        &mut record.viewport_json,
+        &mut record.history_json,
+    ] {
+        redact_portable_string(value, &auth_names, &mut changed);
+    }
+    if let Some(value) = &mut record.image_pool_json {
+        redact_portable_string(value, &auth_names, &mut changed);
+    }
+    record
+}
+
+/// Old include-secrets settings are accepted only after their credential section is discarded.
+fn redact_settings_text(content: &str) -> Result<String, String> {
+    let mut value: Value = serde_json::from_str(content)
+        .map_err(|_| "invalid-settings:settings file is not JSON".to_string())?;
+    let settings = value
+        .as_object_mut()
+        .filter(|settings| {
+            settings.get("format").and_then(Value::as_str) == Some("open-storyboard-settings")
+        })
+        .ok_or_else(|| "invalid-settings:not an Open Storyboard settings bundle".to_string())?;
+    settings.remove("credentials");
+    settings.insert("includesCredentials".to_string(), Value::Bool(false));
+    redact_portable_value(&mut value, "", &HashSet::new(), &mut false);
+    serde_json::to_string_pretty(&value)
+        .map_err(|_| "invalid-settings:credential redaction failed".to_string())
+}
 
 #[derive(Default)]
 pub struct PortabilityJobs(Mutex<HashSet<String>>);
@@ -499,6 +827,7 @@ fn inspect_bundle_file(
     {
         return Err("summary-mismatch:manifest and project summary do not match".to_string());
     }
+    let record = redact_project_credentials(record);
     let mut warnings = Vec::new();
     let declared_assets: HashSet<&str> = manifest
         .assets
@@ -853,6 +1182,7 @@ fn export_project_bundle_impl(
         let db = app.state::<ProjectDb>();
         let record = get_project_record_impl(app, &db, project_id)?
             .ok_or_else(|| "project-not-found".to_string())?;
+        let record = redact_project_credentials(record);
         let sources = collect_record_sources(&record);
         let mut replacements = HashMap::new();
         let mut asset_bytes: HashMap<String, Vec<u8>> = HashMap::new();
@@ -1265,6 +1595,7 @@ pub fn write_portability_text_file(path: String, content: String) -> Result<(), 
     if content.len() as u64 > MAX_SETTINGS_BYTES {
         return Err("size-limit:settings file is too large".to_string());
     }
+    let content = redact_settings_text(&content)?;
     let destination = PathBuf::from(path);
     let parent = destination
         .parent()
@@ -1289,7 +1620,9 @@ pub fn read_portability_text_file(path: String) -> Result<String, String> {
     if metadata.len() > MAX_SETTINGS_BYTES {
         return Err("size-limit:settings file is too large".to_string());
     }
-    std::fs::read_to_string(source).map_err(|error| format!("read-failed:{error}"))
+    let content =
+        std::fs::read_to_string(source).map_err(|error| format!("read-failed:{error}"))?;
+    redact_settings_text(&content)
 }
 
 #[cfg(test)]

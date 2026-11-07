@@ -1,12 +1,7 @@
-import { memo, useEffect, useMemo, useState } from 'react';
-import {
-  Handle,
-  Position,
-  useUpdateNodeInternals,
-  useViewport,
-  type NodeProps,
-} from '@xyflow/react';
-import { AlertTriangle, CircleHelp, Image as ImageIcon, PauseCircle, Sparkles } from 'lucide-react';
+import { NodeMediaMetadata } from '../ui/NodeMediaMetadata';
+import { memo, useEffect } from 'react';
+import { useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
+import { AlertTriangle, Image as ImageIcon, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -18,15 +13,13 @@ import {
   type CanvasGenerationJobState,
   type ExportImageNodeData,
   type ImageEditNodeData,
+  readGenerationReferenceFailure,
 } from '@/features/canvas/domain/canvasNodes';
 import {
   resolveMinEdgeFittedSize,
   resolveResizeMinConstraintsByAspect,
 } from '@/features/canvas/application/imageNodeSizing';
-import {
-  resolveImageDisplayUrl,
-  shouldUseOriginalImageByZoom,
-} from '@/features/canvas/application/imageData';
+import { useCanvasImageThumbnail } from '@/features/canvas/application/useCanvasImageThumbnail';
 import {
   DEFAULT_GENERATED_IMAGE_DISPLAY_NAME,
   extractFileNameFromPath,
@@ -34,11 +27,19 @@ import {
 } from '@/features/canvas/application/generatedMediaNaming';
 import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
 import { renameLocalMediaFiles } from '@/commands/image';
-import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
-import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
 import { CanvasNodeImage } from '@/features/canvas/ui/CanvasNodeImage';
+import { NodeFrame } from '@/features/canvas/ui/NodeFrame';
+import { BatchStackControl } from '@/features/canvas/ui/BatchStackControl';
+import {
+  GenerationProgress,
+  ResultProblemFace,
+  WaitingLabel,
+  resolveResultFaceState,
+  resultFaceStatus,
+} from '@/features/canvas/ui/NodeGenerationFace';
 import { formatGenerationElapsedMs } from '@/features/canvas/ui/generationElapsed';
 import { GenerationJobStatus } from '@/features/canvas/ui/GenerationJobStatus';
+import { GenerationReferenceRetry } from '@/features/canvas/ui/GenerationReferenceRetry';
 import { useCanvasStore } from '@/stores/canvasStore';
 
 type ImageNodeProps = NodeProps & {
@@ -47,182 +48,77 @@ type ImageNodeProps = NodeProps & {
   selected?: boolean;
 };
 
-function resolveNodeDimension(value: number | undefined, fallback: number): number {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 1) {
-    return Math.round(value);
-  }
-  return fallback;
+function readText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
-export const ImageNode = memo(({ id, data, selected, type, width, height }: ImageNodeProps) => {
+/** A generated (or generating) image result. */
+export const ImageNode = memo(({ id, data, selected = false, type, width, height }: ImageNodeProps) => {
   const { t } = useTranslation();
   const updateNodeInternals = useUpdateNodeInternals();
-  const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const { zoom } = useViewport();
-  const [now, setNow] = useState(() => Date.now());
-  const isExportResultNode = type === CANVAS_NODE_TYPES.exportImage;
-  const isGenerating = typeof data.isGenerating === 'boolean' ? data.isGenerating : false;
-  const generationError =
-    typeof (data as { generationError?: unknown }).generationError === 'string'
-      ? ((data as { generationError?: string }).generationError ?? '').trim()
-      : '';
-  const generationWarning =
-    typeof (data as { generationWarning?: unknown }).generationWarning === 'string'
-      ? ((data as { generationWarning?: string }).generationWarning ?? '').trim()
-      : '';
-  const generationJobState = typeof data.generationJobState === 'string'
-    ? data.generationJobState as CanvasGenerationJobState
-    : null;
-  const generationJobPhase = typeof data.generationJobPhase === 'string'
-    ? data.generationJobPhase
-    : null;
-  const generationNetworkRoute = data.generationNetworkRoute === 'system'
+  const isResult = type === CANVAS_NODE_TYPES.exportImage;
+  const isGenerating = data.isGenerating === true;
+  const generationError = readText('generationError' in data ? data.generationError : undefined);
+  const referenceFailure = isResult && generationError ? readGenerationReferenceFailure(data) : null;
+  const generationWarning = readText(data.generationWarning);
+  const jobState = typeof data.generationJobState === 'string' ? data.generationJobState as CanvasGenerationJobState : null;
+  const jobPhase = typeof data.generationJobPhase === 'string' ? data.generationJobPhase : null;
+  const networkRoute = data.generationNetworkRoute === 'system'
     || data.generationNetworkRoute === 'direct'
     || data.generationNetworkRoute === 'custom-proxy'
     ? data.generationNetworkRoute
     : null;
-  const hasUnknownSubmission =
-    isExportResultNode && !isGenerating && !data.imageUrl && generationJobState === 'unknown';
-  const hasRecoverableWait =
-    isExportResultNode && !isGenerating && !data.imageUrl && generationJobState === 'recoverable_wait';
-  const hasGenerationAttention = hasUnknownSubmission || hasRecoverableWait;
-  const hasGenerationError =
-    isExportResultNode
-    && !isGenerating
-    && !data.imageUrl
-    && generationError.length > 0
-    && !hasGenerationAttention;
-  const generationStartedAt =
-    typeof data.generationStartedAt === 'number' ? data.generationStartedAt : null;
-  const generationDurationMs =
-    typeof data.generationDurationMs === 'number' ? data.generationDurationMs : 60000;
-  const resolvedAspectRatio = data.aspectRatio || DEFAULT_ASPECT_RATIO;
-  const compactSize = resolveMinEdgeFittedSize(resolvedAspectRatio, {
-    minWidth: EXPORT_RESULT_NODE_MIN_WIDTH,
-    minHeight: EXPORT_RESULT_NODE_MIN_HEIGHT,
+  const startedAt = typeof data.generationStartedAt === 'number' ? data.generationStartedAt : null;
+  const expectedDurationMs = typeof data.generationDurationMs === 'number' ? data.generationDurationMs : 60_000;
+  // Only result nodes track a job; an image source node never shows job failure states.
+  const face = resolveResultFaceState({
+    hasMedia: Boolean(data.imageUrl),
+    busy: isGenerating || !isResult,
+    jobState,
+    error: referenceFailure ? t('reference.needsPublicUrl', { slotKey: referenceFailure.slotKey }) : generationError,
+    safeRecovery: data.generationSafeRecoveryAvailable === true,
   });
-  const resizeConstraints = resolveResizeMinConstraintsByAspect(resolvedAspectRatio, {
-    minWidth: EXPORT_RESULT_NODE_MIN_WIDTH,
-    minHeight: EXPORT_RESULT_NODE_MIN_HEIGHT,
-  });
-  const resizeMinWidth = resizeConstraints.minWidth;
-  const resizeMinHeight = resizeConstraints.minHeight;
-  const resolvedWidth = resolveNodeDimension(width, compactSize.width);
-  const resolvedHeight = resolveNodeDimension(height, compactSize.height);
-  const resolvedTitle = useMemo(
-    () => resolveNodeDisplayName(type as CanvasNodeType, data),
-    [data, type]
-  );
-  const liveGenerationElapsedMs = isGenerating && generationStartedAt !== null
-    ? Math.max(0, now - generationStartedAt)
-    : (data as { generationElapsedMs?: unknown }).generationElapsedMs;
-  const generationElapsedText = formatGenerationElapsedMs(liveGenerationElapsedMs);
+
+  const aspectRatio = data.aspectRatio || DEFAULT_ASPECT_RATIO;
+  const limits = { minWidth: EXPORT_RESULT_NODE_MIN_WIDTH, minHeight: EXPORT_RESULT_NODE_MIN_HEIGHT };
+  const compactSize = resolveMinEdgeFittedSize(aspectRatio, limits);
+  const resizeMin = resolveResizeMinConstraintsByAspect(aspectRatio, limits);
+  const frameWidth = typeof width === 'number' && width > 1 ? Math.round(width) : compactSize.width;
+  const frameHeight = typeof height === 'number' && height > 1 ? Math.round(height) : compactSize.height;
+  const title = resolveNodeDisplayName(type as CanvasNodeType, data);
+  const finishedElapsed = isGenerating ? '' : formatGenerationElapsedMs('generationElapsedMs' in data ? data.generationElapsedMs : undefined);
+  const batch = data.batchId && typeof data.batchIndex === 'number' && typeof data.batchTotal === 'number' && data.batchTotal > 1
+    ? { id: data.batchId, index: data.batchIndex + 1, total: data.batchTotal, collapsed: data.batchCollapsed === true }
+    : null;
 
   useEffect(() => {
     updateNodeInternals(id);
-  }, [id, resolvedHeight, resolvedWidth, updateNodeInternals]);
+  }, [id, frameHeight, frameWidth, updateNodeInternals]);
 
-  useEffect(() => {
-    if (!isGenerating) {
+  const image = useCanvasImageThumbnail({
+    imageUrl: data.imageUrl,
+    previewImageUrl: data.previewImageUrl,
+    width: frameWidth,
+    height: frameHeight,
+  });
+
+  const rename = async (nextTitle: string) => {
+    if (!isResult || !data.imageUrl) {
+      updateNodeData(id, { displayName: nextTitle, ...(isResult ? { generatedNamingMode: 'custom' as const } : {}) });
       return;
     }
-
-    const timer = window.setInterval(() => {
-      setNow(Date.now());
-    }, 100);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [isGenerating]);
-
-  const simulatedProgress = useMemo(() => {
-    if (!isGenerating) {
-      return 0;
-    }
-
-    const startedAt = generationStartedAt ?? Date.now();
-    const duration = Math.max(1000, generationDurationMs);
-    const elapsed = Math.max(0, now - startedAt);
-
-    return Math.min(elapsed / duration, 0.96);
-  }, [generationDurationMs, generationStartedAt, isGenerating, now]);
-
-  const waitedMinutes = useMemo(() => {
-    if (!isGenerating || generationStartedAt === null) {
-      return 0;
-    }
-
-    const elapsed = Math.max(0, now - generationStartedAt);
-    return Math.floor(elapsed / 60000);
-  }, [generationStartedAt, isGenerating, now]);
-
-  const waitingResultText = useMemo(() => {
-    if (!isExportResultNode) {
-      return t('node.imageNode.selectToEdit');
-    }
-
-    if (!isGenerating || waitedMinutes < 2) {
-      return t('node.imageNode.waitingResult');
-    }
-
-    return t('node.imageNode.waitingResultDelayed', { minutes: waitedMinutes });
-  }, [isExportResultNode, isGenerating, t, waitedMinutes]);
-
-  const imageSource = useMemo(() => {
-    const preferOriginal = shouldUseOriginalImageByZoom(zoom);
-    const picked = preferOriginal
-      ? data.imageUrl || data.previewImageUrl
-      : data.previewImageUrl || data.imageUrl;
-    return picked ? resolveImageDisplayUrl(picked) : null;
-  }, [data.imageUrl, data.previewImageUrl, zoom]);
-
-  const imageFallbackSources = useMemo(() => {
-    const sources = [data.imageUrl, data.previewImageUrl]
-      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-      .map((item) => resolveImageDisplayUrl(item));
-    return Array.from(new Set(sources));
-  }, [data.imageUrl, data.previewImageUrl]);
-
-  // 获取原图 URL 用于查看器
-  const originalImageUrl = useMemo(() => {
-    if (!data.imageUrl) return null;
-    return resolveImageDisplayUrl(data.imageUrl);
-  }, [data.imageUrl]);
-
-  const handleTitleChange = async (nextTitle: string) => {
-    if (!isExportResultNode || !data.imageUrl) {
-      updateNodeData(id, {
-        displayName: nextTitle,
-        ...(isExportResultNode ? { generatedNamingMode: 'custom' as const } : {}),
-      });
-      return;
-    }
-
-    const normalizedTitle = nextTitle.trim() || DEFAULT_GENERATED_IMAGE_DISPLAY_NAME;
-    const desiredFileName = resolveCustomGeneratedImageName(normalizedTitle) ?? undefined;
-    const fallbackPatch = {
-      displayName: normalizedTitle,
-      generatedFileName: desiredFileName
-        ? data.generatedFileName ?? extractFileNameFromPath(data.imageUrl)
-        : null,
-      generatedNamingMode: desiredFileName ? 'custom' as const : 'default' as const,
-    };
-
+    const displayName = nextTitle.trim() || DEFAULT_GENERATED_IMAGE_DISPLAY_NAME;
+    const desiredFileName = resolveCustomGeneratedImageName(displayName) ?? undefined;
     try {
       const renamed = await renameLocalMediaFiles({
         primaryPath: data.imageUrl,
-        previewPath:
-          data.previewImageUrl && data.previewImageUrl !== data.imageUrl
-            ? data.previewImageUrl
-            : undefined,
+        previewPath: data.previewImageUrl && data.previewImageUrl !== data.imageUrl ? data.previewImageUrl : undefined,
         desiredFileName,
         mediaKind: 'image',
       });
-
       updateNodeData(id, {
-        displayName: normalizedTitle,
+        displayName,
         imageUrl: renamed.primaryPath,
         previewImageUrl: renamed.previewPath ?? renamed.primaryPath,
         generatedFileName: renamed.fileName ?? extractFileNameFromPath(renamed.primaryPath),
@@ -230,175 +126,75 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
       });
     } catch (error) {
       console.warn('[ImageNode] failed to rename generated image file', { id, error });
-      updateNodeData(id, fallbackPatch);
+      updateNodeData(id, {
+        displayName,
+        generatedFileName: desiredFileName ? data.generatedFileName ?? extractFileNameFromPath(data.imageUrl) : null,
+        generatedNamingMode: desiredFileName ? 'custom' : 'default',
+      });
     }
   };
 
+  const status = resultFaceStatus(face, isGenerating, startedAt);
+
   return (
-    <div
-      className={`
-        group relative overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-0 shadow-(--canvas-node-shadow) transition-colors duration-150
-        ${hasGenerationAttention
-          ? (selected
-            ? 'border-amber-300 shadow-[0_0_0_1px_rgba(252,211,77,0.34)]'
-            : 'border-amber-400/65 bg-amber-950/10 hover:border-amber-300/80')
-          : hasGenerationError
-          ? (selected
-            ? 'border-red-400 shadow-[0_0_0_1px_rgba(248,113,113,0.42)]'
-            : 'border-red-500/70 bg-[rgba(127,29,29,0.12)] hover:border-red-400/80 dark:border-red-500/70 dark:hover:border-red-400/80')
-          : selected
-          ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
-      `}
-      style={{ width: resolvedWidth, height: resolvedHeight }}
-      onClick={() => setSelectedNode(id)}
+    <NodeFrame
+      type={type as CanvasNodeType}
+      selected={selected}
+      icon={isResult ? <ImageIcon /> : <Sparkles />}
+      title={title}
+      onRename={(next) => void rename(next)}
+      meta={<NodeMediaMetadata data={data} fallback={aspectRatio} />}
+      status={status}
+      badges={(
+        <>
+          {batch ? <BatchStackControl nodeId={id} batchId={batch.id} index={batch.index} total={batch.total} collapsed={batch.collapsed} selected={Boolean(selected)} /> : null}
+          {finishedElapsed ? <span className="node-frame__badge" title={t('rework.canvas.node.elapsed')}>{finishedElapsed}</span> : null}
+        </>
+      )}
+      variant="media"
+      width={frameWidth}
+      height={frameHeight}
+      resize={{ minWidth: resizeMin.minWidth, minHeight: resizeMin.minHeight, maxWidth: 1600, maxHeight: 1600, keepAspectRatio: Boolean(data.imageUrl) }}
     >
-      <NodeHeader
-        className={NODE_HEADER_FLOATING_POSITION_CLASS}
-        icon={isExportResultNode
-          ? <ImageIcon className="h-4 w-4" />
-          : <Sparkles className="h-4 w-4" />}
-        titleText={resolvedTitle}
-        titleClassName="inline-block max-w-[220px] truncate whitespace-nowrap align-bottom"
-        editable
-        onTitleChange={(nextTitle) => {
-          void handleTitleChange(nextTitle);
-        }}
-        rightSlot={(
-          <span className="flex items-center gap-1">
-            {generationElapsedText ? (
-              <span
-                className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-px text-[10px] font-medium leading-tight text-white"
-                title={t('node.imageNode.generationElapsed')}
-              >
-                {generationElapsedText}
-              </span>
-            ) : null}
-            {data.batchId &&
-            typeof data.batchIndex === 'number' &&
-            typeof data.batchTotal === 'number' &&
-            data.batchTotal > 1 ? (
-              <span
-                className="rounded-full bg-accent/80 px-2 py-px text-[10px] font-medium leading-tight text-white"
-                title={`第 ${data.batchIndex + 1} 张 / 共 ${data.batchTotal} 张`}
-              >
-                {data.batchIndex + 1}/{data.batchTotal}
-              </span>
-            ) : null}
-          </span>
-        )}
-      />
-
-      <div
-        className={`relative h-full w-full overflow-hidden rounded-(--node-radius) ${
-          hasGenerationAttention
-            ? 'bg-amber-950/25'
-            : hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-(--canvas-node-media-bg)'
-        }`}
-      >
-        {data.imageUrl ? (
-          <>
-            <CanvasNodeImage
-              src={imageSource ?? ''}
-              fallbackSrcs={imageFallbackSources}
-              alt={isExportResultNode ? t('node.imageNode.resultAlt') : t('node.imageNode.generatedAlt')}
-              viewerSourceUrl={originalImageUrl}
-              className="h-full w-full object-contain"
-            />
-          </>
-        ) : hasGenerationAttention ? (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-amber-100">
-            {hasUnknownSubmission ? (
-              <CircleHelp className="h-7 w-7 text-amber-300" aria-hidden="true" />
-            ) : (
-              <PauseCircle className="h-7 w-7 text-amber-300" aria-hidden="true" />
-            )}
-            <span className="text-center text-[12px] font-semibold leading-5">
-              {t(hasUnknownSubmission
-                ? 'generationJob.unknownTitle'
-                : 'generationJob.recoverableTitle')}
-            </span>
-            <span className="max-h-[64px] overflow-y-auto wrap-break-word text-center text-[12px] leading-5 text-amber-100/85">
-              {generationError || t('generationJob.recoverableDescription')}
-            </span>
-            <span className="text-center text-[11px] leading-4 text-amber-200/70">
-              {hasUnknownSubmission
-                ? t(data.generationSafeRecoveryAvailable
-                  ? 'generationJob.unknownSafeHint'
-                  : 'generationJob.unknownBlockedHint')
-                : t('generationJob.recoverableHint')}
-            </span>
-          </div>
-        ) : hasGenerationError ? (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-red-700 dark:text-red-300">
-            <AlertTriangle className="h-7 w-7 opacity-90" />
-            <span className="text-center text-[12px] font-semibold leading-5 text-red-800 dark:text-red-200">
-              {t('node.imageNode.generationFailed')}
-            </span>
-            <span className="max-h-[88px] overflow-y-auto wrap-break-word text-center text-[11px] leading-5 text-red-800/90 dark:text-red-200/90">
-              {generationError}
-            </span>
-          </div>
-        ) : (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-text-muted/85">
-            {isExportResultNode ? (
-              <ImageIcon className="h-7 w-7 opacity-60" />
-            ) : (
-              <Sparkles className="h-7 w-7 opacity-60" />
-            )}
-            <span className="px-4 text-center text-[12px] leading-6">
-              {waitingResultText}
-            </span>
-          </div>
-        )}
-
-        {isGenerating && (
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="absolute inset-0 bg-bg-dark/55" />
-            <div
-              className="absolute left-0 top-0 h-full w-full origin-left bg-linear-to-r from-[rgba(255,255,255,0.4)] to-[rgba(255,255,255,0.06)] transition-transform duration-100 ease-linear"
-              style={{ transform: `scaleX(${simulatedProgress})` }}
-            />
-          </div>
-        )}
-
-        <GenerationJobStatus
-          state={isGenerating ? generationJobState : null}
-          phase={generationJobPhase}
-          networkRoute={generationNetworkRoute}
+      {data.imageUrl ? (
+        <CanvasNodeImage
+          src={image.src}
+          fallbackSrcs={image.fallbackSrcs}
+          pending={image.pending}
+          alt={isResult ? t('node.imageNode.resultAlt') : t('node.imageNode.generatedAlt')}
+          viewerSourceUrl={image.viewerSrc}
+          className="h-full w-full object-contain"
         />
-
-        {generationWarning && data.imageUrl ? (
-          <div
-            className="pointer-events-auto absolute inset-x-2 bottom-2 z-10 flex max-h-16 items-start gap-1.5 overflow-y-auto rounded-md border border-amber-300/45 bg-amber-950/85 px-2 py-1.5 text-[11px] leading-4 text-amber-100 shadow-lg backdrop-blur-xs"
-            role="status"
-            title={t('node.imageNode.providerWarning')}
-          >
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
-            <span className="min-w-0 wrap-break-word">{generationWarning}</span>
-          </div>
-        ) : null}
-      </div>
-
-      <Handle
-        type="target"
-        id="target"
-        position={Position.Left}
-        className="h-2! w-2! border-surface-dark! bg-accent!"
-      />
-      <Handle
-        type="source"
-        id="source"
-        position={Position.Right}
-        className="h-2! w-2! border-surface-dark! bg-accent!"
-      />
-      <NodeResizeHandle
-        minWidth={resizeMinWidth}
-        minHeight={resizeMinHeight}
-        maxWidth={1600}
-        maxHeight={1600}
-      />
-    </div>
+      ) : face.kind === 'waiting' ? (
+        <div className="node-face">
+          {isResult ? <ImageIcon /> : <Sparkles />}
+          <span>
+            {isGenerating ? (
+              <WaitingLabel
+                startedAt={startedAt}
+                render={(minutes) => (minutes === null
+                  ? t('node.imageNode.waitingResult')
+                  : t('node.imageNode.waitingResultDelayed', { minutes }))}
+              />
+            ) : isResult ? t('node.imageNode.waitingResult') : t('node.imageNode.selectToEdit')}
+          </span>
+        </div>
+      ) : (
+        <ResultProblemFace
+          face={face}
+          failedTitle={t('node.imageNode.generationFailed')}
+          action={referenceFailure ? <GenerationReferenceRetry nodeId={id} failure={referenceFailure} /> : null}
+        />
+      )}
+      {isGenerating ? <GenerationProgress startedAt={startedAt} expectedDurationMs={expectedDurationMs} /> : null}
+      <GenerationJobStatus state={isGenerating ? jobState : null} phase={jobPhase} networkRoute={networkRoute} />
+      {generationWarning && data.imageUrl ? (
+        <div className="node-warning" role="status" title={t('node.imageNode.providerWarning')}>
+          <AlertTriangle />
+          <span>{generationWarning}</span>
+        </div>
+      ) : null}
+    </NodeFrame>
   );
 });
 

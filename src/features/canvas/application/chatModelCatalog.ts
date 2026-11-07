@@ -1,14 +1,12 @@
 import { useMemo } from 'react';
 
 import {
-  AGNES_PROVIDER_DEFAULTS,
   isChatCustomProvider,
-  useCustomProvidersStore,
   type CustomProviderChatModelMetadata,
   type CustomProviderConfig,
 } from '@/stores/customProvidersStore';
 import { hasCustomProviderCredential } from '@/features/canvas/application/providerAvailability';
-import { useSettingsStore } from '@/stores/settingsStore';
+import { useChannelCatalogProviders } from '@/features/channels/application/channelCatalog';
 
 export interface ChatCatalogEntry {
   id: string;
@@ -81,7 +79,6 @@ function metadataFor(
 
 export function buildChatModelCatalog(
   customProviders: readonly CustomProviderConfig[],
-  agnesApiKey = '',
 ): ChatCatalogEntry[] {
   const entries: ChatCatalogEntry[] = [];
   for (const provider of customProviders) {
@@ -117,39 +114,13 @@ export function buildChatModelCatalog(
     }
   }
 
-  if (agnesApiKey.trim()) {
-    for (const [modelId, label] of [
-      [AGNES_PROVIDER_DEFAULTS.models.chat25Flash, 'Agnes 2.5 Flash'],
-      [AGNES_PROVIDER_DEFAULTS.models.chat20Flash, 'Agnes 2.0 Flash'],
-      [AGNES_PROVIDER_DEFAULTS.models.chat15Flash, 'Agnes 1.5 Flash'],
-    ] as const) {
-      entries.push({
-        id: `agnes:chat:${modelId}`,
-        providerId: 'agnes',
-        providerLabel: 'Agnes',
-        modelId,
-        modelLabel: label,
-        supportsMultimodal: true,
-        supportsTools: true,
-        supportsStreaming: true,
-        supportsReasoningSummary: false,
-        supportsToolSearch: false,
-        agentProtocol: 'openai-chat-completions',
-        contextWindow: 256000,
-        maxOutputTokens: 65500,
-        description: label,
-        usable: true,
-      });
-    }
-  }
   return entries;
 }
 
 export function useChatModelCatalog(): ChatCatalogEntry[] {
-  const customProviders = useCustomProvidersStore((state) => state.providers);
-  const agnesApiKey = useSettingsStore((state) => state.agnesApiKey);
+  const customProviders = useChannelCatalogProviders();
   return useMemo(
-    () => buildChatModelCatalog(customProviders, agnesApiKey),
-    [agnesApiKey, customProviders],
+    () => buildChatModelCatalog(customProviders),
+    [customProviders],
   );
 }

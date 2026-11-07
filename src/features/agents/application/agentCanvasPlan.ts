@@ -3,6 +3,7 @@ import { canvasCommandRegistry } from '@/features/canvas/application/canvasComma
 import { CANVAS_COMMAND_VERSION, type CanvasCommand } from '@/features/canvas/domain/canvasCommands';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useProjectStore } from '@/stores/projectStore';
+import { withCanvasHistoryAgentTurn } from '@/stores/canvasHistory';
 
 export const canvasPlanSchema = z.object({
   title: z.string().trim().min(1).max(200),
@@ -50,7 +51,7 @@ export async function openAgentProject(projectId: string): Promise<void> {
 }
 
 /** Plan creation is non-paying; opening materializes the entire plan atomically. */
-export async function openAgentCanvasPlan(input: { projectId?: string | null; plan: AgentCanvasPlan }) {
+export async function openAgentCanvasPlan(input: { projectId?: string | null; plan: AgentCanvasPlan; agentTurnId?: string }) {
   const plan = canvasPlanSchema.parse(input.plan);
   const store = useProjectStore.getState();
   if (!input.projectId) await persistAgentProjectBeforeNavigation();
@@ -72,7 +73,7 @@ export async function openAgentCanvasPlan(input: { projectId?: string | null; pl
       configuration: { displayName: shot.title, prompt: shot.prompt, modelId: shot.modelId, aspectRatio: shot.aspectRatio, resolution: shot.resolution },
     } }, { type: 'edge.connect', version: CANVAS_COMMAND_VERSION, input: { sourceNodeId: scriptId, targetNodeId: nodeIds[index] } });
   });
-  const result = canvasCommandRegistry.executeTransaction({ id: globalThis.crypto.randomUUID(), origin: 'agent', expectedRevision: canvasCommandRegistry.getRevision(), commands });
+  const result = withCanvasHistoryAgentTurn(input.agentTurnId, () => canvasCommandRegistry.executeTransaction({ id: globalThis.crypto.randomUUID(), origin: 'agent', expectedRevision: canvasCommandRegistry.getRevision(), commands }));
   if (!result.ok) throw new Error(result.error.message);
   const next = useCanvasStore.getState();
   useProjectStore.getState().saveCurrentProject(next.nodes, next.edges, next.currentViewport, next.history);

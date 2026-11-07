@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { UiButton, UiIconButton, UiPanel, UiSelect } from '@/components/ui/primitives';
+import { UiButton, UiIconButton, UiSelect } from '@/components/ui';
 import {
   useSettingsStore,
   type DreaminaStatusSnapshot,
@@ -102,14 +102,14 @@ function StatusMetric({
   tone?: MetricTone;
 }) {
   const toneClass = tone === 'success'
-    ? 'text-emerald-500'
+    ? 'text-success'
     : tone === 'warning'
-      ? 'text-amber-500'
+      ? 'text-warning'
       : tone === 'danger'
-        ? 'text-red-500'
+        ? 'text-danger'
         : 'text-text-muted';
   return (
-    <div className="min-w-0 border-b border-border-dark/60 py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:px-4 sm:first:pl-0 sm:last:border-r-0 sm:last:pr-0">
+    <div className="min-w-0 border-b border-[var(--line)] py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:px-4 sm:first:pl-0 sm:last:border-r-0 sm:last:pr-0">
       <div className="flex items-center gap-2 text-xs text-text-muted">
         <span className={toneClass}>{icon}</span>
         <span>{label}</span>
@@ -289,27 +289,31 @@ export const DreaminaSection = memo(() => {
     }
   }, []);
 
+  const header = (
+    <div className="border-b border-[var(--line)] px-6 py-5">
+      <h2 className="text-[15px] font-semibold text-text-dark">{t('settings.dreamina.title')}</h2>
+      <p className="mt-1 text-[13px] text-text-muted">{t('settings.dreamina.description')}</p>
+    </div>
+  );
+
   if (!desktopRuntime) {
     return (
-      <div className="space-y-5">
-        <div>
-          <h2 className="text-base font-semibold text-text-dark">{t('settings.dreamina.title')}</h2>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-text-muted">
-            {t('settings.dreamina.description')}
-          </p>
+      <>
+        {header}
+        <div className="ui-scrollbar flex-1 space-y-4 overflow-y-auto p-6">
+          <section className="flex items-start gap-3 rounded-xl border border-[var(--line)] bg-surface p-4" role="status">
+            <Terminal className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-text-dark">
+                {t('settings.dreamina.runtime.desktopOnlyTitle')}
+              </div>
+              <div className="mt-1 text-xs leading-5 text-text-muted">
+                {t('settings.dreamina.runtime.desktopOnlyDescription')}
+              </div>
+            </div>
+          </section>
         </div>
-        <UiPanel className="flex items-start gap-3 p-4" role="status">
-          <Terminal className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-text-dark">
-              {t('settings.dreamina.runtime.desktopOnlyTitle')}
-            </div>
-            <div className="mt-1 text-xs leading-5 text-text-muted">
-              {t('settings.dreamina.runtime.desktopOnlyDescription')}
-            </div>
-          </div>
-        </UiPanel>
-      </div>
+      </>
     );
   }
 
@@ -330,292 +334,290 @@ export const DreaminaSection = memo(() => {
   const versionDetail = versionParts.length > 0 ? versionParts.join(' · ') : undefined;
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-base font-semibold text-text-dark">{t('settings.dreamina.title')}</h2>
-        <p className="mt-1 max-w-3xl text-xs leading-5 text-text-muted">
-          {t('settings.dreamina.description')}
-        </p>
-      </div>
-
-      <UiPanel className="p-4" aria-live="polite" aria-busy={checking || sessionLoading}>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border-dark/60 pb-3">
-          <div>
-            <div className="text-sm font-medium text-text-dark">{t('settings.dreamina.runtime.title')}</div>
-            <div className="mt-0.5 text-xs text-text-muted">{t('settings.dreamina.runtime.subtitle')}</div>
-          </div>
-          <div className="flex items-center gap-2">
-            <UiIconButton
-              type="button"
-              onClick={() => void runNetworkDiagnose()}
-              disabled={diagnosing}
-              aria-label={t('settings.dreamina.network.run')}
-              title={t('settings.dreamina.network.run')}
-            >
-              {diagnosing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />}
-            </UiIconButton>
-            <UiIconButton
-              type="button"
-              onClick={() => void refreshStatus()}
-              disabled={checking}
-              aria-label={t('settings.dreamina.runtime.refresh')}
-              title={t('settings.dreamina.runtime.refresh')}
-            >
-              <RefreshCw className={`h-4 w-4 ${checking ? 'animate-spin' : ''}`} />
-            </UiIconButton>
-          </div>
-        </div>
-
-        <div className="grid sm:grid-cols-2 xl:grid-cols-4">
-          <StatusMetric
-            icon={<Terminal className="h-4 w-4" />}
-            label={t('settings.dreamina.runtime.cli')}
-            value={checking && !status
-              ? t('settings.dreamina.status.checking')
-              : status?.installed
-                ? (status.version ?? t('settings.dreamina.status.installed'))
-                : t('settings.dreamina.status.notInstalled')}
-            detail={versionDetail}
-            tone={cliTone}
-          />
-          <StatusMetric
-            icon={<KeyRound className="h-4 w-4" />}
-            label={t('settings.dreamina.runtime.account')}
-            value={accountLabel}
-            detail={status?.vipLevel ? t('settings.dreamina.status.vip', { level: status.vipLevel }) : undefined}
-            tone={accountTone}
-          />
-          <StatusMetric
-            icon={<WalletCards className="h-4 w-4" />}
-            label={t('settings.dreamina.runtime.credits')}
-            value={status?.credits === null || status?.credits === undefined
-              ? t('settings.dreamina.status.unavailable')
-              : status.credits.toLocaleString()}
-            tone={status?.credits !== null && status?.credits !== undefined ? 'success' : 'neutral'}
-          />
-          <StatusMetric
-            icon={<FolderCog className="h-4 w-4" />}
-            label={t('settings.dreamina.runtime.session')}
-            value={t('settings.dreamina.sessions.current', { id: selectedSessionId })}
-            detail={status?.sessionsAvailable
-              ? t('settings.dreamina.sessions.available')
-              : t('settings.dreamina.sessions.degraded')}
-            tone={effectiveSessionError ? 'warning' : 'success'}
-          />
-        </div>
-
-        {status?.resolvedPath && (
-          <div className="mt-3 min-w-0 border-t border-border-dark/60 pt-3 text-xs text-text-muted">
-            <span className="font-medium text-text-dark">{t('settings.dreamina.runtime.path')}</span>{' '}
-            <span className="break-all font-mono">{status.resolvedPath}</span>
-          </div>
-        )}
-        {status?.accountError && (
-          <div role="alert" className="mt-3 flex items-start gap-2 border-l-2 border-amber-500 bg-amber-500/5 px-3 py-2 text-xs leading-5 text-text-muted">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <span>{status.accountError}</span>
-          </div>
-        )}
-      </UiPanel>
-
-      {status?.installed && !status.loggedIn && (
-        <section className="border-t border-border-dark pt-5" aria-labelledby="dreamina-oauth-title">
-          <div className="flex items-start justify-between gap-4">
+    <>
+      {header}
+      <div className="ui-scrollbar flex-1 space-y-4 overflow-y-auto p-6">
+        <section className="rounded-xl border border-[var(--line)] bg-surface p-4" aria-live="polite" aria-busy={checking || sessionLoading}>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line)] pb-3">
             <div>
-              <h3 id="dreamina-oauth-title" className="text-sm font-medium text-text-dark">
-                {t('settings.dreamina.oauth.title')}
-              </h3>
-              <p className="mt-1 text-xs leading-5 text-text-muted">{t('settings.dreamina.oauth.description')}</p>
+              <div className="text-sm font-medium text-text-dark">{t('settings.dreamina.runtime.title')}</div>
+              <div className="mt-0.5 text-xs text-text-muted">{t('settings.dreamina.runtime.subtitle')}</div>
             </div>
-            {!oauth && (
-              <UiButton
+            <div className="flex items-center gap-2">
+              <UiIconButton
                 type="button"
-                variant="primary"
-                className="min-h-11 shrink-0 gap-2"
-                onClick={() => void startOAuth()}
-                disabled={oauthStarting}
+                onClick={() => void runNetworkDiagnose()}
+                disabled={diagnosing}
+                aria-label={t('settings.dreamina.network.run')}
+                title={t('settings.dreamina.network.run')}
               >
-                {oauthStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-                {oauthStarting ? t('settings.dreamina.oauth.starting') : t('settings.dreamina.oauth.start')}
-              </UiButton>
-            )}
+                {diagnosing ? <Loader2 className="animate-spin" /> : <Activity />}
+              </UiIconButton>
+              <UiIconButton
+                type="button"
+                onClick={() => void refreshStatus()}
+                disabled={checking}
+                aria-label={t('settings.dreamina.runtime.refresh')}
+                title={t('settings.dreamina.runtime.refresh')}
+              >
+                <RefreshCw className={checking ? 'animate-spin' : undefined} />
+              </UiIconButton>
+            </div>
           </div>
 
-          {oauth && (
-            <div className="mt-4 grid gap-4 border-l-2 border-accent/50 pl-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-              <div className="min-w-0 space-y-3">
-                <div>
-                  <div className="text-xs font-medium text-text-dark">{t('settings.dreamina.oauth.userCode')}</div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <code className="min-w-0 flex-1 break-all border ui-field px-3 py-2 font-mono text-sm font-semibold tracking-normal text-text-dark">
-                      {oauth.userCode}
-                    </code>
-                    <UiIconButton
-                      type="button"
-                      onClick={() => void copyToClipboard(oauth.userCode ?? '', 'oauth-code')}
-                      aria-label={t('settings.dreamina.oauth.copyCode')}
-                      title={t('settings.dreamina.oauth.copyCode')}
-                    >
-                      {copied === 'oauth-code' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                    </UiIconButton>
-                  </div>
-                </div>
-                <div className="text-xs leading-5 text-text-muted">
-                  {t('settings.dreamina.oauth.expires', { seconds: oauth.expiresIn ?? '?' })}
-                </div>
+          <div className="grid sm:grid-cols-2 xl:grid-cols-4">
+            <StatusMetric
+              icon={<Terminal className="h-4 w-4" />}
+              label={t('settings.dreamina.runtime.cli')}
+              value={checking && !status
+                ? t('settings.dreamina.status.checking')
+                : status?.installed
+                  ? (status.version ?? t('settings.dreamina.status.installed'))
+                  : t('settings.dreamina.status.notInstalled')}
+              detail={versionDetail}
+              tone={cliTone}
+            />
+            <StatusMetric
+              icon={<KeyRound className="h-4 w-4" />}
+              label={t('settings.dreamina.runtime.account')}
+              value={accountLabel}
+              detail={status?.vipLevel ? t('settings.dreamina.status.vip', { level: status.vipLevel }) : undefined}
+              tone={accountTone}
+            />
+            <StatusMetric
+              icon={<WalletCards className="h-4 w-4" />}
+              label={t('settings.dreamina.runtime.credits')}
+              value={status?.credits === null || status?.credits === undefined
+                ? t('settings.dreamina.status.unavailable')
+                : status.credits.toLocaleString()}
+              tone={status?.credits !== null && status?.credits !== undefined ? 'success' : 'neutral'}
+            />
+            <StatusMetric
+              icon={<FolderCog className="h-4 w-4" />}
+              label={t('settings.dreamina.runtime.session')}
+              value={t('settings.dreamina.sessions.current', { id: selectedSessionId })}
+              detail={status?.sessionsAvailable
+                ? t('settings.dreamina.sessions.available')
+                : t('settings.dreamina.sessions.degraded')}
+              tone={effectiveSessionError ? 'warning' : 'success'}
+            />
+          </div>
+
+          {status?.resolvedPath && (
+            <div className="mt-3 min-w-0 border-t border-[var(--line)] pt-3 text-xs text-text-muted">
+              <span className="font-medium text-text-dark">{t('settings.dreamina.runtime.path')}</span>{' '}
+              <span className="break-all font-mono">{status.resolvedPath}</span>
+            </div>
+          )}
+          {status?.accountError && (
+            <div role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-5 text-text-muted">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              <span>{status.accountError}</span>
+            </div>
+          )}
+        </section>
+
+        {status?.installed && !status.loggedIn && (
+          <section className="rounded-xl border border-[var(--line)] bg-surface p-4" aria-labelledby="dreamina-oauth-title">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 id="dreamina-oauth-title" className="text-sm font-medium text-text-dark">
+                  {t('settings.dreamina.oauth.title')}
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-text-muted">{t('settings.dreamina.oauth.description')}</p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <UiButton
-                  type="button"
-                  className="min-h-11 gap-2"
-                  onClick={() => oauth.verificationUri && void openUrl(oauth.verificationUri)}
-                  disabled={!oauth.verificationUri}
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  {t('settings.dreamina.oauth.openVerification')}
-                </UiButton>
+              {!oauth && (
                 <UiButton
                   type="button"
                   variant="primary"
-                  className="min-h-11 gap-2"
-                  onClick={() => void checkOAuth()}
-                  disabled={oauthChecking}
+                  icon={<KeyRound />}
+                  loading={oauthStarting}
+                  className="shrink-0"
+                  onClick={() => void startOAuth()}
                 >
-                  {oauthChecking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                  {oauthChecking ? t('settings.dreamina.oauth.checking') : t('settings.dreamina.oauth.check')}
+                  {oauthStarting ? t('settings.dreamina.oauth.starting') : t('settings.dreamina.oauth.start')}
                 </UiButton>
-              </div>
+              )}
             </div>
-          )}
-          {oauthPending && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-amber-500" role="status">
-              <CircleHelp className="h-4 w-4" />
-              {t('settings.dreamina.oauth.pending')}
-            </div>
-          )}
-          {oauthError && (
-            <div className="mt-3 text-xs leading-5 text-red-500" role="alert">
-              {oauthError} {t('settings.dreamina.oauth.retryHint')}
-            </div>
-          )}
-        </section>
-      )}
 
-      {status?.installed && (
-        <section className="border-t border-border-dark pt-5" aria-labelledby="dreamina-session-title">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 id="dreamina-session-title" className="text-sm font-medium text-text-dark">
-                {t('settings.dreamina.sessions.title')}
-              </h3>
-              <p className="mt-1 text-xs leading-5 text-text-muted">{t('settings.dreamina.sessions.description')}</p>
-            </div>
-            <UiIconButton
-              type="button"
-              onClick={() => void refreshSessions()}
-              disabled={sessionLoading}
-              aria-label={t('settings.dreamina.sessions.refresh')}
-              title={t('settings.dreamina.sessions.refresh')}
-            >
-              <RefreshCw className={`h-4 w-4 ${sessionLoading ? 'animate-spin' : ''}`} />
-            </UiIconButton>
-          </div>
-          <div className="mt-3 max-w-xl">
-            <label htmlFor="dreamina-default-session" className="mb-1.5 block text-xs font-medium text-text-dark">
-              {t('settings.dreamina.sessions.label')}
-            </label>
-            <UiSelect
-              id="dreamina-default-session"
-              value={String(selectedSessionId)}
-              onChange={(event) => setSelectedSessionId(Number(event.target.value))}
-              aria-label={t('settings.dreamina.sessions.label')}
-            >
-              {!sessionKnown && <option value={String(selectedSessionId)}>{t('settings.dreamina.sessions.missingOption', { id: selectedSessionId })}</option>}
-              {sessions.map((session) => (
-                <option key={session.id} value={String(session.id)}>
-                  {session.isDefault
-                    ? t('settings.dreamina.sessions.defaultOption', { name: session.name, id: session.id })
-                    : t('settings.dreamina.sessions.option', { name: session.name, id: session.id })}
-                </option>
-              ))}
-            </UiSelect>
-            {effectiveSessionError && (
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs leading-5 text-amber-500" role="alert">
-                <span>{effectiveSessionError}</span>
-                {selectedSessionId !== 0 && (
-                  <button
+            {oauth && (
+              <div className="mt-4 grid gap-4 rounded-lg border border-[var(--line)] bg-[var(--field-bg)] p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                <div className="min-w-0 space-y-3">
+                  <div>
+                    <div className="text-xs font-medium text-text-dark">{t('settings.dreamina.oauth.userCode')}</div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <code className="min-w-0 flex-1 break-all rounded-lg border border-[var(--line)] bg-surface px-3 py-2 font-mono text-sm font-semibold tracking-normal text-text-dark">
+                        {oauth.userCode}
+                      </code>
+                      <UiIconButton
+                        type="button"
+                        onClick={() => void copyToClipboard(oauth.userCode ?? '', 'oauth-code')}
+                        aria-label={t('settings.dreamina.oauth.copyCode')}
+                        title={t('settings.dreamina.oauth.copyCode')}
+                      >
+                        {copied === 'oauth-code' ? <Check /> : <Copy />}
+                      </UiIconButton>
+                    </div>
+                  </div>
+                  <div className="text-xs leading-5 text-text-muted">
+                    {t('settings.dreamina.oauth.expires', { seconds: oauth.expiresIn ?? '?' })}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <UiButton
                     type="button"
-                    className="font-medium text-accent hover:underline"
-                    onClick={() => setSelectedSessionId(0)}
+                    icon={<ExternalLink />}
+                    onClick={() => oauth.verificationUri && void openUrl(oauth.verificationUri)}
+                    disabled={!oauth.verificationUri}
                   >
-                    {t('settings.dreamina.sessions.useDefault')}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-
-      {diagnose && (
-        <section className="border-t border-border-dark pt-5" aria-labelledby="dreamina-network-title">
-          <h3 id="dreamina-network-title" className="text-sm font-medium text-text-dark">
-            {t('settings.dreamina.network.title')}
-          </h3>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {([
-              ['DNS', diagnose.dns],
-              ['TCP', diagnose.tcp],
-              ['TLS', diagnose.tls],
-              ['HTTP', diagnose.http],
-            ] as const).map(([label, stage]) => (
-              <div key={label} className="flex min-w-0 items-start gap-2 border-b border-border-dark/60 py-2">
-                {stage.ok
-                  ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                  : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />}
-                <div className="min-w-0">
-                  <div className="text-xs font-medium text-text-dark">{label}</div>
-                  <div className="mt-0.5 wrap-break-word text-xs leading-5 text-text-muted">{stage.detail || t('settings.dreamina.status.unavailable')}</div>
+                    {t('settings.dreamina.oauth.openVerification')}
+                  </UiButton>
+                  <UiButton
+                    type="button"
+                    variant="primary"
+                    icon={<CheckCircle2 />}
+                    loading={oauthChecking}
+                    onClick={() => void checkOAuth()}
+                  >
+                    {oauthChecking ? t('settings.dreamina.oauth.checking') : t('settings.dreamina.oauth.check')}
+                  </UiButton>
                 </div>
               </div>
-            ))}
-          </div>
-          <div className="mt-3 whitespace-pre-wrap border-l-2 border-border-dark pl-3 text-xs leading-5 text-text-muted">
-            {diagnose.overallAdvice}
-          </div>
-        </section>
-      )}
+            )}
+            {oauthPending && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-warning" role="status">
+                <CircleHelp className="h-4 w-4" />
+                {t('settings.dreamina.oauth.pending')}
+              </div>
+            )}
+            {oauthError && (
+              <div className="mt-3 text-xs leading-5 text-danger" role="alert">
+                {oauthError} {t('settings.dreamina.oauth.retryHint')}
+              </div>
+            )}
+          </section>
+        )}
 
-      {!status?.installed && (
-        <details className="border-t border-border-dark pt-5">
-          <summary className="cursor-pointer text-sm font-medium text-text-dark">
-            {t('settings.dreamina.install.title')}
-          </summary>
-          <p className="mt-2 text-xs leading-5 text-text-muted">{t('settings.dreamina.install.description')}</p>
-          <div className="mt-3 flex items-center gap-2">
-            <code className="min-w-0 flex-1 overflow-x-auto border ui-field px-3 py-2 font-mono text-xs text-text-dark">
-              curl -fsSL https://dreamina.jianying.com/install.sh | bash
-            </code>
-            <UiIconButton
+        {status?.installed && (
+          <section className="rounded-xl border border-[var(--line)] bg-surface p-4" aria-labelledby="dreamina-session-title">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 id="dreamina-session-title" className="text-sm font-medium text-text-dark">
+                  {t('settings.dreamina.sessions.title')}
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-text-muted">{t('settings.dreamina.sessions.description')}</p>
+              </div>
+              <UiIconButton
+                type="button"
+                onClick={() => void refreshSessions()}
+                disabled={sessionLoading}
+                aria-label={t('settings.dreamina.sessions.refresh')}
+                title={t('settings.dreamina.sessions.refresh')}
+              >
+                <RefreshCw className={sessionLoading ? 'animate-spin' : undefined} />
+              </UiIconButton>
+            </div>
+            <div className="mt-3 max-w-xl">
+              <label htmlFor="dreamina-default-session" className="mb-1.5 block text-xs font-medium text-text-dark">
+                {t('settings.dreamina.sessions.label')}
+              </label>
+              <UiSelect
+                id="dreamina-default-session"
+                value={String(selectedSessionId)}
+                onChange={(event) => setSelectedSessionId(Number(event.target.value))}
+                aria-label={t('settings.dreamina.sessions.label')}
+              >
+                {!sessionKnown && <option value={String(selectedSessionId)}>{t('settings.dreamina.sessions.missingOption', { id: selectedSessionId })}</option>}
+                {sessions.map((session) => (
+                  <option key={session.id} value={String(session.id)}>
+                    {session.isDefault
+                      ? t('settings.dreamina.sessions.defaultOption', { name: session.name, id: session.id })
+                      : t('settings.dreamina.sessions.option', { name: session.name, id: session.id })}
+                  </option>
+                ))}
+              </UiSelect>
+              {effectiveSessionError && (
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs leading-5 text-warning" role="alert">
+                  <span>{effectiveSessionError}</span>
+                  {selectedSessionId !== 0 && (
+                    <UiButton
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-accent"
+                      onClick={() => setSelectedSessionId(0)}
+                    >
+                      {t('settings.dreamina.sessions.useDefault')}
+                    </UiButton>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {diagnose && (
+          <section className="rounded-xl border border-[var(--line)] bg-surface p-4" aria-labelledby="dreamina-network-title">
+            <h3 id="dreamina-network-title" className="text-sm font-medium text-text-dark">
+              {t('settings.dreamina.network.title')}
+            </h3>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {([
+                ['DNS', diagnose.dns],
+                ['TCP', diagnose.tcp],
+                ['TLS', diagnose.tls],
+                ['HTTP', diagnose.http],
+              ] as const).map(([label, stage]) => (
+                <div key={label} className="flex min-w-0 items-start gap-2 border-b border-[var(--line)] py-2">
+                  {stage.ok
+                    ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+                    : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />}
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-text-dark">{label}</div>
+                    <div className="mt-0.5 wrap-break-word text-xs leading-5 text-text-muted">{stage.detail || t('settings.dreamina.status.unavailable')}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 whitespace-pre-wrap rounded-lg bg-[var(--field-bg)] px-3 py-2 text-xs leading-5 text-text-muted">
+              {diagnose.overallAdvice}
+            </div>
+          </section>
+        )}
+
+        {!status?.installed && (
+          <details className="rounded-xl border border-[var(--line)] bg-surface p-4">
+            <summary className="cursor-pointer text-sm font-medium text-text-dark">
+              {t('settings.dreamina.install.title')}
+            </summary>
+            <p className="mt-2 text-xs leading-5 text-text-muted">{t('settings.dreamina.install.description')}</p>
+            <div className="mt-3 flex items-center gap-2">
+              <code className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--field-bg)] px-3 py-2 font-mono text-xs text-text-dark">
+                curl -fsSL https://dreamina.jianying.com/install.sh | bash
+              </code>
+              <UiIconButton
+                type="button"
+                onClick={() => void copyToClipboard('curl -fsSL https://dreamina.jianying.com/install.sh | bash', 'install')}
+                aria-label={t('settings.dreamina.install.copy')}
+                title={t('settings.dreamina.install.copy')}
+              >
+                {copied === 'install' ? <Check /> : <Copy />}
+              </UiIconButton>
+            </div>
+            <UiButton
               type="button"
-              onClick={() => void copyToClipboard('curl -fsSL https://dreamina.jianying.com/install.sh | bash', 'install')}
-              aria-label={t('settings.dreamina.install.copy')}
-              title={t('settings.dreamina.install.copy')}
+              variant="ghost"
+              size="sm"
+              className="mt-3 text-accent"
+              onClick={() => void openUrl('https://dreamina.jianying.com/platform/cli')}
             >
-              {copied === 'install' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-            </UiIconButton>
-          </div>
-          <button
-            type="button"
-            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-accent hover:underline"
-            onClick={() => void openUrl('https://dreamina.jianying.com/platform/cli')}
-          >
-            {t('settings.dreamina.install.officialPage')}
-            <ExternalLink className="h-3.5 w-3.5" />
-          </button>
-        </details>
-      )}
-    </div>
+              {t('settings.dreamina.install.officialPage')}
+              <ExternalLink />
+            </UiButton>
+          </details>
+        )}
+      </div>
+    </>
   );
 });
 

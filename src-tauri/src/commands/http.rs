@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -77,8 +77,17 @@ pub struct HttpStreamEventDto {
     pub error: Option<String>,
 }
 
-static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-static DIRECT_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
+    custom_http_client_builder()
+        .build()
+        .map_err(|err| format!("Failed to build system HTTP client: {err}"))
+});
+static DIRECT_HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
+    custom_http_client_builder()
+        .no_proxy()
+        .build()
+        .map_err(|err| format!("Failed to build direct HTTP client: {err}"))
+});
 
 #[derive(Debug)]
 struct SafeHttpRequestSummary {
@@ -158,25 +167,28 @@ fn log_http_request(summary: &SafeHttpRequestSummary, transport: &str) {
     );
 }
 
-fn shared_http_client() -> &'static reqwest::Client {
-    HTTP_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .pool_idle_timeout(Duration::from_secs(90))
-            .tcp_keepalive(Duration::from_secs(60))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
-    })
-}
-
-fn direct_http_client() -> &'static reqwest::Client {
-    DIRECT_HTTP_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .no_proxy()
-            .pool_idle_timeout(Duration::from_secs(90))
-            .tcp_keepalive(Duration::from_secs(60))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
-    })
+fn custom_http_client_builder() -> reqwest::ClientBuilder {
+    // Credential names are provider-defined (including query auth), so all
+    // custom HTTP follows only same-origin redirects, for buffered and SSE
+    // requests alike. Never rely on reqwest's standard-header stripping.
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            let next = attempt.url();
+            let same_origin = attempt.previous().first().is_some_and(|original| {
+                original.scheme() == next.scheme()
+                    && original.host_str() == next.host_str()
+                    && original.port_or_known_default() == next.port_or_known_default()
+            });
+            if !same_origin || !next.username().is_empty() || next.password().is_some() {
+                attempt.error("custom HTTP refused a cross-origin or credential-bearing redirect")
+            } else if attempt.previous().len() > 10 {
+                attempt.error("custom HTTP redirect limit exceeded")
+            } else {
+                attempt.follow()
+            }
+        }))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .tcp_keepalive(Duration::from_secs(60))
 }
 
 pub(crate) fn validated_custom_proxy(raw_url: &str) -> Result<reqwest::Proxy, String> {
@@ -193,18 +205,19 @@ fn client_for_route(
     custom_proxy_url: Option<&str>,
 ) -> Result<reqwest::Client, String> {
     match route.unwrap_or("system").trim() {
-        "" | "system" => Ok(shared_http_client().clone()),
-        "direct" => Ok(direct_http_client().clone()),
+        "" | "system" => HTTP_CLIENT.as_ref().map(Clone::clone).map_err(Clone::clone),
+        "direct" => DIRECT_HTTP_CLIENT
+            .as_ref()
+            .map(Clone::clone)
+            .map_err(Clone::clone),
         "custom-proxy" => {
             let raw_url = custom_proxy_url
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| "custom-proxy route requires customProxyUrl".to_string())?;
             let proxy = validated_custom_proxy(raw_url)?;
-            reqwest::Client::builder()
+            custom_http_client_builder()
                 .proxy(proxy)
-                .pool_idle_timeout(Duration::from_secs(90))
-                .tcp_keepalive(Duration::from_secs(60))
                 .build()
                 .map_err(|err| format!("Failed to build custom proxy client: {err}"))
         }
@@ -363,10 +376,63 @@ fn build_form_urlencoded_body(body: Value) -> Result<String, String> {
     Ok(parts.join("&"))
 }
 
+fn resolve_http_credentials(
+    request: &mut HttpRequestDto,
+    resolve: &mut impl FnMut(&super::secrets::SecretRef) -> Result<String, super::secrets::SecretError>,
+) -> Result<super::secrets::SecretRedactor, String> {
+    let mut redactor = super::secrets::SecretRedactor::default();
+    if let std::borrow::Cow::Owned(value) = redactor
+        .resolve_markers_using(&request.url, true, resolve)
+        .map_err(|error| error.to_string())?
+    {
+        request.url = value;
+    }
+    if let Some(headers) = request.headers.as_mut() {
+        for value in headers.values_mut() {
+            if let std::borrow::Cow::Owned(resolved) = redactor
+                .resolve_markers_using(value, false, resolve)
+                .map_err(|error| error.to_string())?
+            {
+                *value = resolved;
+            }
+        }
+    }
+    if let Some(body) = request.body.as_mut() {
+        redactor
+            .resolve_json_using(body, resolve)
+            .map_err(|error| error.to_string())?;
+    }
+    if let Some(fields) = request
+        .multipart
+        .as_mut()
+        .and_then(|body| body.fields.as_mut())
+    {
+        for field in fields {
+            let url = field.value.starts_with("https://") || field.value.starts_with("http://");
+            if let std::borrow::Cow::Owned(value) = redactor
+                .resolve_markers_using(&field.value, url, resolve)
+                .map_err(|error| error.to_string())?
+            {
+                field.value = value;
+            }
+        }
+    }
+    Ok(redactor)
+}
+
 fn build_http_request(
     client: &reqwest::Client,
     request: HttpRequestDto,
-) -> Result<reqwest::RequestBuilder, String> {
+) -> Result<(reqwest::RequestBuilder, super::secrets::SecretRedactor), String> {
+    build_http_request_with_resolver(client, request, &mut super::secrets::resolve_required)
+}
+
+fn build_http_request_with_resolver(
+    client: &reqwest::Client,
+    mut request: HttpRequestDto,
+    resolve: &mut impl FnMut(&super::secrets::SecretRef) -> Result<String, super::secrets::SecretError>,
+) -> Result<(reqwest::RequestBuilder, super::secrets::SecretRedactor), String> {
+    let redactor = resolve_http_credentials(&mut request, resolve)?;
     let method = request.method.trim().to_uppercase();
     let body_mode = normalize_body_mode(request.body_mode.as_deref());
     if body_mode != "json" && body_mode != "multipart" && body_mode != "form-urlencoded" {
@@ -415,7 +481,7 @@ fn build_http_request(
         }
     }
 
-    Ok(builder)
+    Ok((builder, redactor))
 }
 
 fn emit_stream_event(app: &AppHandle, event: HttpStreamEventDto) {
@@ -461,6 +527,14 @@ fn take_decodable_utf8(pending: &mut Vec<u8>, flush: bool) -> Option<String> {
 
 #[tauri::command]
 pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponseDto, String> {
+    custom_http_request_with_resolver(request, super::secrets::resolve_required).await
+}
+
+// The same transport is exercised with an isolated vault in loopback integration tests.
+pub(super) async fn custom_http_request_with_resolver(
+    request: HttpRequestDto,
+    mut resolve: impl FnMut(&super::secrets::SecretRef) -> Result<String, super::secrets::SecretError>,
+) -> Result<HttpResponseDto, String> {
     let summary = summarize_http_request(&request);
     let started_at = Instant::now();
     log_http_request(&summary, "buffered");
@@ -469,29 +543,32 @@ pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponse
         request.network_route.as_deref(),
         request.custom_proxy_url.as_deref(),
     )?;
-    let mut response = build_http_request(&client, request)?
-        .send()
-        .await
-        .map_err(|err| {
-            let err = err.without_url();
-            warn!(
-                target: "custom_provider_http",
-                transport = "buffered",
-                host = %summary.host,
-                path = %summary.path,
-                model = %summary.model,
-                elapsed_ms = started_at.elapsed().as_millis(),
-                "custom provider request transport failed: {err}"
-            );
-            format!("HTTP request failed: {err}")
-        })?;
+    let (builder, redactor) = build_http_request_with_resolver(&client, request, &mut resolve)?;
+    let mut response = builder.send().await.map_err(|err| {
+        let err = redactor.redact_owned(err.without_url().to_string());
+        warn!(
+            target: "custom_provider_http",
+            transport = "buffered",
+            host = %summary.host,
+            path = %summary.path,
+            model = %summary.model,
+            elapsed_ms = started_at.elapsed().as_millis(),
+            "custom provider request transport failed: {err}"
+        );
+        format!("HTTP request failed: {err}")
+    })?;
     let status = response.status().as_u16();
     let text = if let Some(limit) = max_response_bytes {
-        if response.content_length().is_some_and(|length| length > limit as u64) {
+        if response
+            .content_length()
+            .is_some_and(|length| length > limit as u64)
+        {
             return Err(format!("HTTP response exceeds size limit ({limit} bytes)"));
         }
         let mut bytes = Vec::with_capacity(limit.min(8192));
-        while let Some(chunk) = response.chunk().await.map_err(|err| format!("HTTP response read failed: {err}"))? {
+        while let Some(chunk) = response.chunk().await.map_err(|err| {
+            redactor.redact_owned(format!("HTTP response read failed: {}", err.without_url()))
+        })? {
             if chunk.len() > limit.saturating_sub(bytes.len()) {
                 return Err(format!("HTTP response exceeds size limit ({limit} bytes)"));
             }
@@ -499,8 +576,11 @@ pub async fn custom_http_request(request: HttpRequestDto) -> Result<HttpResponse
         }
         String::from_utf8(bytes).map_err(|_| "HTTP response is not valid UTF-8 text".to_string())?
     } else {
-        response.text().await.map_err(|err| format!("HTTP response read failed: {err}"))?
+        response.text().await.map_err(|err| {
+            redactor.redact_owned(format!("HTTP response read failed: {}", err.without_url()))
+        })?
     };
+    let text = redactor.redact_owned(text);
 
     info!(
         target: "custom_provider_http",
@@ -536,33 +616,31 @@ pub async fn custom_http_stream_request(
         request.network_route.as_deref(),
         request.custom_proxy_url.as_deref(),
     )?;
-    let mut response = build_http_request(&client, request)?
-        .send()
-        .await
-        .map_err(|err| {
-            let err = err.without_url();
-            warn!(
-                target: "custom_provider_http",
-                transport = "stream",
-                host = %summary.host,
-                path = %summary.path,
-                model = %summary.model,
-                elapsed_ms = started_at.elapsed().as_millis(),
-                "custom provider request transport failed: {err}"
-            );
-            let message = format!("HTTP request failed: {err}");
-            emit_stream_event(
-                &app,
-                HttpStreamEventDto {
-                    stream_id: normalized_stream_id.clone(),
-                    kind: "error".to_string(),
-                    status: None,
-                    chunk: None,
-                    error: Some(message.clone()),
-                },
-            );
-            message
-        })?;
+    let (builder, redactor) = build_http_request(&client, request)?;
+    let mut response = builder.send().await.map_err(|err| {
+        let err = redactor.redact_owned(err.without_url().to_string());
+        warn!(
+            target: "custom_provider_http",
+            transport = "stream",
+            host = %summary.host,
+            path = %summary.path,
+            model = %summary.model,
+            elapsed_ms = started_at.elapsed().as_millis(),
+            "custom provider request transport failed: {err}"
+        );
+        let message = format!("HTTP request failed: {err}");
+        emit_stream_event(
+            &app,
+            HttpStreamEventDto {
+                stream_id: normalized_stream_id.clone(),
+                kind: "error".to_string(),
+                status: None,
+                chunk: None,
+                error: Some(message.clone()),
+            },
+        );
+        message
+    })?;
     let status = response.status().as_u16();
 
     info!(
@@ -590,9 +668,13 @@ pub async fn custom_http_stream_request(
     let mut error_bytes: Vec<u8> = Vec::new();
     let mut full_bytes: Vec<u8> = Vec::new();
     let mut pending_utf8: Vec<u8> = Vec::new();
+    let mut pending_secrets = String::new();
     let mut chunk_count = 0usize;
     while let Some(chunk) = response.chunk().await.map_err(|err| {
-        let message = format!("HTTP response stream read failed: {err}");
+        let message = redactor.redact_owned(format!(
+            "HTTP response stream read failed: {}",
+            err.without_url()
+        ));
         emit_stream_event(
             &app,
             HttpStreamEventDto {
@@ -612,6 +694,7 @@ pub async fn custom_http_stream_request(
         }
         pending_utf8.extend_from_slice(&chunk);
         if let Some(text) = take_decodable_utf8(&mut pending_utf8, false) {
+            let text = redactor.redact_stream(&mut pending_secrets, &text, false);
             emit_stream_event(
                 &app,
                 HttpStreamEventDto {
@@ -625,7 +708,9 @@ pub async fn custom_http_stream_request(
         }
     }
 
-    if let Some(text) = take_decodable_utf8(&mut pending_utf8, true) {
+    let tail = take_decodable_utf8(&mut pending_utf8, true).unwrap_or_default();
+    let text = redactor.redact_stream(&mut pending_secrets, &tail, true);
+    if !text.is_empty() {
         emit_stream_event(
             &app,
             HttpStreamEventDto {
@@ -639,7 +724,7 @@ pub async fn custom_http_stream_request(
     }
 
     if status < 200 || status >= 300 {
-        let error_text = String::from_utf8_lossy(&error_bytes).to_string();
+        let error_text = redactor.redact_owned(String::from_utf8_lossy(&error_bytes).to_string());
         let preview: String = error_text.chars().take(1000).collect();
         let message = format!("HTTP {status}: {preview}");
         warn!(
@@ -668,7 +753,7 @@ pub async fn custom_http_stream_request(
     }
 
     let byte_length = full_bytes.len();
-    let text = String::from_utf8_lossy(&full_bytes).to_string();
+    let text = redactor.redact_owned(String::from_utf8_lossy(&full_bytes).to_string());
 
     info!(
         target: "custom_provider_http",
@@ -705,27 +790,41 @@ pub async fn custom_http_stream_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    async fn bounded_response_fixture(raw_response: &'static [u8], limit: usize) -> Result<HttpResponseDto, String> {
+    async fn bounded_response_fixture(
+        raw_response: &'static [u8],
+        limit: usize,
+    ) -> Result<HttpResponseDto, String> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0u8; 4096]; let _ = stream.read(&mut request).await;
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request).await;
             // The caller may reject Content-Length before reading the body.
             let _ = stream.write_all(raw_response).await;
         });
         let mut request = diagnostic_request();
-        request.url = format!("http://{address}/docs"); request.method = "GET".into();
-        request.headers = None; request.body = None; request.body_mode = None;
-        request.network_route = Some("direct".into()); request.max_response_bytes = Some(limit);
+        request.url = format!("http://{address}/docs");
+        request.method = "GET".into();
+        request.headers = None;
+        request.body = None;
+        request.body_mode = None;
+        request.network_route = Some("direct".into());
+        request.max_response_bytes = Some(limit);
         let result = custom_http_request(request).await;
-        server.await.unwrap(); result
+        server.await.unwrap();
+        result
     }
 
     #[tokio::test]
     async fn bounded_response_rejects_content_length_before_body() {
-        let error = bounded_response_fixture(b"HTTP/1.1 200 OK\r\nContent-Length: 9999\r\nConnection: close\r\n\r\n", 16).await.unwrap_err();
+        let error = bounded_response_fixture(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 9999\r\nConnection: close\r\n\r\n",
+            16,
+        )
+        .await
+        .unwrap_err();
         assert!(error.contains("exceeds size limit (16 bytes)"));
     }
 
@@ -737,10 +836,162 @@ mod tests {
 
     #[tokio::test]
     async fn bounded_response_returns_complete_valid_document() {
-        let response = bounded_response_fixture(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\ndocument", 8).await.unwrap();
-        assert_eq!(response.text, "document"); assert_eq!(response.status, 200);
+        let response = bounded_response_fixture(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\ndocument",
+            8,
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.text, "document");
+        assert_eq!(response.status, 200);
     }
 
+    async fn read_local_request(stream: &mut tokio::net::TcpStream) -> String {
+        use tokio::io::AsyncReadExt;
+        let mut request = Vec::new();
+        while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let mut chunk = [0u8; 1024];
+            let count = stream.read(&mut chunk).await.unwrap();
+            if count == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..count]);
+        }
+        String::from_utf8(request).unwrap()
+    }
+
+    async fn assert_cross_origin_redirect_refused(route: &str, credential: &str) {
+        use tokio::io::AsyncWriteExt;
+        let origin = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin_address = origin.local_addr().unwrap();
+        let destination = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let destination_address = destination.local_addr().unwrap();
+        let origin_server = tokio::spawn(async move {
+            let (mut stream, _) = origin.accept().await.unwrap();
+            let initial_request = read_local_request(&mut stream).await;
+            let response = format!(
+                "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://{destination_address}/stolen\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            drop(stream);
+            // A proxy sees every redirected request, even when its URL has
+            // changed origin. Capture it instead of letting a refusal masquerade
+            // as safety because the proxy closed its listening socket.
+            let forwarded =
+                match tokio::time::timeout(Duration::from_millis(500), origin.accept()).await {
+                    Ok(Ok((mut stream, _))) => {
+                        let request = read_local_request(&mut stream).await;
+                        stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                        )
+                        .await
+                        .unwrap();
+                        Some(request)
+                    }
+                    _ => None,
+                };
+            (initial_request, forwarded)
+        });
+        let destination_server = tokio::spawn(async move {
+            match tokio::time::timeout(Duration::from_millis(500), destination.accept()).await {
+                Ok(Ok((mut stream, _))) => {
+                    let request = read_local_request(&mut stream).await;
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                        )
+                        .await
+                        .unwrap();
+                    Some(request)
+                }
+                _ => None,
+            }
+        });
+        let mut request = diagnostic_request();
+        request.url = format!("http://{origin_address}/start");
+        request.method = "GET".into();
+        request.body = None;
+        request.headers = match credential {
+            "query" => {
+                request.url.push_str("?provider_key=local-test-secret");
+                None
+            }
+            "bearer" => Some(HashMap::from([(
+                "Authorization".into(),
+                "Bearer local-test-secret".into(),
+            )])),
+            name => Some(HashMap::from([(name.into(), "local-test-secret".into())])),
+        };
+        request.network_route = Some(route.into());
+        request.custom_proxy_url =
+            (route == "custom-proxy").then(|| format!("http://{origin_address}"));
+        request.timeout_ms = Some(2_000);
+        let result = custom_http_request(request).await;
+        let (initial, proxy_forwarded) = origin_server.await.unwrap();
+        let destination_forwarded = destination_server.await.unwrap();
+        assert!(
+            initial.contains("local-test-secret"),
+            "fixture did not attach {credential}"
+        );
+        assert!(
+            proxy_forwarded.is_none(),
+            "{route} forwarded credentials through its proxy: {proxy_forwarded:?}"
+        );
+        assert!(
+            destination_forwarded.is_none(),
+            "{route} reached redirected origin: {destination_forwarded:?}"
+        );
+        assert!(
+            result.is_err(),
+            "{route} accepted cross-origin redirect with {credential}"
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_http_redirect_refuses_cross_origin_credentials_on_every_route() {
+        for route in ["direct", "system", "custom-proxy"] {
+            for credential in ["x-api-key", "x-goog-api-key", "bearer", "query"] {
+                assert_cross_origin_redirect_refused(route, credential).await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn custom_http_redirect_preserves_same_origin_credentials() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_local_request(&mut stream).await;
+            stream.write_all(b"HTTP/1.1 307 Temporary Redirect\r\nLocation: /same-origin\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+            drop(stream);
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let forwarded = read_local_request(&mut stream).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+            forwarded
+        });
+        let mut request = diagnostic_request();
+        request.url = format!("http://{address}/start");
+        request.method = "GET".into();
+        request.body = None;
+        request.headers = Some(HashMap::from([(
+            "x-api-key".into(),
+            "local-test-secret".into(),
+        )]));
+        request.network_route = Some("direct".into());
+        request.timeout_ms = Some(2_000);
+        let response = custom_http_request(request).await.unwrap();
+        let forwarded = server.await.unwrap();
+        assert!(forwarded.contains("GET /same-origin HTTP/1.1"));
+        assert!(forwarded.contains("x-api-key: local-test-secret"));
+        assert_eq!(response.status, 200);
+        assert_eq!(response.text, "ok");
+    }
 
     fn diagnostic_request() -> HttpRequestDto {
         HttpRequestDto {

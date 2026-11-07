@@ -5,14 +5,44 @@ import { createWorkbenchDocument } from './workbenchPersistence';
 import { createWorkbenchStore } from '../store/workbenchStore';
 import { getAssetDisplaySource, persistAssetMedia, readWorkspaceRecord } from '@/features/assets/application/assetMediaStorage';
 import type { WorkbenchTransport } from './workbenchTransport';
+import { selectWorkbenchConversations } from './conversationSelectors';
 import type { WorkbenchData } from '../domain/types';
 import type { AssetRecord } from '@/features/assets/application/assetCatalog';
+import { ReferenceNeedsPublicUrlError } from '@/features/channels/domain/referenceErrors';
 
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => false, invoke: vi.fn() }));
+const hostUpload = vi.hoisted(() => vi.fn(async () => 'https://host.test/first.png'));
+vi.mock('@/features/canvas/application/imageHosting', () => ({ uploadImageToConfiguredHost: hostUpload }));
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=';
 
 describe('IndexedDB workspace reload persistence', () => {
+  it('preserves the typed public-URL failure through reload and resubmits only the confirmed hosted slot', async () => {
+    const key = `test:reference-url:${crypto.randomUUID()}`;
+    const submit = vi.fn<WorkbenchTransport['submit']>()
+      .mockRejectedValueOnce(new ReferenceNeedsPublicUrlError({ kind: 'image', slot: 'first_frame' }))
+      .mockResolvedValueOnce({ jobId: 'hosted-job' });
+    const transport: WorkbenchTransport = { submit, poll: vi.fn(async () => ({ job_id: 'hosted-job', status: 'running' as const })), recover: vi.fn() };
+    const document = createWorkbenchDocument(key);
+    const first = createWorkbenchStore({ document, transport });
+    const taskId = await first.getState().submit({ kind: 'video', model: 'custom:test:video', prompt: 'A crane',
+      channelModeId: 'first-frame', referenceSlots: { first_frame: ['/local.png'], last_frame: ['/last.png'] } });
+    await document.flush?.();
+    const restored = createWorkbenchStore({ document: createWorkbenchDocument(key), transport });
+    await restored.getState().initialize();
+    expect(restored.getState().tasks[taskId].failure).toMatchObject({
+      kind: 'configuration', code: 'reference.needsPublicUrl', slotKey: 'first_frame', slotKind: 'image',
+    });
+    expect(submit).toHaveBeenCalledOnce();
+    expect(hostUpload).not.toHaveBeenCalled();
+    const retriedId = await restored.getState().retryWithHostedReference(taskId, { confirmed: true });
+    expect(retriedId).not.toBe(taskId);
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit.mock.calls[1][0].referenceSlots).toEqual({ first_frame: ['https://host.test/first.png'], last_frame: ['/last.png'] });
+    expect(restored.getState().tasks[retriedId].conversationId).toBe(restored.getState().tasks[taskId].conversationId);
+    expect(restored.getState().tasks[taskId].status).toBe('failed');
+    restored.getState().cancelWaiting(retriedId);
+  });
   it('commits binary references/results and restores with localStorage already full', async () => {
     const setItem = vi.fn(() => { throw new DOMException('Full origin storage', 'QuotaExceededError'); });
     vi.stubGlobal('localStorage', { getItem: () => null, setItem });
@@ -24,7 +54,9 @@ describe('IndexedDB workspace reload persistence', () => {
     };
     const saveResult = vi.fn(async (asset: Omit<AssetRecord, 'id' | 'createdAt' | 'favorite'>) => ({ ...asset, id: 'persisted-result', createdAt: 1, favorite: false }));
     const first = createWorkbenchStore({ document, transport, saveResult });
-    const taskId = await first.getState().submit({ kind: 'image', model: 'custom:test:image', prompt: 'Durable cat', references: [{ id: 'reference', kind: 'image', source: image }] });
+    const taskId = await first.getState().submit({ kind: 'image', model: 'custom:test:image', prompt: 'Durable cat', channelModeId: 'frames',
+      referenceSlots: { first_frame: [image] }, references: [{ id: 'reference', kind: 'image', source: image }] });
+    first.getState().setDraft({ channelModeId: 'frames', referenceSlots: { first_frame: ['/saved.png'] } });
     await document.flush?.();
     expect(first.getState().tasks[taskId].status).toBe('succeeded');
     expect(first.getState().storageStatus.mode).toBe('persistent');
@@ -38,6 +70,9 @@ describe('IndexedDB workspace reload persistence', () => {
     await second.getState().initialize();
     const restored = second.getState().tasks[taskId];
     expect(restored.input.prompt).toBe('Durable cat');
+    expect(restored.input.channelModeId).toBe('frames');
+    expect(restored.input.referenceSlots?.first_frame[0]).toMatch(/^asset-media:/);
+    expect(second.getState().draft).toMatchObject({ channelModeId: 'frames', referenceSlots: { first_frame: ['/saved.png'] } });
     expect(restored.results).toEqual(first.getState().tasks[taskId].results);
     expect(transport.submit).toHaveBeenCalledOnce();
     const persistedBlob = await readWorkspaceRecord<Blob>('media', restored.results[0].source);
@@ -49,13 +84,16 @@ describe('IndexedDB workspace reload persistence', () => {
   it('migrates legacy inline media without changing or overwriting legacy localStorage', async () => {
     const key = `test:migrate:${crypto.randomUUID()}`;
     const legacy = { conversations: {}, messages: {}, tasks: {}, selectedConversationId: null,
-      draft: { kind: 'image', prompt: '', model: '', references: [{ id: 'legacy', kind: 'image', source: image }] } };
+      draft: { kind: 'image', prompt: '', model: '', channelModeId: 4, referenceSlots: { first_frame: ['/kept.png', 3, null, ''], empty: [] },
+        references: [{ id: 'legacy', kind: 'image', source: image }] } };
     const setItem = vi.fn();
     vi.stubGlobal('localStorage', { getItem: (name: string) => name === key ? JSON.stringify({ version: 1, data: legacy }) : null, setItem });
     const document = createWorkbenchDocument(key);
     await document.initialize?.();
     await document.flush?.();
     expect(document.load().draft.references?.[0].source).toMatch(/^asset-media:/);
+    expect(document.load().draft.channelModeId).toBeUndefined();
+    expect(document.load().draft.referenceSlots).toEqual({ first_frame: ['/kept.png'] });
     expect(setItem).not.toHaveBeenCalled();
     const next = createWorkbenchDocument(key);
     await next.initialize?.();
@@ -110,7 +148,7 @@ describe('IndexedDB workspace reload persistence', () => {
   it('isolates dead legacy blobs without blocking new tasks or losing original recovery handles', async () => {
     const key = `test:stale:${crypto.randomUUID()}`;
     const dead = 'blob:http://localhost:1420/dead-before-reload';
-    const legacy: WorkbenchData = { conversations: { old: { id: 'old', title: 'Keep history', createdAt: 1, updatedAt: 2 } },
+    const legacy = { conversations: { old: { id: 'old', title: 'Keep history', createdAt: 1, updatedAt: 2 } },
       messages: {}, selectedConversationId: 'old', draft: { kind: 'image', model: '', prompt: 'blob:this-is-prompt-text' },
       tasks: { oldTask: { id: 'oldTask', conversationId: 'old', input: { kind: 'image', model: 'custom:test:image', prompt: 'Original cat' },
         status: 'succeeded', jobId: 'custom-local-original', results: [{ kind: 'image', source: dead }], waitingCanceled: false, createdAt: 1, updatedAt: 2 } } };
@@ -167,5 +205,35 @@ describe('IndexedDB workspace reload persistence', () => {
     await restored.initialize?.();
     expect(restored.load().draft.references?.[0].source).toBe(reference);
     expect(restored.load().draft.prompt).toBe('Edit 11');
+  });
+  it('hydrates legacy conversation defaults and preserves pin order and project linkage after reopening', async () => {
+    const key = `test:conversation-data:${crypto.randomUUID()}`;
+    const legacy = { conversations: {
+      old: { id: 'old', title: 'Legacy ungrouped', createdAt: 1, updatedAt: 100 },
+      linked: { id: 'linked', title: 'Linked', createdAt: 2, updatedAt: 200 },
+    }, messages: {}, tasks: {}, selectedConversationId: 'old', draft: { kind: 'image', model: '', prompt: '' } };
+    vi.stubGlobal('localStorage', { getItem: (name: string) => name === key ? JSON.stringify({ version: 1, data: legacy }) : null });
+    const document = createWorkbenchDocument(key);
+    const transport: WorkbenchTransport = { submit: vi.fn(), poll: vi.fn(), recover: vi.fn() };
+    const first = createWorkbenchStore({ document, transport });
+    await first.getState().initialize();
+    expect(first.getState().conversations.old).toMatchObject({ pinnedAt: null, projectId: null });
+    first.getState().associateConversationProject('linked', ' project-id ');
+    vi.spyOn(Date, 'now').mockReturnValueOnce(10).mockReturnValueOnce(20);
+    first.getState().setConversationPinned('linked', true);
+    first.getState().setConversationPinned('old', true);
+    await document.flush?.();
+    const next = createWorkbenchStore({ document: createWorkbenchDocument(key), transport });
+    await next.getState().initialize();
+    expect(selectWorkbenchConversations(next.getState()).map((conversation) => conversation.id)).toEqual(['old', 'linked']);
+    expect(selectWorkbenchConversations(next.getState(), { projectId: 'project-id' }).map((conversation) => conversation.id)).toEqual(['linked']);
+    expect(selectWorkbenchConversations(next.getState(), { projectId: null, text: 'LEGACY' }).map((conversation) => conversation.id)).toEqual(['old']);
+    next.getState().setConversationPinned('old', true);
+    expect(next.getState().conversations.old.pinnedAt).toBe(20);
+    next.getState().setConversationPinned('old', false);
+    next.getState().associateConversationProject('linked', null);
+    expect(selectWorkbenchConversations(next.getState()).map((conversation) => conversation.id)).toEqual(['linked', 'old']);
+    expect(next.getState().conversations.linked.projectId).toBeNull();
+    expect(transport.submit).not.toHaveBeenCalled();
   });
 });

@@ -24,6 +24,18 @@ describe('agent skill router', () => {
       .toBe('generation-diagnostics');
   });
 
+  it('exposes canvas operations for prompt editing requests without requiring the user to repeat node types', () => {
+    for (const text of ['把提示词都改成赛博朋克风格并生成', 'Update all prompts and generate']) {
+      const context = buildSkillContext({ text, surface: 'canvas' });
+      expect(resolveAgentToolPolicy({ skillContext: context, supportsVision: false, supportsToolSearch: false }).toolKinds).toContain('canvas');
+    }
+    expect(resolveAgentToolPolicy({
+      skillContext: buildSkillContext({ text: '你好', surface: 'canvas' }),
+      supportsVision: false,
+      supportsToolSearch: false,
+    }).toolKinds).toEqual([]);
+  });
+
   it('keeps unmatched requests minimal and never loads every skill detail', () => {
     const unmatched = buildSkillContext({ text: '你好' });
     expect(unmatched.selections).toEqual([]);
@@ -52,6 +64,13 @@ describe('agent skill router', () => {
       recentUserText: '帮我生成图片吧\n16比9，2k，神里绫华\n默认',
     }).selections.map((item) => item.skill.id)).toContain('image-prompt-director');
     for (const statusQuestion of [
+      '生成吧',
+      '你直接帮我提交生成呀',
+      '现在直接生成',
+      '开始执行吧',
+      '帮我提交一下',
+      '我已经选好了',
+      '模型选好了，继续',
       '你看看现在生成完成了吗',
       '生成好了吗',
       '看看状态',
@@ -68,6 +87,9 @@ describe('agent skill router', () => {
       text: '你好',
       recentUserText: '帮我生成图片吧',
     }).selections).toEqual([]);
+    expect(buildSkillContext({ text: '生成吧' }).selections).toEqual([]);
+    expect(buildSkillContext({ text: '你直接帮我提交生成呀', recentUserText: '帮我写份文档' }).selections)
+      .not.toContainEqual(expect.objectContaining({ skill: expect.objectContaining({ id: 'image-prompt-director' }) }));
   });
 
   it('derives equivalent local and tool-search permissions from selected skills', () => {

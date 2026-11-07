@@ -1,8 +1,10 @@
 import { create } from 'zustand';
+import { flushPendingCanvasViewport, isCanvasViewportInteractionActive } from '@/features/canvas/application/canvasViewportCommit';
 import { v4 as uuidv4 } from 'uuid';
 import type { Viewport } from '@xyflow/react';
 import {
   useCanvasStore,
+  normalizeCanvasGraph,
   type CanvasEdge,
   type CanvasHistoryState,
   type CanvasNode,
@@ -13,10 +15,8 @@ import {
   DEFAULT_NODE_WIDTH,
 } from '@/features/canvas/domain/canvasNodes';
 import { canvasNodeFactory } from '@/features/canvas/application/canvasServices';
-import {
-  migrateLegacyTagGraph,
-  reportTagMigrationDiagnostics,
-} from '@/features/canvas/application/tagPersistenceMigration';
+import { migrateCanvasNodeMedia, type ProjectMediaResolver, type ProjectMediaResolution } from '@/features/canvas/domain/projectMedia';
+import { listAssets, saveAsset, type AssetRecord } from '@/features/assets/application/assetCatalog';
 import {
   deleteProjectRecord,
   getProjectRecord,
@@ -27,6 +27,16 @@ import {
   type ProjectRecord,
   type ProjectSummaryRecord,
 } from '@/commands/projectState';
+import {
+  appendCanvasHistory,
+  applyCanvasHistoryEntry,
+  type CanvasGraph,
+  mapCanvasHistoryValues,
+  MAX_HISTORY_BYTES,
+  MAX_PERSISTED_HISTORY_STEPS,
+  normalizeCanvasHistory,
+  trimCanvasHistory,
+} from './canvasHistory';
 
 const DEFAULT_VIEWPORT: Viewport = {
   x: 0,
@@ -42,20 +52,27 @@ function createEmptyHistory(): CanvasHistoryState {
 }
 
 const IMAGE_REF_PREFIX = '__img_ref__:';
+const HISTORY_MEDIA_FIELDS: Record<string, true | undefined> = {
+  imageUrl: true, previewImageUrl: true, thumbnailUrl: true, sourceImageUrl: true,
+  snapshotUrl: true, backgroundImageUrl: true, backgroundPanoramaUrl: true,
+  videoUrl: true, localVideoUrl: true, audioUrl: true, localAudioUrl: true,
+  refImageUrl: true, coverUrl: true, url: true,
+};
 let openProjectRequestSeq = 0;
 const UPSERT_DEBOUNCE_MS = 260;
 const VIEWPORT_UPSERT_DEBOUNCE_MS = 280;
 const VIEWPORT_EPSILON = 0.001;
 const IDLE_PERSIST_TIMEOUT_MS = 1200;
 const FALLBACK_IDLE_DELAY_MS = 64;
-const MAX_PERSISTED_HISTORY_STEPS = 12;
-const MAX_HISTORY_RESTORE_JSON_CHARS = 1_500_000;
+const INTERACTION_PERSIST_RECHECK_MS = 80;
+const MAX_INTERACTION_PERSIST_DELAY_MS = 5_000;
 const DELETE_RETRY_DELAY_MS = 80;
 const MAX_DELETE_RETRIES = 10;
-const MAX_PROMPT_APPLY_HISTORY_STEPS = 50;
 
 interface QueuedProjectUpsert {
   project: Project;
+  queuedAt: number;
+  cancelIdle?: () => void;
   /** True if this entry was queued via `persistProject(immediate=true)`.
    *  Carried through the queue so that when settle re-flushes the queue
    *  after a prior in-flight upsert finishes, the close-time data still
@@ -98,7 +115,8 @@ export type PromptCanvasTarget =
   | { kind: 'existing'; projectId: string }
   | { kind: 'new'; name: string };
 
-type PersistedProject = Project & {
+type PersistedProject = Omit<Project, 'history'> & {
+  history: unknown;
   imagePool?: string[];
 };
 
@@ -130,12 +148,10 @@ function decodeImageReference(
     return imageUrl;
   }
 
-  const index = Number.parseInt(imageUrl.slice(IMAGE_REF_PREFIX.length), 10);
-  if (!Number.isFinite(index) || index < 0) {
-    return null;
-  }
-
-  return imagePool[index] ?? null;
+  const rawIndex = imageUrl.slice(IMAGE_REF_PREFIX.length);
+  const index = /^\d+$/.test(rawIndex) ? Number(rawIndex) : -1;
+  // Keep unresolved references as evidence; media migration adds a typed missing marker.
+  return Number.isSafeInteger(index) && index >= 0 ? imagePool[index] ?? imageUrl : imageUrl;
 }
 
 function mapNodeImageReferences(
@@ -229,6 +245,25 @@ function mapNodeImageReferences(
         && /^(?:data|blob):/i.test(nextData.generationRetryResultUrl.trim())) {
         nextData.generationRetryResultUrl = null;
       }
+      // A `blob:` URL never outlives its page; a stored one renders as a broken image (canvas,
+      // asset library). When the other copy survived, use it: a dead preview falls back to the
+      // full image, a dead full image to its preview (older browser builds kept only the preview
+      // durable). A node with neither keeps its URLs so its recovery path can run.
+      const isBlob = (value: unknown) => typeof value === 'string' && /^blob:/i.test(value);
+      const isDurable = (value: unknown) => typeof value === 'string' && value.length > 0 && !isBlob(value);
+      if (isBlob(nextData.previewImageUrl) && isDurable(nextData.imageUrl)) {
+        nextData.mediaReferences = {
+          ...(nextData.mediaReferences && typeof nextData.mediaReferences === 'object' ? nextData.mediaReferences : {}),
+          previewImageUrl: { status: 'missing', source: nextData.previewImageUrl, reason: 'unavailable-blob' },
+        };
+        nextData.previewImageUrl = nextData.imageUrl;
+      } else if (isBlob(nextData.imageUrl) && isDurable(nextData.previewImageUrl)) {
+        nextData.mediaReferences = {
+          ...(nextData.mediaReferences && typeof nextData.mediaReferences === 'object' ? nextData.mediaReferences : {}),
+          imageUrl: { status: 'missing', source: nextData.imageUrl, reason: 'unavailable-blob' },
+        };
+        nextData.imageUrl = nextData.previewImageUrl;
+      }
 
       if (Array.isArray(nextData.frames)) {
         nextData.frames = nextData.frames.map((frame) => {
@@ -287,36 +322,25 @@ function mapHistoryImageReferences(
   history: CanvasHistoryState,
   mapImageUrl: (imageUrl: string | null | undefined) => string | null | undefined
 ): CanvasHistoryState {
-  const mapSnapshot = (snapshot: unknown): CanvasHistoryState['past'][number] => {
-    const snapshotRecord =
-      snapshot && typeof snapshot === 'object'
-        ? (snapshot as Partial<CanvasHistoryState['past'][number]>)
-        : {};
-    return {
-      nodes: mapNodeImageReferences(
-        Array.isArray(snapshotRecord.nodes) ? snapshotRecord.nodes : [],
-        mapImageUrl
-      ),
-      edges: Array.isArray(snapshotRecord.edges) ? snapshotRecord.edges : [],
-    };
+  const mapValue = (value: unknown, path: Array<string | number>): unknown => {
+    const key = path[path.length - 1];
+    if (key === 'generationRetryResultUrl' && typeof value === 'string' && /^(?:data|blob):/i.test(value.trim())) return null;
+    if (typeof key === 'string' && HISTORY_MEDIA_FIELDS[key] && (typeof value === 'string' || value === null || value === undefined)) return mapImageUrl(value);
+    if (path[path.length - 2] === 'snapshotHistory' && typeof value === 'string') return mapImageUrl(value);
+    if (Array.isArray(value)) return value.map((item, index) => mapValue(item, [...path, index]));
+    if (!value || typeof value !== 'object') return value;
+    // Whole inserted/removed nodes use exactly the same media repair rules as the live graph.
+    if (path[0] === 'nodes' && path.length === 2) return mapNodeImageReferences([value as CanvasNode], mapImageUrl)[0];
+    return Object.fromEntries(Object.entries(value).map(([field, item]) => [field, mapValue(item, [...path, field])]));
   };
-  const past = Array.isArray(history?.past) ? history.past : [];
-  const future = Array.isArray(history?.future) ? history.future : [];
-
-  return {
-    past: past.map(mapSnapshot),
-    future: future.map(mapSnapshot),
-  };
+  return mapCanvasHistoryValues(history, mapValue);
 }
 
 function trimHistoryForPersistence(history: CanvasHistoryState): CanvasHistoryState {
-  return {
-    past: history.past.slice(-MAX_PERSISTED_HISTORY_STEPS),
-    future: history.future.slice(-MAX_PERSISTED_HISTORY_STEPS),
-  };
+  return trimCanvasHistory(history, MAX_PERSISTED_HISTORY_STEPS);
 }
 
-export function encodeProject(project: Project): PersistedProject {
+export function encodeProject(project: Project): Project & { imagePool: string[] } {
   const imagePool: string[] = [];
   const imageIndexMap = new Map<string, number>();
   const encode = (imageUrl: string | null | undefined) =>
@@ -325,38 +349,76 @@ export function encodeProject(project: Project): PersistedProject {
   return {
     ...project,
     nodes: mapNodeImageReferences(project.nodes, encode),
-    history: mapHistoryImageReferences(project.history, encode),
+    history: mapHistoryImageReferences(trimHistoryForPersistence(project.history), encode),
     imagePool,
   };
 }
 
+/** Reconstruct each reachable historical graph before migrating it, including patch-era records. */
+function historySnapshots(history: CanvasHistoryState, current: CanvasGraph): { past: CanvasGraph[]; future: CanvasGraph[] } {
+  const stack = (entries: CanvasHistoryState['past'], direction: 'undo' | 'redo'): CanvasGraph[] => {
+    let cursor = current;
+    return entries.slice().reverse().map((entry) => {
+      cursor = applyCanvasHistoryEntry(cursor, entry, direction);
+      return { ...cursor,
+        ...(entry.groupId ? { historyGroupId: entry.groupId } : {}),
+        ...(entry.agentTurnId ? { historyAgentTurnId: entry.agentTurnId } : {}),
+      };
+    }).reverse();
+  };
+  return { past: stack(history.past, 'undo'), future: stack(history.future, 'redo') };
+}
+
 export function decodeProject(project: PersistedProject): Project {
-  const decode = (imageUrl: string | null | undefined) =>
-    decodeImageReference(imageUrl, project.imagePool);
+  const { imagePool, ...fields } = project;
+  const decode = (imageUrl: string | null | undefined) => decodeImageReference(imageUrl, imagePool);
+  const rawCurrent = { nodes: project.nodes, edges: project.edges };
+  const decodedCurrent = { nodes: mapNodeImageReferences(project.nodes, decode), edges: project.edges };
+  const rawHistory = normalizeCanvasHistory(project.history, rawCurrent);
+  const decodedHistory = mapHistoryImageReferences(rawHistory, decode);
+  const current = normalizeCanvasGraph(decodedCurrent.nodes, decodedCurrent.edges);
+  const history = normalizeCanvasHistory(historySnapshots(decodedHistory, decodedCurrent), current,
+    (graph) => normalizeCanvasGraph(graph.nodes, graph.edges));
+  return { ...fields, ...current, nodeCount: current.nodes.length, history: trimHistoryForPersistence(history) };
+}
 
-  const decodedNodes = mapNodeImageReferences(project.nodes, decode);
-  const migratedCurrent = migrateLegacyTagGraph(decodedNodes, project.edges);
-  const migrateSnapshot = (
-    snapshot: CanvasHistoryState['past'][number],
-    scope: string,
-  ): CanvasHistoryState['past'][number] => {
-    const migrated = migrateLegacyTagGraph(snapshot.nodes, snapshot.edges);
-    reportTagMigrationDiagnostics(scope, migrated.diagnostics);
-    return { nodes: migrated.nodes, edges: migrated.edges };
+/** Resolve legacy URL fields to committed asset ids without submitting generation or dropping evidence. */
+export async function migrateProjectMedia(project: Project, resolver?: ProjectMediaResolver): Promise<Project> {
+  const cache = new Map<string, Promise<ProjectMediaResolution | null>>();
+  let assets: Promise<AssetRecord[]> | undefined;
+  const resolve: ProjectMediaResolver = (request) => {
+    const key = `${request.kind}:${request.assetId ?? request.source}`;
+    let pending = cache.get(key);
+    if (!pending) {
+      pending = resolver ? resolver(request) : (async () => {
+        assets ??= listAssets();
+        const existing = (await assets).find((asset) => asset.kind === request.kind && (request.assetId
+          ? asset.id === request.assetId
+          : !asset.id.startsWith('project:') && asset.source === request.source));
+        if (existing && !/^(?:blob|data):/i.test(existing.source)) return { assetId: existing.id, source: existing.source };
+        if (request.assetId && !existing) return null;
+        const saved = await saveAsset({ id: existing?.id, kind: request.kind, source: existing?.source ?? request.source, name: existing?.name ?? request.name,
+          origin: existing?.origin ?? 'uploaded', projectId: existing?.projectId ?? project.id, nodeId: existing?.nodeId ?? request.nodeId,
+          favorite: existing?.favorite, createdAt: existing?.createdAt, previewUrl: existing?.previewUrl,
+          metadata: { ...existing?.metadata, migratedFromLegacyProject: true } });
+        return { assetId: saved.id, source: saved.source };
+      })();
+      cache.set(key, pending);
+    }
+    return pending;
   };
-  const decodedHistory = mapHistoryImageReferences(project.history, decode);
-
-  reportTagMigrationDiagnostics(`project:${project.id}`, migratedCurrent.diagnostics);
-
-  return {
-    ...project,
-    nodes: migratedCurrent.nodes,
-    edges: migratedCurrent.edges,
-    history: {
-      past: decodedHistory.past.map((snapshot, index) => migrateSnapshot(snapshot, `project:${project.id}:past:${index}`)),
-      future: decodedHistory.future.map((snapshot, index) => migrateSnapshot(snapshot, `project:${project.id}:future:${index}`)),
-    },
-  };
+  const migrateGraph = async (graph: CanvasGraph): Promise<CanvasGraph> => ({ ...graph, nodes: await migrateCanvasNodeMedia(graph.nodes, resolve) });
+  const current = await migrateGraph(project);
+  const snapshots = historySnapshots(project.history, project);
+  const past = await Promise.all(snapshots.past.map(migrateGraph));
+  const future = await Promise.all(snapshots.future.map(migrateGraph));
+  const migratedGraphs = [current, ...past, ...future];
+  if ([project, ...snapshots.past, ...snapshots.future].every((before, index) => {
+    const after = migratedGraphs[index];
+    return before.nodes.length === after.nodes.length && before.nodes.every((node, nodeIndex) => node === after.nodes[nodeIndex]);
+  })) return project;
+  const history = normalizeCanvasHistory({ past, future }, current);
+  return { ...project, ...current, history: trimHistoryForPersistence(history) };
 }
 
 function safeParseJson<T>(value: string, fallback: T): T {
@@ -466,10 +528,9 @@ function toProjectRecord(project: Project): ProjectRecord {
   const persistedNodes = encodedProject.nodes;
   const persistedHistory = trimHistoryForPersistence(encodedProject.history);
   const nodesJson = JSON.stringify(persistedNodes);
-  const historyJson = JSON.stringify({
-    ...persistedHistory,
-    imagePool: encodedProject.imagePool ?? [],
-  });
+  // The pool has its own column. Keeping it out of history also makes the restore-size bound
+  // independent of a large unchanged image in the current graph.
+  const historyJson = JSON.stringify(persistedHistory);
 
   return {
     id: encodedProject.id,
@@ -489,7 +550,7 @@ function fromProjectRecord(record: ProjectRecord): Project {
   const parsedNodes = safeParseJson<CanvasNode[]>(record.nodesJson, []);
   const parsedEdges = safeParseJson<CanvasEdge[]>(record.edgesJson, []);
   const parsedViewport = safeParseJson<Viewport>(record.viewportJson, DEFAULT_VIEWPORT);
-  const shouldRestoreHistory = record.historyJson.length <= MAX_HISTORY_RESTORE_JSON_CHARS;
+  const shouldRestoreHistory = record.historyJson.length <= MAX_HISTORY_BYTES;
   const topLevelImagePool = getTopLevelImagePool(record);
   const extractedImagePool = extractImagePoolFromHistoryJson(record.historyJson);
   const parsedHistoryPayload = shouldRestoreHistory
@@ -545,17 +606,19 @@ interface PersistViewportOptions {
   debounceMs?: number;
 }
 
-function scheduleIdlePersist(task: () => void): void {
+function scheduleIdlePersist(task: () => void): () => void {
   const idleHost = globalThis as typeof globalThis & {
     requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+    cancelIdleCallback?: (handle: number) => void;
   };
-
+  let active = true;
+  const run = () => { if (active) { active = false; task(); } };
   if (typeof idleHost.requestIdleCallback === 'function') {
-    idleHost.requestIdleCallback(task, { timeout: IDLE_PERSIST_TIMEOUT_MS });
-    return;
+    const handle = idleHost.requestIdleCallback(run, { timeout: IDLE_PERSIST_TIMEOUT_MS });
+    return () => { active = false; idleHost.cancelIdleCallback?.(handle); };
   }
-
-  setTimeout(task, FALLBACK_IDLE_DELAY_MS);
+  const handle = setTimeout(run, FALLBACK_IDLE_DELAY_MS);
+  return () => { active = false; clearTimeout(handle); };
 }
 
 function hasViewportMeaningfulDelta(current: Viewport, next: Viewport): boolean {
@@ -580,6 +643,7 @@ function clearQueuedProjectUpsert(projectId: string): void {
     clearTimeout(timer);
     projectUpsertTimers.delete(projectId);
   }
+  queuedProjectUpserts.get(projectId)?.cancelIdle?.();
   queuedProjectUpserts.delete(projectId);
 }
 
@@ -606,9 +670,6 @@ function flushProjectUpsert(projectId: string, options?: FlushProjectUpsertOptio
     return;
   }
 
-  queuedProjectUpserts.delete(projectId);
-  projectUpsertsInFlight.add(projectId);
-
   const settle = () => {
     projectUpsertsInFlight.delete(projectId);
 
@@ -623,16 +684,31 @@ function flushProjectUpsert(projectId: string, options?: FlushProjectUpsertOptio
       // had to settle first.
       flushProjectUpsert(projectId, { bypassIdle: next.immediate });
     }
+    if (queuedViewportUpserts.has(projectId)) flushViewportUpsert(projectId);
   };
 
   const executePersist = () => {
-    if (deletingProjectIds.has(projectId)) {
-      settle();
+    // A canceled idle callback may still be delivered by the host. It cannot
+    // write a superseded snapshot or resurrect a deleted project.
+    if (deletingProjectIds.has(projectId) || queuedProjectUpserts.get(projectId) !== queued) return;
+    queued.cancelIdle = undefined;
+    if (!options?.bypassIdle && !queued.immediate && isCanvasViewportInteractionActive()
+      && Date.now() - queued.queuedAt < MAX_INTERACTION_PERSIST_DELAY_MS) {
+      const timer = setTimeout(() => {
+        projectUpsertTimers.delete(projectId);
+        flushProjectUpsert(projectId);
+      }, INTERACTION_PERSIST_RECHECK_MS);
+      projectUpsertTimers.set(projectId, timer);
       return;
     }
-
-    const record = toProjectRecord(queued.project);
-    void upsertProjectRecord(record)
+    const timer = projectUpsertTimers.get(projectId);
+    if (timer) clearTimeout(timer);
+    projectUpsertTimers.delete(projectId);
+    queuedProjectUpserts.delete(projectId);
+    projectUpsertsInFlight.add(projectId);
+    // Defer serialization itself, not only the IPC write. Capture synchronous
+    // encoding failures in the same checkpoint failure path as storage errors.
+    void Promise.resolve().then(() => upsertProjectRecord(toProjectRecord(queued.project)))
       .then(() => {
         projectUpsertFailures.delete(projectId);
       })
@@ -644,11 +720,11 @@ function flushProjectUpsert(projectId: string, options?: FlushProjectUpsertOptio
   };
 
   if (options?.bypassIdle || queued.immediate) {
+    queued.cancelIdle?.();
     executePersist();
     return;
   }
-
-  scheduleIdlePersist(executePersist);
+  if (!queued.cancelIdle) queued.cancelIdle = scheduleIdlePersist(executePersist);
 }
 
 function queueProjectUpsert(project: Project, options?: PersistProjectOptions): void {
@@ -660,7 +736,8 @@ function queueProjectUpsert(project: Project, options?: PersistProjectOptions): 
   // non-immediate persists.
   const existing = queuedProjectUpserts.get(projectId);
   const immediate = requestImmediate || (existing?.immediate ?? false);
-  queuedProjectUpserts.set(projectId, { project, immediate });
+  existing?.cancelIdle?.();
+  queuedProjectUpserts.set(projectId, { project, immediate, queuedAt: existing?.queuedAt ?? Date.now() });
 
   const existingTimer = projectUpsertTimers.get(projectId);
   if (existingTimer) {
@@ -696,13 +773,19 @@ function queueProjectUpsert(project: Project, options?: PersistProjectOptions): 
  * see "items disappear after exit/reopen".
  */
 async function awaitProjectPersistDrain(projectId: string): Promise<void> {
-  // First: if a debounce timer is still pending, kick it off immediately.
-  const timer = projectUpsertTimers.get(projectId);
-  if (timer) {
-    clearTimeout(timer);
-    projectUpsertTimers.delete(projectId);
+  // Explicit checkpoints promote even an idle/interaction-deferred snapshot.
+  // An in-flight write will pass this immediate intent to its next queued write.
+  const promotePending = () => {
+    const queued = queuedProjectUpserts.get(projectId);
+    if (queued) queued.immediate = true;
+    const timer = projectUpsertTimers.get(projectId);
+    if (timer) {
+      clearTimeout(timer);
+      projectUpsertTimers.delete(projectId);
+    }
     flushProjectUpsert(projectId, { bypassIdle: true });
-  }
+  };
+  promotePending();
 
   // Then poll until queue + inflight + timers are all clear.
   let waited = 0;
@@ -716,6 +799,7 @@ async function awaitProjectPersistDrain(projectId: string): Promise<void> {
     if (waited >= MAX_WAIT_MS) {
       throw new Error(`Project persistence timed out after ${MAX_WAIT_MS}ms for ${projectId}.`);
     }
+    promotePending();
     await new Promise<void>((resolve) => setTimeout(resolve, POLL_MS));
     waited += POLL_MS;
   }
@@ -735,7 +819,7 @@ function persistProject(project: Project, options?: PersistProjectOptions): void
 }
 
 function flushViewportUpsert(projectId: string): void {
-  if (deletingProjectIds.has(projectId) || viewportUpsertsInFlight.has(projectId)) {
+  if (deletingProjectIds.has(projectId) || viewportUpsertsInFlight.has(projectId) || projectUpsertsInFlight.has(projectId)) {
     return;
   }
 
@@ -866,24 +950,6 @@ function resolvePromptNodePosition(nodes: CanvasNode[]): { x: number; y: number 
   };
 }
 
-function appendProjectHistorySnapshot(
-  history: CanvasHistoryState,
-  nodes: CanvasNode[],
-  edges: CanvasEdge[]
-): CanvasHistoryState {
-  const snapshot = { nodes, edges };
-  const past = history.past ?? [];
-  const last = past[past.length - 1];
-  const nextPast =
-    last && last.nodes === nodes && last.edges === edges
-      ? past
-      : [...past, snapshot].slice(-MAX_PROMPT_APPLY_HISTORY_STEPS);
-
-  return {
-    past: nextPast,
-    future: [],
-  };
-}
 
 function addPromptNodeToProject(
   project: Project,
@@ -905,10 +971,10 @@ function addPromptNodeToProject(
   return {
     ...project,
     nodes: nextNodes,
-    history: appendProjectHistorySnapshot(
+    history: appendCanvasHistory(
       project.history ?? createEmptyHistory(),
-      project.nodes,
-      project.edges
+      project,
+      { nodes: nextNodes, edges: project.edges },
     ),
     nodeCount: nextNodes.length,
     updatedAt,
@@ -990,6 +1056,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   createProject: (name) => {
+    flushPendingCanvasViewport();
     const id = uuidv4();
     const now = Date.now();
     const project: Project = {
@@ -1131,6 +1198,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   openProject: (id) => {
+    flushPendingCanvasViewport();
     const reqSeq = ++openProjectRequestSeq;
     useCanvasStore.getState().closeImageViewer();
     set({ isOpeningProject: true });
@@ -1153,7 +1221,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           return;
         }
 
-        const project = fromProjectRecord(record);
+        const project = await migrateProjectMedia(fromProjectRecord(record));
+        if (reqSeq !== openProjectRequestSeq) return;
         set((state) => ({
           currentProjectId: id,
           currentProject: project,
@@ -1177,6 +1246,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   closeProject: () => {
+    flushPendingCanvasViewport();
     openProjectRequestSeq += 1;
     useCanvasStore.getState().closeImageViewer();
     const { currentProjectId, currentProject } = get();
@@ -1290,6 +1360,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     };
 
     set({ currentProject: nextProject });
+    // A delayed graph snapshot must not overwrite a newer viewport that reached
+    // storage first. Keep its graph/history, updating only the committed camera.
+    const queued = queuedProjectUpserts.get(currentProjectId);
+    if (queued) queued.project = { ...queued.project, viewport: nextViewport };
     queueViewportUpsert(currentProjectId, nextViewport);
   },
 

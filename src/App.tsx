@@ -1,10 +1,15 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
+import { GenerationDetailsHost } from './features/library/ui/GenerationDetailsDialog';
+import { StudioCommandMenu } from './features/studio/StudioCommandMenu';
+import { MediaViewerHost } from './features/viewer/MediaViewerHost';
 import { TitleBar } from './components/TitleBar';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import { UpdateAvailableDialog, type UpdateIgnoreMode } from './components/UpdateAvailableDialog';
 import { GlobalErrorDialog } from './components/GlobalErrorDialog';
+import { UiButton } from './components/ui';
+import { launchLocation, settleLaunchLocation } from './features/studio/appLocation';
 import { StudioShell } from './features/studio/StudioShell';
 import { useThemeStore } from './stores/themeStore';
 import { useProjectStore } from './stores/projectStore';
@@ -52,6 +57,7 @@ function App() {
   const uiRadiusPreset = useSettingsStore((state) => state.uiRadiusPreset);
   const themeTonePreset = useSettingsStore((state) => state.themeTonePreset);
   const accentColor = useSettingsStore((state) => state.accentColor);
+  const accentSource = useSettingsStore((state) => state.accentSource);
   const autoCheckAppUpdateOnLaunch = useSettingsStore((state) => state.autoCheckAppUpdateOnLaunch);
   const enableUpdateDialog = useSettingsStore((state) => state.enableUpdateDialog);
   const setEnableUpdateDialog = useSettingsStore((state) => state.setEnableUpdateDialog);
@@ -93,10 +99,16 @@ function App() {
 
   useEffect(() => {
     const root = document.documentElement;
+    if (accentSource === 'theme') {
+      // The active color theme supplies --accent-rgb from CSS.
+      root.style.removeProperty('--accent');
+      root.style.removeProperty('--accent-rgb');
+      return;
+    }
     const normalized = accentColor.startsWith('#') ? accentColor : `#${accentColor}`;
     root.style.setProperty('--accent', normalized);
     root.style.setProperty('--accent-rgb', toRgbCssValue(normalized));
-  }, [accentColor]);
+  }, [accentColor, accentSource]);
 
   useEffect(() => {
     return subscribeWebProjectStorageStatus((status) => {
@@ -107,7 +119,15 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void hydrate();
+    // Reload / restart: return to the canvas that was open. A failed hydrate still releases location writes.
+    void hydrate().then(() => {
+      const { projects, currentProjectId: openId, openProject } = useProjectStore.getState();
+      const launch = launchLocation;
+      if (launch.view !== 'canvas' || openId) return settleLaunchLocation(null);
+      const exists = projects.some((project) => project.id === launch.projectId);
+      settleLaunchLocation(exists ? null : { view: 'home' });
+      if (exists) openProject(launch.projectId);
+    }, () => settleLaunchLocation({ view: 'home' }));
   }, [hydrate]);
 
   useEffect(() => {
@@ -228,37 +248,39 @@ function App() {
   if (!isHydrated) {
     return (
       <AppErrorBoundary>
-        <div className="h-full w-full bg-bg-dark" />
+        <div className="h-full w-full bg-bg" />
       </AppErrorBoundary>
     );
   }
 
   return (
     <AppErrorBoundary>
-        <div className="w-full h-full flex flex-col bg-bg-dark">
+        <div className="relative w-full h-full flex flex-col bg-bg">
           <TitleBar
             onSettingsClick={() => {
               setSettingsInitialCategory('general');
               setHasOpenedSettings(true);
               setShowSettings(true);
             }}
-            showBackButton={!!currentProjectId}
-            onBackClick={closeProject}
+            onBackClick={currentProjectId ? closeProject : undefined}
+            overlay={Boolean(currentProjectId)}
           />
 
           {showWebStorageFallback ? (
             <div
               role="status"
-              className="flex shrink-0 items-center justify-between gap-4 border-b border-amber-400/30 bg-amber-400/10 px-4 py-2 text-xs text-text-dark"
+              className="flex shrink-0 items-center justify-between gap-4 border-b border-warning/30 bg-warning/10 px-4 py-2 text-xs text-text-dark"
             >
               <span>{t('project.webStorageFallback')}</span>
-              <button
+              <UiButton
                 type="button"
-                className="shrink-0 rounded-sm px-2 py-1 text-text-muted transition-colors hover:bg-amber-400/10 hover:text-text-dark"
+                variant="ghost"
+                size="sm"
+                className="shrink-0"
                 onClick={() => setShowWebStorageFallback(false)}
               >
                 {t('common.close')}
-              </button>
+              </UiButton>
             </div>
           ) : null}
 
@@ -267,13 +289,13 @@ function App() {
             {currentProjectId ? (
               <div
                 key={`canvas-${currentProjectId}`}
-                className="ui-workspace-enter relative h-full min-h-0 min-w-0 overflow-hidden"
+                className="relative h-full min-h-0 min-w-0 overflow-hidden"
               >
                 <Suspense
                   fallback={(
                     <div
                       role="status"
-                      className="flex h-full items-center justify-center gap-2 bg-bg-dark text-sm text-text-muted"
+                      className="flex h-full items-center justify-center gap-2 bg-bg text-sm text-text-muted"
                     >
                       <span className="h-2 w-2 animate-pulse rounded-full bg-accent motion-reduce:animate-none" />
                       {t('common.loading')}
@@ -292,7 +314,7 @@ function App() {
               fallback={showSettings ? (
                 <div
                   role="status"
-                  className="fixed inset-0 z-100000 flex items-center justify-center bg-black/45 text-sm text-white backdrop-blur-xs"
+                  className="fixed inset-0 z-100000 flex items-center justify-center bg-[var(--scrim)] text-sm text-text-dark backdrop-blur-xs"
                 >
                   {t('common.loading')}
                 </div>
@@ -313,6 +335,9 @@ function App() {
             currentVersion={currentVersion}
             onApplyIgnore={handleApplyIgnore}
           />
+          <MediaViewerHost />
+          <GenerationDetailsHost />
+          <StudioCommandMenu />
           <GlobalErrorDialog
             isOpen={Boolean(globalError)}
             title={globalError?.title ?? ''}

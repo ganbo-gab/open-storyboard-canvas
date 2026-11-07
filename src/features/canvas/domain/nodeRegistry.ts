@@ -22,6 +22,7 @@ import {
   type TextAnnotationNodeData,
   type UploadImageNodeData,
   type VideoNodeData,
+  fitStoryboardFrames,
 } from './canvasNodes';
 import { DEFAULT_NODE_DISPLAY_NAME } from './nodeDisplay';
 import { DEFAULT_IMAGE_MODEL_ID } from '../models';
@@ -92,6 +93,7 @@ const imageEditNodeDefinition: CanvasNodeDefinition<ImageEditNodeData> = {
   menuLabelKey: 'node.menu.aiImageGeneration',
   menuIcon: 'sparkles',
   visibleInMenu: true,
+  defaultSize: { width: 520, height: 300 },
   capabilities: {
     toolbar: true,
     promptInput: false,
@@ -129,6 +131,7 @@ const aiVideoNodeDefinition: CanvasNodeDefinition<AiVideoNodeData> = {
   menuLabelKey: 'node.menu.aiVideoGeneration',
   menuIcon: 'video',
   visibleInMenu: true,
+  defaultSize: { width: 560, height: 315 },
   capabilities: {
     toolbar: true,
     selectionToolbar: 'full',
@@ -159,6 +162,7 @@ const aiTextNodeDefinition: CanvasNodeDefinition<AiTextNodeData> = {
   menuLabelKey: 'node.menu.aiTextGeneration',
   menuIcon: 'sparkles',
   visibleInMenu: true,
+  defaultSize: { width: 420, height: 260 },
   capabilities: {
     toolbar: true,
     selectionToolbar: 'deleteOnly',
@@ -194,10 +198,7 @@ const aiAudioNodeDefinition: CanvasNodeDefinition<AiAudioNodeData> = {
   menuLabelKey: 'node.menu.aiAudioGeneration',
   menuIcon: 'audio',
   visibleInMenu: true,
-  defaultSize: {
-    width: 640,
-    height: 340,
-  },
+  defaultSize: { width: 420, height: 240 },
   capabilities: {
     toolbar: true,
     selectionToolbar: 'deleteOnly',
@@ -349,6 +350,7 @@ const groupNodeDefinition: CanvasNodeDefinition<GroupNodeData> = {
   menuLabelKey: 'node.menu.storyboard',
   menuIcon: 'layout',
   visibleInMenu: false,
+  defaultSize: { width: 320, height: 220 },
   capabilities: {
     toolbar: false,
     promptInput: false,
@@ -544,6 +546,7 @@ const storyboardGenNodeDefinition: CanvasNodeDefinition<StoryboardGenNodeData> =
   menuLabelKey: 'node.menu.storyboardGen',
   menuIcon: 'sparkles',
   visibleInMenu: true,
+  defaultSize: { width: 480, height: 340 },
   capabilities: {
     toolbar: true,
     promptInput: false,
@@ -560,7 +563,7 @@ const storyboardGenNodeDefinition: CanvasNodeDefinition<StoryboardGenNodeData> =
     displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.storyboardGen],
     gridRows: 2,
     gridCols: 2,
-    frames: [],
+    frames: fitStoryboardFrames([], 4),
     ratioControlMode: 'cell',
     model: DEFAULT_IMAGE_MODEL_ID,
     size: '2K' as ImageSize,
@@ -622,6 +625,7 @@ const blueprintNodeDefinition: CanvasNodeDefinition<BlueprintNodeData> = {
   menuLabelKey: 'node.menu.blueprint',
   menuIcon: 'layout',
   visibleInMenu: false,
+  defaultSize: { width: 440, height: 360 },
   capabilities: {
     toolbar: false,
     selectionToolbar: 'deleteOnly',

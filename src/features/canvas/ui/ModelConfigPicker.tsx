@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type WheelEvent } from 'react';
 import { ChevronDown, Check, Settings2 } from 'lucide-react';
 
+import { UiButton, UiCheckbox, UiChipButton, UiInput, UiTextArea } from '@/components/ui';
 import {
   formatRatio,
   useImageModelCatalog,
@@ -217,14 +218,14 @@ export const ModelConfigPicker = memo(({
 
   if (catalog.length === 0) {
     return (
-      <span className={`text-[11px] text-white/45 ${className ?? ''}`}>
+      <span className={`text-[11px] text-text-subtle ${className ?? ''}`}>
         暂无可用模型 — 请先在设置中添加服务商
       </span>
     );
   }
 
   const chipCls =
-    'inline-flex h-6 min-w-0 max-w-[110px] shrink items-center gap-1 overflow-hidden whitespace-nowrap rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-1 text-[11px] text-text-dark shadow-xs transition-colors hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)';
+    'h-6 min-w-0 max-w-[110px] shrink gap-1 overflow-hidden whitespace-nowrap rounded-md px-2 py-1 text-[11px]';
   const menuCls = 'ui-scrollbar nowheel absolute bottom-full z-1200 mb-1 overflow-y-auto rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-1 shadow-2xl';
 
   return (
@@ -235,49 +236,49 @@ export const ModelConfigPicker = memo(({
       onClick={(event) => event.stopPropagation()}
     >
       <div className="relative min-w-0 max-w-[110px]">
-        <button type="button" className={chipCls} onClick={() => { setProviderOpen((v) => !v); setModelOpen(false); setParamsOpen(false); }} title={currentEntry?.providerLabel ?? '选择服务商'}>
+        <UiButton variant="secondary" type="button" className={chipCls} onClick={() => { setProviderOpen((v) => !v); setModelOpen(false); setParamsOpen(false); }} title={currentEntry?.providerLabel ?? '选择服务商'}>
           <span className="min-w-0 truncate">{currentEntry?.providerLabel ?? '选择服务商'}</span>
           <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
-        </button>
+        </UiButton>
         {providerOpen && (
           <div className={`${menuCls} left-0 max-h-[220px] min-w-[140px]`} onWheelCapture={stopPickerWheel}>
             {Array.from(byProvider.keys()).map((label) => (
-              <button
+              <UiButton variant="ghost"
                 key={label}
                 type="button"
                 onClick={() => handlePickProvider(label)}
-                className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left text-[11px] text-text-dark hover:bg-(--canvas-node-menu-hover)"
+                className="h-auto w-full justify-start gap-1.5 rounded-sm px-2 py-1 text-left text-[11px]"
                 title={label}
               >
                 {currentEntry?.providerLabel === label && <Check className="h-3 w-3 shrink-0 text-accent" />}
                 <span className="min-w-0 truncate">{label}</span>
-              </button>
+              </UiButton>
             ))}
           </div>
         )}
       </div>
 
       <div className="relative min-w-0 max-w-[120px]">
-        <button type="button" className={chipCls} onClick={() => { setModelOpen((v) => !v); setProviderOpen(false); setParamsOpen(false); }} title={currentEntry?.modelLabel ?? '选择模型'}>
+        <UiButton variant="secondary" type="button" className={chipCls} onClick={() => { setModelOpen((v) => !v); setProviderOpen(false); setParamsOpen(false); }} title={currentEntry?.modelLabel ?? '选择模型'}>
           <span className="min-w-0 truncate">{currentEntry?.modelLabel ?? '选择模型'}</span>
           <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
-        </button>
+        </UiButton>
         {modelOpen && (
           <div className={`${menuCls} left-0 max-h-[260px] min-w-[220px] max-w-[280px]`} onWheelCapture={stopPickerWheel}>
             {modelsForCurrentProvider.map((entry) => (
-              <button
+              <UiButton variant="ghost"
                 key={entry.id}
                 type="button"
                 onClick={() => handlePickModel(entry)}
-                className={`flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1 text-left text-[11px] hover:bg-(--canvas-node-menu-hover) ${entry.usable ? 'text-text-dark' : 'text-text-muted/55'}`}
+                className={`h-auto w-full justify-between gap-2 rounded-sm px-2 py-1 text-left text-[11px] ${entry.usable ? 'text-text-dark' : 'text-text-subtle'}`}
                 title={entry.modelLabel}
               >
                 <span className="min-w-0 flex-1 truncate">{entry.modelLabel}</span>
                 {!entry.usable && entry.notReadyReason && (
-                  <span className="shrink-0 text-[9px] text-amber-400/80">接入中</span>
+                  <span className="shrink-0 text-[9px] text-warning">接入中</span>
                 )}
                 {entry.id === current.entryId && <Check className="h-3 w-3 shrink-0 text-accent" />}
-              </button>
+              </UiButton>
             ))}
           </div>
         )}
@@ -285,7 +286,7 @@ export const ModelConfigPicker = memo(({
 
       {hasParamsBox && (
         <div className="relative min-w-0 max-w-[90px]">
-          <button
+          <UiButton variant="secondary"
             type="button"
             className={`${chipCls} ${webSearchEnabled ? 'border-accent/70! text-accent!' : ''}`}
             onClick={() => { setParamsOpen((v) => !v); setProviderOpen(false); setModelOpen(false); }}
@@ -294,7 +295,7 @@ export const ModelConfigPicker = memo(({
             <Settings2 className="h-3 w-3 shrink-0" />
             <span className="min-w-0 truncate">参数</span>
             <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
-          </button>
+          </UiButton>
           {paramsOpen && (
             <div
               className="nowheel absolute bottom-full right-0 z-1200 mb-1 min-w-[280px] max-w-[320px] space-y-2 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-2 shadow-2xl"
@@ -306,12 +307,12 @@ export const ModelConfigPicker = memo(({
                   {supportedRatios.map((r) => {
                     const active = r === current.ratio;
                     return (
-                      <button
+                      <UiChipButton active={active}
                         key={r}
                         type="button"
                         onClick={() => handlePickRatio(r)}
-                        className={`rounded-sm border px-1.5 py-0.5 text-[11px] transition-colors ${active ? 'border-accent/60 bg-accent/15 text-accent' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)'}`}
-                      >{formatRatio(r)}</button>
+                        className="h-auto rounded-sm px-1.5 py-0.5 text-[11px]"
+                      >{formatRatio(r)}</UiChipButton>
                     );
                   })}
                 </div>
@@ -323,12 +324,12 @@ export const ModelConfigPicker = memo(({
                     {(currentEntry?.supportedResolutions ?? []).map((r) => {
                       const active = (current.extraParams?.resolutionType as string | undefined) === r;
                       return (
-                        <button
+                        <UiChipButton active={active}
                           key={r}
                           type="button"
                           onClick={() => updateExtra({ resolutionType: active ? undefined : r })}
-                          className={`rounded-sm border px-1.5 py-0.5 text-[11px] transition-colors ${active ? 'border-accent/60 bg-accent/15 text-accent' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)'}`}
-                        >{r}</button>
+                          className="h-auto rounded-sm px-1.5 py-0.5 text-[11px]"
+                        >{r}</UiChipButton>
                       );
                     })}
                   </div>
@@ -341,12 +342,12 @@ export const ModelConfigPicker = memo(({
                     {(currentEntry?.supportedModelVersions ?? []).map((v) => {
                       const active = (current.extraParams?.modelVersion as string | undefined) === v;
                       return (
-                        <button
+                        <UiChipButton active={active}
                           key={v}
                           type="button"
                           onClick={() => updateExtra({ modelVersion: active ? undefined : v })}
-                          className={`rounded-sm border px-1.5 py-0.5 text-[11px] transition-colors ${active ? 'border-accent/60 bg-accent/15 text-accent' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)'}`}
-                        >{v}</button>
+                          className="h-auto rounded-sm px-1.5 py-0.5 text-[11px]"
+                        >{v}</UiChipButton>
                       );
                     })}
                   </div>
@@ -354,11 +355,10 @@ export const ModelConfigPicker = memo(({
               )}
               {currentEntry?.supportsWebSearch && (
                 <label className="flex cursor-pointer items-start gap-2 rounded-sm px-1 py-0.5 hover:bg-(--canvas-node-menu-hover)">
-                  <input
-                    type="checkbox"
+                  <UiCheckbox
                     checked={webSearchEnabled}
-                    onChange={(e) => handleToggleWebSearch(e.target.checked)}
-                    className="mt-0.5 h-3 w-3 accent-accent"
+                    onCheckedChange={handleToggleWebSearch}
+                    className="mt-0.5 h-3 w-3"
                   />
                   <div className="flex-1">
                     <div className="text-[11px] text-text-dark">启用联网搜索</div>
@@ -366,16 +366,16 @@ export const ModelConfigPicker = memo(({
                 </label>
               )}
               <div className="rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-2">
-                <button
+                <UiButton variant="ghost"
                   type="button"
                   onClick={() => setAdvancedOpen((v) => !v)}
-                  className="flex w-full items-center justify-between gap-2 text-left"
+                  className="h-auto w-full justify-between gap-2 px-0 text-left"
                 >
                   <span className="text-[11px] font-medium text-text-dark">高级可选参数</span>
                   <span className={`text-[10px] ${hasAdvancedParams ? 'text-accent' : 'text-text-muted'}`}>
                     {advancedOpen ? '收起' : hasAdvancedParams ? '已设置' : '展开'}
                   </span>
-                </button>
+                </UiButton>
                 {advancedOpen && (
                   <div className="mt-2 space-y-2">
                     <div className="text-[10px] leading-4 text-text-muted">
@@ -383,22 +383,22 @@ export const ModelConfigPicker = memo(({
                     </div>
                   <div>
                     <div className="mb-1 text-[10px] text-text-muted">种子（seed）</div>
-                    <input
+                    <UiInput
                       type="number"
                       value={(current.extraParams?.seed as number | undefined) ?? ''}
                       onChange={(e) => updateExtra({ seed: e.target.value.trim() === '' ? undefined : Number(e.target.value) })}
                       placeholder="通常留空；留空 = 随机"
-                      className="w-full rounded-sm border border-(--canvas-node-field-border) bg-(--canvas-node-bg-strong) px-1.5 py-0.5 text-[11px] text-text-dark outline-hidden focus:border-accent/60"
+                      className="w-full rounded-sm px-1.5 py-0.5 text-[11px]"
                     />
                   </div>
                   <div>
                     <div className="mb-1 text-[10px] text-text-muted">反向提示词 / 排除</div>
-                    <textarea
+                    <UiTextArea
                       value={(current.extraParams?.negativePrompt as string | undefined) ?? ''}
                       onChange={(e) => updateExtra({ negativePrompt: e.target.value.trim() || undefined })}
                       placeholder="通常留空；仅在支持时填写排除内容"
                       rows={2}
-                      className="w-full resize-none rounded-sm border border-(--canvas-node-field-border) bg-(--canvas-node-bg-strong) px-1.5 py-0.5 text-[11px] text-text-dark outline-hidden focus:border-accent/60"
+                      className="w-full resize-none rounded-sm px-1.5 py-0.5 text-[11px]"
                     />
                   </div>
                 </div>
@@ -428,15 +428,15 @@ export const ModelConfigButton = memo(({ panelKey }: ModelConfigButtonProps) => 
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <button
+      <UiButton variant="secondary"
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="inline-flex items-center gap-1 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-0.5 text-[10px] text-(--canvas-node-button-text) transition-colors hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)"
+        className="h-auto gap-1 rounded-md px-2 py-0.5 text-[10px]"
         title="配置当前面板使用的模型"
       >
         <Settings2 className="h-3 w-3" />
         配置模型
-      </button>
+      </UiButton>
       {open && (
         <>
           <div className="fixed inset-0 z-900" onClick={() => setOpen(false)} />

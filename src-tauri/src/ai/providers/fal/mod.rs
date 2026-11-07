@@ -10,6 +10,7 @@ use crate::ai::error::AIError;
 use crate::ai::{
     AIProvider, GenerateRequest, ProviderTaskHandle, ProviderTaskPollResult, ProviderTaskSubmission,
 };
+use crate::commands::secrets::{credential_ref_from_token, resolve_provider_credential, SecretRef};
 
 const FAL_QUEUE_BASE_URL: &str = "https://queue.fal.run";
 const FAL_NANO_BANANA_2_T2I_MODEL_PATH: &str = "fal-ai/nano-banana-2";
@@ -32,14 +33,14 @@ struct FalStatusResponse {
 
 pub struct FalProvider {
     client: Client,
-    api_key: Arc<RwLock<Option<String>>>,
+    credential_ref: Arc<RwLock<Option<SecretRef>>>,
 }
 
 impl FalProvider {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
-            api_key: Arc::new(RwLock::new(None)),
+            credential_ref: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -164,9 +165,14 @@ impl AIProvider for FalProvider {
     }
 
     async fn set_api_key(&self, api_key: String) -> Result<(), AIError> {
-        let mut key = self.api_key.write().await;
-        *key = Some(api_key);
+        let reference = credential_ref_from_token(&api_key)
+            .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
+        *self.credential_ref.write().await = Some(reference);
         Ok(())
+    }
+
+    async fn credential_ref(&self) -> Option<SecretRef> {
+        self.credential_ref.read().await.clone()
     }
 
     fn supports_task_resume(&self) -> bool {
@@ -177,12 +183,16 @@ impl AIProvider for FalProvider {
         &self,
         request: GenerateRequest,
     ) -> Result<ProviderTaskSubmission, AIError> {
-        let api_key = self
-            .api_key
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| AIError::InvalidRequest("API key not set".to_string()))?;
+        let reference = self.credential_ref().await;
+        let mut credential = resolve_provider_credential(
+            reference.as_ref(),
+            request
+                .extra_params
+                .as_ref()
+                .and_then(|params| params.get("credential_ref")),
+        )
+        .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
+        let api_key = credential.value.as_str();
 
         let enable_web_search = request
             .extra_params
@@ -227,6 +237,10 @@ impl AIProvider for FalProvider {
         if let Some(thinking_level) = thinking_level.as_ref() {
             input["thinking_level"] = json!(thinking_level);
         }
+        credential
+            .redactor
+            .resolve_json(&mut input)
+            .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
 
         info!(
             "[FAL Request] model: {}, route: {}, size: {}, aspect_ratio: {}, web_search: {}, thinking_level: {}",
@@ -245,18 +259,23 @@ impl AIProvider for FalProvider {
             .header("X-Fal-No-Retry", "1")
             .json(&input)
             .send()
-            .await?;
+            .await
+            .map_err(|error| AIError::Network(error.without_url()))?;
 
         if !submit_response.status().is_success() {
             let status = submit_response.status();
-            let error_text = submit_response.text().await.unwrap_or_default();
+            let error_text = credential
+                .redactor
+                .redact_owned(submit_response.text().await.unwrap_or_default());
             return Err(AIError::Provider(format!(
                 "FAL submit failed {}: {}",
                 status, error_text
             )));
         }
 
-        let submit_raw = submit_response.text().await.unwrap_or_default();
+        let submit_raw = credential
+            .redactor
+            .redact_owned(submit_response.text().await.unwrap_or_default());
         let submit_body =
             serde_json::from_str::<FalSubmitResponse>(&submit_raw).map_err(|err| {
                 AIError::Provider(format!(
@@ -270,7 +289,10 @@ impl AIProvider for FalProvider {
             metadata: Some(json!({
                 "model_path": model_path,
                 "status_url": submit_body.status_url,
-                "response_url": submit_body.response_url
+                "response_url": submit_body.response_url,
+                "credential_ref": request.extra_params.as_ref()
+                    .and_then(|params| params.get("credential_ref")).cloned()
+                    .or_else(|| reference.as_ref().and_then(|value| serde_json::to_value(value).ok()))
             })),
         }))
     }
@@ -279,12 +301,16 @@ impl AIProvider for FalProvider {
         &self,
         handle: ProviderTaskHandle,
     ) -> Result<ProviderTaskPollResult, AIError> {
-        let api_key = self
-            .api_key
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| AIError::InvalidRequest("API key not set".to_string()))?;
+        let reference = self.credential_ref().await;
+        let mut credential = resolve_provider_credential(
+            reference.as_ref(),
+            handle
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("credential_ref")),
+        )
+        .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
+        let api_key = credential.value.as_str();
 
         let (status_endpoints, result_endpoints) =
             Self::resolve_poll_endpoints(handle.task_id.as_str(), handle.metadata.as_ref());
@@ -292,18 +318,28 @@ impl AIProvider for FalProvider {
         let mut status_body: Option<FalStatusResponse> = None;
         let mut last_status_error: Option<String> = None;
         for endpoint in status_endpoints {
+            let request_url = credential
+                .redactor
+                .resolve_markers(&endpoint, true)
+                .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
             let response = self
                 .client
-                .get(endpoint.as_str())
+                .get(request_url.as_ref())
                 .header("Authorization", format!("Key {}", api_key))
                 .send()
-                .await?;
+                .await
+                .map_err(|error| AIError::Network(error.without_url()))?;
             if response.status().is_success() {
-                status_body = Some(response.json::<FalStatusResponse>().await?);
+                let raw = credential
+                    .redactor
+                    .redact_owned(response.text().await.unwrap_or_default());
+                status_body = Some(serde_json::from_str::<FalStatusResponse>(&raw)?);
                 break;
             }
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = credential
+                .redactor
+                .redact_owned(response.text().await.unwrap_or_default());
             last_status_error = Some(format!("{} {} -> {}", endpoint, status, error_text));
             if status != reqwest::StatusCode::METHOD_NOT_ALLOWED
                 && status != reqwest::StatusCode::NOT_FOUND
@@ -327,18 +363,29 @@ impl AIProvider for FalProvider {
                 let mut result_raw: Option<String> = None;
                 let mut last_result_error: Option<String> = None;
                 for endpoint in result_endpoints {
+                    let request_url = credential
+                        .redactor
+                        .resolve_markers(&endpoint, true)
+                        .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
                     let response = self
                         .client
-                        .get(endpoint.as_str())
+                        .get(request_url.as_ref())
                         .header("Authorization", format!("Key {}", api_key))
                         .send()
-                        .await?;
+                        .await
+                        .map_err(|error| AIError::Network(error.without_url()))?;
                     if response.status().is_success() {
-                        result_raw = Some(response.text().await.unwrap_or_default());
+                        result_raw = Some(
+                            credential
+                                .redactor
+                                .redact_owned(response.text().await.unwrap_or_default()),
+                        );
                         break;
                     }
                     let status = response.status();
-                    let error_text = response.text().await.unwrap_or_default();
+                    let error_text = credential
+                        .redactor
+                        .redact_owned(response.text().await.unwrap_or_default());
                     last_result_error = Some(format!("{} {} -> {}", endpoint, status, error_text));
                     if status != reqwest::StatusCode::METHOD_NOT_ALLOWED
                         && status != reqwest::StatusCode::NOT_FOUND

@@ -1,617 +1,279 @@
-import { describe, expect, it } from 'vitest';
-
-import type {
-  AgentModelProtocol,
-  AgentModelReference,
-  AgentModelStreamEvent,
-  AgentModelTurnRequest,
-  AgentProviderHttpClient,
-  AgentProviderHttpRequest,
-  AgentProviderHttpResponse,
-} from '../domain/agentModel';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Agent, Runner, tool } from '@openai/agents';
+import { z } from 'zod';
+import type { AgentModelProtocol, AgentModelReference, AgentModelStreamEvent, AgentModelTurnRequest } from '../domain/agentModel';
+import type { ChannelProfileV2 } from '@/features/channels/domain/profile';
 import { buildAgentProviderBody } from '../application/agentProviderRequestCodec';
 import { AgentModelGatewayError, createAgentModelTransport } from './agentModelGateway';
+import { StoryboardAgentModel } from './sdkRuntime';
 
-function model(
-  protocol: AgentModelProtocol,
-  overrides: Partial<AgentModelReference['capabilities']> = {},
-): AgentModelReference {
-  return {
-    catalogId: `custom:provider:${protocol}`,
-    providerId: 'provider',
-    modelId: `fixture-${protocol}`,
-    label: `Fixture ${protocol}`,
-    usable: true,
-    capabilities: {
-      protocol,
-      tools: true,
-      stream: true,
-      vision: true,
-      reasoningSummary: true,
-      toolSearch: false,
-      ...overrides,
-    },
-  };
+const channel = vi.hoisted(() => ({ resolve: vi.fn(), submit: vi.fn(), stream: vi.fn() }));
+vi.mock('@/features/channels/application/channelService', () => ({ resolveNativeChannelModel: channel.resolve,
+  submitChannelChat: channel.submit, streamChannelChat: channel.stream }));
+function model(protocol: AgentModelProtocol, overrides: Partial<AgentModelReference['capabilities']> = {}): AgentModelReference {
+  return { catalogId: `custom:provider:${protocol}`, providerId: 'provider', modelId: `fixture-${protocol}`,
+    label: `Fixture ${protocol}`, usable: true,
+    capabilities: { protocol, tools: true, stream: true, vision: true, reasoningSummary: true, toolSearch: false, ...overrides } };
 }
-
 function request(reference: AgentModelReference): AgentModelTurnRequest {
-  return {
-    model: reference,
-    systemInstructions: 'Use tools when needed.',
-    input: [{
-      type: 'message',
-      role: 'user',
-      content: [{ type: 'text', text: 'Create a node.' }],
-    }],
-    tools: [{
-      name: 'create_node',
-      namespace: 'canvas',
-      description: 'Create one canvas node.',
-      parameters: {
-        type: 'object',
-        properties: { title: { type: 'string' } },
-        required: ['title'],
-        additionalProperties: false,
-      },
-      strict: true,
-    }],
-    toolChoice: 'auto',
+  return { model: reference, systemInstructions: 'Use tools when needed.',
+    input: [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'Create a node.' }] }],
+    tools: [{ name: 'create_node', namespace: 'canvas', description: 'Create one canvas node.',
+      parameters: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'], additionalProperties: false }, strict: true }],
+    toolChoice: 'auto' };
+}
+function resolve(protocol: AgentModelProtocol) {
+  const mappings: Record<AgentModelProtocol, Record<string, string>> = {
+    'openai-chat-completions': { messages: '{{messages}}' },
+    'openai-responses': { input: '{{chatPayload.input}}' },
+    'anthropic-messages': { messages: '{{messages}}', system: '{{chatPayload.system}}' },
+    'google-gemini': { contents: '{{chatPayload.contents}}' },
   };
+  const profile: ChannelProfileV2 = { version: 2, id: 'provider', name: 'Channel', baseUrl: 'https://provider.test', auth: { type: 'none' },
+    operations: { chat: { method: 'POST', path: '/chat', body: 'json', template: mappings[protocol], response: { mode: 'sync', outputs: [] } } },
+    models: [{ id: `fixture-${protocol}`, operations: ['chat'], params: [] }] };
+  channel.resolve.mockReturnValue({ profile, model: profile.models[0] });
+  return profile;
 }
-
-class FixtureHttpClient implements AgentProviderHttpClient {
-  readonly requests: AgentProviderHttpRequest[] = [];
-
-  constructor(
-    private readonly response: AgentProviderHttpResponse,
-    private readonly chunks: string[],
-  ) {}
-
-  async request(requestValue: AgentProviderHttpRequest): Promise<AgentProviderHttpResponse> {
-    this.requests.push(requestValue);
-    return this.response;
-  }
-
-  async *stream(requestValue: AgentProviderHttpRequest): AsyncIterable<string> {
-    this.requests.push(requestValue);
-    for (const chunk of this.chunks) yield chunk;
-  }
-}
-
-function transport(client: AgentProviderHttpClient) {
-  return createAgentModelTransport({
-    httpClient: client,
-    resolveConnection: (reference) => ({
-      providerId: reference.providerId,
-      modelId: reference.modelId,
-      url: 'https://provider.test/v1/model',
-      headers: { Authorization: 'Bearer top-secret-value' },
-      timeoutMs: 30_000,
-      defaultRequestParams: { user: 'storyboard-copilot' },
-    }),
-  });
-}
-
 async function collect(iterable: AsyncIterable<AgentModelStreamEvent>): Promise<AgentModelStreamEvent[]> {
-  const events: AgentModelStreamEvent[] = [];
-  for await (const event of iterable) events.push(event);
-  return events;
+  const events: AgentModelStreamEvent[] = []; for await (const event of iterable) events.push(event); return events;
 }
-
-describe('agent model provider gateway', () => {
-  it('normalizes an OpenAI Responses text and tool round without leaking credentials', async () => {
-    const client = new FixtureHttpClient({
-      status: 200,
-      text: JSON.stringify({
-        id: 'resp-1',
-        status: 'completed',
-        output: [
-          {
-            type: 'message',
-            content: [{ type: 'output_text', text: 'I will create it.' }],
-          },
-          {
-            type: 'function_call',
-            call_id: 'call-1',
-            name: 'canvas__create_node',
-            arguments: '{"title":"Shot 1"}',
-          },
-        ],
-        usage: { input_tokens: 12, output_tokens: 8, total_tokens: 20 },
-      }),
-    }, []);
-    const result = await transport(client).getResponse(request(model('openai-responses')));
-
-    expect(result).toMatchObject({
-      responseId: 'resp-1',
-      text: 'I will create it.',
-      usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
-      toolCalls: [{
-        callId: 'call-1',
-        name: 'create_node',
-        namespace: 'canvas',
-        arguments: '{"title":"Shot 1"}',
-      }],
-    });
-    expect(client.requests[0].body).toMatchObject({
-      model: 'fixture-openai-responses',
-      user: 'storyboard-copilot',
-      tools: [{ name: 'canvas__create_node' }],
-    });
-    expect(JSON.stringify(client.requests[0].body)).not.toContain('top-secret-value');
-    expect(JSON.stringify(result)).not.toContain('top-secret-value');
+function streamedToolFixture(protocol: AgentModelProtocol, terminal: 'missing' | 'success' | 'limited'): unknown[] {
+  const complete = terminal === 'success';
+  if (protocol === 'openai-responses') {
+    const item = { type: 'function_call', id: 'item-1', call_id: 'call-1', name: 'canvas__create_node', arguments: '{"title":"Shot"}' };
+    return [{ type: 'response.output_item.done', item }, ...(terminal === 'missing' ? [] : [{
+      type: complete ? 'response.completed' : 'response.incomplete',
+      response: { id: 'response', status: complete ? 'completed' : 'incomplete', output: [item] },
+    }])];
+  }
+  if (protocol === 'anthropic-messages') return [
+    { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'call-1', name: 'canvas__create_node', input: { title: 'Shot' } } },
+    { type: 'message_delta', delta: { stop_reason: terminal === 'limited' ? 'max_tokens' : 'tool_use' } },
+    ...(terminal === 'missing' ? [] : [{ type: 'message_stop' }]),
+  ];
+  if (protocol === 'google-gemini') return [{ candidates: [{
+    content: { parts: [{ functionCall: { id: 'call-1', name: 'canvas__create_node', args: { title: 'Shot' } }, thoughtSignature: 'complete-signature' }] },
+    ...(terminal === 'missing' ? {} : { finishReason: complete ? 'STOP' : 'MAX_TOKENS' }),
+  }] }];
+  return [{ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call-1', function: { name: 'canvas__create_node', arguments: '{"title":"Shot"}' } }] },
+    ...(terminal === 'missing' ? {} : { finish_reason: complete ? 'tool_calls' : 'length' }),
+  }] }];
+}
+beforeEach(() => { vi.resetAllMocks(); resolve('openai-chat-completions'); });
+afterEach(() => vi.unstubAllGlobals());
+describe('channel-only agent model gateway', () => {
+  it.each(['read', 'write'] as const)('preserves a successful model request when optional context storage %s throws', async (phase) => {
+    vi.resetModules();
+    const getItem = vi.fn(() => { if (phase === 'read') throw new Error('Unknown statistics read failure'); return null; });
+    const setItem = vi.fn(() => { throw new Error('Unknown statistics write failure'); });
+    vi.stubGlobal('localStorage', { getItem, setItem, removeItem: () => {} });
+    const { createAgentModelTransport: createIsolatedTransport } = await import('./agentModelGateway');
+    const selected = { ...model('openai-chat-completions'), contextSessionId: 'context-storage-error' };
+    channel.submit.mockResolvedValue({ raw: { choices: [{ message: { content: 'Still successful' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105 } } });
+    await expect(createIsolatedTransport().getResponse(request(selected))).resolves.toMatchObject({ text: 'Still successful', usage: { inputTokens: 100 } });
+    expect(channel.submit).toHaveBeenCalledOnce();
+    expect(phase === 'read' ? getItem : setItem).toHaveBeenCalled();
   });
-
-  it('streams OpenAI Responses text and a complete tool call', async () => {
-    const chunks = [
-      'data: {"type":"response.created","response":{"id":"resp-stream"}}\n',
-      'data: {"type":"response.output_text.delta","delta":"Working"}\n',
-      'data: {"type":"response.output_item.added","item":{"id":"item-1","type":"function_call","call_id":"call-1","name":"canvas__create_node","arguments":""}}\n',
-      'data: {"type":"response.function_call_arguments.delta","item_id":"item-1","delta":"{\\"title\\":\\"Shot 2\\"}"}\n',
-      'data: [DONE]\n',
-    ];
-    const events = await collect(transport(new FixtureHttpClient({ status: 200, text: '{}' }, chunks))
-      .getStreamedResponse(request(model('openai-responses'))));
-
-    expect(events[0]).toEqual({ type: 'text_delta', delta: 'Working' });
-    expect(events[events.length - 1]).toMatchObject({
-      type: 'completed',
-      response: {
-        responseId: 'resp-stream',
-        text: 'Working',
-        toolCalls: [{
-          callId: 'call-1',
-          name: 'create_node',
-          namespace: 'canvas',
-          arguments: '{"title":"Shot 2"}',
-        }],
-      },
-    });
-  });
-
-  it('normalizes OpenAI-compatible Chat Completions text and tool fixtures', async () => {
-    const nonStreaming = new FixtureHttpClient({
-      status: 200,
-      text: JSON.stringify({
-        id: 'chat-1',
-        choices: [{
-          finish_reason: 'tool_calls',
-          message: {
-            content: 'Checking the canvas.',
-            tool_calls: [{
-              id: 'call-chat',
-              type: 'function',
-              function: { name: 'canvas__create_node', arguments: '{"title":"Shot 3"}' },
-            }],
-          },
-        }],
-        usage: { prompt_tokens: 5, completion_tokens: 6, total_tokens: 11 },
-      }),
-    }, []);
-    const result = await transport(nonStreaming).getResponse(request(model('openai-chat-completions')));
-    expect(result).toMatchObject({
-      text: 'Checking the canvas.',
-      finishReason: 'tool_calls',
-      toolCalls: [{ callId: 'call-chat', name: 'create_node', namespace: 'canvas' }],
-    });
-
-    const streaming = new FixtureHttpClient({ status: 200, text: '' }, [
-      'data: {"id":"chat-stream","choices":[{"index":0,"delta":{"content":"Checking "}}]}\n',
-      'data: {"id":"chat-stream","choices":[{"index":0,"delta":{"content":"now","tool_calls":[{"index":0,"id":"call-stream","function":{"name":"canvas__create_node","arguments":"{\\"title\\":"}}]}}]}\n',
-      'data: {"id":"chat-stream","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"Shot 4\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":7,"completion_tokens":4,"total_tokens":11}}\n',
-      'data: [DONE]\n',
-    ]);
-    const events = await collect(transport(streaming)
-      .getStreamedResponse(request(model('openai-chat-completions'))));
-    expect(events.filter((event) => event.type === 'text_delta')).toEqual([
-      { type: 'text_delta', delta: 'Checking ' },
-      { type: 'text_delta', delta: 'now' },
-    ]);
-    expect(events[events.length - 1]).toMatchObject({
-      type: 'completed',
-      response: {
-        text: 'Checking now',
-        usage: { inputTokens: 7, outputTokens: 4, totalTokens: 11 },
-        toolCalls: [{
-          callId: 'call-stream',
-          name: 'create_node',
-          namespace: 'canvas',
-          arguments: '{"title":"Shot 4"}',
-        }],
-      },
-    });
-  });
-
-  it('fails closed for malformed tool streams and unsupported model capabilities', async () => {
-    const malformed = new FixtureHttpClient({ status: 200, text: '' }, [
-      'data: {"id":"chat-bad","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-bad","function":{"name":"canvas__create_node","arguments":"{\\"title\\":"}}]}}]}\n',
-      'data: [DONE]\n',
-    ]);
-    await expect(collect(transport(malformed)
-      .getStreamedResponse(request(model('openai-chat-completions')))))
-      .rejects.toThrow('Tool arguments must be a JSON object');
-
-    const noTools = request(model('openai-chat-completions', { tools: false }));
-    await expect(transport(malformed).getResponse(noTools)).rejects.toThrow('不支持工具调用');
-
-    const noVision = request(model('openai-chat-completions', { vision: false }));
-    noVision.input = [{
-      type: 'message',
-      role: 'user',
-      content: [{ type: 'image', imageUrl: 'https://assets.test/shot.png' }],
-    }];
-    await expect(transport(malformed).getResponse(noVision)).rejects.toThrow('不支持图片输入');
-  });
-
-  it('encodes approved tool image results for every supported provider protocol', () => {
-    const inlineImage = 'data:image/png;base64,aGVsbG8=';
-    const requestWithToolImage = (protocol: AgentModelProtocol): AgentModelTurnRequest => ({
-      ...request(model(protocol)),
-      input: [
-        {
-          type: 'function_call',
-          callId: 'asset-call',
-          name: 'asset_read',
-          arguments: '{"assetId":"node-1:image"}',
-        },
-        {
-          type: 'function_call_result',
-          callId: 'asset-call',
-          name: 'asset_read',
-          output: '{"assetId":"node-1:image"}',
-          content: [
-            { type: 'text', text: '{"assetId":"node-1:image"}' },
-            { type: 'image', imageUrl: inlineImage, detail: 'auto' },
-          ],
-        },
-      ],
-    });
-
-    const responses = buildAgentProviderBody(requestWithToolImage('openai-responses'), false);
-    expect(responses.input).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'function_call_output', output: '{"assetId":"node-1:image"}' }),
-      expect.objectContaining({
-        type: 'message',
-        role: 'user',
-        content: [expect.objectContaining({ type: 'input_image', image_url: inlineImage })],
-      }),
-    ]));
-
-    const chat = buildAgentProviderBody(requestWithToolImage('openai-chat-completions'), false);
-    expect(chat.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ role: 'tool', content: '{"assetId":"node-1:image"}' }),
-      expect.objectContaining({
-        role: 'user',
-        content: [expect.objectContaining({ type: 'image_url', image_url: expect.objectContaining({ url: inlineImage }) })],
-      }),
-    ]));
-
-    const anthropic = buildAgentProviderBody(requestWithToolImage('anthropic-messages'), false);
-    expect(anthropic.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        role: 'user',
-        content: [expect.objectContaining({
-          type: 'tool_result',
-          content: expect.arrayContaining([
-            expect.objectContaining({ type: 'text', text: '{"assetId":"node-1:image"}' }),
-            expect.objectContaining({
-              type: 'image',
-              source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' },
-            }),
-          ]),
-        })],
-      }),
-    ]));
-
-    const gemini = buildAgentProviderBody(requestWithToolImage('google-gemini'), false);
-    expect(gemini.contents).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        role: 'user',
-        parts: [expect.objectContaining({ functionResponse: expect.any(Object) })],
-      }),
-      expect.objectContaining({
-        role: 'user',
-        parts: [{ inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } }],
-      }),
-    ]));
-  });
-
-  it('redacts credentials and payloads from transport errors', async () => {
-    const secretToken = 'sk-private-agent-token';
-    const querySecret = 'query-secret-value';
-    const inlinePayload = 'data:image/png;base64,aGVsbG8=';
-    const longPayload = 'A'.repeat(220);
-    const failingClient: AgentProviderHttpClient = {
-      async request(): Promise<AgentProviderHttpResponse> {
-        throw new Error(
-          `Authorization: Bearer ${secretToken} https://provider.test?api_key=${querySecret} `
-          + `${inlinePayload} ${longPayload}`,
-        );
-      },
-      async *stream(): AsyncIterable<string> {
-        throw new Error('unused');
-      },
-    };
-
-    const failure = transport(failingClient).getResponse(request(model('openai-responses')));
-    await expect(failure).rejects.not.toThrow(secretToken);
-    await expect(failure).rejects.not.toThrow(querySecret);
-    await expect(failure).rejects.not.toThrow(inlinePayload);
-    await expect(failure).rejects.not.toThrow(longPayload);
-    await expect(failure).rejects.toThrow('[redacted]');
-  });
-
-  it('preserves an explicit quota-exhausted provider error for retry policy classification', async () => {
-    const client = new FixtureHttpClient({
-      status: 429,
-      text: JSON.stringify({
-        error: {
-          message: 'You exceeded your current quota, please check your plan and billing details.',
-          type: 'insufficient_quota',
-        },
-      }),
-    }, []);
-
-    await expect(transport(client).getResponse(request(model('openai-chat-completions', { stream: false }))))
-      .rejects.toThrow('exceeded your current quota');
-  });
-
-  it('uses non-stream fallback and propagates AbortSignal cancellation', async () => {
-    const fallbackClient = new FixtureHttpClient({
-      status: 200,
-      text: JSON.stringify({
-        id: 'chat-fallback',
-        choices: [{ message: { content: 'One response' }, finish_reason: 'stop' }],
-      }),
-    }, []);
-    const events = await collect(transport(fallbackClient).getStreamedResponse(
-      request(model('openai-chat-completions', { stream: false })),
-    ));
-    expect(events).toMatchObject([
-      { type: 'text_delta', delta: 'One response' },
-      { type: 'completed', response: { text: 'One response' } },
-    ]);
-
-    const cancellableClient: AgentProviderHttpClient = {
-      async request(): Promise<AgentProviderHttpResponse> {
-        return { status: 200, text: '{}' };
-      },
-      async *stream(_requestValue, signal): AsyncIterable<string> {
-        yield 'data: {"id":"chat-cancel","choices":[{"index":0,"delta":{"content":"partial"}}]}\n';
-        await new Promise<void>((resolve, reject) => {
-          if (signal?.aborted) {
-            reject(new DOMException('aborted', 'AbortError'));
-            return;
-          }
-          const timer = setTimeout(resolve, 5_000);
-          signal?.addEventListener('abort', () => {
-            clearTimeout(timer);
-            reject(new DOMException('aborted', 'AbortError'));
-          }, { once: true });
+  it.each<AgentModelProtocol>(['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'google-gemini'])(
+    'requires successful protocol completion before exposing executable %s tools', async (protocol) => {
+      resolve(protocol);
+      for (const terminal of ['missing', 'limited', 'success'] as const) {
+        channel.stream.mockImplementation(async function* () {
+          for (const payload of streamedToolFixture(protocol, terminal)) yield `data: ${JSON.stringify(payload)}\n\n`;
+          yield 'data: [DONE]\n\n';
         });
-      },
-    };
-    const controller = new AbortController();
-    const iterator = transport(cancellableClient)
-      .getStreamedResponse(request(model('openai-chat-completions')), controller.signal)
-      [Symbol.asyncIterator]();
-    await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'text_delta', delta: 'partial' } });
-    controller.abort();
-    await expect(iterator.next()).rejects.toMatchObject({ name: 'AbortError' });
-  });
-
-  it('falls back once to non-stream when an OpenAI-compatible stream fails before output', async () => {
-    const requests: AgentProviderHttpRequest[] = [];
-    const client: AgentProviderHttpClient = {
-      async request(requestValue) {
-        requests.push(requestValue);
-        return {
-          status: 200,
-          text: JSON.stringify({
-            id: 'chat-fallback',
-            choices: [{ message: { content: 'Recovered response' }, finish_reason: 'stop' }],
-          }),
-        };
-      },
-      async *stream(requestValue) {
-        requests.push(requestValue);
-        throw new AgentModelGatewayError('The quota has been exceeded.', 429, true, false);
-      },
-    };
-
-    const events = await collect(transport(client)
-      .getStreamedResponse(request(model('openai-chat-completions'))));
-
-    expect(requests).toHaveLength(2);
-    expect(events).toEqual([
-      { type: 'text_delta', delta: 'Recovered response' },
-      expect.objectContaining({
-        type: 'completed',
-        response: expect.objectContaining({
-          text: 'Recovered response',
-          providerSummary: expect.objectContaining({ transportFallback: 'non-stream' }),
-        }),
-      }),
-    ]);
-  });
-
-  it('falls back once when a provider closes a successful stream without text or tools', async () => {
-    const client = new FixtureHttpClient({
-      status: 200,
-      text: JSON.stringify({
-        id: 'chat-empty-fallback',
-        choices: [{ message: { content: 'Non-stream response' }, finish_reason: 'stop' }],
-      }),
-    }, ['data: [DONE]\n']);
-
-    const events = await collect(transport(client)
-      .getStreamedResponse(request(model('openai-chat-completions'))));
-
-    expect(client.requests).toHaveLength(2);
-    expect(events).toEqual([
-      { type: 'text_delta', delta: 'Non-stream response' },
-      expect.objectContaining({ type: 'completed', response: expect.objectContaining({ text: 'Non-stream response' }) }),
-    ]);
-  });
-
-  it('uses provider-specific named tool choice wire shapes', () => {
-    const responses = buildAgentProviderBody({
-      ...request(model('openai-responses')),
-      toolChoice: 'create_node',
-    }, false);
-    expect(responses.tool_choice).toEqual({ type: 'function', name: 'canvas__create_node' });
-
-    const chat = buildAgentProviderBody({
-      ...request(model('openai-chat-completions')),
-      toolChoice: 'create_node',
-    }, false);
-    expect(chat.tool_choice).toEqual({
-      type: 'function',
-      function: { name: 'canvas__create_node' },
+        const events: AgentModelStreamEvent[] = [];
+        const reading = (async () => { for await (const event of createAgentModelTransport().getStreamedResponse(request(model(protocol)))) events.push(event); })();
+        if (terminal === 'success') {
+          await reading;
+          expect(events.at(-1)).toMatchObject({ type: 'completed', response: { toolCalls: [{ name: 'create_node', arguments: '{"title":"Shot"}' }] } });
+        } else {
+          await expect(reading).rejects.toThrow(/未完整结束.*工具未执行/);
+          expect(events.some(event => event.type === 'completed')).toBe(false);
+        }
+      }
+      expect(channel.stream).toHaveBeenCalledTimes(3);
+      expect(channel.submit).not.toHaveBeenCalled();
     });
-
-    const anthropic = buildAgentProviderBody({
-      ...request(model('anthropic-messages')),
-      toolChoice: 'create_node',
-    }, false);
-    expect(anthropic.tool_choice).toEqual({ type: 'tool', name: 'canvas__create_node' });
-
-    const gemini = buildAgentProviderBody({
-      ...request(model('google-gemini')),
-      toolChoice: 'create_node',
-    }, false);
-    expect(gemini.toolConfig).toEqual({
-      functionCallingConfig: {
-        mode: 'ANY',
-        allowedFunctionNames: ['canvas__create_node'],
-      },
+  it('does not let the real SDK execute a complete-looking tool call from a truncated stream', async () => {
+    channel.stream.mockImplementation(async function* () {
+      for (const payload of streamedToolFixture('openai-chat-completions', 'missing')) yield `data: ${JSON.stringify(payload)}\n\n`;
     });
+    const execute = vi.fn(async () => 'Created');
+    const agent = new Agent({ name: 'Stream safety', model: new StoryboardAgentModel(model('openai-chat-completions'), createAgentModelTransport()),
+      tools: [tool({ name: 'canvas__create_node', description: 'Create a node', parameters: z.object({ title: z.string() }), execute })] });
+    const result = await new Runner({ tracingDisabled: true }).run(agent, 'Create a node', { stream: true });
+    await expect(result.completed).rejects.toThrow(/工具未执行/);
+    expect(execute).not.toHaveBeenCalled();
+    expect(channel.stream).toHaveBeenCalledOnce();
+    expect(channel.submit).not.toHaveBeenCalled();
   });
-
-  it('emits Responses tool search, namespaces, and deferred functions only for compatible models', () => {
-    const compatible: AgentModelTurnRequest = {
-      ...request(model('openai-responses', { toolSearch: true })),
-      tools: [{
-        ...request(model('openai-responses')).tools[0],
-        namespaceDescription: 'Canvas tools.',
-        deferLoading: true,
-      }],
-      toolPolicy: {
-        mode: 'responses-tool-search',
-        deferredToolNames: ['canvas.create_node'],
-        deferredNamespaces: ['canvas'],
-      },
-    };
-    expect(buildAgentProviderBody(compatible, false).tools).toEqual([
-      { type: 'tool_search' },
-      {
-        type: 'namespace',
-        name: 'canvas',
-        description: 'Canvas tools.',
-        tools: [expect.objectContaining({
-          type: 'function',
-          name: 'create_node',
-          defer_loading: true,
-        })],
-      },
-    ]);
-
-    const unsupportedResponses = {
-      ...compatible,
-      model: model('openai-responses', { toolSearch: false }),
-    };
-    expect(buildAgentProviderBody(unsupportedResponses, false).tools).toEqual([
-      expect.objectContaining({ type: 'function', name: 'canvas__create_node' }),
-    ]);
-    expect(JSON.stringify(buildAgentProviderBody(unsupportedResponses, false).tools)).not.toContain('defer_loading');
-
-    const chat = { ...compatible, model: model('openai-chat-completions', { toolSearch: true }) };
-    expect(buildAgentProviderBody(chat, false).tools).toEqual([
-      expect.objectContaining({
-        type: 'function',
-        function: expect.objectContaining({ name: 'canvas__create_node' }),
-      }),
-    ]);
-    expect(JSON.stringify(buildAgentProviderBody(chat, false).tools)).not.toContain('tool_search');
-    expect(JSON.stringify(buildAgentProviderBody(chat, false).tools)).not.toContain('defer_loading');
-  });
-
-  it('normalizes Anthropic and Gemini tools without exposing hidden thinking', async () => {
-    const anthropicClient = new FixtureHttpClient({
-      status: 200,
-      text: JSON.stringify({
-        id: 'msg-anthropic',
-        stop_reason: 'tool_use',
-        content: [
-          { type: 'thinking', thinking: 'private chain of thought' },
-          { type: 'text', text: 'I will inspect the shot.' },
-          {
-            type: 'tool_use',
-            id: 'tool-anthropic',
-            name: 'canvas__create_node',
-            input: { title: 'Anthropic shot' },
-          },
-        ],
-        usage: { input_tokens: 9, output_tokens: 5 },
-      }),
-    }, []);
-    const anthropic = await transport(anthropicClient)
-      .getResponse(request(model('anthropic-messages')));
-    expect(anthropic).toMatchObject({
-      text: 'I will inspect the shot.',
-      toolCalls: [{
-        callId: 'tool-anthropic',
-        name: 'create_node',
-        namespace: 'canvas',
-        arguments: '{"title":"Anthropic shot"}',
-      }],
+  it.each<AgentModelProtocol>(['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'google-gemini'])(
+    'sends the full native %s request through channelService and parses raw tool responses', async (protocol) => {
+      const profile = resolve(protocol); const input = request(model(protocol));
+      const fixtures: Record<AgentModelProtocol, unknown> = {
+        'openai-chat-completions': { id: 'chat', choices: [{ finish_reason: 'tool_calls', message: { content: null,
+          tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'canvas__create_node', arguments: '{"title":"Shot"}' } }] } }] },
+        'openai-responses': { id: 'response', output: [{ type: 'function_call', call_id: 'call-1', name: 'canvas__create_node', arguments: '{"title":"Shot"}' }] },
+        'anthropic-messages': { id: 'message', content: [{ type: 'tool_use', id: 'call-1', name: 'canvas__create_node', input: { title: 'Shot' } }], stop_reason: 'tool_use' },
+        'google-gemini': { candidates: [{ content: { parts: [{ functionCall: { id: 'call-1', name: 'canvas__create_node', args: { title: 'Shot' } } }] }, finishReason: 'STOP' }] },
+      };
+      channel.submit.mockResolvedValue({ text: '', raw: fixtures[protocol], status: 200 });
+      const response = await createAgentModelTransport().getResponse(input);
+      expect(channel.submit).toHaveBeenCalledOnce();
+      expect(channel.submit).toHaveBeenCalledWith(profile, profile.models[0].id, buildAgentProviderBody(input, false), undefined);
+      expect(response.toolCalls).toMatchObject([{ name: 'create_node', namespace: 'canvas', arguments: '{"title":"Shot"}' }]);
     });
-    expect(anthropic.reasoningSummary).toBeUndefined();
-    expect(JSON.stringify(anthropic)).not.toContain('private chain of thought');
-
-    const geminiClient = new FixtureHttpClient({
-      status: 200,
-      text: JSON.stringify({
-        candidates: [{
-          finishReason: 'STOP',
-          content: {
-            role: 'model',
-            parts: [
-              { text: 'Creating the shot.' },
-              { functionCall: { id: 'tool-gemini', name: 'canvas__create_node', args: { title: 'Gemini shot' } } },
-            ],
-          },
-        }],
-        usageMetadata: { promptTokenCount: 6, candidatesTokenCount: 4, totalTokenCount: 10 },
-      }),
-    }, []);
-    const gemini = await transport(geminiClient).getResponse(request(model('google-gemini')));
-    expect(gemini).toMatchObject({
-      text: 'Creating the shot.',
-      usage: { inputTokens: 6, outputTokens: 4, totalTokens: 10 },
-      toolCalls: [{
-        callId: 'tool-gemini',
-        name: 'create_node',
-        namespace: 'canvas',
-        arguments: '{"title":"Gemini shot"}',
-      }],
-    });
+  it('accepts a mode-only chat model with an explicit chat endpoint', async () => {
+    const profile = resolve('openai-chat-completions'); const selected = profile.models[0];
+    selected.operations = []; selected.modes = [{ id: 'chat-mode', label: 'Chat', operation: 'chat', endpoint: profile.operations.chat! }];
+    profile.operations = {};
+    channel.submit.mockResolvedValue({ text: 'Mode chat works', raw: { choices: [{ message: { content: 'Mode chat works' } }] } });
+    expect(await createAgentModelTransport().getResponse(request(model('openai-chat-completions')))).toMatchObject({ text: 'Mode chat works' });
+    expect(channel.submit).toHaveBeenCalledWith(profile, selected.id, expect.any(Object), undefined);
   });
-
-  it('fails closed when a provider prints an available tool call as Markdown', async () => {
-    const client = new FixtureHttpClient({
-      status: 200,
-      text: JSON.stringify({
-        id: 'chat-textual-tool',
-        choices: [{
-          finish_reason: 'stop',
-          message: {
-            content: '准备创建节点。\n\ncanvas__create_node({"title":"Not executed"})',
-          },
-        }],
-      }),
-    }, []);
-    await expect(transport(client).getResponse(request(model('openai-chat-completions'))))
-      .rejects.toThrow('普通文本返回');
+  it('validates the selected model chat mode rather than an unrelated model protocol', async () => {
+    const profile = resolve('anthropic-messages'); const selected = profile.models[0];
+    selected.modes = [{ id: 'image-mode', label: 'Image', operation: 'image.generate', endpoint: {
+      method: 'POST', path: '/images', body: 'json', template: { prompt: '{{prompt}}' }, response: { mode: 'sync', outputs: [] } } },
+      { id: 'selected-chat', label: 'Chat', operation: 'chat', endpoint: profile.operations.chat! }];
+    profile.models.unshift({ id: 'unrelated-openai', operations: ['chat'], params: [], modes: [
+      { id: 'unrelated-chat', label: 'Other chat', operation: 'chat', endpoint: { method: 'POST', path: '/other-chat', body: 'json',
+        template: { messages: '{{messages}}' }, response: { mode: 'sync', outputs: [] } } },
+    ] });
+    channel.submit.mockResolvedValue({ text: 'Selected Anthropic', raw: { content: [{ type: 'text', text: 'Selected Anthropic' }] } });
+    expect(await createAgentModelTransport().getResponse(request(model('anthropic-messages')))).toMatchObject({ text: 'Selected Anthropic' });
+    expect(channel.submit).toHaveBeenCalledWith(profile, selected.id, expect.any(Object), undefined);
+  });
+  it('rejects stale protocol metadata that only matches an unrelated model chat mode', async () => {
+    const profile = resolve('anthropic-messages'); const selected = profile.models[0];
+    selected.modes = [{ id: 'selected-chat', label: 'Chat', operation: 'chat', endpoint: profile.operations.chat! }];
+    profile.models.unshift({ id: 'unrelated-openai', operations: ['chat'], params: [], modes: [
+      { id: 'other-chat', label: 'Other chat', operation: 'chat', endpoint: { method: 'POST', path: '/other-chat', body: 'json',
+        template: { messages: '{{messages}}' }, response: { mode: 'sync', outputs: [] } } },
+    ] });
+    channel.submit.mockResolvedValue({ text: 'Wrong protocol', raw: { choices: [{ message: { content: 'Wrong protocol' } }] } });
+    await expect(createAgentModelTransport().getResponse(request(model('openai-chat-completions')))).rejects.toBeInstanceOf(AgentModelGatewayError);
+    expect(channel.submit).not.toHaveBeenCalled();
+  });
+  it('does not use a legacy chat operation when explicit modes expose no chat mode', async () => {
+    const profile = resolve('openai-chat-completions');
+    profile.models[0].modes = [{ id: 'image-only', label: 'Image', operation: 'image.generate', endpoint: {
+      method: 'POST', path: '/images', body: 'json', template: { prompt: '{{prompt}}' }, response: { mode: 'sync', outputs: [] } } }];
+    channel.submit.mockResolvedValue({ text: 'Wrong operation', raw: { choices: [{ message: { content: 'Wrong operation' } }] } });
+    await expect(createAgentModelTransport().getResponse(request(model('openai-chat-completions')))).rejects.toBeInstanceOf(AgentModelGatewayError);
+    expect(channel.submit).not.toHaveBeenCalled();
+  });
+  it('streams split provider events and tool argument fragments through the real channel stream port', async () => {
+    channel.stream.mockImplementation(async function* () {
+      yield 'data: {"id":"chat-stream","choices":[{"delta":{"content":"Work';
+      yield 'ing","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"canvas__create_node","arguments":"{\\\"title\\\":"}}]}}]}\n\n';
+      yield 'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\\"Shot\\\"}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n';
+    });
+    const events = await collect(createAgentModelTransport().getStreamedResponse(request(model('openai-chat-completions'))));
+    expect(events).toContainEqual({ type: 'text_delta', delta: 'Working' });
+    expect(events.at(-1)).toMatchObject({ type: 'completed', response: { text: 'Working', toolCalls: [{ name: 'create_node', arguments: '{"title":"Shot"}' }] } });
+    expect(channel.stream).toHaveBeenCalledOnce(); expect(channel.submit).not.toHaveBeenCalled();
+  });
+  it('never submits a second request after a stream failure before any visible output', async () => {
+    channel.stream.mockImplementation(async function* () { throw new Error('unknown upstream acceptance'); });
+    await expect(collect(createAgentModelTransport().getStreamedResponse(request(model('openai-chat-completions'))))).rejects.toMatchObject({
+      name: 'AgentModelGatewayError', retryable: false, responseStarted: false,
+    });
+    expect(channel.stream).toHaveBeenCalledOnce(); expect(channel.submit).not.toHaveBeenCalled();
+  });
+  it('assembles Anthropic tool input deltas independently and preserves whitespace inside JSON strings', async () => {
+    resolve('anthropic-messages');
+    const payloads = [
+      { type: 'message_start', message: { id: 'anthropic-stream', usage: { input_tokens: 12 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'call-1', name: 'canvas__create_node', input: {} } },
+      { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'call-2', name: 'canvas__create_node', input: {} } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"title":"First' } },
+      { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"title":"Second"}' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: ' ' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: 'shot"}' } },
+      { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 8 } },
+      { type: 'message_stop' },
+    ];
+    channel.stream.mockImplementation(async function* () {
+      for (const payload of payloads) {
+        const line = `data: ${JSON.stringify(payload)}\n\n`;
+        yield line.slice(0, 17);
+        yield line.slice(17);
+      }
+    });
+    const events = await collect(createAgentModelTransport().getStreamedResponse(request(model('anthropic-messages'))));
+    expect(events.at(-1)).toMatchObject({ type: 'completed', response: {
+      toolCalls: [
+        { callId: 'call-1', name: 'create_node', namespace: 'canvas', arguments: '{"title":"First shot"}' },
+        { callId: 'call-2', name: 'create_node', namespace: 'canvas', arguments: '{"title":"Second"}' },
+      ], usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
+    } });
+    expect(channel.stream).toHaveBeenCalledOnce();
+    expect(channel.submit).not.toHaveBeenCalled();
+  });
+  it.each([{}, { title: 'Complete input' }])('preserves complete Anthropic input without deltas: %j', async (input) => {
+    resolve('anthropic-messages');
+    channel.stream.mockImplementation(async function* () {
+      yield `data: ${JSON.stringify({ type: 'content_block_start', index: 0,
+        content_block: { type: 'tool_use', id: 'call-1', name: 'canvas__create_node', input } })}\n\n`;
+      yield `data: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'tool_use' } })}\n\n`;
+      yield `data: ${JSON.stringify({ type: 'message_stop' })}\n\n`;
+    });
+    const events = await collect(createAgentModelTransport().getStreamedResponse(request(model('anthropic-messages'))));
+    expect(events.at(-1)).toMatchObject({ type: 'completed', response: {
+      toolCalls: [{ arguments: JSON.stringify(input) }],
+    } });
+  });
+  it.each(['null', '[]', '{"title":', '{"title":"cut'])('rejects malformed or non-object streamed Anthropic input %s without resubmission', async (partialJson) => {
+    resolve('anthropic-messages');
+    channel.stream.mockImplementation(async function* () {
+      yield `data: ${JSON.stringify({ type: 'content_block_start', index: 0,
+        content_block: { type: 'tool_use', id: 'call-1', name: 'canvas__create_node', input: {} } })}\n\n`;
+      yield `data: ${JSON.stringify({ type: 'content_block_delta', index: 0,
+        delta: { type: 'input_json_delta', partial_json: partialJson } })}\n\n`;
+    });
+    await expect(collect(createAgentModelTransport().getStreamedResponse(request(model('anthropic-messages')))))
+      .rejects.toThrow(/create_node.*JSON.*未执行/);
+    expect(channel.stream).toHaveBeenCalledOnce();
+    expect(channel.submit).not.toHaveBeenCalled();
+  });
+  it.each([null, [], 'not an object'])('rejects non-object complete Anthropic input: %j', async (input) => {
+    resolve('anthropic-messages');
+    channel.submit.mockResolvedValue({ raw: { content: [{ type: 'tool_use', id: 'call-1', name: 'canvas__create_node', input }] }, text: '' });
+    await expect(createAgentModelTransport().getResponse(request(model('anthropic-messages'))))
+      .rejects.toThrow(/create_node.*JSON.*未执行/);
+    expect(channel.submit).toHaveBeenCalledOnce();
+  });
+  it('never submits a second request for an empty or malformed stream', async () => {
+    channel.stream.mockImplementation(async function* () { yield 'data: [DONE]\n'; });
+    await expect(collect(createAgentModelTransport().getStreamedResponse(request(model('openai-chat-completions'))))).rejects.toThrow(/not resubmitted/);
+    channel.stream.mockImplementation(async function* () { yield 'data: {broken}\n'; });
+    await expect(collect(createAgentModelTransport().getStreamedResponse(request(model('openai-chat-completions'))))).rejects.toThrow(/malformed/);
+    expect(channel.submit).not.toHaveBeenCalled();
+  });
+  it('uses one non-stream request when streaming is explicitly unsupported', async () => {
+    channel.submit.mockResolvedValue({ raw: { choices: [{ message: { content: 'Ready' } }] }, text: 'Ready' });
+    const events = await collect(createAgentModelTransport().getStreamedResponse(request(model('openai-chat-completions', { stream: false }))));
+    expect(events[0]).toEqual({ type: 'text_delta', delta: 'Ready' }); expect(channel.submit).toHaveBeenCalledOnce(); expect(channel.stream).not.toHaveBeenCalled();
+  });
+  it('rejects stale protocol metadata, unavailable channels and unsupported tools before sending', async () => {
+    const transport = createAgentModelTransport();
+    await expect(transport.getResponse(request(model('anthropic-messages')))).rejects.toThrow(/协议/);
+    channel.resolve.mockReturnValue(null);
+    await expect(transport.getResponse(request(model('openai-chat-completions')))).rejects.toThrow(/v2/);
+    await expect(transport.getResponse(request(model('openai-chat-completions', { tools: false })))).rejects.toBeInstanceOf(AgentModelGatewayError);
+    expect(channel.submit).not.toHaveBeenCalled(); expect(channel.stream).not.toHaveBeenCalled();
+  });
+  it('does not submit pre-cancelled requests and passes cancellation to channelService', async () => {
+    const controller = new AbortController(); controller.abort();
+    await expect(createAgentModelTransport().getResponse(request(model('openai-chat-completions')), controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(channel.submit).not.toHaveBeenCalled();
+    const active = new AbortController();
+    channel.submit.mockImplementation(async () => { active.abort(); return { raw: {}, text: '' }; });
+    await expect(createAgentModelTransport().getResponse(request(model('openai-chat-completions')), active.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(channel.submit.mock.lastCall?.[3]).toBe(active.signal);
   });
 });

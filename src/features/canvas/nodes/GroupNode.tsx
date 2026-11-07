@@ -1,47 +1,29 @@
-import { memo, useMemo } from 'react';
+import { memo } from 'react';
+import type { NodeProps } from '@xyflow/react';
 import { LayoutGrid } from 'lucide-react';
 
-import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
-import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
 import { CANVAS_NODE_TYPES, type GroupNodeData } from '@/features/canvas/domain/canvasNodes';
 import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
+import { NodeFrame } from '@/features/canvas/ui/NodeFrame';
 import { useCanvasStore } from '@/stores/canvasStore';
 
-type GroupNodeProps = {
-  id: string;
-  data: GroupNodeData;
-  selected?: boolean;
-};
+type GroupNodeProps = NodeProps & { data: GroupNodeData };
 
-export const GroupNode = memo(({ id, data, selected }: GroupNodeProps) => {
+const RESIZE = { minWidth: 220, minHeight: 140, maxWidth: 4000, maxHeight: 4000 } as const;
+
+/** Container for a set of nodes; sized by React Flow (style), so the frame fills its box. */
+export const GroupNode = memo(({ id, data, selected = false }: GroupNodeProps) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const resolvedTitle = useMemo(
-    () => resolveNodeDisplayName(CANVAS_NODE_TYPES.group, data),
-    [data]
-  );
-
   return (
-    <div
-      className={`group relative h-full w-full overflow-visible rounded-[18px] border ${selected
-        ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.35)]'
-        : 'border-[rgba(15,23,42,0.2)] dark:border-[rgba(255,255,255,0.26)]'
-        }`}
-      style={{
-        backgroundColor: 'var(--group-node-bg)',
-      }}
-    >
-      <NodeHeader
-        className={NODE_HEADER_FLOATING_POSITION_CLASS}
-        icon={<LayoutGrid className="h-4 w-4" />}
-        titleText={resolvedTitle}
-        editable
-        onTitleChange={(nextTitle) => updateNodeData(id, {
-          displayName: nextTitle,
-          label: nextTitle,
-        })}
-      />
-      <NodeResizeHandle minWidth={220} minHeight={140} maxWidth={2200} maxHeight={1600} />
-    </div>
+    <NodeFrame
+      type={CANVAS_NODE_TYPES.group}
+      selected={selected}
+      icon={<LayoutGrid />}
+      title={resolveNodeDisplayName(CANVAS_NODE_TYPES.group, data)}
+      onRename={(name) => updateNodeData(id, { displayName: name, label: name })}
+      variant="group"
+      resize={RESIZE}
+    />
   );
 });
 

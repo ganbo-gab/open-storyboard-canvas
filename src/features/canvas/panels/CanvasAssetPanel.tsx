@@ -7,7 +7,8 @@ import {
   buildCanvasAssetCatalog,
   type CanvasAssetCatalogItem,
 } from '@/features/canvas/application/canvasAssetCatalog';
-import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
+import { selectCanvasContentNodes } from '@/features/canvas/application/canvasContentSelector';
+import { buildCanvasNodeTree } from '@/features/canvas/application/canvasNodeTree';
 import { CANVAS_COMMAND_VERSION } from '@/features/canvas/domain/canvasCommands';
 import { CANVAS_NODE_TYPES, type CanvasNode } from '@/features/canvas/domain/canvasNodes';
 import { nodeHasSourceHandle } from '@/features/canvas/domain/nodeRegistry';
@@ -19,26 +20,12 @@ const EMPTY_NODES: CanvasNode[] = [];
 const IMAGE_SOURCE_TYPES = new Set<string>([CANVAS_NODE_TYPES.upload, CANVAS_NODE_TYPES.imageEdit, CANVAS_NODE_TYPES.exportImage]);
 
 function toAssetPanelItem(asset: CanvasAssetCatalogItem): CanvasAssetItem | null {
-  if (asset.kind === 'audio') return null;
+  if (asset.kind === 'audio') return { id: asset.id, nodeId: asset.nodeId, title: asset.title, sourceLabel: asset.sourceLabel, order: asset.order, kind: 'audio', audioUrl: asset.url };
   const base = { id: asset.id, nodeId: asset.nodeId, aspectRatio: asset.aspectRatio, title: asset.title, sourceLabel: asset.sourceLabel, order: asset.order };
   if (asset.kind === 'image') {
-    return {
-      ...base,
-      kind: 'image',
-      rawImageUrl: asset.url,
-      rawPreviewImageUrl: asset.previewUrl,
-      imageUrl: resolveImageDisplayUrl(asset.url),
-      previewImageUrl: resolveImageDisplayUrl(asset.previewUrl || asset.url),
-    };
+    return { ...base, kind: 'image', imageUrl: asset.url, previewImageUrl: asset.previewUrl };
   }
-  return {
-    ...base,
-    kind: 'video',
-    rawVideoUrl: asset.url,
-    rawThumbnailUrl: asset.previewUrl,
-    videoUrl: resolveImageDisplayUrl(asset.url),
-    thumbnailUrl: asset.previewUrl ? resolveImageDisplayUrl(asset.previewUrl) : null,
-  };
+  return { ...base, kind: 'video', videoUrl: asset.url };
 }
 
 /**
@@ -62,6 +49,8 @@ export function CanvasAssetPanel({ scheduleCanvasPersist }: { scheduleCanvasPers
       ? items.filter((asset) => asset.kind === 'image' && asset.nodeId !== panel.targetNodeId)
       : items;
   }, [nodes, panel]);
+  // Content nodes only (no geometry-only invalidation): the drawer tree changes with the graph's content.
+  const tree = useMemo(() => (panel?.mode === 'browse' ? buildCanvasNodeTree(selectCanvasContentNodes(nodes)) : undefined), [nodes, panel?.mode]);
 
   const anchorRect = useMemo(
     () => (panel ? new DOMRect(panel.anchor.x, panel.anchor.y, panel.anchor.width, panel.anchor.height) : null),
@@ -80,8 +69,8 @@ export function CanvasAssetPanel({ scheduleCanvasPersist }: { scheduleCanvasPers
       ? source.id
       : addNode(CANVAS_NODE_TYPES.exportImage, { x: target.position.x - 300, y: target.position.y }, {
           displayName: asset.title,
-          imageUrl: asset.rawImageUrl,
-          previewImageUrl: asset.rawPreviewImageUrl ?? asset.rawImageUrl,
+          imageUrl: asset.imageUrl,
+          previewImageUrl: asset.previewImageUrl ?? asset.imageUrl,
           aspectRatio: asset.aspectRatio ?? '1:1',
           resultKind: 'generic',
         });
@@ -92,12 +81,17 @@ export function CanvasAssetPanel({ scheduleCanvasPersist }: { scheduleCanvasPers
     }, 'ui').then(() => scheduleCanvasPersist(0));
   };
 
-  const locateAsset = (asset: CanvasAssetItem) => {
-    const node = useCanvasStore.getState().nodes.find((item) => item.id === asset.nodeId);
+  const locateNode = (nodeId: string) => {
+    const store = useCanvasStore.getState();
+    const node = store.nodes.find((item) => item.id === nodeId);
     if (!node) return;
-    useCanvasStore.getState().setSelectedNode(node.id);
+    // A collapsed stack member is hidden: make it the stack's face first (one undo step), then focus it.
+    if (node.hidden && typeof node.data.batchId === 'string') store.setBatchPrimary(node.data.batchId, node.id);
+    store.setSelectedNode(node.id);
     void reactFlow.fitView({ nodes: [{ id: node.id }], padding: 0.4, duration: 400, maxZoom: Math.max(reactFlow.getZoom(), 0.85) });
   };
+
+  const locateAsset = (asset: CanvasAssetItem) => locateNode(asset.nodeId);
 
   return (
     <AssetPanel
@@ -127,6 +121,9 @@ export function CanvasAssetPanel({ scheduleCanvasPersist }: { scheduleCanvasPers
             });
           }
         : undefined}
+      tree={tree}
+      onLocateNode={locateNode}
+      onRenameNode={(nodeId, displayName) => { void canvasCommandRegistry.execute({ type: 'node.rename', version: CANVAS_COMMAND_VERSION, input: { nodeId, displayName } }, 'ui'); }}
     />
   );
 }

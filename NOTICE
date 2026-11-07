@@ -40,6 +40,11 @@ Third-party npm/Rust dependencies remain governed by their own licenses. See
 package.json, package-lock.json, src-tauri/Cargo.toml, and src-tauri/Cargo.lock
 for dependency lists.
 
+Local canvas video editing uses Mediabunny (https://mediabunny.dev/), copyright
+Vanilagy and contributors, under the Mozilla Public License 2.0. Its source and
+license are distributed in the mediabunny npm package; it is loaded on demand.
+The application does not assume an installed FFmpeg or other media executable.
+
 Documents under docs/api_docs/ are integration reference notes for third-party
 provider APIs. They do not imply endorsement by those providers and may become
 out of date as providers change their APIs.

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, RotateCcw, X } from 'lucide-react';
+import { UiIconButton } from '@/components/ui';
 import { UI_CONTENT_OVERLAY_INSET_CLASS, UI_DIALOG_TRANSITION_MS } from '@/components/ui/motion';
 import { useDialogTransition } from '@/components/ui/useDialogTransition';
 import { useModalFocus } from '@/components/ui/useModalFocus';
@@ -25,7 +26,7 @@ export function ImageViewerModal({
 }: ImageViewerModalProps): React.JSX.Element | null {
   const { t } = useTranslation();
   const viewerControlClass =
-    'inline-flex h-10 items-center justify-center rounded-full border border-white/20 bg-black/60 px-4 text-sm text-white backdrop-blur-xl';
+    'inline-flex h-10 items-center justify-center rounded-full border border-[var(--line)] bg-elevated/90 px-4 text-sm text-text-dark backdrop-blur-xl';
   const { shouldRender, isVisible } = useDialogTransition(open, UI_DIALOG_TRANSITION_MS);
   const [displayImageUrl, setDisplayImageUrl] = useState(imageUrl);
   const { dialogRef, onKeyDown: onModalKeyDown } = useModalFocus({
@@ -139,26 +140,26 @@ export function ImageViewerModal({
         <div className="absolute bottom-8 left-1/2 flex -translate-x-1/2 flex-col items-center gap-3">
           {imageList.length > 1 && (
             <div className="flex items-center gap-3">
-              <button
+              <UiIconButton variant="secondary"
                 type="button"
                 onClick={() => onNavigate('prev')}
                 disabled={currentIndex <= 0}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800/80 text-white backdrop-blur-xs transition-[background-color,opacity] duration-200 hover:bg-zinc-700/80 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-11 w-11 rounded-full bg-elevated/90 backdrop-blur-xs"
                 aria-label={t('viewer.prev', '上一张')}
                 title={t('viewer.prev', '上一张')}
               >
                 <ChevronLeft className="h-5 w-5" />
-              </button>
-              <button
+              </UiIconButton>
+              <UiIconButton variant="secondary"
                 type="button"
                 onClick={() => onNavigate('next')}
                 disabled={currentIndex >= imageList.length - 1}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800/80 text-white backdrop-blur-xs transition-[background-color,opacity] duration-200 hover:bg-zinc-700/80 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-11 w-11 rounded-full bg-elevated/90 backdrop-blur-xs"
                 aria-label={t('viewer.next', '下一张')}
                 title={t('viewer.next', '下一张')}
               >
                 <ChevronRight className="h-5 w-5" />
-              </button>
+              </UiIconButton>
             </div>
           )}
 
@@ -174,24 +175,24 @@ export function ImageViewerModal({
             >
               100%
             </div>
-            <button
+            <UiIconButton variant="secondary"
               type="button"
               onClick={resetView}
-              className={`${viewerControlClass} transition-colors hover:bg-white/10`}
+              className={`${viewerControlClass} w-10 p-0`}
               aria-label={t('viewer.reset', '重置视图')}
               title={t('viewer.reset', '重置视图')}
             >
               <RotateCcw className="h-4 w-4" />
-            </button>
-            <button
+            </UiIconButton>
+            <UiIconButton variant="secondary"
               type="button"
               onClick={onClose}
-              className={`${viewerControlClass} transition-colors hover:bg-white/10`}
+              className={`${viewerControlClass} w-10 p-0`}
               aria-label={t('common.close', '关闭')}
               title={t('common.close', '关闭')}
             >
               <X className="h-4 w-4" />
-            </button>
+            </UiIconButton>
           </div>
         </div>
       </div>

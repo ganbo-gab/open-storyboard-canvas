@@ -1,56 +1,13 @@
-import type { GenerationJobStatus } from '@/commands/ai';
+import { normalizeGenerationJobResults, type GenerationJobStatus } from '@/commands/ai';
 import { useCanvasStore } from '@/stores/canvasStore';
-import { recoverCustomProviderJob } from '../infrastructure/customProviderGateway';
+import { recoverCustomProviderJob } from '../infrastructure/providerGateway';
+import { isGenerationResultNode, publishGenerationJobResults } from './generation/publishJobResults';
 
 export interface GenerationRecoveryResult {
   job: GenerationJobStatus;
   nodeIds: string[];
   status: 'succeeded';
   policy: 'poll-download-persist-only';
-}
-
-function projectRecoveredResult(
-  nodeId: string,
-  jobId: string,
-  job: GenerationJobStatus,
-): void {
-  const result = typeof job.result === 'string' ? job.result.trim() : '';
-  if (!result) throw new Error('结果已取回，但本机媒体路径为空，未报告成功。');
-  if (job.media_type !== 'image' && job.media_type !== 'video') {
-    throw new Error('该任务的媒体类型不支持安全结果投影，未报告成功。');
-  }
-
-  const node = useCanvasStore.getState().nodes.find((candidate) => candidate.id === nodeId);
-  if (!node) throw new Error(`结果节点 ${nodeId} 已不存在，未报告成功。`);
-  const currentData = node.data as Record<string, unknown>;
-  const base = {
-    isGenerating: false,
-    generationJobState: 'succeeded' as const,
-    generationStartedAt: null,
-    generationJobPhase: 'materialize',
-    generationLastJobId: jobId,
-    generationJobId: null,
-    generationError: null,
-    generationErrorDetails: null,
-    generationRetryResultUrl: null,
-    generationRetryRequestedAt: null,
-    generationSafeRecoveryAvailable: false,
-    generationJobUpdatedAt: job.updated_at ?? Date.now(),
-  };
-  if (job.media_type === 'video') {
-    useCanvasStore.getState().updateNodeData(nodeId, {
-      ...base,
-      videoUrl: result,
-      localVideoUrl: result,
-    });
-    return;
-  }
-  useCanvasStore.getState().updateNodeData(nodeId, {
-    ...base,
-    imageUrl: result,
-    previewImageUrl: result,
-    ...(typeof currentData.aspectRatio === 'string' ? { aspectRatio: currentData.aspectRatio } : {}),
-  });
 }
 
 function nodeJobIds(node: ReturnType<typeof useCanvasStore.getState>['nodes'][number]): string[] {
@@ -76,18 +33,18 @@ export async function recoverPersistedGenerationResult(input: {
   if (requested && linkedNodes.length !== requested.size) {
     throw new Error('请求中的节点与持久任务不匹配，未执行网络请求。');
   }
+  const anchor = linkedNodes.find(isGenerationResultNode);
+  if (!anchor) throw new Error('当前画布没有与该 jobId 关联的结果节点，未执行网络请求。');
 
   const job = await recoverCustomProviderJob(jobId);
-  if (job.status !== 'succeeded' || !job.result) {
+  if (job.status !== 'succeeded' || !normalizeGenerationJobResults(job).length) {
     throw new Error(job.error || '已查询上游任务，但结果尚未成功保存到本机。');
   }
 
-  for (const node of linkedNodes) {
-    projectRecoveredResult(node.id, jobId, job);
-  }
+  const nodeIds = publishGenerationJobResults(anchor.id, job);
   return {
     job,
-    nodeIds: linkedNodes.map((node) => node.id),
+    nodeIds,
     status: 'succeeded',
     policy: 'poll-download-persist-only',
   };

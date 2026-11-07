@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom';
 import { FileSpreadsheet, FileUp, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { UiButton, UiCheckbox, UiInput, UiSelect } from '@/components/ui';
+import { UiButton, UiCheckbox, UiChipButton, UiIconButton, UiInput, UiSelect } from '@/components/ui';
 import {
   UI_CONTENT_OVERLAY_INSET_CLASS,
   UI_DIALOG_TRANSITION_MS,
@@ -279,7 +279,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
         type="button"
         tabIndex={-1}
         aria-hidden="true"
-        className={`absolute inset-0 bg-black/55 transition-opacity duration-180 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 bg-(--scrim) transition-opacity duration-180 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
         onClick={requestClose}
       />
       <div
@@ -299,15 +299,15 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
               {t(`promptImport.stage.${stage}`)}
             </p>
           </div>
-          <button
+          <UiIconButton variant="ghost"
             type="button"
             onClick={requestClose}
             aria-label={t('common.close')}
             title={t('common.close')}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-(--canvas-node-menu-hover) hover:text-text-dark"
+            className="h-9 w-9 shrink-0 rounded-md"
           >
             <X className="h-4 w-4" />
-          </button>
+          </UiIconButton>
         </header>
 
         <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
@@ -336,15 +336,15 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
                   <legend className="text-sm font-medium">{t('promptImport.txtMode.label')}</legend>
                   <div className="inline-flex max-w-full rounded-md border border-(--ui-border-soft) p-1">
                     {(['nonEmptyLines', 'paragraphs'] as PromptImportTxtMode[]).map((mode) => (
-                      <button
+                      <UiChipButton active={txtMode === mode}
                         key={mode}
                         type="button"
                         aria-pressed={txtMode === mode}
                         onClick={() => setTxtMode(mode)}
-                        className={`min-h-9 rounded-sm px-3 py-1.5 text-xs transition-colors ${txtMode === mode ? 'bg-accent text-white' : 'text-text-muted hover:text-text-dark'}`}
+                        className="min-h-9 rounded-sm px-3 py-1.5 text-xs"
                       >
                         {t(`promptImport.txtMode.${mode}`)}
-                      </button>
+                      </UiChipButton>
                     ))}
                   </div>
                 </fieldset>
@@ -373,7 +373,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
               )}
 
               {errorCode && (
-                <p role="alert" className="rounded-md border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+                <p role="alert" className="rounded-md border border-danger/35 bg-danger/10 px-3 py-2 text-sm text-danger">
                   {t(`promptImport.errors.${errorCode}`)}
                 </p>
               )}
@@ -462,12 +462,12 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
               </div>
 
               {workbook?.warnings.includes('decodedAsGb18030') && (
-                <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
                   {t('promptImport.warnings.decodedAsGb18030')}
                 </p>
               )}
               {isOverNodeLimit && (
-                <p role="alert" className="rounded-md border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+                <p role="alert" className="rounded-md border border-danger/35 bg-danger/10 px-3 py-2 text-sm text-danger">
                   {t('promptImport.errors.tooManyNodes', { count: mapping.rows.length, limit: PROMPT_IMPORT_MAX_NODES })}
                 </p>
               )}
@@ -491,7 +491,7 @@ export function PromptImportDialog({ isOpen, onClose, onImport }: PromptImportDi
                     </thead>
                     <tbody>
                       {previewRows.map((row) => (
-                        <tr key={row.sourceRowNumber} className="align-top odd:bg-black/3 dark:odd:bg-white/2">
+                        <tr key={row.sourceRowNumber} className="align-top odd:bg-(--hover)">
                           <th scope="row" className="border-b border-r border-(--ui-border-soft) px-2 py-2 font-normal text-text-muted">
                             {row.sourceRowNumber}
                           </th>

@@ -1,10 +1,9 @@
-import type { ChannelAdapter, ChannelError, JobInput, JobRef, JsonValue, MediaKind, Output, PollResult, SubmitResult } from '../../runtime/types';
+import type { ChannelAdapter, ChannelError, JobInput, JobRef, JsonValue, Output, PollResult, SubmitResult } from '../../runtime/types';
 import { detectComfyUIBindings, type ComfyUIBindings } from './bindings';
 import { parseComfyUIProgress, type ComfyUIProgress } from './progress';
-import { applyComfyUIAuth, comfyUIHistoryUrl, comfyUIViewUrl, comfyUIWebSocketUrl, resolveComfyUIUrls, type ComfyUIAuth, type ComfyUIResolvedUrls } from './url';
+import { applyComfyUIAuth, comfyUIHistoryUrl, comfyUIViewUrl, comfyUIWebSocketUrl, resolveComfyUIUrls, type ComfyUIAuth, type ComfyUIAuthConfig, type ComfyUIResolvedUrls } from './url';
 import { asRecord, cloneWorkflow, historyError, nonemptyString, outputFile, safeKey, setInput, uploadedImageName, type ComfyUIWorkflow } from './workflow';
 
-export type ComfyUIAuthConfig = { mode: 'none' | 'bearer' } | { mode: 'header' | 'query'; name: string };
 export interface ComfyUIConfig {
   baseUrl: string;
   workflow: unknown;
@@ -12,7 +11,7 @@ export interface ComfyUIConfig {
   outputNodeIds?: string[];
   auth?: ComfyUIAuthConfig;
   comfyOrgKeyRequired?: boolean;
-  mediaKind?: MediaKind;
+  mediaKind?: JobRef['kind'];
 }
 export interface ComfyUIJobSnapshot {
   workflow: ComfyUIWorkflow;
@@ -21,7 +20,7 @@ export interface ComfyUIJobSnapshot {
   urls: ComfyUIResolvedUrls;
   auth: ComfyUIAuthConfig;
   comfyOrgKeyRequired: boolean;
-  mediaKind: MediaKind;
+  mediaKind: JobRef['kind'];
 }
 export interface ComfyUIHttpRequest {
   method: 'GET' | 'POST';
@@ -33,8 +32,11 @@ export interface ComfyUIHttpRequest {
 export interface ComfyUIDependencies {
   http(request: ComfyUIHttpRequest): Promise<{ status: number; body: unknown }>;
   getSecrets(channelId: string): Promise<{ apiKey?: string; comfyOrgKey?: string }>;
-  ws?(url: string, callbacks: { message(data: unknown): void; close(): void; error(): void }, headers: Record<string, string>): { close(): void };
+  ws?(url: string, callbacks: { message(data: unknown): void; close(): void; error(): void }, headers: Record<string, string>): { close(): void } | Promise<{ close(): void }>;
+  onProgress?(jobId: string, progress: ComfyUIProgress | null): void;
 }
+
+export interface ComfyUIAdapter extends ChannelAdapter { dispose(jobId: string): void }
 
 /** Call before persisting the job. No credential values enter the snapshot. */
 export function createComfyUIJob(job: JobInput, config: ComfyUIConfig): JobInput {
@@ -98,12 +100,16 @@ function patchWorkflow(snapshot: ComfyUIJobSnapshot, job: JobInput, uploadedName
 }
 
 /** Secrets are resolved at execution time, independently of persisted configuration. */
-export function createComfyUIAdapter(dependencies: ComfyUIDependencies): ChannelAdapter {
-  const sessions = new Map<string, { socket: { close(): void }; progress?: ComfyUIProgress; updatedAt?: number; taskId?: string }>();
+export function createComfyUIAdapter(dependencies: ComfyUIDependencies): ComfyUIAdapter {
+  const sessions = new Map<string, { socket: { close(): void }; token: symbol; progress?: ComfyUIProgress; updatedAt?: number; taskId?: string }>();
+  const pendingSockets = new Map<string, symbol>();
+  const attempted = new Set<string>();
   const stop = (jobId: string) => {
     const session = sessions.get(jobId);
     sessions.delete(jobId);
+    pendingSockets.delete(jobId);
     session?.socket.close();
+    dependencies.onProgress?.(jobId, null);
   };
   const credentials = async (job: JobInput, snapshot: ComfyUIJobSnapshot, submitting = false): Promise<{ auth: ComfyUIAuth; comfyOrgKey?: string }> => {
     const secrets = await dependencies.getSecrets(job.channelId);
@@ -113,11 +119,42 @@ export function createComfyUIAdapter(dependencies: ComfyUIDependencies): Channel
       : { mode: snapshot.auth.mode, name: 'name' in snapshot.auth ? snapshot.auth.name : '', value: secrets.apiKey ?? '' };
     return { auth, comfyOrgKey: snapshot.comfyOrgKeyRequired ? secrets.comfyOrgKey : undefined };
   };
+  const connect = async (job: JobInput, snapshot: ComfyUIJobSnapshot, auth: ComfyUIAuth, taskId?: string, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    if (!dependencies.ws || attempted.has(job.jobId)) return;
+    attempted.add(job.jobId);
+    const token = Symbol(job.jobId);
+    pendingSockets.set(job.jobId, token);
+    const abort = () => stop(job.jobId);
+    signal?.addEventListener('abort', abort, { once: true });
+    const wsAuth = applyComfyUIAuth(comfyUIWebSocketUrl(snapshot.urls, job.jobId), auth);
+    try {
+      const socket = await dependencies.ws(wsAuth.url, {
+        message(data) {
+          const session = sessions.get(job.jobId);
+          const progress = parseComfyUIProgress(data);
+          if (session?.token !== token || !session.taskId || !progress || (progress.promptId && progress.promptId !== session.taskId)) return;
+          // A new executing node starts a new sampler; never carry the old node's percentage.
+          session.progress = progress.type === 'executing' ? progress : { ...session.progress, ...progress };
+          session.updatedAt = Date.now();
+          dependencies.onProgress?.(job.jobId, session.progress);
+        },
+        close() { if (sessions.get(job.jobId)?.token === token || pendingSockets.get(job.jobId) === token) stop(job.jobId); },
+        error() { if (sessions.get(job.jobId)?.token === token || pendingSockets.get(job.jobId) === token) stop(job.jobId); },
+      }, wsAuth.headers);
+      if (pendingSockets.get(job.jobId) !== token || signal?.aborted) { socket.close(); return; }
+      pendingSockets.delete(job.jobId);
+      sessions.set(job.jobId, { socket, token, taskId });
+    } catch { if (pendingSockets.get(job.jobId) === token) { pendingSockets.delete(job.jobId); dependencies.onProgress?.(job.jobId, null); } }
+    finally { signal?.removeEventListener('abort', abort); }
+  };
   return {
+    dispose(jobId) { stop(jobId); attempted.delete(jobId); },
     async submit(job, signal): Promise<SubmitResult> {
       let promptSent = false;
       let networkStarted = false;
       try {
+        signal?.throwIfAborted();
         const snapshot = readSnapshot(job);
         patchWorkflow(snapshot, job, job.refs.map((_, index) => `reference-${index}.png`));
         const { auth, comfyOrgKey } = await credentials(job, snapshot, true);
@@ -132,23 +169,7 @@ export function createComfyUIAdapter(dependencies: ComfyUIDependencies): Channel
         }
         const workflow = patchWorkflow(snapshot, job, uploaded);
         stop(job.jobId);
-        if (dependencies.ws) {
-          const wsAuth = applyComfyUIAuth(comfyUIWebSocketUrl(snapshot.urls, job.jobId), auth);
-          try {
-            const socket = dependencies.ws(wsAuth.url, {
-              message(data) {
-                const session = sessions.get(job.jobId);
-                const progress = parseComfyUIProgress(data);
-                if (session && progress && (!progress.promptId || !session.taskId || progress.promptId === session.taskId)) {
-                  session.progress = { ...session.progress, ...progress };
-                  session.updatedAt = Date.now();
-                }
-              },
-              close() { sessions.delete(job.jobId); }, error() { stop(job.jobId); },
-            }, wsAuth.headers);
-            sessions.set(job.jobId, { socket });
-          } catch { /* WebSocket is optional; history polling remains available. */ }
-        }
+        await connect(job, snapshot, auth, undefined, signal);
         signal?.addEventListener('abort', () => stop(job.jobId), { once: true });
         signal?.throwIfAborted();
         promptSent = true;
@@ -176,7 +197,11 @@ export function createComfyUIAdapter(dependencies: ComfyUIDependencies): Channel
     },
     async poll(job, taskId, signal): Promise<PollResult> {
       try {
+        signal?.throwIfAborted();
         const snapshot = readSnapshot(job);
+        const { auth } = await credentials(job, snapshot);
+        await connect(job, snapshot, auth, taskId, signal);
+        signal?.throwIfAborted();
         const session = sessions.get(job.jobId);
         const progress = session?.progress;
         if (progress?.error && (!progress.promptId || progress.promptId === taskId)) {
@@ -186,7 +211,6 @@ export function createComfyUIAdapter(dependencies: ComfyUIDependencies): Channel
         if (progress && session?.updatedAt && Date.now() - session.updatedAt < 15_000 && !progress.completed && progress.type !== 'executed') {
           return { state: 'pending', ...(progress.progress === undefined ? {} : { progress: progress.progress }), ...(progress.currentNode ? { message: `正在执行节点 ${progress.currentNode}` } : {}) };
         }
-        const { auth } = await credentials(job, snapshot);
         const response = await dependencies.http({ method: 'GET', ...applyComfyUIAuth(comfyUIHistoryUrl(snapshot.urls, taskId), auth), signal });
         if (response.status < 200 || response.status >= 300) return { state: 'failed', error: channelError('ComfyUI 查询任务失败。', response.status) };
         const root = asRecord(response.body);
@@ -222,7 +246,7 @@ export function createComfyUIAdapter(dependencies: ComfyUIDependencies): Channel
         const status = asRecord(entry.status);
         if (status?.completed === true || status?.status_str === 'success') {
           stop(job.jobId);
-          return { state: 'failed', error: { category: 'upstream', message: 'ComfyUI 已完成，但所选输出节点没有可用文件。', retryable: false } };
+          return { state: 'failed', error: { category: 'upstream', message: 'ComfyUI 已完成，但所选输出节点暂未返回可用文件；保留原任务，可稍后取回。', retryable: true } };
         }
         return { state: 'pending' };
       } catch (cause) {

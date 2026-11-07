@@ -1,3 +1,8 @@
+import type { AgentTurnSafetySnapshot } from '../application/agentTurnSafety';
+import { createAgentCompressedStorage } from './agentCompressedStorage';
+import type { SkillRoutingContext } from '../application/agentSkills';
+import { agentGenerationPreferencesSchema, type AgentGenerationPreferences } from '../application/agentGenerationPreferences';
+import type { CanvasAgentExecutionMode } from '../application/agentAutoApprovalPolicy';
 import type {
   AgentInputItem,
   SessionHistoryRewriteArgs,
@@ -32,7 +37,7 @@ export interface AgentSessionRecord {
   id: string;
   projectId: string;
   scope?: AgentScope;
-  executionMode?: 'manual' | 'auto';
+  executionMode?: 'manual' | 'auto' | 'full';
   title: string;
   modelRef: string;
   createdAt: number;
@@ -59,6 +64,12 @@ export interface AgentRunStateRecord {
   agentDefinitionVersion: typeof CANVAS_AGENT_DEFINITION_VERSION;
   commandSchemaVersion: typeof CANVAS_COMMAND_VERSION;
   serializedState: string;
+  turnSafety?: AgentTurnSafetySnapshot;
+  skillRoutingContext?: SkillRoutingContext;
+  allowedToolNames?: readonly string[];
+  modelRef?: string;
+  generationPreferences?: AgentGenerationPreferences;
+  executionMode?: CanvasAgentExecutionMode;
   createdAt: number;
   updatedAt: number;
 }
@@ -257,6 +268,8 @@ function isAgentRunStateRecord(value: unknown): value is AgentRunStateRecord {
     && typeof record.agentDefinitionVersion === 'number'
     && typeof record.commandSchemaVersion === 'number'
     && typeof record.serializedState === 'string'
+    && (record.executionMode === undefined || ['manual', 'auto', 'full'].includes(record.executionMode))
+    && (record.generationPreferences === undefined || agentGenerationPreferencesSchema.safeParse(record.generationPreferences).success)
     && isFiniteTimestamp(record.createdAt)
     && isFiniteTimestamp(record.updatedAt);
 }
@@ -268,7 +281,7 @@ function defaultStorage(): StorageLike | null {
     // quota. A write-probe incorrectly turned a full-but-readable store into
     // an empty in-memory repository, hiding all existing Agent history.
     void window.localStorage.length;
-    return window.localStorage;
+    return createAgentCompressedStorage(window.localStorage);
   } catch {
     return null;
   }
@@ -419,9 +432,12 @@ export class AgentSessionRepository {
     assertAgentSerializedRunStateSafe(serializedState);
     const envelope = this.readRunStates();
     const existingIndex = envelope.runStates.findIndex((record) => record.id === input.id);
+    const previous = existingIndex >= 0 ? envelope.runStates[existingIndex] : undefined;
     const now = this.now();
     const record: AgentRunStateRecord = {
       ...input,
+      ...(input.generationPreferences === undefined ? {} : { generationPreferences: agentGenerationPreferencesSchema.parse(input.generationPreferences) }),
+      executionMode: previous?.executionMode ?? input.executionMode ?? 'manual',
       serializedState,
       runtimeVersion: CANVAS_AGENT_RUNTIME_VERSION,
       agentDefinitionVersion: CANVAS_AGENT_DEFINITION_VERSION,
@@ -659,25 +675,35 @@ export class AgentSessionRepository {
   }
 
   async applyHistoryTransaction(sessionId: string, args: SessionHistoryTransactionArgs): Promise<void> {
-    const fingerprint = stableStringify(args.transaction);
+    // Keep one small identity digest instead of copying each tool/media result
+    // into a second full-size JSON string in the same localStorage envelope.
+    // Freeze the input across async hashing so the digest always binds the data
+    // actually applied below. Identical concurrent operations still mutate once.
+    const transaction = cloneJson(args.transaction);
+    const operationId = args.operationId;
+    const legacyFingerprint = stableStringify(transaction);
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(legacyFingerprint));
+    const fingerprint = `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`;
     this.mutateSession(sessionId, (session) => {
-      const prior = session.appliedTransactions[args.operationId];
+      const prior = session.appliedTransactions[operationId];
       if (prior) {
-        if (prior !== fingerprint) throw new Error('Agent session operation id was reused with different input.');
-        return session;
+        if (prior !== fingerprint && prior !== legacyFingerprint) throw new Error('Agent session operation id was reused with different input.');
+        return prior === fingerprint ? session : {
+          ...session, appliedTransactions: { ...session.appliedTransactions, [operationId]: fingerprint },
+        };
       }
       let items = cloneJson(session.items);
-      if (args.transaction.type === 'append_items') {
-        items.push(...cloneJson(args.transaction.items));
+      if (transaction.type === 'append_items') {
+        items.push(...transaction.items);
       } else {
-        const suffixLength = args.transaction.expectedSuffix.length;
+        const suffixLength = transaction.expectedSuffix.length;
         const currentSuffix = suffixLength === 0 ? [] : items.slice(-suffixLength);
-        if (stableStringify(currentSuffix) !== stableStringify(args.transaction.expectedSuffix)) {
+        if (stableStringify(currentSuffix) !== stableStringify(transaction.expectedSuffix)) {
           throw new Error('Agent session history suffix changed before replacement.');
         }
         items = [
           ...items.slice(0, Math.max(0, items.length - suffixLength)),
-          ...cloneJson(args.transaction.replacement),
+          ...transaction.replacement,
         ];
       }
       if (items.length > MAX_SESSION_ITEMS) throw new Error('Agent session exceeds 2000 history items.');
@@ -685,7 +711,7 @@ export class AgentSessionRepository {
       return {
         ...session,
         items,
-        appliedTransactions: { ...session.appliedTransactions, [args.operationId]: fingerprint },
+        appliedTransactions: { ...session.appliedTransactions, [operationId]: fingerprint },
       };
     });
   }

@@ -7,6 +7,7 @@ import ReactCrop, {
 } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 
+import { UiChipButton, UiInput } from '@/components/ui';
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
 import type { ToolSelectField } from '@/features/canvas/tools';
 import type { VisualToolEditorProps } from './types';
@@ -346,14 +347,10 @@ export function CropToolEditor({ plugin, sourceImageUrl, options, onOptionsChang
         {ratioOptions.map((item) => {
           const active = item.value === aspectMode;
           return (
-            <button
+            <UiChipButton active={active}
               key={item.value}
               type="button"
-              className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
-                active
-                  ? 'border-accent/45 bg-accent/15 text-text-dark'
-                  : 'border-[rgba(255,255,255,0.15)] text-text-muted hover:bg-bg-dark'
-              }`}
+              className="rounded-lg px-3 py-1.5 text-xs"
               onClick={() =>
                 onOptionsChange({
                   ...options,
@@ -362,17 +359,13 @@ export function CropToolEditor({ plugin, sourceImageUrl, options, onOptionsChang
               }
             >
               {item.label}
-            </button>
+            </UiChipButton>
           );
         })}
 
-        <button
+        <UiChipButton active={aspectMode === 'custom'}
           type="button"
-          className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
-            aspectMode === 'custom'
-              ? 'border-accent/45 bg-accent/15 text-text-dark'
-              : 'border-[rgba(255,255,255,0.15)] text-text-muted hover:bg-bg-dark'
-          }`}
+          className="rounded-lg px-3 py-1.5 text-xs"
           onClick={() =>
             onOptionsChange({
               ...options,
@@ -381,12 +374,12 @@ export function CropToolEditor({ plugin, sourceImageUrl, options, onOptionsChang
           }
         >
           自定义
-        </button>
+        </UiChipButton>
       </div>
 
       {aspectMode === 'custom' && (
         <div className="flex items-center gap-2">
-          <input
+          <UiInput
             type="text"
             value={customRatioInput}
             onChange={(event) => {
@@ -399,15 +392,15 @@ export function CropToolEditor({ plugin, sourceImageUrl, options, onOptionsChang
               });
             }}
             placeholder="输入比例，如 3:2 或 1.5"
-            className="h-9 w-[220px] rounded-lg border border-[rgba(255,255,255,0.15)] bg-bg-dark/80 px-3 text-sm text-text-dark outline-hidden"
+            className="h-9 w-[220px] rounded-lg px-3 text-sm"
           />
-          {customRatioError && <span className="text-xs text-red-400">{customRatioError}</span>}
+          {customRatioError && <span className="text-xs text-danger">{customRatioError}</span>}
         </div>
       )}
 
       <div
         ref={viewportRef}
-        className="relative h-[min(62vh,640px)] rounded-xl border border-[rgba(255,255,255,0.12)] bg-bg-dark/85"
+        className="relative h-[min(62vh,640px)] rounded-xl border border-(--canvas-node-border) bg-(--canvas-node-media-bg)"
       >
         <div className="flex h-full w-full items-center justify-center p-3">
           {renderedImageSize && (

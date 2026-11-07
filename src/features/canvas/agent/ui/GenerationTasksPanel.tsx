@@ -6,6 +6,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { listGenerationJobs, type GenerationJobStatus } from '@/commands/ai';
+import { UiButton, UiIconButton } from '@/components/ui';
 import { canvasNavigationFacade } from '@/features/canvas/application/canvasNavigationFacade';
 import { recoverPersistedGenerationResult } from '@/features/canvas/application/generationRecovery';
 import type { CanvasNode } from '@/features/canvas/domain/canvasNodes';
@@ -13,9 +14,9 @@ import type { CanvasNode } from '@/features/canvas/domain/canvasNodes';
 interface Props { nodes: CanvasNode[] }
 
 function statusIcon(status: GenerationJobStatus['status']) {
-  if (status === 'succeeded') return <CheckCircle2 className="h-4 w-4 text-emerald-500" aria-hidden="true" />;
-  if (status === 'failed' || status === 'not_found' || status === 'canceled') return <XCircle className="h-4 w-4 text-red-500" aria-hidden="true" />;
-  if (status === 'unknown' || status === 'recoverable_wait') return <ShieldAlert className="h-4 w-4 text-amber-500" aria-hidden="true" />;
+  if (status === 'succeeded') return <CheckCircle2 className="h-4 w-4 text-success" aria-hidden="true" />;
+  if (status === 'failed' || status === 'not_found' || status === 'canceled') return <XCircle className="h-4 w-4 text-danger" aria-hidden="true" />;
+  if (status === 'unknown' || status === 'recoverable_wait') return <ShieldAlert className="h-4 w-4 text-warning" aria-hidden="true" />;
   return <Clock3 className="h-4 w-4 text-accent" aria-hidden="true" />;
 }
 
@@ -93,18 +94,18 @@ export function GenerationTasksPanel({ nodes }: Props) {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col" aria-label={t('canvasAgent.tasks')}>
-      <div className="flex min-h-14 shrink-0 items-center justify-between border-b border-border-dark/70 px-4">
+      <div className="flex min-h-14 shrink-0 items-center justify-between border-b border-[var(--line)] px-4">
         <div>
           <h2 className="text-sm font-semibold text-text-dark">{t('generationJob.taskPanelTitle')}</h2>
           <p className="mt-0.5 text-[11px] text-text-muted">{t(isTauri() ? 'generationJob.desktopPersistenceNotice' : 'generationJob.webPersistenceNotice')}</p>
         </div>
-        <button type="button" className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-text-muted transition-colors duration-150 hover:bg-text-dark/5 hover:text-text-dark focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-40" onClick={() => void refresh(false)} aria-label={t('generationJob.refreshTasks')} title={t('generationJob.refreshTasks')} disabled={isRefreshing}>
-          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'motion-safe:animate-spin' : ''}`} />
-        </button>
+        <UiIconButton size="lg" onClick={() => void refresh(false)} aria-label={t('generationJob.refreshTasks')} title={t('generationJob.refreshTasks')} disabled={isRefreshing}>
+          <RefreshCw className={isRefreshing ? 'motion-safe:animate-spin' : undefined} />
+        </UiIconButton>
       </div>
 
       <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto p-3" aria-live="polite">
-        {error ? <div className="mb-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-600 dark:text-red-300" role="alert">{error}</div> : null}
+        {error ? <div className="mb-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-xs leading-5 text-danger" role="alert">{error}</div> : null}
         {isLoading ? <div className="flex min-h-32 items-center justify-center gap-2 text-xs text-text-muted" role="status"><RefreshCw className="h-4 w-4 motion-safe:animate-spin" />{t('generationJob.loadingTasks')}</div> : jobs.length === 0 ? (
           <div className="flex min-h-40 flex-col items-center justify-center gap-2 px-6 text-center text-text-muted"><Clock3 className="h-6 w-6 opacity-60" /><span className="text-xs leading-5">{t('generationJob.noTasks')}</span></div>
         ) : (
@@ -114,12 +115,12 @@ export function GenerationTasksPanel({ nodes }: Props) {
             const canRecover = isTauri() && canLocate && (job.status === 'recoverable_wait' || job.status === 'unknown') && job.resumable !== false && Boolean(job.external_task_id || job.result_url);
             const status = recoveryStatus[job.job_id];
             const isRecovering = recoveringJobId === job.job_id;
-            return <article key={job.job_id} className="rounded-xl border border-border-dark/70 bg-surface-dark/55 px-3 py-2.5 transition-colors duration-150 hover:border-border-dark">
-              <div className="flex items-start gap-2.5"><div className="mt-0.5 shrink-0">{statusIcon(job.status)}</div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><span className="truncate text-xs font-semibold text-text-dark">{job.model_id || job.provider_id || t('generationJob.unknownModel')}</span><span className="shrink-0 text-[10px] text-text-muted">{formatUpdatedAt(job.updated_at, i18n.language)}</span></div><div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-text-muted"><span>{t(`generationJob.status.${job.status}`, { defaultValue: job.status })}</span>{job.phase ? <span>{t(`generationJob.phase.${job.phase}`, { defaultValue: job.phase })}</span> : null}{job.network_route ? <span>{t(`generationJob.route.${job.network_route}`)}</span> : null}{canRecover ? <span className="text-amber-600 dark:text-amber-400">{t('generationJob.safeHandle')}</span> : null}</div>{job.error ? <div className="mt-1.5 line-clamp-2 wrap-break-word text-[11px] leading-4 text-text-muted" title={job.error}>{job.error}</div> : null}</div>
-                <div className="flex shrink-0 gap-1">{canRecover ? <button type="button" className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-amber-600 transition-colors duration-150 hover:bg-amber-500/10 disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-amber-400/60" onClick={() => setConfirmJobId(job.job_id)} disabled={isRecovering} aria-label={t('generationJob.recoverResult')}><RotateCcw className={`h-4 w-4 ${isRecovering ? 'motion-safe:animate-spin' : ''}`} /></button> : null}<button type="button" className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-text-muted transition-colors duration-150 hover:bg-accent/10 hover:text-accent disabled:opacity-30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60" onClick={() => void locate(job.job_id)} disabled={!canLocate} aria-label={t('generationJob.locateTask')}><LocateFixed className="h-4 w-4" /></button></div>
+            return <article key={job.job_id} className="rounded-xl border border-[var(--line)] bg-[var(--field-bg)] px-3 py-2.5 transition-colors duration-(--dur-1) hover:border-[var(--line-strong)]">
+              <div className="flex items-start gap-2.5"><div className="mt-0.5 shrink-0">{statusIcon(job.status)}</div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><span className="truncate text-xs font-semibold text-text-dark">{job.model_id || job.provider_id || t('generationJob.unknownModel')}</span><span className="shrink-0 text-[10px] text-text-muted">{formatUpdatedAt(job.updated_at, i18n.language)}</span></div><div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-text-muted"><span>{t(`generationJob.status.${job.status}`, { defaultValue: job.status })}</span>{job.phase ? <span>{t(`generationJob.phase.${job.phase}`, { defaultValue: job.phase })}</span> : null}{job.network_route ? <span>{t(`generationJob.route.${job.network_route}`)}</span> : null}{canRecover ? <span className="text-warning">{t('generationJob.safeHandle')}</span> : null}</div>{job.error ? <div className="mt-1.5 line-clamp-2 wrap-break-word text-[11px] leading-4 text-text-muted" title={job.error}>{job.error}</div> : null}</div>
+                <div className="flex shrink-0 gap-1">{canRecover ? <UiIconButton size="lg" className="text-warning hover:bg-warning/10" onClick={() => setConfirmJobId(job.job_id)} disabled={isRecovering} aria-label={t('generationJob.recoverResult')}><RotateCcw className={isRecovering ? 'motion-safe:animate-spin' : undefined} /></UiIconButton> : null}<UiIconButton size="lg" className="hover:bg-accent/10 hover:text-accent" onClick={() => void locate(job.job_id)} disabled={!canLocate} aria-label={t('generationJob.locateTask')}><LocateFixed /></UiIconButton></div>
               </div>
-              {confirmJobId === job.job_id ? <div className="mt-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.07] p-3 text-[11px] leading-5 text-text-dark"><div>{t('generationJob.recoveryConfirm')}</div><div className="mt-2 flex justify-end gap-1.5"><button type="button" className="h-9 rounded-lg px-3 text-text-muted hover:bg-text-dark/5" onClick={() => setConfirmJobId(null)}>{t('common.cancel')}</button><button type="button" className="h-9 rounded-lg bg-amber-500 px-3 font-medium text-black" onClick={() => void recover(job)}>{t('generationJob.confirmRecovery')}</button></div></div> : null}
-              {status ? <div className={`mt-2 text-[11px] leading-4 ${status.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-300'}`} role="status">{status.message}</div> : null}
+              {confirmJobId === job.job_id ? <div className="mt-2 rounded-xl border border-warning/30 bg-warning/[0.07] p-3 text-[11px] leading-5 text-text-dark"><div>{t('generationJob.recoveryConfirm')}</div><div className="mt-2 flex justify-end gap-1.5"><UiButton variant="ghost" onClick={() => setConfirmJobId(null)}>{t('common.cancel')}</UiButton><UiButton variant="primary" onClick={() => void recover(job)}>{t('generationJob.confirmRecovery')}</UiButton></div></div> : null}
+              {status ? <div className={`mt-2 text-[11px] leading-4 ${status.ok ? 'text-success' : 'text-danger'}`} role="status">{status.message}</div> : null}
             </article>;
           })}</div>
         )}

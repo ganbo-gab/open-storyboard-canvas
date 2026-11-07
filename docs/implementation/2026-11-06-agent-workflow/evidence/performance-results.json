@@ -1,0 +1,80 @@
+{
+  "candidatePan": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"zoom\":0.1,\"visibility\":\"visible\",\"dpr\":2,\"nodes\":1000,\"edges\":1000,\"mounted\":1000,\"mountedEdges\":1000,\"images\":350,\"thumbs\":{\"live\":350,\"idle\":96,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":700,\"failures\":0},\"frames\":233,\"transforms\":180,\"p50\":16.69999999999891,\"p95\":17.600000000000364,\"max\":50,\"over50\":0,\"graphStable\":true,\"historyStable\":true,\"end\":[112.24465402301075,24.53012183098508,0.1]}\n```"
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"zoom\":0.1,\"visibility\":\"visible\",\"dpr\":2,\"nodes\":1000,\"edges\":1000,\"mounted\":1000,\"mountedEdges\":1000,\"images\":350,\"thumbs\":{\"live\":350,\"idle\":69,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":700,\"failures\":0},\"frames\":265,\"transforms\":179,\"p50\":16.700000000000728,\"p95\":17.599999999998545,\"max\":34.19999999999709,\"over50\":0,\"graphStable\":true,\"historyStable\":true,\"end\":[112.24465402301075,24.53012183098508,0.1]}\n```"
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"zoom\":0.6,\"visibility\":\"visible\",\"dpr\":2,\"nodes\":1000,\"edges\":1000,\"mounted\":40,\"mountedEdges\":80,\"images\":40,\"thumbs\":{\"live\":40,\"idle\":96,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":740,\"failures\":0},\"frames\":168,\"transforms\":164,\"p50\":16.69999999999709,\"p95\":17.5,\"max\":232.40000000000146,\"over50\":1,\"graphStable\":true,\"historyStable\":true,\"end\":[112.24465402301075,24.53012183098508,0.6]}\n```"
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"zoom\":1,\"visibility\":\"visible\",\"dpr\":2,\"nodes\":1000,\"edges\":1000,\"mounted\":15,\"mountedEdges\":30,\"images\":15,\"thumbs\":{\"live\":15,\"idle\":96,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":745,\"failures\":0},\"frames\":181,\"transforms\":174,\"p50\":16.69999999999709,\"p95\":17.599999999998545,\"max\":17.700000000004366,\"over50\":0,\"graphStable\":true,\"historyStable\":true,\"end\":[112.24465402301075,24.53012183098508,1]}\n```"
+        }
+      ]
+    }
+  ],
+  "drags": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"operation\":\"drag\",\"count\":5,\"canonical\":1000,\"changed\":[\"qa-n-0\",\"qa-n-1\",\"qa-n-2\",\"qa-n-3\",\"qa-n-4\"],\"historyDelta\":1,\"undoExact\":true,\"frames\":95,\"p50\":16.69999999999709,\"p95\":17.39999999999418,\"max\":17.60000000000582,\"over50\":0}\n```"
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"operation\":\"drag\",\"count\":10,\"canonical\":1000,\"changed\":[\"qa-n-0\",\"qa-n-1\",\"qa-n-2\",\"qa-n-3\",\"qa-n-4\",\"qa-n-5\",\"qa-n-6\",\"qa-n-7\",\"qa-n-8\",\"qa-n-9\"],\"historyDelta\":1,\"undoExact\":true,\"frames\":96,\"p50\":16.69999999999709,\"p95\":17.59999999999127,\"max\":17.70000000001164,\"over50\":0}\n```"
+        }
+      ]
+    }
+  ],
+  "zoom": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"operation\":\"zoom\",\"canonical\":1000,\"edges\":1000,\"frames\":154,\"transforms\":84,\"p50\":16.70000000001164,\"p95\":49.69999999998254,\"max\":100,\"over50\":5,\"graphStable\":true,\"historyStable\":true,\"markersClean\":true,\"end\":[20.000000000000227,49.999999999999886,0.1],\"thumbs\":{\"live\":350,\"idle\":13,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":1305,\"failures\":0}}\n```"
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"operation\":\"zoom\",\"canonical\":1000,\"edges\":1000,\"frames\":175,\"range\":[0.1,0.143333],\"transforms\":61,\"p50\":16.699999999982538,\"p95\":17.5,\"max\":17.70000000001164,\"over50\":0,\"graphStable\":true,\"historyStable\":true,\"markersClean\":true,\"end\":[19.999999999997044,49.99999999999835,0.10000000000000044],\"thumbs\":{\"live\":350,\"idle\":13,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":1839,\"failures\":0}}\n```"
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"operation\":\"zoom\",\"canonical\":1000,\"edges\":1000,\"frames\":157,\"range\":[0.1,1.00142],\"transforms\":61,\"p50\":16.699999999982538,\"p95\":17.60000000000582,\"max\":33.29999999998836,\"over50\":0,\"graphStable\":true,\"historyStable\":true,\"markersClean\":true,\"end\":[19.999999999996135,49.99999999999761,0.10000000000000062],\"thumbs\":{\"live\":350,\"idle\":13,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":1839,\"failures\":0}}\n```"
+        }
+      ]
+    }
+  ]
+}

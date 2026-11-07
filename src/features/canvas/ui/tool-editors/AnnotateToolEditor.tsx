@@ -15,6 +15,7 @@ import {
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 
+import { UiButton, UiChipButton, UiInput, UiTextArea } from '@/components/ui';
 import type { ToolOptions } from '@/features/canvas/tools';
 import {
   normalizeAnnotationRect,
@@ -973,7 +974,7 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
           const Icon = button.icon;
           const active = tool === button.type;
           return (
-            <button
+            <UiChipButton active={active}
               key={button.type}
               type="button"
               onClick={() => {
@@ -982,15 +983,11 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
                   setTextEditorState(null);
                 }
               }}
-              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
-                active
-                  ? 'border-accent/45 bg-accent/15 text-text-dark'
-                  : 'border-[rgba(255,255,255,0.14)] text-text-muted hover:bg-bg-dark'
-              }`}
+              className="gap-1 rounded-lg px-2.5 py-1.5 text-xs"
             >
               <Icon className="h-3.5 w-3.5" />
               {button.label}
-            </button>
+            </UiChipButton>
           );
         })}
 
@@ -1003,12 +1000,13 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
               type="color"
               value={color}
               onChange={(event) => handleStyleInputChange({ color: event.target.value })}
-              className="h-9 w-10 cursor-pointer rounded-md border border-[rgba(255,255,255,0.18)] bg-transparent p-1"
+              className="ui-input h-9 w-10 cursor-pointer rounded-md p-1"
             />
             {activeStyleKind === 'shape' && (
               <>
                 <input
                   type="range"
+                  className="ui-range"
                   min={MIN_LINE_WIDTH_PERCENT}
                   max={MAX_LINE_WIDTH_PERCENT}
                   step={0.1}
@@ -1020,7 +1018,7 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
             )}
             {activeStyleKind === 'text' && (
               <div className="flex items-center gap-1">
-                <input
+                <UiInput
                   type="number"
                   min={MIN_TEXT_SIZE_PERCENT}
                   max={MAX_TEXT_SIZE_PERCENT}
@@ -1029,25 +1027,25 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
                   onChange={(event) =>
                     handleStyleInputChange({ fontSizePercent: Number(event.target.value) })
                   }
-                  className="h-9 w-24 rounded-lg border border-[rgba(255,255,255,0.14)] bg-bg-dark/80 px-2 text-sm text-text-dark outline-hidden"
+                  className="h-9 w-24 rounded-lg px-2 text-sm"
                 />
                 <span className="text-xs text-text-muted">%</span>
               </div>
             )}
           </>
         )}
-        <button
+        <UiButton variant="secondary" size="sm"
           type="button"
-          className="inline-flex items-center gap-1 rounded-lg border border-[rgba(255,255,255,0.14)] px-2.5 py-1.5 text-xs text-text-muted transition-colors hover:bg-bg-dark"
+          className="gap-1 rounded-lg px-2.5 py-1.5 text-xs"
           onClick={handleUndo}
           disabled={undoStack.length === 0}
         >
           <Undo2 className="h-3.5 w-3.5" />
           撤销
-        </button>
-        <button
+        </UiButton>
+        <UiButton variant="secondary" size="sm"
           type="button"
-          className="inline-flex items-center gap-1 rounded-lg border border-[rgba(255,255,255,0.14)] px-2.5 py-1.5 text-xs text-text-muted transition-colors hover:bg-bg-dark"
+          className="gap-1 rounded-lg px-2.5 py-1.5 text-xs"
           onClick={handleRedo}
           disabled={redoStack.length === 0}
         >
@@ -1056,19 +1054,19 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
             <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
           </svg>
           重做
-        </button>
-        <button
+        </UiButton>
+        <UiButton variant="danger" size="sm"
           type="button"
-          className="inline-flex items-center gap-1 rounded-lg border border-[rgba(255,255,255,0.14)] px-2.5 py-1.5 text-xs text-text-muted transition-colors hover:bg-bg-dark"
+          className="gap-1 rounded-lg px-2.5 py-1.5 text-xs"
           onClick={handleDeleteSelected}
           disabled={!selectedId}
         >
           <Trash2 className="h-3.5 w-3.5" />
           删除选中
-        </button>
-        <button
+        </UiButton>
+        <UiButton variant="danger" size="sm"
           type="button"
-          className="inline-flex items-center gap-1 rounded-lg border border-[rgba(255,255,255,0.14)] px-2.5 py-1.5 text-xs text-text-muted transition-colors hover:bg-bg-dark"
+          className="gap-1 rounded-lg px-2.5 py-1.5 text-xs"
           onClick={() => {
             setUndoStack((prev) => [...prev, annotations].slice(-40));
             setRedoStack([]);
@@ -1079,17 +1077,17 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
         >
           <Trash2 className="h-3.5 w-3.5" />
           清空
-        </button>
+        </UiButton>
       </div>
 
       <div
         ref={viewportRef}
-        className="relative h-[min(62vh,640px)] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.12)] bg-bg-dark/85"
+        className="relative h-[min(62vh,640px)] overflow-hidden rounded-xl border border-(--canvas-node-border) bg-(--canvas-node-media-bg)"
       >
         <div
           ref={stageHostRef}
           tabIndex={0}
-          className="relative flex h-full w-full items-center justify-center p-2 outline-hidden"
+          className="relative flex h-full w-full items-center justify-center p-2 focus-visible:outline-2 focus-visible:outline-accent"
           onKeyDown={handleStageKeyDown}
         >
           <Stage
@@ -1148,7 +1146,7 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
 
           {textEditorState && textEditorStagePos && (
             <div
-              className="absolute z-20 flex flex-col gap-2 rounded-md border border-[rgba(255,255,255,0.2)] bg-black/75 p-2 backdrop-blur-xs"
+              className="absolute z-20 flex flex-col gap-2 rounded-md border border-(--canvas-node-border) bg-elevated p-2 shadow-(--shadow-pop)"
               style={{
                 left: `${textEditorStagePos.x}px`,
                 top: `${textEditorStagePos.y}px`,
@@ -1157,7 +1155,7 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
                 maxWidth: '300px',
               }}
             >
-              <textarea
+              <UiTextArea
                 ref={textInputRef}
                 value={textEditorState.value}
                 onChange={(event) =>
@@ -1182,23 +1180,23 @@ export function AnnotateToolEditor({ options, onOptionsChange, sourceImageUrl }:
                   }
                 }}
                 rows={3}
-                className="w-full resize-none rounded-sm border border-[rgba(255,255,255,0.18)] bg-bg-dark/90 px-2 py-1.5 text-sm text-text-dark outline-hidden focus:border-accent"
+                className="w-full resize-none rounded-sm px-2 py-1.5 text-sm"
               />
               <div className="flex items-center justify-end gap-2">
-                <button
+                <UiButton variant="secondary" size="sm"
                   type="button"
-                  className="rounded-sm border border-[rgba(255,255,255,0.22)] px-2 py-1 text-xs text-text-muted hover:bg-bg-dark"
+                  className="rounded-sm px-2 py-1 text-xs"
                   onClick={handleCancelTextEditor}
                 >
                   取消
-                </button>
-                <button
+                </UiButton>
+                <UiButton variant="primary" size="sm"
                   type="button"
-                  className="rounded-sm border border-accent/45 bg-accent/20 px-2 py-1 text-xs text-text-dark hover:bg-accent/30"
+                  className="rounded-sm px-2 py-1 text-xs"
                   onClick={handleCommitTextEditor}
                 >
                   确认
-                </button>
+                </UiButton>
               </div>
             </div>
           )}

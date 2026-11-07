@@ -1,0 +1,122 @@
+[
+  {
+    "width": 960,
+    "setupWidth": 541,
+    "bounds": [
+      {
+        "x": 339,
+        "y": 784,
+        "width": 247.5,
+        "height": 84
+      },
+      {
+        "x": 598.5,
+        "y": 784,
+        "width": 247.5,
+        "height": 84
+      }
+    ],
+    "overflow": [],
+    "overlap": false
+  },
+  {
+    "width": 1100,
+    "setupWidth": 681,
+    "bounds": [
+      {
+        "x": 339,
+        "y": 784,
+        "width": 317.5,
+        "height": 84
+      },
+      {
+        "x": 668.5,
+        "y": 784,
+        "width": 317.5,
+        "height": 84
+      }
+    ],
+    "overflow": [],
+    "overlap": false
+  },
+  {
+    "width": 1280,
+    "setupWidth": 383.5,
+    "bounds": [
+      {
+        "x": 339,
+        "y": 824,
+        "width": 349.5,
+        "height": 84
+      },
+      {
+        "x": 339,
+        "y": 920,
+        "width": 349.5,
+        "height": 84
+      }
+    ],
+    "overflow": [],
+    "overlap": false
+  },
+  {
+    "width": 1440,
+    "setupWidth": 463.5,
+    "bounds": [
+      {
+        "x": 339,
+        "y": 336,
+        "width": 429.5,
+        "height": 84
+      },
+      {
+        "x": 339,
+        "y": 432,
+        "width": 429.5,
+        "height": 84
+      }
+    ],
+    "overflow": [],
+    "overlap": false
+  },
+  {
+    "width": 1710,
+    "setupWidth": 598.5,
+    "bounds": [
+      {
+        "x": 339,
+        "y": 316,
+        "width": 276.25,
+        "height": 84
+      },
+      {
+        "x": 627.25,
+        "y": 316,
+        "width": 276.25,
+        "height": 84
+      }
+    ],
+    "overflow": [],
+    "overlap": false
+  },
+  {
+    "width": 1920,
+    "setupWidth": 703.5,
+    "bounds": [
+      {
+        "x": 339,
+        "y": 414,
+        "width": 328.75,
+        "height": 84
+      },
+      {
+        "x": 679.75,
+        "y": 414,
+        "width": 328.75,
+        "height": 84
+      }
+    ],
+    "overflow": [],
+    "overlap": false
+  }
+]

@@ -42,13 +42,13 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
     const details = formatErrorDetails(error, errorInfo);
 
     return (
-      <div className="flex h-full w-full items-center justify-center bg-bg-dark p-6 text-text-dark">
-        <div className="max-w-3xl rounded-xl border border-red-400/25 bg-surface-dark p-5 shadow-2xl">
-          <div className="mb-2 text-base font-semibold text-red-200">页面渲染失败</div>
+      <div className="flex h-full w-full items-center justify-center bg-bg p-6 text-text-dark">
+        <div className="max-w-3xl rounded-xl border border-danger/25 bg-surface p-5 shadow-[var(--shadow-pop)]">
+          <div className="mb-2 text-base font-semibold text-danger">页面渲染失败</div>
           <div className="mb-4 text-sm leading-6 text-text-muted">
             软件没有卡死，是前端渲染遇到了异常。下面的信息可以用来定位黑屏原因。
           </div>
-          <pre className="ui-scrollbar max-h-[50vh] overflow-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-(--canvas-node-border) bg-bg-dark/70 p-3 text-xs leading-5 text-text-dark">
+          <pre className="ui-scrollbar max-h-[50vh] overflow-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-[var(--line)] bg-bg/70 p-3 text-xs leading-5 text-text-dark">
             {details}
           </pre>
         </div>

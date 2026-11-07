@@ -18,17 +18,18 @@ export function useCanvasPointer(wrapperRef: RefObject<HTMLElement | null>): Ref
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
-    const handleMove = (event: PointerEvent) => {
-      pointerRef.current = { x: event.clientX, y: event.clientY };
+    const handleMove = (event: MouseEvent) => {
+      const rect = wrapper.getBoundingClientRect();
+      pointerRef.current = event.clientX >= rect.left && event.clientX <= rect.right
+        && event.clientY >= rect.top && event.clientY <= rect.bottom
+        ? { x: event.clientX, y: event.clientY } : null;
     };
-    const handleLeave = () => {
-      pointerRef.current = null;
-    };
-    wrapper.addEventListener('pointermove', handleMove, { passive: true });
-    wrapper.addEventListener('pointerleave', handleLeave);
+    // Capture also sees moves stopped by node/tool controls. Enter/down refresh the location
+    // when returning from another window or after full-screen changes without a mouse move.
+    const events = ['pointermove', 'pointerover', 'pointerdown', 'contextmenu', 'mousemove'] as const;
+    for (const name of events) document.addEventListener(name, handleMove, { capture: true, passive: true });
     return () => {
-      wrapper.removeEventListener('pointermove', handleMove);
-      wrapper.removeEventListener('pointerleave', handleLeave);
+      for (const name of events) document.removeEventListener(name, handleMove, true);
     };
   }, [wrapperRef]);
   return pointerRef;
@@ -109,7 +110,19 @@ export function useCanvasHotkeys(
       ui.closeMenus();
     };
 
+    // macOS menu accelerators can dispatch `copy` directly without a DOM keydown.
+    const handleCopy = (event: ClipboardEvent) => {
+      if (event.defaultPrevented || isEditableTarget(event.target) || document.querySelector(BLOCKING_SURFACES)) return;
+      const ui = useCanvasUiStore.getState();
+      if (ui.sheet || useCanvasStore.getState().activeDirectorStudioNodeId) return;
+      const wrapper = wrapperRef.current;
+      if (!wrapper || readSelectedText(wrapper) || !useCanvasStore.getState().nodes.some(node => node.selected)) return;
+      event.preventDefault();
+      actions.copySelection();
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener('copy', handleCopy);
+    return () => { window.removeEventListener('keydown', handleKeyDown); document.removeEventListener('copy', handleCopy); };
   }, [actions, pointerRef, wrapperRef]);
 }

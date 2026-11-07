@@ -12,6 +12,7 @@ use crate::ai::error::AIError;
 use crate::ai::{
     AIProvider, GenerateRequest, ProviderTaskHandle, ProviderTaskPollResult, ProviderTaskSubmission,
 };
+use crate::commands::secrets::{credential_ref_from_token, resolve_provider_credential, SecretRef};
 
 const DRAW_ENDPOINT_PATH: &str = "/v1/draw/nano-banana";
 const RESULT_ENDPOINT_PATH: &str = "/v1/draw/result";
@@ -93,7 +94,7 @@ struct DrawRequestBody {
 
 pub struct GrsaiProvider {
     client: Client,
-    api_key: Arc<RwLock<Option<String>>>,
+    credential_ref: Arc<RwLock<Option<SecretRef>>>,
     base_url: String,
 }
 
@@ -101,7 +102,7 @@ impl GrsaiProvider {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
-            api_key: Arc::new(RwLock::new(None)),
+            credential_ref: Arc::new(RwLock::new(None)),
             base_url: DEFAULT_BASE_URL.to_string(),
         }
     }
@@ -205,12 +206,21 @@ impl GrsaiProvider {
         }
 
         let endpoint = format!("{}{}", self.base_url, DRAW_ENDPOINT_PATH);
-        let api_key = self
-            .api_key
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| AIError::InvalidRequest("API key not set".to_string()))?;
+        let reference = self.credential_ref().await;
+        let mut credential = resolve_provider_credential(
+            reference.as_ref(),
+            request
+                .extra_params
+                .as_ref()
+                .and_then(|params| params.get("credential_ref")),
+        )
+        .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
+        let api_key = credential.value.as_str();
+        let mut body = serde_json::to_value(body)?;
+        credential
+            .redactor
+            .resolve_json(&mut body)
+            .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
 
         info!("[GRSAI API] URL: {}", endpoint);
         let response = self
@@ -220,48 +230,72 @@ impl GrsaiProvider {
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
-            .await?;
+            .await
+            .map_err(|error| AIError::Network(error.without_url()))?;
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = credential
+                .redactor
+                .redact_owned(response.text().await.unwrap_or_default());
             return Err(AIError::Provider(format!(
                 "GRSAI draw request failed {}: {}",
                 status, error_text
             )));
         }
 
-        response.json::<Value>().await.map_err(AIError::from)
+        let raw = credential.redactor.redact_owned(
+            response
+                .text()
+                .await
+                .map_err(|error| AIError::Network(error.without_url()))?,
+        );
+        serde_json::from_str::<Value>(&raw).map_err(AIError::from)
     }
 
-    async fn poll_result_once(&self, task_id: &str) -> Result<ProviderTaskPollResult, AIError> {
+    async fn poll_result_once(
+        &self,
+        task_id: &str,
+        explicit_ref: Option<&Value>,
+    ) -> Result<ProviderTaskPollResult, AIError> {
         let endpoint = format!("{}{}", self.base_url, RESULT_ENDPOINT_PATH);
-        let api_key = self
-            .api_key
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| AIError::InvalidRequest("API key not set".to_string()))?;
+        let reference = self.credential_ref().await;
+        let mut credential = resolve_provider_credential(reference.as_ref(), explicit_ref)
+            .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
+        let api_key = credential.value.as_str();
+        let task_id = credential
+            .redactor
+            .resolve_markers(task_id, false)
+            .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
 
         let response = self
             .client
             .post(&endpoint)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
-            .json(&json!({ "id": task_id }))
+            .json(&json!({ "id": task_id.as_ref() }))
             .send()
-            .await?;
+            .await
+            .map_err(|error| AIError::Network(error.without_url()))?;
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = credential
+                .redactor
+                .redact_owned(response.text().await.unwrap_or_default());
             return Err(AIError::Provider(format!(
                 "GRSAI result request failed {}: {}",
                 status, error_text
             )));
         }
 
-        let poll_response = response.json::<Value>().await?;
+        let raw = credential.redactor.redact_owned(
+            response
+                .text()
+                .await
+                .map_err(|error| AIError::Network(error.without_url()))?,
+        );
+        let poll_response = serde_json::from_str::<Value>(&raw)?;
         let payload = Self::resolve_task_payload(&poll_response)?;
 
         if let Some(url) = Self::extract_result_url(payload) {
@@ -286,9 +320,13 @@ impl GrsaiProvider {
         }
     }
 
-    async fn poll_result_until_complete(&self, task_id: &str) -> Result<String, AIError> {
+    async fn poll_result_until_complete(
+        &self,
+        task_id: &str,
+        explicit_ref: Option<&Value>,
+    ) -> Result<String, AIError> {
         loop {
-            match self.poll_result_once(task_id).await? {
+            match self.poll_result_once(task_id, explicit_ref).await? {
                 ProviderTaskPollResult::Running => {
                     sleep(Duration::from_millis(POLL_INTERVAL_MS)).await
                 }
@@ -328,9 +366,14 @@ impl AIProvider for GrsaiProvider {
     }
 
     async fn set_api_key(&self, api_key: String) -> Result<(), AIError> {
-        let mut key = self.api_key.write().await;
-        *key = Some(api_key);
+        let reference = credential_ref_from_token(&api_key)
+            .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
+        *self.credential_ref.write().await = Some(reference);
         Ok(())
+    }
+
+    async fn credential_ref(&self) -> Option<SecretRef> {
+        self.credential_ref.read().await.clone()
     }
 
     fn supports_task_resume(&self) -> bool {
@@ -363,7 +406,14 @@ impl AIProvider for GrsaiProvider {
         &self,
         handle: ProviderTaskHandle,
     ) -> Result<ProviderTaskPollResult, AIError> {
-        self.poll_result_once(handle.task_id.as_str()).await
+        self.poll_result_once(
+            handle.task_id.as_str(),
+            handle
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("credential_ref")),
+        )
+        .await
     }
 
     async fn generate(&self, request: GenerateRequest) -> Result<String, AIError> {
@@ -385,6 +435,13 @@ impl AIProvider for GrsaiProvider {
             .and_then(|raw| raw.as_str())
             .ok_or_else(|| AIError::Provider("GRSAI response missing task id".to_string()))?;
 
-        self.poll_result_until_complete(task_id).await
+        self.poll_result_until_complete(
+            task_id,
+            request
+                .extra_params
+                .as_ref()
+                .and_then(|params| params.get("credential_ref")),
+        )
+        .await
     }
 }

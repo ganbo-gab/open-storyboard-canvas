@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+import { UiButton, UiChipButton, UiInput } from '@/components/ui';
 import type { VisualToolEditorProps } from './types';
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
 
@@ -135,7 +136,7 @@ export function MaskToolEditor({ plugin, sourceImageUrl, options, onOptionsChang
   return (
     <div className="space-y-3">
       <div ref={hostRef} className="relative inline-block w-full">
-        <canvas ref={baseCanvasRef} className="rounded-sm border border-white/10 bg-black/40 block" />
+        <canvas ref={baseCanvasRef} className="block rounded-sm border border-(--canvas-node-border) bg-(--canvas-node-media-bg)" />
         <canvas
           ref={maskCanvasRef}
           className="absolute inset-0 cursor-crosshair"
@@ -155,26 +156,26 @@ export function MaskToolEditor({ plugin, sourceImageUrl, options, onOptionsChang
             step={2}
             value={brushSize}
             onChange={(e) => onOptionsChange({ ...options, brushSize: Number(e.target.value) })}
-            className="accent-accent"
+            className="ui-range"
           />
           <span className="w-8 text-right">{brushSize}px</span>
         </label>
         <div className="inline-flex gap-1">
-          <button
+          <UiChipButton active={mode === 'paint'}
             type="button"
             onClick={() => onOptionsChange({ ...options, __maskMode: 'paint' })}
-            className={`rounded-sm px-2 py-0.5 border transition-colors ${mode === 'paint' ? 'border-accent/60 bg-accent/20 text-accent' : 'border-white/10 bg-white/5 text-white/65 hover:border-white/25'}`}
-          >涂</button>
-          <button
+            className="rounded-sm px-2 py-0.5"
+          >涂</UiChipButton>
+          <UiChipButton active={mode === 'erase'}
             type="button"
             onClick={() => onOptionsChange({ ...options, __maskMode: 'erase' })}
-            className={`rounded-sm px-2 py-0.5 border transition-colors ${mode === 'erase' ? 'border-accent/60 bg-accent/20 text-accent' : 'border-white/10 bg-white/5 text-white/65 hover:border-white/25'}`}
-          >擦</button>
-          <button
+            className="rounded-sm px-2 py-0.5"
+          >擦</UiChipButton>
+          <UiButton variant="danger" size="sm"
             type="button"
             onClick={clearMask}
-            className="rounded-sm px-2 py-0.5 border border-white/10 bg-white/5 text-white/65 hover:border-red-400/50 hover:text-red-300"
-          >清空</button>
+            className="rounded-sm px-2 py-0.5"
+          >清空</UiButton>
         </div>
       </div>
       {promptKey && (
@@ -182,12 +183,12 @@ export function MaskToolEditor({ plugin, sourceImageUrl, options, onOptionsChang
           <label className="mb-1 block text-xs text-text-muted">
             {plugin.fields.find((f) => f.key === promptKey)!.label}
           </label>
-          <input
+          <UiInput
             type="text"
             value={String(options[promptKey] ?? '')}
             onChange={(e) => onOptionsChange({ ...options, [promptKey]: e.target.value })}
             placeholder={(plugin.fields.find((f) => f.key === promptKey) as { placeholder?: string }).placeholder ?? ''}
-            className="w-full rounded-sm bg-white/5 border border-white/10 px-2 py-1 text-xs text-text-dark outline-hidden focus:border-white/25"
+            className="w-full rounded-sm px-2 py-1 text-xs"
           />
         </div>
       )}

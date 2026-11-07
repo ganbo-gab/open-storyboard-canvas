@@ -26,23 +26,44 @@ export function strictScopedToolSchema(source: Schema): Schema {
   return schema;
 }
 
+/** Select a union branch before removing its optional-null fields. Validation remains Zod's job. */
+function matchesInputShape(schema: Schema, value: unknown): boolean {
+  if (schema.const !== undefined) return value === schema.const;
+  if (Array.isArray(schema.enum)) return schema.enum.includes(value);
+  const variants = schema.anyOf ?? schema.oneOf;
+  if (Array.isArray(variants)) return variants.some((variant: Schema) => matchesInputShape(variant, value));
+  if (schema.type === 'array') return Array.isArray(value);
+  if (schema.properties && typeof schema.properties === 'object') {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const record = value as Record<string, unknown>;
+    const properties = schema.properties as Record<string, Schema>;
+    return Object.keys(record).every((key) => key in properties)
+      && Object.entries(properties).every(([key, property]) => property.const === undefined || record[key] === property.const);
+  }
+  return schema.type === 'null' ? value === null : true;
+}
+
+function explicitlyAcceptsNull(schema: Schema): boolean {
+  if (schema.type === 'null' || (Array.isArray(schema.type) && schema.type.includes('null'))) return true;
+  if (schema.const === null || (Array.isArray(schema.enum) && schema.enum.includes(null))) return true;
+  const variants = schema.anyOf ?? schema.oneOf;
+  return Array.isArray(variants) && variants.some((variant: Schema) => explicitlyAcceptsNull(variant));
+}
+
 /** Reverse only optional-null fields, retaining explicitly nullable domain fields. */
 export function decodeScopedToolInput(schema: Schema, value: unknown): unknown {
+  const variants = schema.anyOf ?? schema.oneOf;
+  if (Array.isArray(variants)) {
+    const matching = variants.find((variant: Schema) => matchesInputShape(variant, value));
+    if (matching) return decodeScopedToolInput(matching, value);
+  }
   if (Array.isArray(value)) return value.map((item) => decodeScopedToolInput((schema.items ?? {}) as Schema, item));
   if (!value || typeof value !== 'object') return value;
   const record = value as Record<string, unknown>;
-  const variants = schema.anyOf ?? schema.oneOf;
-  if (Array.isArray(variants)) {
-    const matching = variants.find((variant: Schema) => {
-      const properties = variant.properties as Record<string, Schema> | undefined;
-      return properties && Object.keys(record).every((key) => key in properties)
-        && Object.entries(properties).every(([key, property]) => property.const === undefined || record[key] === property.const);
-    });
-    if (matching) return decodeScopedToolInput(matching, value);
-  }
   const properties = (schema.properties ?? {}) as Record<string, Schema>;
   const required = new Set(Array.isArray(schema.required) ? schema.required : []);
   return Object.fromEntries(Object.entries(record).flatMap(([key, item]) =>
-    key in properties && !required.has(key) && item === null ? [] : [[key, decodeScopedToolInput(properties[key] ?? {}, item)]],
+    key in properties && !required.has(key) && item === null && !explicitlyAcceptsNull(properties[key])
+      ? [] : [[key, decodeScopedToolInput(properties[key] ?? {}, item)]],
   ));
 }

@@ -18,6 +18,27 @@ export interface UseCanvasPersistenceResult {
   scheduleCanvasPersist: (delayMs?: number) => void;
 }
 
+// Reopening a project discards node selection. Compare every other field,
+// including measurements that intentionally do not advance the graph revision.
+function hasChangesBeyondNodeSelection<T extends { selected?: boolean }>(
+  nodes: readonly T[],
+  previous: readonly T[],
+): boolean {
+  if (nodes.length !== previous.length) return true;
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index], before = previous[index];
+    if (node === before) continue;
+    for (const key in node) {
+      if (key !== 'selected' && Object.hasOwn(node, key)
+        && (!Object.hasOwn(before, key) || node[key] !== before[key])) return true;
+    }
+    for (const key in before) {
+      if (key !== 'selected' && Object.hasOwn(before, key) && !Object.hasOwn(node, key)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Owns the project ↔ canvas persistence wiring previously inlined in
  * `Canvas.tsx`. Three responsibilities, deliberately kept together so
@@ -50,10 +71,6 @@ export function useCanvasPersistence(
   const isRestoringCanvasRef = useRef(true);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const nodes = useCanvasStore((state) => state.nodes);
-  const edges = useCanvasStore((state) => state.edges);
-  const history = useCanvasStore((state) => state.history);
-  const dragHistorySnapshot = useCanvasStore((state) => state.dragHistorySnapshot);
   const setCanvasData = useCanvasStore((state) => state.setCanvasData);
   const setViewportState = useCanvasStore((state) => state.setViewportState);
   const closeImageViewer = useCanvasStore((state) => state.closeImageViewer);
@@ -138,12 +155,16 @@ export function useCanvasPersistence(
   // Persist watcher — fires on every meaningful canvas change. The drag /
   // restore guards keep us from writing transient state (mid-drag values
   // or the just-restored persistence echo).
-  useEffect(() => {
-    if (isRestoringCanvasRef.current || dragHistorySnapshot) {
-      return;
-    }
+  // Observe graph changes without making the entire Canvas (chrome and actions) render per drag.
+  useEffect(() => useCanvasStore.subscribe((state, previous) => {
+    if (state.nodes === previous.nodes && state.edges === previous.edges
+      && state.history === previous.history && state.dragHistorySnapshot === previous.dragHistorySnapshot) return;
+    if (isRestoringCanvasRef.current || state.dragHistorySnapshot) return;
+    if (state.edges === previous.edges && state.history === previous.history
+      && state.dragHistorySnapshot === previous.dragHistorySnapshot
+      && !hasChangesBeyondNodeSelection(state.nodes, previous.nodes)) return;
     scheduleCanvasPersist();
-  }, [nodes, edges, history, dragHistorySnapshot, scheduleCanvasPersist]);
+  }), [scheduleCanvasPersist]);
 
   return { isRestoringCanvasRef, scheduleCanvasPersist };
 }

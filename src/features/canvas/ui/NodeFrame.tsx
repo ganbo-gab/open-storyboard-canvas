@@ -1,22 +1,30 @@
 import {
   memo,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
   type ReactNode,
 } from 'react';
-import { Handle, NodeResizeControl, Position, ResizeControlVariant } from '@xyflow/react';
-import { AlertTriangle, LoaderCircle, Plus } from 'lucide-react';
+import { Handle, NodeResizeControl, Position, ResizeControlVariant, useNodeId, useReactFlow, useUpdateNodeInternals } from '@xyflow/react';
+import { AlertTriangle, Ban, LoaderCircle, MoreHorizontal, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { CanvasNodeType } from '@/features/canvas/domain/canvasNodes';
 import {
+  getNodeDefinition,
   nodeCanStartManualConnection,
   nodeHasSourceHandle,
   nodeHasTargetHandle,
 } from '@/features/canvas/domain/nodeRegistry';
+import { nodeAcceptsManualInput, type ConnectionRejectReason } from '@/features/canvas/application/canvasConnectionRules';
+import { clearBrowserTextSelection } from '@/features/canvas/application/textSelection';
+import { useCanvasUiStore } from '@/features/canvas/state/canvasUiStore';
+import { useCanvasStore } from '@/stores/canvasStore';
+import { connectionRejectText } from './connectionRejectText';
 import { formatGenerationElapsedMs } from './generationElapsed';
+import { anchorBelow } from '@/components/ui/Menu';
 
 export type NodeFrameStatus =
   | { kind: 'generating'; startedAt: number | null; label?: string }
@@ -46,11 +54,12 @@ export interface NodeFrameProps {
   badges?: ReactNode;
   /** Small icon buttons at the right end of the title bar. */
   actions?: ReactNode;
-  /** `media`: content fills the card edge to edge. `card`: padded content. */
-  variant?: 'media' | 'card';
+  /** `media`: content fills the card edge to edge. `card`: padded content. `group`: a translucent container. */
+  variant?: 'media' | 'card' | 'group';
   tone?: 'default' | 'error' | 'attention';
-  width: number;
-  height: number;
+  /** Omit to fill the box React Flow gives the node (style-sized nodes such as groups). */
+  width?: number;
+  height?: number;
   resize?: NodeFrameResize | false;
   className?: string;
   bodyClassName?: string;
@@ -59,6 +68,25 @@ export interface NodeFrameProps {
 }
 
 const RESIZE_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
+const FALLBACK_BOX = { width: 320, height: 220 };
+
+/**
+ * The box a node renders at: its measured/stored size, else the registry default, never below
+ * the resize minimum. Nodes created before a size was stored open at the registry default.
+ */
+export function resolveNodeBox(
+  type: CanvasNodeType,
+  width: number | undefined,
+  height: number | undefined,
+  resize?: NodeFrameResize | false,
+): { width: number; height: number } {
+  const fallback = getNodeDefinition(type).defaultSize ?? FALLBACK_BOX;
+  const min = resize || {};
+  return {
+    width: Math.max(min.minWidth ?? 0, Math.round(width ?? fallback.width)),
+    height: Math.max(min.minHeight ?? 0, Math.round(height ?? fallback.height)),
+  };
+}
 
 /**
  * The single node shell. Owns everything nodes used to re-implement: the title bar that
@@ -92,6 +120,13 @@ export const NodeFrame = memo(function NodeFrame({
       : status?.kind === 'attention'
         ? 'attention'
         : 'default';
+  const nodeId = useNodeId();
+  const flow = useReactFlow();
+  const { t } = useTranslation();
+  // Only the card under a refused connection drag subscribes to a value; every other frame reads null.
+  const rejectReason = useCanvasUiStore((state) => (
+    nodeId && state.connectionReject?.nodeId === nodeId ? state.connectionReject.reason : null
+  ));
   return (
     <div
       className={`node-frame ${className}`}
@@ -99,8 +134,10 @@ export const NodeFrame = memo(function NodeFrame({
       data-tone={resolvedTone}
       data-selected={selected || undefined}
       data-generating={status?.kind === 'generating' || undefined}
-      style={{ width, height }}
+      data-connection-reject={rejectReason ? '' : undefined}
+      style={{ width: width ?? '100%', height: height ?? '100%' }}
     >
+      {rejectReason ? <ConnectionRejectChip reason={rejectReason} /> : null}
       <div className="node-frame__title">
         {icon ? <span className="node-frame__icon">{icon}</span> : null}
         <NodeTitle title={title} onRename={onRename} />
@@ -109,15 +146,33 @@ export const NodeFrame = memo(function NodeFrame({
         {badges}
         {status ? <NodeStatusChip status={status} /> : null}
         {actions ? <span className="node-frame__actions">{actions}</span> : null}
+        {nodeId && <button type="button" className="nodrag node-frame__more" title={t('rework.canvas.moreActions')} aria-label={t('rework.canvas.moreActions')} aria-haspopup="menu" onClick={(event) => {
+          event.stopPropagation();
+          const ui = useCanvasUiStore.getState();
+          if (ui.contextMenu?.anchor?.trigger === event.currentTarget) { ui.closeMenus(); return; }
+          const rect = event.currentTarget.getBoundingClientRect();
+          useCanvasStore.getState().setSelectedNode(nodeId);
+          useCanvasUiStore.getState().openContextMenu({ nodeId, clientX: rect.right, clientY: rect.bottom + 4, anchor: anchorBelow(event.currentTarget), flowPosition: flow.screenToFlowPosition({ x: rect.right, y: rect.bottom }) });
+        }}><MoreHorizontal size={15} /></button>}
       </div>
       <div className={`node-frame__card ${bodyClassName}`} style={bodyStyle}>
         {children}
       </div>
-      <NodeHandles type={type} />
+      <NodeHandles type={type} width={width} height={height} />
       {resize === false || !selected ? null : <NodeResizeCorners {...(resize ?? {})} />}
     </div>
   );
 });
+
+function ConnectionRejectChip({ reason }: { reason: ConnectionRejectReason }) {
+  const { t } = useTranslation();
+  return (
+    <span className="node-frame__reject" role="status">
+      <Ban />
+      {connectionRejectText(reason, t)}
+    </span>
+  );
+}
 
 function NodeTitle({ title, onRename }: { title: string; onRename?: (title: string) => void }) {
   const [editing, setEditing] = useState(false);
@@ -199,13 +254,34 @@ export function GenerationTimer({ startedAt }: { startedAt: number }) {
 }
 
 /** Left = input / reference, right = output. Rendered from the node registry. */
-export function NodeHandles({ type }: { type: CanvasNodeType }) {
+export function NodeHandles({ type, width, height }: { type: CanvasNodeType; width?: number; height?: number }) {
   const canStart = nodeCanStartManualConnection(type);
+  const nodeId = useNodeId();
+  const updateNodeInternals = useUpdateNodeInternals();
+  useLayoutEffect(() => {
+    // Flow may retain handle bounds from the previous card size or LOD body.
+    // Refresh after this body commits; viewport changes do not retrigger measurement.
+    if (!nodeId) return;
+    // The initial parent Flow effect installs domNode after child layout effects.
+    // Defer the lookup as well as the measurement so a first mount is included.
+    const frame = requestAnimationFrame(() => updateNodeInternals(nodeId));
+    return () => cancelAnimationFrame(frame);
+  }, [height, nodeId, type, updateNodeInternals, width]);
   return (
     <>
       {nodeHasTargetHandle(type) ? (
-        <Handle type="target" id="target" position={Position.Left} className="node-handle" isConnectableStart={false}>
-          <span className="node-handle__dot"><Plus /></span>
+        // Material/result cards keep the handle for internal result edges but refuse manual input.
+        <Handle
+          type="target"
+          id="target"
+          position={Position.Left}
+          className="node-handle"
+          isConnectableStart={nodeAcceptsManualInput(type)}
+          isConnectableEnd={nodeAcceptsManualInput(type)}
+          data-passive={nodeAcceptsManualInput(type) ? undefined : 'true'}
+          onPointerDownCapture={clearBrowserTextSelection}
+        >
+          {nodeAcceptsManualInput(type) ? <span className="node-handle__dot"><Plus /></span> : null}
         </Handle>
       ) : null}
       {nodeHasSourceHandle(type) ? (
@@ -216,6 +292,9 @@ export function NodeHandles({ type }: { type: CanvasNodeType }) {
           className="node-handle"
           data-passive={canStart ? undefined : 'true'}
           isConnectableStart={canStart}
+          isConnectableEnd={canStart}
+          // Dragging out of a node with selected text would otherwise drag the text.
+          onPointerDownCapture={clearBrowserTextSelection}
         >
           {canStart ? <span className="node-handle__dot"><Plus /></span> : null}
         </Handle>
@@ -239,6 +318,7 @@ function NodeResizeCorners({
           key={corner}
           position={corner}
           variant={ResizeControlVariant.Handle}
+          autoScale={false}
           minWidth={minWidth}
           minHeight={minHeight}
           maxWidth={maxWidth}

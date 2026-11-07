@@ -2,6 +2,7 @@ import { memo, useCallback, useState } from 'react';
 import { Grid3x3, Scissors, ChevronDown, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { UiButton } from '@/components/ui';
 import { NODE_TOOL_TYPES } from '@/features/canvas/domain/canvasNodes';
 import { useCanvasStore } from '@/stores/canvasStore';
 import type { CanvasNode } from '@/features/canvas/domain/canvasNodes';
@@ -74,7 +75,7 @@ export const GridSplitPanel = memo(({ node, isOpen, onClose, buttonRect }: GridS
 
   return (
     <div
-      className="fixed z-100 min-w-[180px] rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-dark/95 p-2 shadow-2xl backdrop-blur-xs"
+      className="ui-popover fixed z-100 min-w-[180px] rounded-xl p-2"
       style={{
         left: `${buttonRect.left}px`,
         top: `${buttonRect.bottom + 4}px`,
@@ -87,40 +88,37 @@ export const GridSplitPanel = memo(({ node, isOpen, onClose, buttonRect }: GridS
           <Grid3x3 className="h-4 w-4 text-accent" />
           <span className="text-sm font-medium text-text-dark">{t('gridSplit.title')}</span>
         </div>
-        <button
-          onClick={onClose}
-          className="rounded-md p-1 text-text-muted hover:bg-bg-dark hover:text-text-dark transition-colors"
-        >
+        <UiButton variant="ghost" onClick={onClose} className="h-7 w-7 p-1">
           <X className="h-3.5 w-3.5" />
-        </button>
+        </UiButton>
       </div>
 
       {/* Divider */}
-      <div className="my-1.5 h-px bg-[rgba(255,255,255,0.1)]" />
+      <div className="my-1.5 h-px bg-(--canvas-node-divider)" />
 
       {/* Preset grid options */}
       <div className="space-y-0.5">
         {GRID_PRESETS.map((preset) => (
-          <button
+          <UiButton variant="ghost"
             key={preset.labelKey}
             type="button"
-            className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-xs text-text-dark transition-colors hover:bg-bg-dark"
+            className="h-8 w-full justify-start gap-2 rounded-md px-2.5 text-left text-xs"
             onClick={() => handlePresetSelect(preset.rows, preset.cols)}
           >
             <Grid3x3 className="h-3.5 w-3.5 text-text-muted" />
             {t(preset.labelKey)}
-          </button>
+          </UiButton>
         ))}
       </div>
 
       {/* Divider */}
-      <div className="my-2 h-px bg-[rgba(255,255,255,0.1)]" />
+      <div className="my-2 h-px bg-(--canvas-node-divider)" />
 
       {/* Custom grid option */}
       <div className="space-y-2">
-        <button
+        <UiButton variant="ghost"
           type="button"
-          className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-xs text-text-dark transition-colors hover:bg-bg-dark"
+          className="h-8 w-full justify-start gap-2 rounded-md px-2.5 text-left text-xs"
           onClick={handleCustomToggle}
         >
           <Scissors className="h-3.5 w-3.5 text-text-muted" />
@@ -128,11 +126,11 @@ export const GridSplitPanel = memo(({ node, isOpen, onClose, buttonRect }: GridS
           <ChevronDown
             className={`h-3.5 w-3.5 text-text-muted transition-transform ${showCustomSelector ? 'rotate-180' : ''}`}
           />
-        </button>
+        </UiButton>
 
         {/* Custom grid selector */}
         {showCustomSelector && (
-          <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-bg-dark/80 p-3">
+          <div className="rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-subtle-bg) p-3">
             <CustomGridSelector
               rows={customRows}
               cols={customCols}

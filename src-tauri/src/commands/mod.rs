@@ -5,8 +5,11 @@ mod dreamina_cli;
 pub mod external_agent;
 pub mod http;
 pub mod image;
+pub mod knowledge;
+pub mod model;
 pub mod portability;
 pub mod project_state;
+pub mod secrets;
 pub mod system;
 pub mod update;
 

@@ -1,3 +1,4 @@
+import { genericAudioProfile } from './audio';
 import type { ChannelProfileV2 } from '../domain/profile';
 import { anthropicProfile } from './anthropic';
 import { falProfile } from './fal';
@@ -6,9 +7,15 @@ import { genericAsyncProfile } from './genericAsync';
 import { grsaiProfile } from './grsai';
 import { openAICompatibleProfile, openAIStandardProfile } from './openai';
 import { ppioProfile } from './ppio';
+import {
+  bytePlusSeedanceProfile, miniMaxChinaVideoProfile, miniMaxVideoProfile, officialVideoPresets,
+  viduVideoProfile, volcengineSeedanceProfile, wanVideoProfile,
+} from './videoModels';
 
 export { anthropicProfile, falProfile, geminiNativeProfile, genericAsyncProfile, grsaiProfile,
-  openAICompatibleProfile, openAIStandardProfile, ppioProfile };
+  openAICompatibleProfile, openAIStandardProfile, ppioProfile,
+  bytePlusSeedanceProfile, miniMaxChinaVideoProfile, miniMaxVideoProfile, officialVideoPresets,
+  viduVideoProfile, volcengineSeedanceProfile, wanVideoProfile };
 
 /** KIE stays on its Rust provider: reference upload is a prerequisite HTTP workflow, not a template. */
 export const builtInPresets: ChannelProfileV2[] = [
@@ -17,7 +24,9 @@ export const builtInPresets: ChannelProfileV2[] = [
   geminiNativeProfile,
   anthropicProfile,
   genericAsyncProfile,
+  genericAudioProfile,
   ppioProfile,
   grsaiProfile,
   falProfile,
+  ...officialVideoPresets,
 ];

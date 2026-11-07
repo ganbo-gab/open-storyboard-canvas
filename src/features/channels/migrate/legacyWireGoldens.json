@@ -1,0 +1,1155 @@
+{
+  "capture": "Executed original customProviderGateway pure preview builders before cutover; only application settings state mocked, no HTTP invoked.",
+  "fixtures": [
+    {
+      "key": "openai_images",
+      "config": {
+        "label": "OpenAI Images",
+        "baseUrl": "https://api.openai.com/v1",
+        "endpointPath": "/images/generations",
+        "modelListEndpointPath": "/models",
+        "httpMethod": "POST",
+        "apiStyle": "openai-compatible",
+        "responseFormat": "openai-images",
+        "models": [
+          "gpt-image-1.5",
+          "gpt-image-1",
+          "gpt-image-1-mini",
+          "chatgpt-image-latest",
+          "dall-e-3"
+        ],
+        "supportsWebSearch": false,
+        "supportedResolutions": [
+          "1024x1024",
+          "1536x1024",
+          "1024x1536",
+          "auto"
+        ],
+        "note": "标准 OpenAI Images 格式，通常可直接使用；图生图/编辑需确认上游是否支持 image 字段。",
+        "id": "capture-openai_images",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-openai_images:gpt-image-1.5",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "OpenAI Images",
+        "providerId": "capture-openai_images",
+        "modelId": "custom:capture-openai_images:gpt-image-1.5",
+        "modelName": "gpt-image-1.5",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "https://api.openai.com/v1/images/generations",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "model": "gpt-image-1.5",
+          "prompt": "a castle",
+          "size": "1024x1024",
+          "n": 1,
+          "aspect_ratio": "1:1"
+        }
+      }
+    },
+    {
+      "key": "openai_videos",
+      "config": {
+        "label": "OpenAI Videos",
+        "mediaType": "video",
+        "baseUrl": "https://api.openai.com",
+        "endpointPath": "/v1/videos",
+        "modelListEndpointPath": "/v1/models",
+        "httpMethod": "POST",
+        "apiStyle": "openai-compatible",
+        "responseFormat": "generic",
+        "models": [
+          "sora-2",
+          "sora-2-pro"
+        ],
+        "supportsWebSearch": false,
+        "supportedResolutions": [
+          "1280x720",
+          "720x1280",
+          "1024x1024"
+        ],
+        "extraParams": {
+          "mediaType": "video",
+          "supportedRatios": [
+            "16:9",
+            "9:16",
+            "1:1"
+          ],
+          "requestBodyMode": "multipart",
+          "videoStatusEndpointPath": "/v1/videos/{taskId}",
+          "videoContentEndpointPath": "/v1/videos/{taskId}/content",
+          "videoReferenceField": "input_reference",
+          "defaultRequestParams": {
+            "seconds": 8
+          }
+        },
+        "note": "OpenAI Videos API 兼容路线：multipart/form-data 提交 model/prompt/size/seconds/input_reference，GET /v1/videos/{id} 轮询，完成后 GET /v1/videos/{id}/content 下载视频。官方文档当前标注 Sora 2 Videos API 将在 2026-09-24 关闭，保留此预设用于兼容。",
+        "id": "capture-openai_videos",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-openai_videos:sora-2",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "OpenAI Videos",
+        "providerId": "capture-openai_videos",
+        "modelId": "custom:capture-openai_videos:sora-2",
+        "modelName": "sora-2",
+        "method": "POST",
+        "bodyMode": "multipart",
+        "url": "https://api.openai.com/v1/videos",
+        "headers": {
+          "Authorization": "[masked]"
+        },
+        "multipart": {
+          "fields": [
+            {
+              "name": "model",
+              "value": "sora-2"
+            },
+            {
+              "name": "prompt",
+              "value": "a castle"
+            },
+            {
+              "name": "size",
+              "value": "1024x1024"
+            },
+            {
+              "name": "seconds",
+              "value": "8"
+            }
+          ],
+          "files": []
+        }
+      }
+    },
+    {
+      "key": "agnes_image_flash",
+      "config": {
+        "label": "Agnes Image",
+        "mediaType": "image",
+        "baseUrl": "https://apihub.agnes-ai.com/v1",
+        "endpointPath": "/images/generations",
+        "modelListEndpointPath": "/models",
+        "httpMethod": "POST",
+        "apiStyle": "openai-compatible",
+        "responseFormat": "openai-images",
+        "models": [
+          "agnes-image-2.1-flash",
+          "agnes-image-2.0-flash"
+        ],
+        "supportsWebSearch": false,
+        "supportedResolutions": [
+          "1K",
+          "2K",
+          "3K",
+          "4K",
+          "1024x1024",
+          "1024x768",
+          "768x1024",
+          "2048x2048",
+          "2048x1152",
+          "1152x2048",
+          "4096x4096",
+          "3840x2160",
+          "2160x3840",
+          "auto"
+        ],
+        "extraParams": {
+          "providerConfigVersion": "new-v1",
+          "providerKind": "agnes-images",
+          "supportedRatios": [
+            "auto",
+            "16:9",
+            "9:16",
+            "1:1",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3",
+            "21:9"
+          ]
+        },
+        "note": "Agnes 官方网关：POST /images/generations。文生图默认 return_base64=true；图生/多图使用 extra_body.image 数组，并在 extra_body.response_format 放 b64_json。",
+        "id": "capture-agnes_image_flash",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-agnes_image_flash:agnes-image-2.1-flash",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "Agnes Image",
+        "providerId": "capture-agnes_image_flash",
+        "modelId": "custom:capture-agnes_image_flash:agnes-image-2.1-flash",
+        "modelName": "agnes-image-2.1-flash",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "https://apihub.agnes-ai.com/v1/images/generations",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "return_base64": true,
+          "model": "agnes-image-2.1-flash",
+          "prompt": "a castle",
+          "size": "1024x1024",
+          "ratio": "1:1",
+          "n": 1
+        }
+      }
+    },
+    {
+      "key": "openai_proxy",
+      "config": {
+        "label": "OpenAI 兼容接口",
+        "baseUrl": "https://api.example.com/v1",
+        "endpointPath": "/images/generations",
+        "modelListEndpointPath": "/models",
+        "httpMethod": "POST",
+        "apiStyle": "openai-compatible",
+        "responseFormat": "openai-images",
+        "models": [
+          "gpt-image-1",
+          "dall-e-3",
+          "nano-banana"
+        ],
+        "supportsWebSearch": false,
+        "supportedResolutions": [
+          "auto",
+          "1024x1024",
+          "1536x1024",
+          "1024x1536",
+          "1K",
+          "2K"
+        ],
+        "note": "适合兼容 OpenAI Images 返回 data[].url 或 data[].b64_json 的服务。",
+        "id": "capture-openai_proxy",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-openai_proxy:gpt-image-1",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "OpenAI 兼容接口",
+        "providerId": "capture-openai_proxy",
+        "modelId": "custom:capture-openai_proxy:gpt-image-1",
+        "modelName": "gpt-image-1",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "https://api.example.com/v1/images/generations",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "model": "gpt-image-1",
+          "prompt": "a castle",
+          "size": "1024x1024",
+          "n": 1,
+          "aspect_ratio": "1:1"
+        }
+      }
+    },
+    {
+      "key": "openai_chat_image",
+      "config": {
+        "label": "Chat Completions 图像",
+        "baseUrl": "https://api.example.com/v1",
+        "endpointPath": "/chat/completions",
+        "modelListEndpointPath": "/models",
+        "httpMethod": "POST",
+        "apiStyle": "openai-compatible",
+        "responseFormat": "generic",
+        "models": [
+          "google/gemini-2.5-flash-image",
+          "openai/gpt-image-1"
+        ],
+        "supportsWebSearch": true,
+        "supportedResolutions": [
+          "auto",
+          "0.5K",
+          "1K",
+          "2K"
+        ],
+        "note": "用于返回结构不一定是 Images API 的聊天式图像模型；保存前建议测试连通。",
+        "id": "capture-openai_chat_image",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-openai_chat_image:google/gemini-2.5-flash-image",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "Chat Completions 图像",
+        "providerId": "capture-openai_chat_image",
+        "modelId": "custom:capture-openai_chat_image:google/gemini-2.5-flash-image",
+        "modelName": "google/gemini-2.5-flash-image",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "https://api.example.com/v1/chat/completions",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "aspect_ratio": "1:1",
+          "model": "google/gemini-2.5-flash-image",
+          "messages": [
+            {
+              "role": "user",
+              "content": "a castle"
+            }
+          ],
+          "modalities": [
+            "image",
+            "text"
+          ],
+          "size": "1024x1024",
+          "n": 1
+        }
+      }
+    },
+    {
+      "key": "openai_responses_image",
+      "config": {
+        "label": "Responses 图像工具",
+        "baseUrl": "https://api.example.com/v1",
+        "endpointPath": "/responses",
+        "modelListEndpointPath": "/models",
+        "httpMethod": "POST",
+        "apiStyle": "openai-compatible",
+        "responseFormat": "generic",
+        "models": [
+          "gpt-5.1",
+          "gpt-4.1"
+        ],
+        "supportsWebSearch": false,
+        "supportedResolutions": [
+          "auto",
+          "1024x1024",
+          "1536x1024",
+          "1024x1536"
+        ],
+        "extraParams": {
+          "defaultRequestParams": {
+            "tools": [
+              {
+                "type": "image_generation"
+              }
+            ]
+          },
+          "responseImagePath": "output[0].result"
+        },
+        "note": "用于 Responses API 的 image_generation 工具路线。不同兼容站返回字段可能不同，失败时可调整 responseImagePath。",
+        "id": "capture-openai_responses_image",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-openai_responses_image:gpt-5.1",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "Responses 图像工具",
+        "providerId": "capture-openai_responses_image",
+        "modelId": "custom:capture-openai_responses_image:gpt-5.1",
+        "modelName": "gpt-5.1",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "https://api.example.com/v1/responses",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "tools": [
+            {
+              "type": "image_generation"
+            }
+          ],
+          "model": "gpt-5.1",
+          "input": "a castle",
+          "aspect_ratio": "1:1"
+        }
+      }
+    },
+    {
+      "key": "grsai_draw_async",
+      "config": {
+        "label": "Draw 任务轮询接口",
+        "baseUrl": "https://grsai.dakka.com.cn",
+        "endpointPath": "/v1/draw/completions",
+        "modelListEndpointPath": "",
+        "httpMethod": "POST",
+        "apiStyle": "generic-json",
+        "responseFormat": "generic",
+        "models": [
+          "gpt-image-2"
+        ],
+        "supportsWebSearch": false,
+        "supportedResolutions": [],
+        "extraParams": {
+          "supportedRatios": [
+            "auto",
+            "1:1",
+            "3:2",
+            "2:3",
+            "16:9",
+            "9:16",
+            "5:4",
+            "4:5",
+            "4:3",
+            "3:4",
+            "21:9",
+            "9:21",
+            "1:3",
+            "3:1",
+            "2:1",
+            "1:2"
+          ],
+          "requestBodyHints": {
+            "promptField": "prompt",
+            "modelField": "model",
+            "sizeField": "",
+            "ratioField": "aspectRatio",
+            "referenceImageField": "urls"
+          },
+          "responseImagePath": "results[0].url",
+          "asyncTask": {
+            "enabled": true,
+            "taskIdPath": "data.id",
+            "resultEndpointPath": "/v1/draw/result",
+            "resultMethod": "POST",
+            "requestBody": {
+              "id": "{taskId}"
+            },
+            "imagePath": "results[0].url",
+            "statusPath": "status",
+            "pendingValues": [
+              "running",
+              "pending",
+              "queued",
+              "processing"
+            ],
+            "successValues": [
+              "succeeded",
+              "success",
+              "completed",
+              "done"
+            ],
+            "failedValues": [
+              "failed",
+              "error"
+            ],
+            "errorPath": "error",
+            "intervalMs": 1000,
+            "timeoutMs": 180000
+          },
+          "defaultRequestParams": {
+            "webHook": "-1",
+            "shutProgress": false
+          }
+        },
+        "note": "适合 /v1/draw/completions 这类任务型绘图接口。webHook=-1 时立即返回任务 id，再轮询 /v1/draw/result 获取 results[0].url；默认 1 秒轮询一次并允许较长生成时间。",
+        "id": "capture-grsai_draw_async",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-grsai_draw_async:gpt-image-2",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "Draw 任务轮询接口",
+        "providerId": "capture-grsai_draw_async",
+        "modelId": "custom:capture-grsai_draw_async:gpt-image-2",
+        "modelName": "gpt-image-2",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "https://grsai.dakka.com.cn/v1/draw/completions",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "model": "gpt-image-2",
+          "prompt": "a castle",
+          "aspectRatio": "1:1",
+          "webHook": "-1",
+          "shutProgress": false
+        }
+      }
+    },
+    {
+      "key": "fal",
+      "config": {
+        "label": "模型端点直连接口",
+        "baseUrl": "https://fal.run",
+        "endpointPath": "",
+        "modelListEndpointPath": "",
+        "httpMethod": "POST",
+        "apiStyle": "fal",
+        "responseFormat": "generic",
+        "models": [
+          "fal-ai/flux/dev",
+          "fal-ai/flux-pro",
+          "fal-ai/nano-banana",
+          "fal-ai/stable-diffusion-xl"
+        ],
+        "supportsWebSearch": false,
+        "note": "适合每个模型都有独立 endpoint 的托管接口。选择模型后如无法连通，请把完整模型 endpoint 填入 baseUrl 或 endpointPath。",
+        "id": "capture-fal",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-fal:fal-ai/flux/dev",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "模型端点直连接口",
+        "providerId": "capture-fal",
+        "modelId": "custom:capture-fal:fal-ai/flux/dev",
+        "modelName": "fal-ai/flux/dev",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "https://fal.run/fal-ai/flux/dev",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "model": "fal-ai/flux/dev",
+          "prompt": "a castle",
+          "size": "1024x1024",
+          "aspect_ratio": "1:1"
+        }
+      }
+    },
+    {
+      "key": "fal_queue_async",
+      "config": {
+        "label": "队列式异步任务",
+        "baseUrl": "https://queue.fal.run",
+        "endpointPath": "",
+        "modelListEndpointPath": "",
+        "httpMethod": "POST",
+        "apiStyle": "fal",
+        "responseFormat": "generic",
+        "models": [
+          "fal-ai/flux-pro",
+          "fal-ai/flux/dev",
+          "fal-ai/nano-banana"
+        ],
+        "supportsWebSearch": false,
+        "extraParams": {
+          "requestBodyHints": {
+            "promptField": "prompt",
+            "modelField": "",
+            "sizeField": "",
+            "ratioField": "aspect_ratio",
+            "referenceImageField": "image_url"
+          },
+          "asyncTask": {
+            "enabled": true,
+            "taskIdPath": "request_id",
+            "resultEndpointPath": "/{taskId}/status",
+            "resultMethod": "GET",
+            "imagePath": "response.images[0].url",
+            "statusPath": "status",
+            "pendingValues": [
+              "IN_QUEUE",
+              "IN_PROGRESS"
+            ],
+            "successValues": [
+              "COMPLETED",
+              "SUCCEEDED",
+              "SUCCESS"
+            ],
+            "failedValues": [
+              "FAILED"
+            ],
+            "errorPath": "error",
+            "intervalMs": 2000,
+            "timeoutMs": 120000
+          }
+        },
+        "note": "适合 queue submit/status/result 这类异步任务接口；如果路径不一致，请按文档调整 resultEndpointPath。",
+        "id": "capture-fal_queue_async",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-fal_queue_async:fal-ai/flux-pro",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "队列式异步任务",
+        "providerId": "capture-fal_queue_async",
+        "modelId": "custom:capture-fal_queue_async:fal-ai/flux-pro",
+        "modelName": "fal-ai/flux-pro",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "https://queue.fal.run/fal-ai/flux-pro",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "prompt": "a castle",
+          "aspect_ratio": "1:1"
+        }
+      }
+    },
+    {
+      "key": "replicate_prediction_async",
+      "config": {
+        "label": "Prediction 任务接口",
+        "baseUrl": "https://api.replicate.com/v1",
+        "endpointPath": "/predictions",
+        "modelListEndpointPath": "/models",
+        "httpMethod": "POST",
+        "apiStyle": "replicate",
+        "responseFormat": "generic",
+        "models": [
+          "black-forest-labs/flux-1.1-pro",
+          "stability-ai/sdxl",
+          "google/nano-banana"
+        ],
+        "supportsWebSearch": false,
+        "extraParams": {
+          "requestBodyHints": {
+            "promptField": "input.prompt",
+            "modelField": "",
+            "sizeField": "",
+            "ratioField": "input.aspect_ratio",
+            "referenceImageField": "input.image"
+          },
+          "asyncTask": {
+            "enabled": true,
+            "taskIdPath": "id",
+            "resultEndpointPath": "/predictions/{taskId}",
+            "resultMethod": "GET",
+            "imagePath": "output[0]",
+            "statusPath": "status",
+            "pendingValues": [
+              "starting",
+              "processing"
+            ],
+            "successValues": [
+              "succeeded",
+              "success",
+              "completed"
+            ],
+            "failedValues": [
+              "failed",
+              "canceled"
+            ],
+            "errorPath": "error",
+            "intervalMs": 2000,
+            "timeoutMs": 180000
+          }
+        },
+        "note": "适合需要 version/input 结构并轮询 prediction 的接口。导入时务必让 AI 从文档提取 version 或模型专属 endpoint。",
+        "id": "capture-replicate_prediction_async",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-replicate_prediction_async:black-forest-labs/flux-1.1-pro",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "Prediction 任务接口",
+        "providerId": "capture-replicate_prediction_async",
+        "modelId": "custom:capture-replicate_prediction_async:black-forest-labs/flux-1.1-pro",
+        "modelName": "black-forest-labs/flux-1.1-pro",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "https://api.replicate.com/v1/predictions",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "input": {
+            "prompt": "a castle",
+            "aspect_ratio": "1:1"
+          }
+        }
+      }
+    },
+    {
+      "key": "generic_async_poll",
+      "config": {
+        "label": "Generic 异步任务",
+        "baseUrl": "https://api.example.com",
+        "endpointPath": "/generate",
+        "modelListEndpointPath": "",
+        "httpMethod": "POST",
+        "apiStyle": "generic-json",
+        "responseFormat": "generic",
+        "models": [],
+        "supportsWebSearch": false,
+        "extraParams": {
+          "requestBodyHints": {
+            "promptField": "prompt",
+            "modelField": "model",
+            "sizeField": "size",
+            "ratioField": "aspect_ratio",
+            "referenceImageField": "image"
+          },
+          "responseImagePath": "result.url",
+          "asyncTask": {
+            "enabled": true,
+            "taskIdPath": "id",
+            "resultEndpointPath": "/result/{taskId}",
+            "resultMethod": "GET",
+            "imagePath": "result.url",
+            "statusPath": "status",
+            "pendingValues": [
+              "queued",
+              "running",
+              "processing",
+              "pending"
+            ],
+            "successValues": [
+              "succeeded",
+              "success",
+              "completed",
+              "done"
+            ],
+            "failedValues": [
+              "failed",
+              "error",
+              "canceled"
+            ],
+            "errorPath": "error",
+            "intervalMs": 2000,
+            "timeoutMs": 120000
+          }
+        },
+        "note": "适合“先提交任务，再查结果”的通用 JSON 接口。导入后重点检查 taskIdPath、resultEndpointPath、imagePath。",
+        "id": "capture-generic_async_poll",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-generic_async_poll:fixture-model",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "Generic 异步任务",
+        "providerId": "capture-generic_async_poll",
+        "modelId": "custom:capture-generic_async_poll:fixture-model",
+        "modelName": "fixture-model",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "https://api.example.com/generate",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "model": "fixture-model",
+          "prompt": "a castle",
+          "aspect_ratio": "1:1",
+          "size": "1024x1024"
+        }
+      }
+    },
+    {
+      "key": "volc_jimeng",
+      "config": {
+        "label": "云厂商签名图像接口",
+        "baseUrl": "https://visual.volcengineapi.com",
+        "endpointPath": "",
+        "modelListEndpointPath": "",
+        "httpMethod": "POST",
+        "apiStyle": "volcengine",
+        "responseFormat": "generic",
+        "models": [
+          "jimeng_t2i_v30",
+          "jimeng_i2i_v30",
+          "jimeng_t2i_v20"
+        ],
+        "supportsWebSearch": false,
+        "extraParams": {
+          "transport": "signed",
+          "needsProxy": true,
+          "signedAuth": {
+            "required": true
+          }
+        },
+        "note": "适合云厂商专用鉴权/请求体路线；若需要 AK/SK 签名，建议通过服务端代理后再接入。",
+        "id": "capture-volc_jimeng",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-volc_jimeng:jimeng_t2i_v30",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "云厂商签名图像接口",
+        "providerId": "capture-volc_jimeng",
+        "modelId": "custom:capture-volc_jimeng:jimeng_t2i_v30",
+        "modelName": "jimeng_t2i_v30",
+        "method": "POST",
+        "bodyMode": "signed",
+        "url": "https://visual.volcengineapi.com/",
+        "headers": {},
+        "error": "该配置被识别为签名鉴权/代理路线（signed_proxy_required）。预览不会伪造 AK/SK、时间戳或 Action 签名，请改为后端代理后的普通接口。"
+      }
+    },
+    {
+      "key": "multipart_proxy_required",
+      "config": {
+        "label": "Multipart 上传接口",
+        "baseUrl": "",
+        "endpointPath": "",
+        "modelListEndpointPath": "",
+        "httpMethod": "POST",
+        "apiStyle": "generic-json",
+        "responseFormat": "generic",
+        "models": [],
+        "supportsWebSearch": false,
+        "extraParams": {
+          "requestBodyMode": "multipart",
+          "multipart": {
+            "enabled": true,
+            "fileField": "image"
+          },
+          "requestBodyHints": {
+            "referenceImageField": "image"
+          }
+        },
+        "note": "该服务商需要 multipart/form-data 或文件流上传。当前网关会按 multipart 发送；如还需要签名、预上传或复杂文件协议，建议通过服务端代理。",
+        "id": "capture-multipart_proxy_required",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-multipart_proxy_required:fixture-model",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "Multipart 上传接口",
+        "providerId": "capture-multipart_proxy_required",
+        "modelId": "custom:capture-multipart_proxy_required:fixture-model",
+        "modelName": "fixture-model",
+        "method": "POST",
+        "bodyMode": "multipart",
+        "url": "",
+        "headers": {
+          "Authorization": "[masked]"
+        },
+        "multipart": {
+          "fields": [
+            {
+              "name": "model",
+              "value": "fixture-model"
+            },
+            {
+              "name": "prompt",
+              "value": "a castle"
+            },
+            {
+              "name": "size",
+              "value": "1024x1024"
+            },
+            {
+              "name": "aspect_ratio",
+              "value": "1:1"
+            }
+          ],
+          "files": []
+        }
+      }
+    },
+    {
+      "key": "form_urlencoded",
+      "config": {
+        "label": "Form URL-encoded 接口",
+        "baseUrl": "",
+        "endpointPath": "",
+        "modelListEndpointPath": "",
+        "httpMethod": "POST",
+        "apiStyle": "generic-json",
+        "responseFormat": "generic",
+        "models": [],
+        "supportsWebSearch": false,
+        "extraParams": {
+          "requestBodyMode": "form-urlencoded",
+          "requestBodyHints": {
+            "promptField": "prompt",
+            "modelField": "model",
+            "sizeField": "size",
+            "ratioField": "aspect_ratio"
+          }
+        },
+        "note": "该服务商需要 application/x-www-form-urlencoded 表单。当前网关会按 URL 编码表单发送请求体。",
+        "id": "capture-form_urlencoded",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-form_urlencoded:fixture-model",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "Form URL-encoded 接口",
+        "providerId": "capture-form_urlencoded",
+        "modelId": "custom:capture-form_urlencoded:fixture-model",
+        "modelName": "fixture-model",
+        "method": "POST",
+        "bodyMode": "form-urlencoded",
+        "url": "",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "body": {
+          "model": "fixture-model",
+          "prompt": "a castle",
+          "aspect_ratio": "1:1",
+          "size": "1024x1024"
+        }
+      }
+    },
+    {
+      "key": "signed_proxy_required",
+      "config": {
+        "label": "签名鉴权接口",
+        "baseUrl": "",
+        "endpointPath": "",
+        "modelListEndpointPath": "",
+        "httpMethod": "POST",
+        "apiStyle": "generic-json",
+        "responseFormat": "generic",
+        "models": [],
+        "supportsWebSearch": false,
+        "extraParams": {
+          "transport": "signed",
+          "needsProxy": true,
+          "signedAuth": {
+            "required": true
+          }
+        },
+        "note": "该服务商需要签名算法、时间戳、动作名或云厂商专用鉴权。当前前端通用配置不适合保存密钥签名逻辑，建议通过后端代理。",
+        "id": "capture-signed_proxy_required",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-signed_proxy_required:fixture-model",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "签名鉴权接口",
+        "providerId": "capture-signed_proxy_required",
+        "modelId": "custom:capture-signed_proxy_required:fixture-model",
+        "modelName": "fixture-model",
+        "method": "POST",
+        "bodyMode": "signed",
+        "url": "",
+        "headers": {},
+        "error": "该配置被识别为签名鉴权/代理路线（signed_proxy_required）。预览不会伪造 AK/SK、时间戳或 Action 签名，请改为后端代理后的普通接口。"
+      }
+    },
+    {
+      "key": "stability",
+      "config": {
+        "label": "Multipart 图像接口",
+        "baseUrl": "https://api.stability.ai",
+        "endpointPath": "/v2beta/stable-image/generate/core",
+        "modelListEndpointPath": "",
+        "httpMethod": "POST",
+        "apiStyle": "stability",
+        "responseFormat": "generic",
+        "models": [
+          "stable-image-ultra",
+          "stable-image-core",
+          "stable-diffusion-3.5-large"
+        ],
+        "supportsWebSearch": false,
+        "extraHeaders": {
+          "Accept": "application/json"
+        },
+        "extraParams": {
+          "requestBodyMode": "multipart",
+          "multipart": {
+            "enabled": true,
+            "fileField": "image"
+          },
+          "requestBodyHints": {
+            "promptField": "prompt",
+            "modelField": "",
+            "sizeField": "",
+            "ratioField": "aspect_ratio",
+            "referenceImageField": "image"
+          },
+          "responseImagePath": "image",
+          "defaultRequestParams": {
+            "output_format": "png"
+          }
+        },
+        "note": "适合官方图像生成/编辑 API 常见的 multipart/form-data 路线；已按 multipart 发送。若服务商返回二进制图片，请改为 JSON/base64 返回或走代理。",
+        "id": "capture-stability",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-stability:stable-image-ultra",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "Multipart 图像接口",
+        "providerId": "capture-stability",
+        "modelId": "custom:capture-stability:stable-image-ultra",
+        "modelName": "stable-image-ultra",
+        "method": "POST",
+        "bodyMode": "multipart",
+        "url": "https://api.stability.ai/v2beta/stable-image/generate/core",
+        "headers": {
+          "Authorization": "[masked]",
+          "Accept": "application/json"
+        },
+        "multipart": {
+          "fields": [
+            {
+              "name": "prompt",
+              "value": "a castle"
+            },
+            {
+              "name": "output_format",
+              "value": "png"
+            },
+            {
+              "name": "aspect_ratio",
+              "value": "1:1"
+            }
+          ],
+          "files": []
+        }
+      }
+    },
+    {
+      "key": "generic_json",
+      "config": {
+        "label": "Generic JSON",
+        "baseUrl": "https://api.example.com",
+        "endpointPath": "/generate",
+        "modelListEndpointPath": "",
+        "httpMethod": "POST",
+        "apiStyle": "generic-json",
+        "responseFormat": "generic",
+        "models": [],
+        "supportsWebSearch": false,
+        "note": "完全不符合主流格式时使用。multipart 接口请加 requestBodyMode 标记；复杂签名、预上传或专用鉴权建议走代理。",
+        "id": "capture-generic_json",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-generic_json:fixture-model",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "Generic JSON",
+        "providerId": "capture-generic_json",
+        "modelId": "custom:capture-generic_json:fixture-model",
+        "modelName": "fixture-model",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "https://api.example.com/generate",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "model": "fixture-model",
+          "prompt": "a castle",
+          "size": "1024x1024",
+          "aspect_ratio": "1:1"
+        }
+      }
+    },
+    {
+      "key": "manual",
+      "config": {
+        "label": "",
+        "baseUrl": "",
+        "endpointPath": "",
+        "modelListEndpointPath": "",
+        "httpMethod": "POST",
+        "apiStyle": "generic-json",
+        "responseFormat": "generic",
+        "models": [],
+        "supportsWebSearch": false,
+        "note": "",
+        "id": "capture-manual",
+        "apiKey": "capture-secret"
+      },
+      "request": {
+        "model": "custom:capture-manual:fixture-model",
+        "prompt": "a castle",
+        "size": "1024x1024",
+        "aspect_ratio": "1:1"
+      },
+      "preview": {
+        "providerLabel": "",
+        "providerId": "capture-manual",
+        "modelId": "custom:capture-manual:fixture-model",
+        "modelName": "fixture-model",
+        "method": "POST",
+        "bodyMode": "json",
+        "url": "",
+        "headers": {
+          "Authorization": "[masked]",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "model": "fixture-model",
+          "prompt": "a castle",
+          "size": "1024x1024",
+          "aspect_ratio": "1:1"
+        }
+      }
+    }
+  ]
+}

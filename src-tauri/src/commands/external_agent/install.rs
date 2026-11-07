@@ -86,16 +86,20 @@ impl InstallContext {
             path,
             descriptor_path: app_data.join("mcp/osc.json"),
             executable,
-            receipt_path: app_data.join("mcp/install").join(format!(
-                "{}.json",
-                cli.binary_name()
-            )),
+            receipt_path: app_data
+                .join("mcp/install")
+                .join(format!("{}.json", cli.binary_name())),
         }
     }
 
     fn from_app(app: &AppHandle, cli: ExternalAgentRuntime) -> InstallResult<Self> {
-        let home = app.path().home_dir().map_err(|error| failure("resolve home directory", error))?;
-        let app_data = app.path().app_data_dir()
+        let home = app
+            .path()
+            .home_dir()
+            .map_err(|error| failure("resolve home directory", error))?;
+        let app_data = app
+            .path()
+            .app_data_dir()
             .map_err(|error| failure("resolve app data directory", error))?;
         let executable = std::env::current_exe()
             .map_err(|error| failure("resolve the Canvas executable", error))?;
@@ -126,7 +130,9 @@ impl InstallContext {
     }
 
     fn read_receipt(&self) -> InstallResult<Option<InstallReceipt>> {
-        let Some(bytes) = read_optional(&self.receipt_path)? else { return Ok(None) };
+        let Some(bytes) = read_optional(&self.receipt_path)? else {
+            return Ok(None);
+        };
         let receipt: InstallReceipt = serde_json::from_slice(&bytes)
             .map_err(|error| failure("read the Canvas install receipt", error))?;
         if receipt.schema_version != 1 || receipt.config_path != self.path {
@@ -174,9 +180,11 @@ impl InstallContext {
         match entry {
             Some(entry) if entry == desired => Ok(before.unwrap_or_default().to_vec()),
             Some(entry) => {
-                let owned = self.read_receipt()?.map(|receipt| {
-                    config_entry(self.cli, &receipt.installed_bytes)
-                }).transpose()?.flatten();
+                let owned = self
+                    .read_receipt()?
+                    .map(|receipt| config_entry(self.cli, &receipt.installed_bytes))
+                    .transpose()?
+                    .flatten();
                 if owned.as_ref() != Some(&entry) {
                     return Err(ExternalAgentCommandError::invalid_request(
                         "A conflicting storyboard_canvas entry exists. Rename the foreign entry before installing; no configuration was changed.",
@@ -213,14 +221,21 @@ impl InstallContext {
         }
         let previous_receipt = self.read_receipt()?;
         let current_entry = config_entry(self.cli, before.as_deref().unwrap_or_default())?;
-        let original_bytes = if let Some(previous) = previous_receipt.as_ref().filter(|_| current_entry.is_some()) {
+        let original_bytes = if let Some(previous) = previous_receipt
+            .as_ref()
+            .filter(|_| current_entry.is_some())
+        {
             if current_entry == config_entry(self.cli, &previous.installed_bytes)? {
                 if before.as_deref() == Some(previous.installed_bytes.as_slice()) {
                     previous.original_bytes.clone()
                 } else {
                     // Reinstall after unrelated edits establishes a new baseline with
                     // those edits retained, not the obsolete original snapshot.
-                    Some(merge_entry(self.cli, before.as_deref().unwrap_or_default(), None)?)
+                    Some(merge_entry(
+                        self.cli,
+                        before.as_deref().unwrap_or_default(),
+                        None,
+                    )?)
                 }
             } else {
                 before.clone()
@@ -244,8 +259,9 @@ impl InstallContext {
             Ok(backup) => backup,
             Err(error) => {
                 if let Some(previous) = previous_receipt {
-                    let bytes = serde_json::to_vec(&previous)
-                        .map_err(|error| failure("encode the previous Canvas install receipt", error))?;
+                    let bytes = serde_json::to_vec(&previous).map_err(|error| {
+                        failure("encode the previous Canvas install receipt", error)
+                    })?;
                     atomic_write(&self.receipt_path, &bytes, None)?;
                 } else {
                     fs::remove_file(&self.receipt_path)
@@ -280,13 +296,17 @@ impl InstallContext {
             });
         }
         let receipt = self.read_receipt()?;
-        let restore = receipt.as_ref().filter(|receipt| {
-            before.as_deref() == Some(receipt.installed_bytes.as_slice())
-        });
+        let restore = receipt
+            .as_ref()
+            .filter(|receipt| before.as_deref() == Some(receipt.installed_bytes.as_slice()));
         let after = if let Some(receipt) = restore {
             receipt.original_bytes.clone()
         } else {
-            Some(merge_entry(self.cli, before.as_deref().unwrap_or_default(), None)?)
+            Some(merge_entry(
+                self.cli,
+                before.as_deref().unwrap_or_default(),
+                None,
+            )?)
         };
         let backup = self.write_config(before.as_deref(), after.as_deref())?;
         // A stale receipt is safe after a failed removal, but must not claim a future
@@ -311,16 +331,24 @@ impl InstallContext {
             private_directory(parent)?;
         }
         // create_new prevents a same-clock timestamp from overwriting an old backup.
-        let stamp = SystemTime::now().duration_since(UNIX_EPOCH)
-            .map_err(|error| failure("timestamp the CLI backup", error))?.as_nanos();
-        let mut name = self.path.file_name().expect("CLI config filename").to_os_string();
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| failure("timestamp the CLI backup", error))?
+            .as_nanos();
+        let mut name = self
+            .path
+            .file_name()
+            .expect("CLI config filename")
+            .to_os_string();
         name.push(format!(".osc-backup-{stamp}"));
         let backup = parent.join(name);
         write_new_private(&backup, before.unwrap_or_default())?;
         ensure_unchanged(&self.path, before)?;
         match after {
             Some(bytes) => {
-                let permissions = fs::metadata(&self.path).ok().map(|metadata| metadata.permissions());
+                let permissions = fs::metadata(&self.path)
+                    .ok()
+                    .map(|metadata| metadata.permissions());
                 atomic_write(&self.path, bytes, permissions)?;
             }
             None => fs::remove_file(&self.path)
@@ -370,21 +398,31 @@ fn write_new_private(path: &Path, bytes: &[u8]) -> InstallResult<()> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let mut file = options.open(path).map_err(|error| failure("create the CLI backup", error))?;
-    file.write_all(bytes).and_then(|_| file.sync_all())
+    let mut file = options
+        .open(path)
+        .map_err(|error| failure("create the CLI backup", error))?;
+    file.write_all(bytes)
+        .and_then(|_| file.sync_all())
         .map_err(|error| failure("persist the CLI backup", error))
 }
 
-fn atomic_write(path: &Path, bytes: &[u8], permissions: Option<fs::Permissions>) -> InstallResult<()> {
+fn atomic_write(
+    path: &Path,
+    bytes: &[u8],
+    permissions: Option<fs::Permissions>,
+) -> InstallResult<()> {
     let mut temp = tempfile::NamedTempFile::new_in(path.parent().expect("file directory"))
         .map_err(|error| failure("prepare the configuration write", error))?;
     if let Some(permissions) = permissions {
-        temp.as_file().set_permissions(permissions)
+        temp.as_file()
+            .set_permissions(permissions)
             .map_err(|error| failure("preserve CLI configuration permissions", error))?;
     }
-    temp.write_all(bytes).and_then(|_| temp.as_file().sync_all())
+    temp.write_all(bytes)
+        .and_then(|_| temp.as_file().sync_all())
         .map_err(|error| failure("persist the configuration write", error))?;
-    temp.persist(path).map_err(|error| failure("replace the configuration file", error.error))?;
+    temp.persist(path)
+        .map_err(|error| failure("replace the configuration file", error.error))?;
     Ok(())
 }
 
@@ -394,7 +432,8 @@ fn config_text(bytes: &[u8]) -> InstallResult<&str> {
 }
 
 fn toml_document(bytes: &[u8]) -> InstallResult<DocumentMut> {
-    config_text(bytes)?.parse::<DocumentMut>()
+    config_text(bytes)?
+        .parse::<DocumentMut>()
         .map_err(|error| failure("parse the Codex TOML configuration", error))
 }
 
@@ -416,9 +455,12 @@ fn json_document(bytes: &[u8]) -> InstallResult<Value> {
 // Normalization is only used for ownership checks, never for rewriting TOML.
 fn toml_item_json(item: &Item) -> Value {
     if let Some(table) = item.as_table_like() {
-        return Value::Object(table.iter().map(|(key, value)| {
-            (key.to_owned(), toml_item_json(value))
-        }).collect());
+        return Value::Object(
+            table
+                .iter()
+                .map(|(key, value)| (key.to_owned(), toml_item_json(value)))
+                .collect(),
+        );
     }
     item.as_value().map(toml_value_json).unwrap_or(Value::Null)
 }
@@ -431,9 +473,12 @@ fn toml_value_json(value: &toml_edit::Value) -> Value {
         toml_edit::Value::Boolean(value) => json!(value.value()),
         toml_edit::Value::Datetime(value) => json!(value.value().to_string()),
         toml_edit::Value::Array(array) => Value::Array(array.iter().map(toml_value_json).collect()),
-        toml_edit::Value::InlineTable(table) => Value::Object(table.iter().map(|(key, value)| {
-            (key.to_owned(), toml_value_json(value))
-        }).collect()),
+        toml_edit::Value::InlineTable(table) => Value::Object(
+            table
+                .iter()
+                .map(|(key, value)| (key.to_owned(), toml_value_json(value)))
+                .collect(),
+        ),
     }
 }
 
@@ -441,7 +486,9 @@ fn config_entry(cli: ExternalAgentRuntime, bytes: &[u8]) -> InstallResult<Option
     match cli {
         ExternalAgentRuntime::Codex => {
             let document = toml_document(bytes)?;
-            let Some(servers) = document.get("mcp_servers") else { return Ok(None) };
+            let Some(servers) = document.get("mcp_servers") else {
+                return Ok(None);
+            };
             let servers = servers.as_table_like().ok_or_else(|| {
                 ExternalAgentCommandError::invalid_request("Codex mcp_servers must be a table.")
             })?;
@@ -449,7 +496,9 @@ fn config_entry(cli: ExternalAgentRuntime, bytes: &[u8]) -> InstallResult<Option
         }
         ExternalAgentRuntime::Claude => {
             let document = json_document(bytes)?;
-            let Some(servers) = document.get("mcpServers") else { return Ok(None) };
+            let Some(servers) = document.get("mcpServers") else {
+                return Ok(None);
+            };
             let servers = servers.as_object().ok_or_else(|| {
                 ExternalAgentCommandError::invalid_request("Claude mcpServers must be an object.")
             })?;
@@ -458,7 +507,11 @@ fn config_entry(cli: ExternalAgentRuntime, bytes: &[u8]) -> InstallResult<Option
     }
 }
 
-fn merge_entry(cli: ExternalAgentRuntime, bytes: &[u8], entry: Option<&Value>) -> InstallResult<Vec<u8>> {
+fn merge_entry(
+    cli: ExternalAgentRuntime,
+    bytes: &[u8],
+    entry: Option<&Value>,
+) -> InstallResult<Vec<u8>> {
     match cli {
         ExternalAgentRuntime::Codex => {
             let mut document = toml_document(bytes)?;
@@ -467,14 +520,21 @@ fn merge_entry(cli: ExternalAgentRuntime, bytes: &[u8], entry: Option<&Value>) -
                 servers.set_implicit(true);
                 document.insert("mcp_servers", Item::Table(servers));
             }
-            let inline_parent = document.get("mcp_servers").is_some_and(Item::is_inline_table);
-            let servers = document.get_mut("mcp_servers").and_then(Item::as_table_like_mut)
-                .ok_or_else(|| ExternalAgentCommandError::invalid_request(
-                    "Codex mcp_servers must be a table.",
-                ))?;
+            let inline_parent = document
+                .get("mcp_servers")
+                .is_some_and(Item::is_inline_table);
+            let servers = document
+                .get_mut("mcp_servers")
+                .and_then(Item::as_table_like_mut)
+                .ok_or_else(|| {
+                    ExternalAgentCommandError::invalid_request("Codex mcp_servers must be a table.")
+                })?;
             if let Some(entry) = entry {
                 let mut server = Table::new();
-                server.insert("command", toml_edit::value(entry["command"].as_str().expect("command")));
+                server.insert(
+                    "command",
+                    toml_edit::value(entry["command"].as_str().expect("command")),
+                );
                 let mut args = toml_edit::Array::new();
                 for arg in entry["args"].as_array().expect("args") {
                     args.push(arg.as_str().expect("string argument"));
@@ -484,7 +544,10 @@ fn merge_entry(cli: ExternalAgentRuntime, bytes: &[u8], entry: Option<&Value>) -
                 server.insert("tool_timeout_sec", toml_edit::value(3600));
                 // Inline parent tables must also receive an inline child value.
                 if inline_parent {
-                    servers.insert(ENTRY, Item::Value(toml_edit::Value::InlineTable(server.into_inline_table())));
+                    servers.insert(
+                        ENTRY,
+                        Item::Value(toml_edit::Value::InlineTable(server.into_inline_table())),
+                    );
                 } else {
                     servers.insert(ENTRY, Item::Table(server));
                 }
@@ -496,10 +559,15 @@ fn merge_entry(cli: ExternalAgentRuntime, bytes: &[u8], entry: Option<&Value>) -
         ExternalAgentRuntime::Claude => {
             let mut document = json_document(bytes)?;
             let root = document.as_object_mut().expect("validated root");
-            let servers = root.entry("mcpServers").or_insert_with(|| Value::Object(Map::new()))
-                .as_object_mut().ok_or_else(|| ExternalAgentCommandError::invalid_request(
-                    "Claude mcpServers must be an object.",
-                ))?;
+            let servers = root
+                .entry("mcpServers")
+                .or_insert_with(|| Value::Object(Map::new()))
+                .as_object_mut()
+                .ok_or_else(|| {
+                    ExternalAgentCommandError::invalid_request(
+                        "Claude mcpServers must be an object.",
+                    )
+                })?;
             if let Some(entry) = entry {
                 servers.insert(ENTRY.into(), entry.clone());
             } else {
@@ -518,23 +586,41 @@ fn merge_entry(cli: ExternalAgentRuntime, bytes: &[u8], entry: Option<&Value>) -
 fn unified_diff(path: &Path, before: Option<&[u8]>, after: &[u8]) -> String {
     let absent = before.is_none();
     let before = before.unwrap_or_default();
-    if before == after { return String::new() }
+    if before == after {
+        return String::new();
+    }
     // Both sides were parsed as UTF-8 before reaching the preview.
-    let old: Vec<&str> = std::str::from_utf8(before).expect("parsed before")
-        .split_inclusive('\n').collect();
-    let new: Vec<&str> = std::str::from_utf8(after).expect("parsed after")
-        .split_inclusive('\n').collect();
+    let old: Vec<&str> = std::str::from_utf8(before)
+        .expect("parsed before")
+        .split_inclusive('\n')
+        .collect();
+    let new: Vec<&str> = std::str::from_utf8(after)
+        .expect("parsed after")
+        .split_inclusive('\n')
+        .collect();
     let common_start = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
-    let common_end = old[common_start..].iter().rev().zip(new[common_start..].iter().rev())
-        .take_while(|(a, b)| a == b).count();
+    let common_end = old[common_start..]
+        .iter()
+        .rev()
+        .zip(new[common_start..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
     let start = common_start.saturating_sub(3);
     let old_end = (old.len() - common_end + 3).min(old.len());
     let new_end = (new.len() - common_end + 3).min(new.len());
-    let mut diff = format!("--- {}\n+++ {}\n@@ -{},{} +{},{} @@\n",
-        if absent { "/dev/null".into() } else { path.to_string_lossy() },
+    let mut diff = format!(
+        "--- {}\n+++ {}\n@@ -{},{} +{},{} @@\n",
+        if absent {
+            "/dev/null".into()
+        } else {
+            path.to_string_lossy()
+        },
         path.to_string_lossy(),
-        if old_end == 0 { 0 } else { start + 1 }, old_end - start,
-        if new_end == 0 { 0 } else { start + 1 }, new_end - start);
+        if old_end == 0 { 0 } else { start + 1 },
+        old_end - start,
+        if new_end == 0 { 0 } else { start + 1 },
+        new_end - start
+    );
     let mut line = |prefix: char, text: &str| {
         diff.push(prefix);
         diff.push_str(text);
@@ -542,10 +628,18 @@ fn unified_diff(path: &Path, before: Option<&[u8]>, after: &[u8]) -> String {
             diff.push_str("\n\\ No newline at end of file\n");
         }
     };
-    for text in &old[start..common_start] { line(' ', text); }
-    for text in &old[common_start..old.len() - common_end] { line('-', text); }
-    for text in &new[common_start..new.len() - common_end] { line('+', text); }
-    for text in &old[old.len() - common_end..old_end] { line(' ', text); }
+    for text in &old[start..common_start] {
+        line(' ', text);
+    }
+    for text in &old[common_start..old.len() - common_end] {
+        line('-', text);
+    }
+    for text in &new[common_start..new.len() - common_end] {
+        line('+', text);
+    }
+    for text in &old[old.len() - common_end..old_end] {
+        line(' ', text);
+    }
     diff
 }
 
@@ -557,29 +651,44 @@ async fn invoke<T: Send + 'static>(
 ) -> InstallResult<T> {
     let context = InstallContext::from_app(&app, cli)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = CONFIG_LOCK.lock()
-            .map_err(|_| ExternalAgentCommandError::process("The CLI install lock is unavailable."))?;
+        let _guard = CONFIG_LOCK.lock().map_err(|_| {
+            ExternalAgentCommandError::process("The CLI install lock is unavailable.")
+        })?;
         action(context)
-    }).await.map_err(|error| failure("complete the CLI configuration operation", error))?
+    })
+    .await
+    .map_err(|error| failure("complete the CLI configuration operation", error))?
 }
 
 #[tauri::command]
-pub async fn external_agent_install(app: AppHandle, cli: ExternalAgentRuntime) -> InstallResult<ExternalAgentInstallOutcome> {
+pub async fn external_agent_install(
+    app: AppHandle,
+    cli: ExternalAgentRuntime,
+) -> InstallResult<ExternalAgentInstallOutcome> {
     invoke(app, cli, |context| context.install()).await
 }
 
 #[tauri::command]
-pub async fn external_agent_uninstall(app: AppHandle, cli: ExternalAgentRuntime) -> InstallResult<ExternalAgentInstallOutcome> {
+pub async fn external_agent_uninstall(
+    app: AppHandle,
+    cli: ExternalAgentRuntime,
+) -> InstallResult<ExternalAgentInstallOutcome> {
     invoke(app, cli, |context| context.uninstall()).await
 }
 
 #[tauri::command]
-pub async fn external_agent_install_status(app: AppHandle, cli: ExternalAgentRuntime) -> InstallResult<ExternalAgentInstallStatus> {
+pub async fn external_agent_install_status(
+    app: AppHandle,
+    cli: ExternalAgentRuntime,
+) -> InstallResult<ExternalAgentInstallStatus> {
     invoke(app, cli, |context| context.status()).await
 }
 
 #[tauri::command]
-pub async fn external_agent_install_preview(app: AppHandle, cli: ExternalAgentRuntime) -> InstallResult<ExternalAgentInstallPreview> {
+pub async fn external_agent_install_preview(
+    app: AppHandle,
+    cli: ExternalAgentRuntime,
+) -> InstallResult<ExternalAgentInstallPreview> {
     invoke(app, cli, |context| context.preview()).await
 }
 
@@ -588,14 +697,24 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    struct Fixture { _root: TempDir, context: InstallContext }
+    struct Fixture {
+        _root: TempDir,
+        context: InstallContext,
+    }
 
     impl Fixture {
         fn new(cli: ExternalAgentRuntime) -> Self {
             let root = tempfile::tempdir().unwrap();
-            let context = InstallContext::new(cli, &root.path().join("home"),
-                &root.path().join("app data"), root.path().join("Canvas App/canvas"));
-            Self { _root: root, context }
+            let context = InstallContext::new(
+                cli,
+                &root.path().join("home"),
+                &root.path().join("app data"),
+                root.path().join("Canvas App/canvas"),
+            );
+            Self {
+                _root: root,
+                context,
+            }
         }
 
         fn seed(&self, bytes: &[u8]) {
@@ -603,14 +722,22 @@ mod tests {
             fs::write(&self.context.path, bytes).unwrap();
         }
 
-        fn bytes(&self) -> Vec<u8> { fs::read(&self.context.path).unwrap() }
+        fn bytes(&self) -> Vec<u8> {
+            fs::read(&self.context.path).unwrap()
+        }
 
         fn backups(&self) -> Vec<PathBuf> {
-            fs::read_dir(self.context.path.parent().unwrap()).unwrap()
+            fs::read_dir(self.context.path.parent().unwrap())
+                .unwrap()
                 .filter_map(|entry| {
                     let path = entry.unwrap().path();
-                    path.file_name().unwrap().to_string_lossy().contains(".osc-backup-").then_some(path)
-                }).collect()
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .contains(".osc-backup-")
+                        .then_some(path)
+                })
+                .collect()
         }
     }
 
@@ -619,12 +746,18 @@ mod tests {
         for cli in [ExternalAgentRuntime::Codex, ExternalAgentRuntime::Claude] {
             let fixture = Fixture::new(cli);
             fixture.seed(b"");
-            assert_eq!(fixture.context.status().unwrap().state, ExternalAgentInstallState::NotInstalled);
+            assert_eq!(
+                fixture.context.status().unwrap().state,
+                ExternalAgentInstallState::NotInstalled
+            );
             let outcome = fixture.context.install().unwrap();
             assert!(outcome.changed);
             assert!(outcome.status.installed);
             assert_eq!(fs::read(outcome.backup_path.unwrap()).unwrap(), b"");
-            assert_eq!(config_entry(cli, &fixture.bytes()).unwrap(), Some(fixture.context.desired_entry().unwrap()));
+            assert_eq!(
+                config_entry(cli, &fixture.bytes()).unwrap(),
+                Some(fixture.context.desired_entry().unwrap())
+            );
             let outcome = fixture.context.uninstall().unwrap();
             assert!(outcome.changed && outcome.restored_original);
             assert!(!outcome.status.installed);
@@ -654,7 +787,9 @@ mod tests {
         fixture.seed(original);
         fixture.context.install().unwrap();
         let installed = fixture.bytes();
-        assert!(std::str::from_utf8(&installed).unwrap().starts_with(std::str::from_utf8(original).unwrap()));
+        assert!(std::str::from_utf8(&installed)
+            .unwrap()
+            .starts_with(std::str::from_utf8(original).unwrap()));
         let document = toml_document(&installed).unwrap();
         let ours = &document["mcp_servers"][ENTRY];
         assert_eq!(ours["startup_timeout_sec"].as_integer(), Some(10));
@@ -686,13 +821,22 @@ mod tests {
             fixture.context.install().unwrap();
             let before = fixture.bytes();
             let receipt = fs::read(&fixture.context.receipt_path).unwrap();
-            let modified = fs::metadata(&fixture.context.path).unwrap().modified().unwrap();
+            let modified = fs::metadata(&fixture.context.path)
+                .unwrap()
+                .modified()
+                .unwrap();
             let outcome = fixture.context.install().unwrap();
             assert!(!outcome.changed);
             assert!(outcome.backup_path.is_none());
             assert_eq!(fixture.bytes(), before);
             assert_eq!(fs::read(&fixture.context.receipt_path).unwrap(), receipt);
-            assert_eq!(fs::metadata(&fixture.context.path).unwrap().modified().unwrap(), modified);
+            assert_eq!(
+                fs::metadata(&fixture.context.path)
+                    .unwrap()
+                    .modified()
+                    .unwrap(),
+                modified
+            );
             assert_eq!(fixture.backups().len(), 1);
             let preview = fixture.context.preview().unwrap();
             assert!(!preview.changed);
@@ -740,7 +884,10 @@ mod tests {
         assert!(remaining.contains("model = 'new' # user edit"));
         assert!(remaining.contains("[mcp_servers.later]\ncommand = 'later-tool'"));
         assert!(!remaining.contains(ENTRY));
-        assert_eq!(fs::read(outcome.backup_path.unwrap()).unwrap(), edited.as_bytes());
+        assert_eq!(
+            fs::read(outcome.backup_path.unwrap()).unwrap(),
+            edited.as_bytes()
+        );
     }
 
     #[test]
@@ -767,11 +914,18 @@ mod tests {
         for cli in [ExternalAgentRuntime::Codex, ExternalAgentRuntime::Claude] {
             let fixture = Fixture::new(cli);
             let original: &[u8] = match cli {
-                ExternalAgentRuntime::Codex => b"[mcp_servers.storyboard_canvas]\ncommand = 'foreign'\n",
-                ExternalAgentRuntime::Claude => b"{\"mcpServers\":{\"storyboard_canvas\":{\"command\":\"foreign\"}}}",
+                ExternalAgentRuntime::Codex => {
+                    b"[mcp_servers.storyboard_canvas]\ncommand = 'foreign'\n"
+                }
+                ExternalAgentRuntime::Claude => {
+                    b"{\"mcpServers\":{\"storyboard_canvas\":{\"command\":\"foreign\"}}}"
+                }
             };
             fixture.seed(original);
-            assert_eq!(fixture.context.status().unwrap().state, ExternalAgentInstallState::Conflict);
+            assert_eq!(
+                fixture.context.status().unwrap().state,
+                ExternalAgentInstallState::Conflict
+            );
             assert!(fixture.context.preview().is_err());
             assert!(fixture.context.install().is_err());
             assert!(fixture.context.uninstall().is_err());
@@ -789,12 +943,19 @@ mod tests {
             let mut entry = fixture.context.desired_entry().unwrap();
             entry["command"] = json!("replacement");
             let edited = match cli {
-                ExternalAgentRuntime::Codex => String::from_utf8(fixture.bytes()).unwrap()
-                    .replace(fixture.context.executable.to_str().unwrap(), "replacement").into_bytes(),
-                ExternalAgentRuntime::Claude => merge_entry(cli, &fixture.bytes(), Some(&entry)).unwrap(),
+                ExternalAgentRuntime::Codex => String::from_utf8(fixture.bytes())
+                    .unwrap()
+                    .replace(fixture.context.executable.to_str().unwrap(), "replacement")
+                    .into_bytes(),
+                ExternalAgentRuntime::Claude => {
+                    merge_entry(cli, &fixture.bytes(), Some(&entry)).unwrap()
+                }
             };
             fixture.seed(&edited);
-            assert_eq!(fixture.context.status().unwrap().state, ExternalAgentInstallState::Conflict);
+            assert_eq!(
+                fixture.context.status().unwrap().state,
+                ExternalAgentInstallState::Conflict
+            );
             assert!(fixture.context.uninstall().is_err());
             assert_eq!(fixture.bytes(), edited);
         }
@@ -824,8 +985,13 @@ mod tests {
         fixture.seed(original);
         fixture.context.install().unwrap();
         let document = toml_document(&fixture.bytes()).unwrap();
-        assert_eq!(document["mcp_servers"]["other"]["command"].as_str(), Some("other-tool"));
-        assert!(String::from_utf8(fixture.bytes()).unwrap().contains("# inline"));
+        assert_eq!(
+            document["mcp_servers"]["other"]["command"].as_str(),
+            Some("other-tool")
+        );
+        assert!(String::from_utf8(fixture.bytes())
+            .unwrap()
+            .contains("# inline"));
         fixture.context.uninstall().unwrap();
         assert_eq!(fixture.bytes(), original);
     }
@@ -847,7 +1013,10 @@ mod tests {
             assert_eq!(fixture.bytes(), before_preview);
             let outcome = fixture.context.install().unwrap();
             assert!(outcome.changed);
-            assert_eq!(config_entry(cli, &fixture.bytes()).unwrap(), Some(fixture.context.desired_entry().unwrap()));
+            assert_eq!(
+                config_entry(cli, &fixture.bytes()).unwrap(),
+                Some(fixture.context.desired_entry().unwrap())
+            );
             assert!(!fixture.context.install().unwrap().changed);
             assert!(fixture.context.uninstall().unwrap().restored_original);
             assert_eq!(fixture.bytes(), original);
@@ -879,8 +1048,13 @@ mod tests {
             let remaining = fixture.bytes();
             assert!(config_entry(cli, &remaining).unwrap().is_none());
             match cli {
-                ExternalAgentRuntime::Codex => assert!(String::from_utf8(remaining).unwrap().contains("# new preference\nmodel = 'new'")),
-                ExternalAgentRuntime::Claude => assert_eq!(serde_json::from_slice::<Value>(&remaining).unwrap()["theme"], "new"),
+                ExternalAgentRuntime::Codex => assert!(String::from_utf8(remaining)
+                    .unwrap()
+                    .contains("# new preference\nmodel = 'new'")),
+                ExternalAgentRuntime::Claude => assert_eq!(
+                    serde_json::from_slice::<Value>(&remaining).unwrap()["theme"],
+                    "new"
+                ),
             }
         }
     }
@@ -911,15 +1085,28 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let fixture = Fixture::new(ExternalAgentRuntime::Claude);
         let outcome = fixture.context.install().unwrap();
-        for path in [fixture.context.path.clone(), fixture.context.receipt_path.clone(),
-            PathBuf::from(outcome.backup_path.unwrap())] {
-            assert_eq!(fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+        for path in [
+            fixture.context.path.clone(),
+            fixture.context.receipt_path.clone(),
+            PathBuf::from(outcome.backup_path.unwrap()),
+        ] {
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
         }
         fs::set_permissions(&fixture.context.path, fs::Permissions::from_mode(0o640)).unwrap();
         let mut edited: Value = serde_json::from_slice(&fixture.bytes()).unwrap();
         edited["theme"] = json!("new");
         fixture.seed(&serde_json::to_vec(&edited).unwrap());
         fixture.context.uninstall().unwrap();
-        assert_eq!(fs::metadata(&fixture.context.path).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(
+            fs::metadata(&fixture.context.path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o640
+        );
     }
 }

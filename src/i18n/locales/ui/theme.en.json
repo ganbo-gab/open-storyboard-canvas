@@ -1,0 +1,39 @@
+{
+  "instantHint": "Appearance changes apply immediately; no need to save.",
+  "mode": {
+    "title": "Light or dark",
+    "desc": "Light suits bright rooms and daytime; dark is easier on the eyes for long image reviews and night work.",
+    "light": "Light",
+    "dark": "Dark"
+  },
+  "palette": {
+    "title": "Color theme",
+    "desc": "Each theme tints the sidebar, pages, cards and accent together, with matching light and dark versions."
+  },
+  "tones": {
+    "neutral": { "name": "Ink", "desc": "Neutral gray, calm and timeless" },
+    "warm": { "name": "Sand", "desc": "Warm paper tones, soft on the eyes" },
+    "cool": { "name": "Mist", "desc": "Crisp blue-gray with clear layers" },
+    "celadon": { "name": "Celadon", "desc": "Quiet jade green glaze" },
+    "dusk": { "name": "Dusk", "desc": "Twilight violet for night sessions" },
+    "forest": { "name": "Pine", "desc": "Deep pine green, steady and restful" },
+    "rose": { "name": "Rouge", "desc": "Soft rouge, gentle and bright" },
+    "ocean": { "name": "Deep sea", "desc": "Navy base lit with cyan" }
+  },
+  "accent": {
+    "title": "Accent color",
+    "desc": "Used for primary buttons, selection and focus. Follows the color theme by default, or pick your own.",
+    "followTheme": "Follow color theme",
+    "swatches": "Common accents",
+    "picker": "Pick accent color",
+    "hex": "Accent hex value",
+    "reset": "Follow theme again"
+  },
+  "radius": {
+    "title": "Corner radius",
+    "desc": "Adjusts the rounding of buttons, cards and nodes everywhere.",
+    "compact": "Compact",
+    "default": "Default",
+    "large": "Rounded"
+  }
+}

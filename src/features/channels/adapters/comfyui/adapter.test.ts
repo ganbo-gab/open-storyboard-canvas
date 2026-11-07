@@ -141,6 +141,32 @@ describe('snapshot-based ComfyUI adapter', () => {
     expect(deps.http).toHaveBeenCalledTimes(2);
   });
 
+  it('closes a late WebSocket connection after abort without submitting the prompt', async () => {
+    const deps = dependencies(); const connection = Promise.withResolvers<{ close(): void }>();
+    const ws = vi.fn(() => connection.promise); const close = vi.fn(); const controller = new AbortController();
+    const adapter = createComfyUIAdapter({ ...deps, ws });
+    const job = createComfyUIJob(input, config);
+    const result = adapter.submit(job, controller.signal);
+    await vi.waitFor(() => expect(ws).toHaveBeenCalledOnce());
+    controller.abort(); connection.resolve({ close });
+    expect(await result).toMatchObject({ state: 'failed' });
+    expect(close).toHaveBeenCalledOnce(); expect(deps.http).not.toHaveBeenCalled();
+  });
+
+  it('resets sampler percentage when execution switches to a new node', async () => {
+    const deps = dependencies(); deps.http.mockResolvedValue({ status: 200, body: { prompt_id: 'task' } });
+    let callbacks!: Parameters<NonNullable<ComfyUIDependencies['ws']>>[1];
+    const onProgress = vi.fn();
+    const adapter = createComfyUIAdapter({ ...deps, onProgress, ws: (_url, handlers) => { callbacks = handlers; return { close: vi.fn() }; } });
+    const job = createComfyUIJob(input, config); await adapter.submit(job);
+    callbacks.message({ type: 'executing', data: { prompt_id: 'task', node: '2' } });
+    callbacks.message({ type: 'progress', data: { prompt_id: 'task', value: 4, max: 4 } });
+    callbacks.message({ type: 'executing', data: { prompt_id: 'task', node: '3' } });
+    expect(onProgress.mock.calls.at(-1)?.[1]).toEqual({ type: 'executing', promptId: 'task', currentNode: '3' });
+    expect(await adapter.poll!(job, 'task')).toEqual({ state: 'pending', message: '正在执行节点 3' });
+    adapter.dispose(job.jobId);
+  });
+
   it('returns original websocket execution errors without polling or resubmitting', async () => {
     const deps = dependencies();
     deps.http.mockResolvedValue({ status: 200, body: { prompt_id: 'task' } });

@@ -5,14 +5,14 @@ import {
 } from './canvasCapabilities';
 import { canvasNodeDefinitions } from './nodeRegistry';
 import { CANVAS_REGISTERED_COMMAND_TYPES } from '../application/canvasCommandRegistry';
-import { CANVAS_GENERATION_TRIGGER_NODE_TYPES } from '../application/canvasGenerationTriggers';
+import { GENERATION_NODE_TYPES } from '../application/generation';
 
 describe('canvas capability manifest coverage', () => {
   it('covers every registered node, command action, and generation strategy', () => {
     expect(inspectCanvasCapabilityCoverage({
       nodeTypes: Object.keys(canvasNodeDefinitions),
       actionIds: CANVAS_REGISTERED_COMMAND_TYPES,
-      generationNodeTypes: CANVAS_GENERATION_TRIGGER_NODE_TYPES,
+      generationNodeTypes: GENERATION_NODE_TYPES,
     })).toEqual({
       covered: true,
       missingNodeTypes: [],
@@ -28,7 +28,7 @@ describe('canvas capability manifest coverage', () => {
     const result = inspectCanvasCapabilityCoverage({
       nodeTypes: [...Object.keys(canvasNodeDefinitions), 'newNodeType'],
       actionIds: [...CANVAS_REGISTERED_COMMAND_TYPES, 'canvas.newAction'],
-      generationNodeTypes: [...CANVAS_GENERATION_TRIGGER_NODE_TYPES, 'newGeneratorNode'],
+      generationNodeTypes: [...GENERATION_NODE_TYPES, 'newGeneratorNode'],
     });
     expect(result).toMatchObject({
       covered: false,

@@ -1,6 +1,7 @@
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useProjectStore } from '@/stores/projectStore';
 import { canvasAgentApprovalStore } from './agentApproval';
+import { applyCanvasHistoryEntry } from '@/stores/canvasHistory';
 
 const ROLLBACK_STORAGE_KEY = 'storyboard-copilot:canvas-agent:canvas-rollbacks:v1';
 const MAX_ROLLBACKS = 1_000;
@@ -105,8 +106,13 @@ export class AgentCanvasRollbackStore {
     return token;
   }
 
-  complete(token: string, revisionAfter: number): void {
-    this.patch(token, (record) => ({ ...record, revisionAfter, status: 'ready' }));
+  complete(token: string, revisionAfter: number, historyDepthBefore?: number): void {
+    this.patch(token, (record) => ({
+      ...record,
+      revisionAfter,
+      ...(historyDepthBefore === undefined ? {} : { historyDepthBefore }),
+      status: 'ready',
+    }));
   }
 
   discard(token: string): void {
@@ -187,4 +193,61 @@ export async function rollbackAgentCanvasReceipt(
     revisionBefore,
     revisionAfter: restored.revision,
   };
+}
+
+export type AgentTurnRollbackResult =
+  | { ok: true; undone: number }
+  | { ok: false; reason: 'not-latest' | 'no-changes' | 'project-changed' };
+
+/**
+ * Withdraw only the latest complete Agent-owned history suffix. Paid jobs and
+ * generation-library records are deliberately outside this graph-only action.
+ */
+export function rollbackAgentTurn(input: { projectId: string; runId: string }): AgentTurnRollbackResult {
+  if (useProjectStore.getState().currentProjectId !== input.projectId) {
+    return { ok: false, reason: 'project-changed' };
+  }
+  const canvas = useCanvasStore.getState();
+  const owns = (agentTurnId: string | undefined): boolean => {
+    if (!agentTurnId) return false;
+    try {
+      const binding: unknown = JSON.parse(agentTurnId);
+      // Home turns retain their Home identity even when opening a new project.
+      return Array.isArray(binding) && binding.length === 2
+        && (binding[0] === input.projectId || binding[0] === 'home')
+        && binding[1] === input.runId;
+    } catch { return false; }
+  };
+  const first = canvas.history.past.findIndex((entry) => owns(entry.agentTurnId));
+  if (first < 0) return { ok: false, reason: 'no-changes' };
+  const entries = canvas.history.past.slice(first);
+  if (entries.some((entry) => !owns(entry.agentTurnId))) return { ok: false, reason: 'not-latest' };
+  // Prepare the entire result before publishing, so malformed history cannot
+  // leave a partially withdrawn turn or expose intermediate graphs to UI.
+  let restored = { nodes: canvas.nodes, edges: canvas.edges };
+  try {
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      restored = applyCanvasHistoryEntry(restored, entries[index], 'undo');
+    }
+  } catch { return { ok: false, reason: 'not-latest' }; }
+  const liveSelection = new Map(canvas.nodes.map((node) => [node.id, node.selected]));
+  const nodes = restored.nodes.map((node) => liveSelection.has(node.id)
+    ? { ...node, selected: liveSelection.get(node.id) }
+    : { ...node, selected: false });
+  useCanvasStore.setState({
+    nodes, edges: restored.edges, revision: canvas.revision + 1, dragHistorySnapshot: null,
+    history: { past: canvas.history.past.slice(0, first), future: [...canvas.history.future, ...entries.slice().reverse()] },
+    activeToolDialog: canvas.activeToolDialog && nodes.some((node) => node.id === canvas.activeToolDialog?.nodeId)
+      ? canvas.activeToolDialog : null,
+    activeDirectorStudioNodeId: nodes.some((node) => node.id === canvas.activeDirectorStudioNodeId)
+      ? canvas.activeDirectorStudioNodeId : null,
+  });
+  for (const receipt of canvasAgentApprovalStore.listReceiptsByRun(input.runId)) {
+    if (!receipt.rollbackToken || receipt.rolledBackAt || !canvasAgentRollbackStore.get(receipt.rollbackToken)) continue;
+    canvasAgentRollbackStore.markRolledBack(receipt.rollbackToken);
+    canvasAgentApprovalStore.putReceipt({ ...receipt, rolledBackAt: Date.now(), updatedAt: Date.now() });
+  }
+  const next = useCanvasStore.getState();
+  useProjectStore.getState().saveCurrentProject(next.nodes, next.edges, next.currentViewport, next.history);
+  return { ok: true, undone: entries.length };
 }

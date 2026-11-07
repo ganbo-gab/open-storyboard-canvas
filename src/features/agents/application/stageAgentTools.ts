@@ -1,9 +1,12 @@
 import { z } from 'zod';
-import { stageCommands, stageCommandSchema, stageDraftInputSchema, stageCreateInputSchema, stageCommandEffects } from '@/features/stage/application/stageCommands';
+import { stageCommands, stageCommandSchema, stageDraftInputSchema, stageCreateInputSchema, isDestructiveStageCommand } from '@/features/stage/application/stageCommands';
 import { stageItemSchema } from '@/features/stage/domain/stageSchemas';
 import { defineScopedAgentTool } from './scopedAgentToolDefinition';
 import type { StageSnapshot } from '@/features/stage/domain/stage';
 import { resolveAsset } from '@/features/assets/application/assetCatalog';
+import { stageAgentCatalogs } from '@/features/stage/application/stageCatalogs';
+import { compileStoryPlan } from '@/features/stage/application/storyCompiler';
+import { stageDirectInputSchema } from '@/features/stage/application/storyPlan';
 
 export function projectAgentStageSnapshot(snapshot: StageSnapshot) {
   const { data, nodeId, revision } = snapshot;
@@ -32,9 +35,9 @@ const agentStageCommandSchema = z.union(commandSchemas as [typeof commandSchemas
 
 export const stageAgentTools = [
   defineScopedAgentTool({
-    name: 'stage_query', scope: 'stage', risk: 'read', description: 'Read the actual stage scene, objects, camera, paths, clips and keyframes; null nodeId means the active stage.',
+    name: 'stage_query', scope: 'stage', risk: 'read', description: 'Read actual stage ids/revision, objects, camera and tracks plus real scene/pose/action/camera catalogs and anatomical pose channels. Null nodeId means the active stage.',
     schema: z.object({ nodeId: nodeId.nullable() }).strict(),
-    async execute(input) { return projectAgentStageSnapshot(stageCommands.query(input.nodeId ?? undefined)); },
+    async execute(input) { return { ...projectAgentStageSnapshot(stageCommands.query(input.nodeId ?? undefined)), catalogs: stageAgentCatalogs() }; },
   }),
   defineScopedAgentTool({
     name: 'stage_create', scope: 'stage', risk: 'edit', description: 'Create a real stage node using the shared application command boundary.',
@@ -47,12 +50,24 @@ export const stageAgentTools = [
     async execute(input) { return stageCommands.open(input.nodeId, input.workspace ?? undefined); },
   }),
   defineScopedAgentTool({
-    name: 'stage_command', scope: 'stage', description: 'Execute one precise scene-object, camera, trajectory, clip, keyframe or draft-adoption command. Keyframe times are absolute seconds; clips require clipStart. Query real ids first. Removal is destructive and always confirmed.',
-    schema: z.object({ nodeId, command: agentStageCommandSchema }).strict(),
-    risk: (input) => stageCommandEffects[input.command.type].destructive ? 'destructive' : 'edit',
+    name: 'stage_command', scope: 'stage', description: 'Execute one command or an atomic batch of 1–100 commands. person.pose writes a static pose (no time) or timed frame; person.action and camera.preset replace only their explicit interval. Query real ids/catalogs first. Nullable fields such as trackTargetId and actionId use null to explicitly clear; when strict mode requires these fields during an unrelated update, preserve their queried current values. Times are absolute seconds; clips require clipStart. Replacement/removal requires destructive approval.',
+    schema: z.object({ nodeId, command: z.union([agentStageCommandSchema, z.array(agentStageCommandSchema).min(1).max(100)]) }).strict(),
+    risk: (input) => (Array.isArray(input.command) ? input.command : [input.command]).some((command) => isDestructiveStageCommand(stageCommandSchema.parse(command))) ? 'destructive' : 'edit',
     async execute(input, context) {
-      const result = stageCommands.execute(input.nodeId, input.command, context.expectedRevision);
+      const commands = (Array.isArray(input.command) ? input.command : [input.command]).map((command) => stageCommandSchema.parse(command));
+      const result = stageCommands.execute(input.nodeId, commands, context.expectedRevision);
       return { ...projectAgentStageSnapshot(result), createdIds: result.createdIds };
+    },
+  }),
+  defineScopedAgentTool({
+    name: 'stage_direct', scope: 'stage', description: 'Compile a strict story plan using real cast/set/pose/action catalogs, metric blocking and framed shots. Always dryRun first and inspect warnings. dryRun is read-only; execution applies the identical compiled plan as one atomic undo transaction. Capture returned key times and inspect asset_view afterwards.',
+    schema: stageDirectInputSchema,
+    risk: (input) => input.dryRun ? 'read' : compileStoryPlan(input.plan, stageCommands.query(input.nodeId)).commands.some(isDestructiveStageCommand) ? 'destructive' : 'edit',
+    async execute(input, context) {
+      if (input.expectedRevision !== undefined && context.expectedRevision !== undefined && input.expectedRevision !== context.expectedRevision) throw new Error('Stage revision conflict. Refresh and preview the plan again.');
+      const result = stageCommands.direct(input.nodeId, input.plan, { dryRun: input.dryRun, expectedRevision: input.expectedRevision ?? context.expectedRevision });
+      if (result.dryRun) return result;
+      return { ...projectAgentStageSnapshot(result), createdIds: result.createdIds, warnings: result.warnings, captureTimes: result.captureTimes, dryRun: false };
     },
   }),
   defineScopedAgentTool({
@@ -61,10 +76,20 @@ export const stageAgentTools = [
     async execute(input, context) { return stageCommands.draftScene(input, context.signal); },
   }),
   defineScopedAgentTool({
-    name: 'stage_capture', scope: 'stage', risk: 'edit', description: 'Capture the actual mounted stage camera render to a registered image asset. Fails explicitly when no live viewport is registered. Use asset_view to visually inspect the returned asset id.',
-    schema: z.object({ nodeId }).strict(),
+    name: 'stage_capture', scope: 'stage', risk: 'edit', description: 'Capture real mounted stage image assets. Optional view=four captures front/right/back/left at the same sampled time; omitted/current captures the mounted camera. timeSeconds requires the exact-time capture bridge; fails when unavailable. Use asset_view before claiming visual inspection.',
+    schema: z.object({ nodeId, timeSeconds: z.number().finite().min(0).max(120).optional(), view: z.enum(['current', 'four']).optional() }).strict(),
     async execute(input, context) {
-      const capture = await stageCommands.capture(input.nodeId);
+      if (input.view === 'four') {
+        const capture = await stageCommands.captureFourViews(input.nodeId, input.timeSeconds, context.signal);
+        const images = await Promise.all(capture.images.map(async (image) => {
+          const asset = await resolveAsset(image.assetId) ?? await resolveAsset(`project:${context.projectId}:${image.assetId}`);
+          if (!asset || asset.kind !== 'image') throw new Error('捕获已完成，但图片资产登记尚不可用。');
+          return { ...image, assetId: asset.id };
+        }));
+        context.signal?.throwIfAborted();
+        return { ...capture, images };
+      }
+      const capture = await stageCommands.capture(input.nodeId, input.timeSeconds, context.signal);
       const assetId = await resolveAsset(capture.assetId)
         ? capture.assetId
         : `project:${context.projectId}:${capture.assetId}`;

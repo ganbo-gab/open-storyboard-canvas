@@ -1,8 +1,14 @@
+import { importedImageHostSettings } from '@/features/settings/imageHostSettings';
 import packageMetadata from '../../../../package.json';
 import { useCustomProvidersStore, type CustomProviderConfig } from '@/stores/customProvidersStore';
+import {
+  useChannelStore,
+  migrateLegacyProviders, isSpecialLegacyProvider, type ChannelRecord,
+} from '@/features/channels/store/channelStore';
+import { channelPersistenceStorage } from '@/features/channels/store/channelPersistence';
 import { usePromptLibraryStore } from '@/stores/promptLibraryStore';
 import {
-  normalizeAudioGenerationSettings,
+  DEFAULT_ACCENT_COLOR,
   normalizeImageHostSettings,
   useSettingsStore,
 } from '@/stores/settingsStore';
@@ -25,10 +31,13 @@ import {
   isMachineAbsolutePath,
   isSensitiveSettingsKey,
   parseProviderStructures,
+  parseChannelRecords,
   sanitizeSettingsCategory,
   validatePortableSettingsPayload,
 } from './settingsContract';
 
+import { isPortableCredentialReference, isPortableSecretRef, redactPortableCredentials } from './credentialRedaction';
+import { secretRefFromToken, secretToken } from '@/features/secrets/secretStore';
 export { assertSettingsBundleSize } from './settingsContract';
 
 function pickFields<T extends object, K extends readonly (keyof T)[]>(source: T, fields: K): Pick<T, K[number]> {
@@ -40,30 +49,44 @@ function pickFields<T extends object, K extends readonly (keyof T)[]>(source: T,
 }
 
 function safeProviderStructure(provider: CustomProviderConfig): Record<string, unknown> {
-  const { apiKey: _apiKey, ...structure } = provider;
-  return sanitizeSettingsCategory(structure as unknown as Record<string, unknown>);
+  const { apiKey, ...structure } = provider;
+  const credentialRef = provider.credentialRef ?? secretRefFromToken(apiKey) ?? undefined;
+  return sanitizeSettingsCategory({ ...structure, ...(credentialRef ? { credentialRef } : {}) });
+}
+
+function legacyProviderBackups(): CustomProviderConfig[] {
+  const source = channelPersistenceStorage.getItem('legacy_custom_providers');
+  if (!source) return [];
+  return redactPortableCredentials(JSON.parse(source) as CustomProviderConfig[]).map((provider) => ({
+    ...provider,
+    apiKey: isPortableSecretRef(provider.credentialRef) ? secretToken(provider.credentialRef)
+      : typeof provider.apiKey === 'string' && secretRefFromToken(provider.apiKey) ? provider.apiKey : '',
+  }));
+}
+
+function portableChannelRecord(record: ChannelRecord): ChannelRecord {
+  const migrationIssues = redactPortableCredentials(record.migrationIssues).map((issue) => {
+    const sanitized = sanitizeSettingsCategory({ value: issue.value });
+    const changed = JSON.stringify(sanitized.value) !== JSON.stringify(issue.value);
+    return { ...issue, value: sanitized.value ?? '[redacted: nonportable value]',
+      reason: changed ? `${issue.reason} [Settings export redacted machine-specific paths.]` : issue.reason };
+  });
+  return parseChannelRecords([{ ...record, migrationIssues }])[0];
 }
 
 function buildImageHostCategory(): Record<string, unknown> {
-  const settings = useSettingsStore.getState().imageHostSettings;
-  return {
-    enabled: settings.enabled,
-    provider: settings.provider,
-    pixhost: {
-      apiBaseUrl: settings.pixhost.apiBaseUrl,
-      contentType: settings.pixhost.contentType,
-      maxThumbnailSize: settings.pixhost.maxThumbnailSize,
-    },
-    seedvault: {
-      apiBaseUrl: settings.seedvault.apiBaseUrl,
-      strategyId: settings.seedvault.strategyId,
-    },
-  };
+  const settings = normalizeImageHostSettings(useSettingsStore.getState().imageHostSettings);
+  return sanitizeSettingsCategory({ ...settings,
+    extraHeaders: Object.fromEntries(Object.entries(settings.extraHeaders).map(([name, value]) => [name, secretRefFromToken(value) ? value : ''])),
+  });
 }
 
-export function buildSettingsBundle(includeCredentials: boolean): SettingsBundlePayload {
+/** Settings portability never exports vault values or accepts a credential opt-in. */
+export function buildSettingsBundle(): SettingsBundlePayload {
   const settings = useSettingsStore.getState();
-  const providers = useCustomProvidersStore.getState().providers;
+  const providers = useCustomProvidersStore.getState().providers.filter(isSpecialLegacyProvider);
+  const channels = useChannelStore.getState().channels.map(portableChannelRecord);
+  const backups = legacyProviderBackups();
   const promptLibrary = usePromptLibraryStore.getState();
   const categories: SettingsBundlePayload['categories'] = {
     general: sanitizeSettingsCategory(pickFields(settings, GENERAL_FIELDS) as Record<string, unknown>),
@@ -76,7 +99,7 @@ export function buildSettingsBundle(includeCredentials: boolean): SettingsBundle
       favoritePrompts: promptLibrary.favoritePrompts,
     }),
     models: sanitizeSettingsCategory(pickFields(settings, MODEL_FIELDS) as Record<string, unknown>),
-    providers: { items: providers.map(safeProviderStructure) },
+    providers: { items: providers.map(safeProviderStructure), channels, legacyBackupIds: backups.map((provider) => provider.id) },
     imageHosting: buildImageHostCategory(),
   };
 
@@ -85,40 +108,21 @@ export function buildSettingsBundle(includeCredentials: boolean): SettingsBundle
     schemaVersion: SETTINGS_BUNDLE_SCHEMA_VERSION,
     appVersion: packageMetadata.version,
     createdAt: new Date().toISOString(),
-    includesCredentials: includeCredentials,
+    includesCredentials: false,
     categories,
   };
 
-  if (includeCredentials) {
-    const customProviderApiKeys = Object.fromEntries(
-      providers
-        .filter((provider) => provider.apiKey.trim())
-        .map((provider) => [provider.id, provider.apiKey])
-    );
-    payload.credentials = {
-      providerApiKeys: { ...settings.apiKeys },
-      agnesApiKey: settings.agnesApiKey,
-      customProviderApiKeys,
-      imageHost: {
-        email: settings.imageHostSettings.seedvault.email,
-        password: settings.imageHostSettings.seedvault.password,
-        token: settings.imageHostSettings.seedvault.token,
-      },
-    };
-  }
 
   return payload;
 }
 
-export function serializeSettingsBundle(includeCredentials: boolean): string {
-  const payload = buildSettingsBundle(includeCredentials);
+export function serializeSettingsBundle(): string {
+  const payload = buildSettingsBundle();
   const serialized = JSON.stringify(payload, null, 2);
   assertSettingsBundleSize(serialized);
-  if (!includeCredentials) {
-    const issues = scanSensitiveSettingsExport(serialized);
-    if (issues.length > 0) {
-      throw new Error(`Default settings export failed the security scan: ${issues.join(', ')}`);
-    }
+  const issues = scanSensitiveSettingsExport(serialized);
+  if (issues.length > 0) {
+    throw new Error(`Settings export failed the security scan: ${issues.join(', ')}`);
   }
   return serialized;
 }
@@ -143,6 +147,12 @@ export function scanSensitiveSettingsExport(raw: string): string[] {
     return ['invalid-json'];
   }
   const visit = (value: unknown, path: string, key = ''): void => {
+    if (isPortableSecretRef(value)) return;
+    if (/^categories\.providers\.channels\[\d+\]\.profile$/.test(path)) {
+      try { parseChannelRecords([{ profile: value, origin: 'native', migrationIssues: [], createdAt: 0, updatedAt: 0 }]); }
+      catch (error) { issues.push(`${path}:${error instanceof Error ? error.message : String(error)}`); }
+      return;
+    }
     if (typeof value === 'string' && isMachineAbsolutePath(value, key)) {
       issues.push(`${path}:absolute-path`);
       return;
@@ -156,6 +166,7 @@ export function scanSensitiveSettingsExport(raw: string): string[] {
       const childPath = path ? `${path}.${key}` : key;
       if (key !== 'includesCredentials'
         && isSensitiveSettingsKey(key)
+        && !isPortableCredentialReference(child)
         && child !== ''
         && child !== false
         && child !== undefined
@@ -165,12 +176,15 @@ export function scanSensitiveSettingsExport(raw: string): string[] {
       visit(child, childPath, key);
     }
   };
+  if (JSON.stringify(redactPortableCredentials(parsed)) !== JSON.stringify(parsed)) {
+    issues.push('credential-data');
+  }
   visit(parsed, '');
   return issues;
 }
 
 function currentCategorySnapshot(category: string): Record<string, unknown> {
-  return buildSettingsBundle(false).categories[category] ?? {};
+  return buildSettingsBundle().categories[category] ?? {};
 }
 
 function changedTopLevelFields(
@@ -183,40 +197,11 @@ function changedTopLevelFields(
 function summarizePreviewValue(value: unknown): SettingsPreviewValue {
   const serialized = JSON.stringify(value);
   const text = serialized === undefined ? 'not set' : serialized;
-  return {
-    kind: 'value',
-    text: text.length > 240 ? `${text.slice(0, 237)}...` : text,
-  };
+  return text.length > 240 ? `${text.slice(0, 237)}...` : text;
 }
 
-function configuredCredentialCount(value: unknown): number {
-  if (typeof value === 'string') return value.trim() ? 1 : 0;
-  if (!isPlainRecord(value)) return 0;
-  return Object.values(value).filter((item) => typeof item === 'string' && item.trim()).length;
-}
 
-function credentialPreviewValue(value: unknown): SettingsPreviewValue {
-  return { kind: 'credential', configuredCount: configuredCredentialCount(value) };
-}
-
-function currentCredentialSnapshot(): Record<string, unknown> {
-  const settings = useSettingsStore.getState();
-  const providers = useCustomProvidersStore.getState().providers;
-  return {
-    providerApiKeys: settings.apiKeys,
-    agnesApiKey: settings.agnesApiKey,
-    customProviderApiKeys: Object.fromEntries(
-      providers.filter((provider) => provider.apiKey.trim()).map((provider) => [provider.id, provider.apiKey])
-    ),
-    imageHost: {
-      email: settings.imageHostSettings.seedvault.email,
-      password: settings.imageHostSettings.seedvault.password,
-      token: settings.imageHostSettings.seedvault.token,
-    },
-  };
-}
-
-export function previewSettingsImport(payload: SettingsBundlePayload): SettingsCategoryDiff[] {
+export function previewSettingsImport(payload: unknown): SettingsCategoryDiff[] {
   const validated = validatePortableSettingsPayload(payload);
   const diffs: SettingsCategoryDiff[] = Object.entries(validated.categories).map(([category, incoming]) => {
     const current = currentCategorySnapshot(category);
@@ -234,23 +219,6 @@ export function previewSettingsImport(payload: SettingsBundlePayload): SettingsC
       fields,
     };
   });
-  if (validated.includesCredentials) {
-    const current = currentCredentialSnapshot();
-    const incoming = validated.credentials ?? {};
-    const credentialFields = ['providerApiKeys', 'agnesApiKey', 'customProviderApiKeys', 'imageHost']
-      .filter((field) => Object.prototype.hasOwnProperty.call(incoming, field));
-    diffs.push({
-      category: 'credentials',
-      status: 'conflict',
-      changedFields: credentialFields,
-      fields: credentialFields.map((field) => ({
-        field,
-        before: credentialPreviewValue(current[field]),
-        after: credentialPreviewValue(incoming[field as keyof typeof incoming]),
-        sensitive: true,
-      })),
-    });
-  }
   return diffs;
 }
 
@@ -266,16 +234,19 @@ function pickIncoming(
 }
 
 export function applySettingsBundle(
-  input: SettingsBundlePayload,
+  input: unknown,
   selectedCategories: ReadonlySet<string>
 ): void {
   const payload = validatePortableSettingsPayload(input);
   const settingsSnapshot = useSettingsStore.getState();
   const providersSnapshot = useCustomProvidersStore.getState();
+  const channelsSnapshot = useChannelStore.getState();
+  const backupSnapshot = ['legacy_custom_providers', 'legacy_custom_providers_raw'].map((name) => ({ name, value: channelPersistenceStorage.getItem(name) }));
   const promptLibrarySnapshot = usePromptLibraryStore.getState();
   const themeSnapshot = useThemeStore.getState();
   const partial: Record<string, unknown> = {};
   let providersToApply: CustomProviderConfig[] | null = null;
+  let channelsToApply: ChannelRecord[] | null = null;
   const general = payload.categories.general;
   if (selectedCategories.has('general') && general) {
     Object.assign(partial, pickIncoming(general, GENERAL_FIELDS));
@@ -283,6 +254,10 @@ export function applySettingsBundle(
   const appearance = payload.categories.appearance;
   if (selectedCategories.has('appearance') && appearance) {
     Object.assign(partial, pickIncoming(appearance, APPEARANCE_FIELDS));
+    // Bundles from before color themes carry only an accent color; a non-default one stays custom.
+    if (typeof appearance.accentColor === 'string' && appearance.accentSource === undefined) {
+      partial.accentSource = appearance.accentColor.toUpperCase() === DEFAULT_ACCENT_COLOR ? 'theme' : 'custom';
+    }
   }
   const prompts = payload.categories.prompts;
   if (selectedCategories.has('prompts') && prompts) {
@@ -291,57 +266,35 @@ export function applySettingsBundle(
   const models = payload.categories.models;
   if (selectedCategories.has('models') && models) {
     Object.assign(partial, pickIncoming(models, MODEL_FIELDS));
-    if (models.audioGenerationSettings !== undefined) {
-      partial.audioGenerationSettings = normalizeAudioGenerationSettings(models.audioGenerationSettings);
-    }
   }
 
   const providersCategory = payload.categories.providers;
   if (selectedCategories.has('providers') && providersCategory) {
-    const apiKeys = payload.includesCredentials && selectedCategories.has('credentials')
-      ? payload.credentials?.customProviderApiKeys ?? {}
-      : {};
-    const providers = parseProviderStructures(providersCategory.items).map((provider) => ({
-      ...provider,
-      apiKey: apiKeys[provider.id] ?? '',
-    }));
-    providersToApply = providers;
+    providersToApply = parseProviderStructures(providersCategory.items);
+    channelsToApply = payload.schemaVersion === 2 ? parseChannelRecords(providersCategory.channels) : [];
   }
 
   const imageHosting = payload.categories.imageHosting;
   if (selectedCategories.has('imageHosting') && imageHosting) {
-    const current = useSettingsStore.getState().imageHostSettings;
-    const pixhost = isPlainRecord(imageHosting.pixhost) ? imageHosting.pixhost : {};
-    const seedvault = isPlainRecord(imageHosting.seedvault) ? imageHosting.seedvault : {};
-    const importedCredentials = payload.includesCredentials && selectedCategories.has('credentials')
-      ? payload.credentials?.imageHost
-      : undefined;
-    partial.imageHostSettings = normalizeImageHostSettings({
-      ...current,
-      ...pickIncoming(imageHosting, ['enabled', 'provider']),
-      pixhost: { ...current.pixhost, ...pixhost },
-      seedvault: {
-        ...current.seedvault,
-        ...seedvault,
-        ...(importedCredentials ?? {}),
-      },
-    });
+    partial.imageHostSettings = importedImageHostSettings(imageHosting);
   }
 
-  if (payload.includesCredentials && selectedCategories.has('credentials')) {
-    partial.apiKeys = { ...(payload.credentials?.providerApiKeys ?? {}) };
-    partial.agnesApiKey = payload.credentials?.agnesApiKey ?? '';
-    if (!providersToApply) {
-      const customKeys = payload.credentials?.customProviderApiKeys ?? {};
-      providersToApply = providersSnapshot.providers.map((provider) => ({
-        ...provider,
-        apiKey: customKeys[provider.id] ?? provider.apiKey,
-      }));
-    }
-  }
   try {
+    if (payload.schemaVersion === 1 && providersToApply && selectedCategories.has('providers')) {
+      const backups = new Map(legacyProviderBackups().map((provider) => [provider.id, provider]));
+      for (const provider of providersToApply) backups.set(provider.id, provider);
+      channelPersistenceStorage.setItem('legacy_custom_providers', JSON.stringify([...backups.values()]));
+    }
+    if (channelsToApply) {
+      const incomingIds = new Set(channelsToApply.map(({ profile }) => profile.id));
+      const legacyIds = payload.schemaVersion === 1 ? new Set(providersToApply?.map((provider) => provider.id)) : new Set<string>();
+      useChannelStore.setState({ channels: channelsToApply,
+        migratedLegacyIds: [...new Set([...channelsSnapshot.migratedLegacyIds, ...legacyProviderBackups().map((provider) => provider.id), ...incomingIds])]
+          .filter((id) => !legacyIds.has(id)) });
+    }
+    if (payload.schemaVersion === 1 && providersToApply && selectedCategories.has('providers')) migrateLegacyProviders(providersToApply);
     if (providersToApply) {
-      useCustomProvidersStore.getState().replaceAll(providersToApply);
+      useCustomProvidersStore.setState({ providers: providersToApply });
     }
     if (selectedCategories.has('prompts') && isPlainRecord(prompts?.favoritePrompts)) {
       usePromptLibraryStore.setState({ favoritePrompts: prompts.favoritePrompts as never });
@@ -353,6 +306,10 @@ export function applySettingsBundle(
     }
   } catch (error) {
     useSettingsStore.setState(settingsSnapshot, true);
+    for (const { name, value } of backupSnapshot) {
+      if (value === null) channelPersistenceStorage.removeItem(name); else channelPersistenceStorage.setItem(name, value);
+    }
+    useChannelStore.setState(channelsSnapshot, true);
     useCustomProvidersStore.setState(providersSnapshot, true);
     usePromptLibraryStore.setState(promptLibrarySnapshot, true);
     useThemeStore.setState(themeSnapshot, true);

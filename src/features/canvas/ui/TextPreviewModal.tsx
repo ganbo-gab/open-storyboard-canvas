@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 
-import { UiButton } from '@/components/ui';
+import { UiButton, UiIconButton } from '@/components/ui';
 
 interface TextPreviewModalProps {
   open: boolean;
@@ -90,7 +90,7 @@ export function TextPreviewModal({
     >
       <button
         type="button"
-        className="absolute inset-0 bg-black/55"
+        className="absolute inset-0 bg-(--scrim) focus-visible:outline-2 focus-visible:outline-accent"
         aria-label="关闭预览"
         onClick={onClose}
       />
@@ -103,16 +103,16 @@ export function TextPreviewModal({
         onMouseDown={(event) => event.stopPropagation()}
         onContextMenu={(event) => event.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-[rgba(255,255,255,0.1)] px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between border-b border-(--canvas-node-divider) px-4 py-3">
           <h2 className="min-w-0 truncate text-sm font-medium text-text-dark">{title}</h2>
-          <button
+          <UiIconButton variant="ghost"
             type="button"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-(--canvas-node-menu-hover) hover:text-text-dark"
+            className="h-8 w-8 shrink-0 rounded-md"
             aria-label="关闭预览"
             onClick={onClose}
           >
             <X className="h-4 w-4" />
-          </button>
+          </UiIconButton>
         </div>
 
         <div className="min-h-0 flex-1 p-4">
@@ -127,7 +127,7 @@ export function TextPreviewModal({
                 </pre>
               ) : (
                 <div
-                  className="markdown-body select-text wrap-break-word [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-white/20 [&_blockquote]:pl-3 [&_code]:rounded-sm [&_code]:bg-white/10 [&_code]:px-1 [&_code]:py-0.5 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-0 [&_p+_p]:mt-4 [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-2 [&_ul]:list-disc [&_ul]:pl-5"
+                  className="markdown-body select-text wrap-break-word [&_a]:text-accent [&_blockquote]:border-l-2 [&_blockquote]:border-(--line-strong) [&_blockquote]:pl-3 [&_code]:rounded-sm [&_code]:bg-(--press) [&_code]:px-1 [&_code]:py-0.5 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-0 [&_p+_p]:mt-4 [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-(--canvas-node-subtle-bg) [&_pre]:p-2 [&_ul]:list-disc [&_ul]:pl-5"
                   onContextMenu={openSelectedTextMenu}
                 >
                   <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
@@ -139,8 +139,8 @@ export function TextPreviewModal({
           </div>
         </div>
 
-        <div className="flex shrink-0 justify-end border-t border-[rgba(255,255,255,0.1)] px-4 py-3">
-          <UiButton variant="muted" size="sm" onClick={onClose}>
+        <div className="flex shrink-0 justify-end border-t border-(--canvas-node-divider) px-4 py-3">
+          <UiButton variant="secondary" size="sm" onClick={onClose}>
             关闭
           </UiButton>
         </div>
@@ -156,9 +156,9 @@ export function TextPreviewModal({
             event.stopPropagation();
           }}
         >
-          <button
+          <UiButton variant="ghost"
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-(--canvas-node-menu-hover)"
+            className="h-auto w-full justify-start gap-2 px-3 py-2 text-left"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -167,11 +167,11 @@ export function TextPreviewModal({
           >
             <Copy className="h-4 w-4" />
             复制文本
-          </button>
+          </UiButton>
           {onCreateImageFromSelectedText ? (
-            <button
+            <UiButton variant="ghost"
               type="button"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-(--canvas-node-menu-hover)"
+              className="h-auto w-full justify-start gap-2 px-3 py-2 text-left"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -180,7 +180,7 @@ export function TextPreviewModal({
             >
               <ImagePlus className="h-4 w-4" />
               生成图片
-            </button>
+            </UiButton>
           ) : null}
         </div>
       ) : null}

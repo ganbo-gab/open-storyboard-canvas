@@ -1,3 +1,4 @@
+import { providerContinuationSchema } from './agentProviderContinuation';
 import type {
   AgentModelProtocol,
   AgentModelStreamEvent,
@@ -31,7 +32,7 @@ function usageFromPayload(protocol: AgentModelProtocol, payload: unknown): Agent
       inputTokens,
       outputTokens,
       totalTokens: numberValue(getPath(payload, ['usage', 'total_tokens'])) || inputTokens + outputTokens,
-      cachedInputTokens: numberValue(getPath(payload, ['usage', 'prompt_tokens_details', 'cached_tokens'])) || undefined,
+      cachedInputTokens: numberValue(getPath(payload, ['usage', 'prompt_cache_hit_tokens'])) || numberValue(getPath(payload, ['usage', 'prompt_tokens_details', 'cached_tokens'])) || undefined,
       reasoningTokens: numberValue(getPath(payload, ['usage', 'completion_tokens_details', 'reasoning_tokens'])) || undefined,
     };
   }
@@ -60,7 +61,11 @@ function validateToolCall(call: AgentModelToolCall): AgentModelToolCall {
   if (!call.callId.trim() || !call.name.trim()) {
     throw new AgentModelProtocolError('Provider returned a tool call without call id or name.');
   }
-  parseToolArguments(call.arguments || '{}');
+  try {
+    parseToolArguments(call.arguments || '{}');
+  } catch {
+    throw new AgentModelProtocolError(`工具 ${call.name} 返回的参数不是有效的 JSON 对象，本次调用未执行。`);
+  }
   return { ...call, arguments: call.arguments || '{}' };
 }
 
@@ -107,11 +112,13 @@ function parseResponsesOutput(
       }));
       continue;
     }
-    const content = Array.isArray(record.content) ? record.content : [];
-    for (const part of content) {
-      const contentRecord = asRecord(part);
-      const text = stringValue(contentRecord?.text);
-      if (text) textParts.push(text);
+    if (record.type === 'message') {
+      const content = Array.isArray(record.content) ? record.content : [];
+      for (const part of content) {
+        const record = asRecord(part);
+        if (record?.type === 'output_text' && typeof record.text === 'string') textParts.push(record.text);
+        else if (record?.type === 'refusal' && typeof record.refusal === 'string') textParts.push(record.refusal);
+      }
     }
     if (record.type === 'reasoning') {
       const summary = Array.isArray(record.summary) ? record.summary : [];
@@ -170,7 +177,7 @@ function parseAnthropicOutput(
         toolCalls.push(validateToolCall({
           callId: stringValue(record.id) ?? '',
           ...decodeToolName(wireName, tools),
-          arguments: jsonString(record.input),
+          arguments: JSON.stringify(record.input === undefined ? {} : record.input),
         }));
       }
     }
@@ -189,8 +196,8 @@ function parseGeminiOutput(
     for (const part of parts) {
       const record = asRecord(part);
       if (!record) continue;
-      const text = stringValue(record.text);
-      if (text) textParts.push(text);
+      const text = typeof record.text === 'string' ? record.text : undefined;
+      if (text && record?.thought !== true) textParts.push(text);
       const functionCall = asRecord(record.functionCall);
       if (functionCall) {
         const wireName = stringValue(functionCall.name) ?? '';
@@ -227,10 +234,14 @@ export function parseAgentProviderResponse(
       : protocol === 'google-gemini'
         ? parseGeminiOutput(payload, request.tools)
         : parseChatOutput(payload, request.tools);
+  const nativeContinuation = protocol === 'anthropic-messages' ? { kind: 'anthropic-content', items: getPath(payload, ['content']) }
+    : protocol === 'google-gemini' ? { kind: 'gemini-parts', items: getPath(payload, ['candidates', 0, 'content', 'parts']) }
+      : protocol === 'openai-responses' ? { kind: 'responses-output', items: getPath(payload, ['output']) } : undefined;
+  const continuation = providerContinuationSchema.safeParse(nativeContinuation);
   const responseId = safeResponseId(
     getPath(payload, ['id'])
       ?? getPath(payload, ['response', 'id'])
-      ?? getPath(payload, ['candidates', 0, 'content', 'role']),
+      ?? getPath(payload, ['responseId']),
   );
   const reasoningSummary = 'reasoningSummary' in output
     && typeof output.reasoningSummary === 'string'
@@ -243,6 +254,8 @@ export function parseAgentProviderResponse(
       ?? stringValue(getPath(payload, ['_request_id'])),
     text: output.text || undefined,
     reasoningSummary,
+    ...(protocol === 'openai-chat-completions' && typeof getPath(payload, ['choices', 0, 'message', 'reasoning_content']) === 'string' ? { continuation: { kind: 'chat-reasoning' as const, reasoningContent: String(getPath(payload, ['choices', 0, 'message', 'reasoning_content'])) } } : {}),
+    ...(continuation.success ? { continuation: continuation.data } : {}),
     toolCalls: output.toolCalls,
     finishReason: finishReason(protocol, payload),
     usage: usageFromPayload(protocol, payload),
@@ -258,6 +271,7 @@ interface PartialToolCall {
   name: string;
   namespace?: string;
   arguments: string;
+  hasInputJsonDelta?: boolean;
 }
 
 export class AgentProviderStreamAccumulator {
@@ -265,7 +279,11 @@ export class AgentProviderStreamAccumulator {
   private requestId: string | undefined;
   private text = '';
   private reasoningSummary = '';
+  private chatReasoning: string | undefined;
+  private nativeBlocks: Record<string, unknown>[] = [];
+  private nativeArguments = new Map<number, string>();
   private finish: string | undefined;
+  private terminalEventReceived = false;
   private usage: AgentModelUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   private readonly toolCalls = new Map<string, PartialToolCall>();
   private finalResponse: AgentModelTurnResponse | null = null;
@@ -281,7 +299,10 @@ export class AgentProviderStreamAccumulator {
   }
 
   complete(): AgentModelTurnResponse {
-    if (this.finalResponse) return this.finalResponse;
+    if (this.finalResponse) {
+      this.assertToolStreamComplete(this.finalResponse.toolCalls.length > 0);
+      return this.finalResponse;
+    }
     const toolCalls = Array.from(this.toolCalls.values()).map((call) => {
       const decoded = call.namespace
         ? { name: call.name, namespace: call.namespace }
@@ -292,12 +313,19 @@ export class AgentProviderStreamAccumulator {
         arguments: call.arguments || '{}',
       });
     });
+    this.assertToolStreamComplete(toolCalls.length > 0);
+    if (this.request.model.capabilities.protocol === 'anthropic-messages') {
+      for (const [index, args] of this.nativeArguments) this.nativeBlocks[index].input = JSON.parse(args || '{}');
+    }
+    const native = providerContinuationSchema.safeParse({ kind: this.request.model.capabilities.protocol === 'anthropic-messages' ? 'anthropic-content' : 'gemini-parts', items: this.nativeBlocks });
     assertStructuredToolCalling(this.request, this.text, toolCalls);
     return {
       responseId: safeResponseId(this.responseId),
       requestId: this.requestId,
       text: this.text || undefined,
       reasoningSummary: this.reasoningSummary || undefined,
+      ...(['anthropic-messages', 'google-gemini'].includes(this.request.model.capabilities.protocol) && native.success ? { continuation: native.data } : {}),
+      ...(this.chatReasoning === undefined ? {} : { continuation: { kind: 'chat-reasoning' as const, reasoningContent: this.chatReasoning } }),
       toolCalls,
       finishReason: this.finish,
       usage: this.usage,
@@ -306,6 +334,18 @@ export class AgentProviderStreamAccumulator {
         finishReason: this.finish ?? null,
       },
     };
+  }
+
+  private assertToolStreamComplete(hasToolCalls: boolean): void {
+    if (!hasToolCalls) return;
+    const protocol = this.request.model.capabilities.protocol;
+    const complete = protocol === 'openai-responses' ? this.terminalEventReceived
+      : protocol === 'anthropic-messages' ? this.terminalEventReceived && (this.finish === 'tool_use' || this.finish === 'end_turn')
+        : protocol === 'google-gemini' ? this.finish === 'STOP'
+          : this.finish === 'tool_calls' || this.finish === 'stop';
+    // Valid argument JSON can arrive before the message (including its private continuation) finishes.
+    // EOF or a token-limit stop must never turn that partial message into an executable tool turn.
+    if (!complete) throw new AgentModelProtocolError('模型的工具回复未完整结束，工具未执行。请检查连接后重新发送；不会自动重试。');
   }
 
   private consumeResponses(payload: unknown): AgentModelStreamEvent[] {
@@ -332,11 +372,12 @@ export class AgentProviderStreamAccumulator {
       const key = stringValue(getPath(payload, ['item_id']))
         ?? String(numberValue(getPath(payload, ['output_index'])));
       const current = this.toolCalls.get(key) ?? { callId: key, name: '', arguments: '' };
-      current.arguments += stringValue(getPath(payload, ['delta'])) ?? '';
+      { const fragment = getPath(payload, ['delta']); if (typeof fragment === 'string') current.arguments += fragment; }
       this.toolCalls.set(key, current);
     } else if (type === 'response.completed' || type === 'response.incomplete') {
       const responsePayload = getPath(payload, ['response']);
       this.finalResponse = parseAgentProviderResponse(this.request, responsePayload);
+      this.terminalEventReceived = type === 'response.completed';
     }
     return events;
   }
@@ -358,7 +399,10 @@ export class AgentProviderStreamAccumulator {
   private consumeChat(payload: unknown): AgentModelStreamEvent[] {
     const events: AgentModelStreamEvent[] = [];
     this.responseId = stringValue(getPath(payload, ['id'])) ?? this.responseId;
-    const delta = stringValue(getPath(payload, ['choices', 0, 'delta', 'content'])) ?? '';
+    const rawDelta = getPath(payload, ['choices', 0, 'delta', 'content']);
+    const delta = typeof rawDelta === 'string' ? rawDelta : '';
+    const reasoning = getPath(payload, ['choices', 0, 'delta', 'reasoning_content']);
+    if (typeof reasoning === 'string') this.chatReasoning = (this.chatReasoning ?? '') + reasoning;
     if (delta) {
       this.text += delta;
       events.push({ type: 'text_delta', delta });
@@ -370,7 +414,7 @@ export class AgentProviderStreamAccumulator {
         const current = this.toolCalls.get(key) ?? { callId: key, name: '', arguments: '' };
         current.callId = stringValue(getPath(rawCall, ['id'])) ?? current.callId;
         current.name += stringValue(getPath(rawCall, ['function', 'name'])) ?? '';
-        current.arguments += stringValue(getPath(rawCall, ['function', 'arguments'])) ?? '';
+        { const fragment = getPath(rawCall, ['function', 'arguments']); if (typeof fragment === 'string') current.arguments += fragment; }
         this.toolCalls.set(key, current);
       }
     }
@@ -387,24 +431,33 @@ export class AgentProviderStreamAccumulator {
     const index = String(numberValue(getPath(payload, ['index'])));
     if (type === 'content_block_start') {
       const block = asRecord(getPath(payload, ['content_block']));
+      if (block) this.nativeBlocks[Number(index)] = { ...block };
       if (block?.type === 'tool_use') {
         this.toolCalls.set(index, {
           callId: stringValue(block.id) ?? index,
           name: stringValue(block.name) ?? '',
-          arguments: block.input ? jsonString(block.input) : '',
+          arguments: JSON.stringify(block.input === undefined ? {} : block.input),
+          hasInputJsonDelta: false,
         });
       }
     } else if (type === 'content_block_delta') {
       const deltaType = stringValue(getPath(payload, ['delta', 'type'])) ?? '';
-      const delta = stringValue(getPath(payload, ['delta', 'text']))
-        ?? stringValue(getPath(payload, ['delta', 'partial_json']))
-        ?? '';
+      const block = this.nativeBlocks[Number(index)];
+      const field = deltaType === 'thinking_delta' ? 'thinking' : deltaType === 'signature_delta' ? 'signature' : deltaType === 'text_delta' ? 'text' : null;
+      if (block && field) { const part = getPath(payload, ['delta', field]); if (typeof part === 'string') block[field] = String(block[field] ?? '') + part; }
+      if (deltaType === 'input_json_delta') this.nativeArguments.set(Number(index), (this.nativeArguments.get(Number(index)) ?? '') + String(getPath(payload, ['delta', 'partial_json']) ?? ''));
+      const fragment = getPath(payload, ['delta', deltaType === 'input_json_delta' ? 'partial_json' : 'text']);
+      const delta = typeof fragment === 'string' ? fragment : '';
       if (deltaType === 'text_delta' && delta) {
         this.text += delta;
         events.push({ type: 'text_delta', delta });
       } else if (deltaType === 'input_json_delta' && delta) {
         const current = this.toolCalls.get(index) ?? { callId: index, name: '', arguments: '' };
+        // Anthropic's start input is an empty placeholder; deltas contain the whole JSON value.
+        // A compatible provider may send a complete input in the start event without deltas.
+        if (!current.hasInputJsonDelta) current.arguments = '';
         current.arguments += delta;
+        current.hasInputJsonDelta = true;
         this.toolCalls.set(index, current);
       }
     } else if (type === 'message_delta') {
@@ -417,11 +470,15 @@ export class AgentProviderStreamAccumulator {
       };
     } else if (type === 'message_start') {
       this.usage = usageFromPayload('anthropic-messages', getPath(payload, ['message']));
+    } else if (type === 'message_stop') {
+      this.terminalEventReceived = true;
     }
     return events;
   }
 
   private consumeGemini(payload: unknown): AgentModelStreamEvent[] {
+    const rawParts = getPath(payload, ['candidates', 0, 'content', 'parts']);
+    if (Array.isArray(rawParts)) for (const part of rawParts) { const record = asRecord(part); if (record) this.nativeBlocks.push(record); }
     const parsed = parseGeminiOutput(payload, this.request.tools);
     const events: AgentModelStreamEvent[] = [];
     if (parsed.text) {

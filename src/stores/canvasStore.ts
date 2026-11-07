@@ -1,3 +1,10 @@
+import { normalizeBatchStacks, retainBatchStackNormalization, updateBatchStack } from '@/features/canvas/application/stacks';
+import { applyAlignmentToNodeChanges } from '@/features/canvas/engine/alignment';
+import {
+  filterRedundantCanvasEdgeChanges,
+  filterRedundantCanvasNodeChanges,
+  isCanvasMeasurementChange,
+} from '@/features/canvas/engine/canvasChanges';
 import { create, type StateCreator, type StoreApi } from 'zustand';
 import {
   Connection,
@@ -38,6 +45,10 @@ import {
   isTagGroupShape,
   isStoryboardSplitNode,
 } from '@/features/canvas/domain/canvasNodes';
+import { normalizePersonPose } from '@/features/canvas/domain/personPose';
+import { normalizeDepthRelief } from '@/features/stage/domain/depthRelief';
+import { normalizeStageObjectFlags } from '@/features/stage/domain/objectFlags';
+import { normalizeChannelGenerationFields } from '@/features/channels/application/generationFields';
 import {
   nodeHasSourceHandle,
   nodeHasTargetHandle,
@@ -47,6 +58,7 @@ import { nodeCatalog } from '@/features/canvas/application/nodeCatalog';
 import { canvasNodeFactory } from '@/features/canvas/application/canvasServices';
 import { normalizeDirectorMotionProject } from '@/features/canvas/application/directorMotion';
 import { validateCanvasConnection } from '@/features/canvas/application/canvasConnectionRules';
+import type { CanvasConnectionOptions } from '@/features/canvas/application/canvasConnectionRules';
 import {
   migrateLegacyTagGraph,
   reportTagMigrationDiagnostics,
@@ -63,6 +75,14 @@ import {
   deriveSelectedNodeId,
   selectNodesExclusive,
 } from '@/features/canvas/domain/canvasSelection';
+import {
+  appendCanvasHistory,
+  applyCanvasHistoryEntry,
+  normalizeCanvasHistory,
+  type CanvasHistoryState,
+} from './canvasHistory';
+
+export { appendCanvasHistory, type CanvasHistoryState } from './canvasHistory';
 
 export type {
   ActiveToolDialog,
@@ -79,10 +99,6 @@ export interface CanvasHistorySnapshot {
   edges: CanvasEdge[];
 }
 
-export interface CanvasHistoryState {
-  past: CanvasHistorySnapshot[];
-  future: CanvasHistorySnapshot[];
-}
 
 export interface AddNodesBatchInput {
   type: CanvasNodeType;
@@ -91,8 +107,6 @@ export interface AddNodesBatchInput {
   data?: Partial<CanvasNodeData>;
 }
 
-const MAX_HISTORY_STEPS = 50;
-const MAX_HEAVY_HISTORY_STEPS = 12;
 export const MAX_CANVAS_BATCH_ADD_NODES = 500;
 const IMAGE_NODE_VISUAL_MIN_EDGE = 96;
 const DIRECTOR_STUDIO_PROJECT_SIGNATURE_SEPARATOR = '\u001f';
@@ -176,7 +190,7 @@ export interface CanvasState {
   onEdgesChange: (changes: EdgeChange<CanvasEdge>[]) => void;
   onConnect: (connection: Connection) => void;
 
-  setCanvasData: (nodes: CanvasNode[], edges: CanvasEdge[], history?: CanvasHistoryState) => void;
+  setCanvasData: (nodes: CanvasNode[], edges: CanvasEdge[], history?: unknown) => void;
   addNode: (
     type: CanvasNodeType,
     position: { x: number; y: number },
@@ -189,7 +203,7 @@ export interface CanvasState {
     edges: CanvasEdge[];
     selectedNodeId: string | null;
   }) => number | null;
-  addEdge: (source: string, target: string) => string | null;
+  addEdge: (source: string, target: string, options?: CanvasConnectionOptions) => string | null;
   findNodePosition: (sourceNodeId: string, newNodeWidth: number, newNodeHeight: number) => { x: number; y: number };
   findNodePositions: (
     sourceNodeId: string,
@@ -225,6 +239,11 @@ export interface CanvasState {
   ) => string | null;
 
   updateNodeData: (nodeId: string, data: Partial<CanvasNodeData>) => void;
+  /**
+   * Read and clear a Director node's one-shot "open on create" request. Persisted (revision bump)
+   * but not an undo step: undo must remove the created node, not re-arm the auto-open.
+   */
+  consumeDirectorOpenRequest: (nodeId: string) => 'director' | 'previs' | null;
   replaceNodeType: (
     nodeId: string,
     type: CanvasNodeType,
@@ -249,6 +268,8 @@ export interface CanvasState {
 
   deleteNode: (nodeId: string) => void;
   deleteNodes: (nodeIds: string[]) => void;
+  setBatchPrimary: (batchId: string, nodeId: string) => boolean;
+  setBatchCollapsed: (batchId: string, collapsed: boolean) => boolean;
   groupNodes: (nodeIds: string[]) => string | null;
   ungroupNode: (groupNodeId: string) => boolean;
   deleteEdge: (edgeId: string) => void;
@@ -366,6 +387,13 @@ function normalizeRecordObject<T extends Record<string, unknown>>(value: unknown
   return record ? { ...record } as T : {} as T;
 }
 
+function normalizeCustomActionPoses(value: unknown): NonNullable<BlueprintNodeData['customActionPoses']> {
+  return Object.fromEntries(Object.entries(asRecord(value) ?? {}).flatMap(([id, value]) => {
+    const pose = normalizePersonPose(value);
+    return pose ? [[id, pose]] : [];
+  }));
+}
+
 function normalizeOptionalVector3(value: unknown, fallback: { x: number; y: number; z: number }): { x: number; y: number; z: number } | undefined {
   const record = asRecord(value);
   if (!record) {
@@ -390,6 +418,7 @@ function normalizeBlueprintItem(value: unknown, index: number): BlueprintItem | 
   const label = normalizeString(record.label, `元素${index + 1}`).trim() || `元素${index + 1}`;
   const item: BlueprintItem = {
     ...(record as Partial<BlueprintItem>),
+    ...normalizeStageObjectFlags(record),
     id: normalizeString(record.id, `restored-item-${index + 1}`).trim() || `restored-item-${index + 1}`,
     label,
     x: normalizeNumber(record.x, BLUEPRINT_ITEM_FALLBACK_X),
@@ -404,8 +433,11 @@ function normalizeBlueprintItem(value: unknown, index: number): BlueprintItem | 
     scale3d: normalizeOptionalVector3(record.scale3d, { x: 1, y: 1, z: 1 }),
     category,
     presetId: normalizeOptionalString(record.presetId),
+    importedModelId: normalizeOptionalString(record.importedModelId)?.trim() || undefined,
+    relief: category === 'scene' ? normalizeDepthRelief(record.relief) : undefined,
     relation: normalizeOptionalString(record.relation),
     action: normalizeOptionalString(record.action),
+    pose: normalizePersonPose(record.pose),
     directorStudioRole: record.directorStudioRole === 'pedestrian' ? 'pedestrian' : undefined,
     directorStudioNumber: normalizeOptionalNumber(record.directorStudioNumber),
     bodyControls: asRecord(record.bodyControls)
@@ -530,13 +562,14 @@ function normalizeDirectorSnapshot(
 ): DirectorStudioProjectSnapshot {
   const record = asRecord(value);
   return {
+    ...(record ?? {}),
     mode: record?.mode === 'panorama' ? 'panorama' : 'flat',
     backgroundImageUrl: normalizeNullableString(record?.backgroundImageUrl),
     backgroundPanoramaUrl: normalizeNullableString(record?.backgroundPanoramaUrl),
     items: normalizeBlueprintItems(record?.items),
     referenceImages: normalizeBlueprintReferenceImages(record?.referenceImages),
     customActionPresets: normalizeStringArray(record?.customActionPresets),
-    customActionPoses: normalizeRecordObject(record?.customActionPoses) as DirectorStudioProjectSnapshot['customActionPoses'],
+    customActionPoses: normalizeCustomActionPoses(record?.customActionPoses),
     basePrompt: normalizeString(record?.basePrompt, ''),
     aspectRatio: normalizeString(record?.aspectRatio, fallback.aspectRatio || '16:9') || '16:9',
     camera: normalizeCameraSettings(record?.camera, fallback.camera),
@@ -612,7 +645,7 @@ function normalizeBlueprintNodeData(data: CanvasNodeData, fallback: BlueprintNod
     items: normalizeBlueprintItems(record.items),
     referenceImages: normalizeBlueprintReferenceImages(record.referenceImages),
     customActionPresets: normalizeStringArray(record.customActionPresets),
-    customActionPoses: normalizeRecordObject(record.customActionPoses) as BlueprintNodeData['customActionPoses'],
+    customActionPoses: normalizeCustomActionPoses(record.customActionPoses),
     basePrompt: normalizeString(record.basePrompt, ''),
     aspectRatio: normalizeString(record.aspectRatio, fallback.aspectRatio || '16:9') || '16:9',
     camera: normalizeCameraSettings(record.camera, fallback.camera),
@@ -637,6 +670,15 @@ function normalizeBlueprintNodeData(data: CanvasNodeData, fallback: BlueprintNod
   };
 }
 
+/** A container has no intrinsic content size: measured metadata alone cannot size its DOM box. */
+function containerDimension(style: unknown, authored: unknown, measured: unknown, fallback: number) {
+  if (typeof style === 'string' && style.trim() && style.trim() !== '0' && style.trim() !== '0px') return style;
+  for (const value of [style, authored, measured]) {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  }
+  return fallback;
+}
+
 function normalizeNodes(rawNodes: CanvasNode[]): CanvasNode[] {
   if (!Array.isArray(rawNodes)) {
     return [];
@@ -659,19 +701,25 @@ function normalizeNodes(rawNodes: CanvasNode[]): CanvasNode[] {
         ...(node.data && typeof node.data === 'object' ? node.data as Partial<CanvasNodeData> : {}),
       } as CanvasNodeData;
 
+      if (node.type === CANVAS_NODE_TYPES.imageEdit || node.type === CANVAS_NODE_TYPES.aiVideo || node.type === CANVAS_NODE_TYPES.aiAudio || node.type === CANVAS_NODE_TYPES.storyboardGen) {
+        Object.assign(mergedData, normalizeChannelGenerationFields(mergedData));
+      }
+
       if (node.type === CANVAS_NODE_TYPES.storyboardSplit) {
         const frames = (mergedData as { frames?: StoryboardFrameItem[] }).frames ?? [];
         const firstFrameAspectRatio = frames.find((frame) => typeof frame.aspectRatio === 'string')
           ?.aspectRatio;
+        const authoredFrameAspectRatio = asRecord(node.data)?.frameAspectRatio;
         const normalizedFrameAspectRatio =
-          (typeof (mergedData as { frameAspectRatio?: unknown }).frameAspectRatio === 'string'
-            ? (mergedData as { frameAspectRatio?: string }).frameAspectRatio
+          (typeof authoredFrameAspectRatio === 'string'
+            ? authoredFrameAspectRatio
             : null) ??
           firstFrameAspectRatio ??
           DEFAULT_ASPECT_RATIO;
 
         (mergedData as { frameAspectRatio: string }).frameAspectRatio = normalizedFrameAspectRatio;
         (mergedData as { frames: StoryboardFrameItem[] }).frames = frames.map((frame, index) => ({
+          ...frame,
           id: frame.id,
           imageUrl: frame.imageUrl ?? null,
           previewImageUrl: frame.previewImageUrl ?? null,
@@ -789,44 +837,38 @@ function normalizeNodes(rawNodes: CanvasNode[]): CanvasNode[] {
         mergedData.isStreaming = false;
       }
 
+      // Stage nodes saved before the type had a default size render at 0×0 and never measure.
+      const styleWidth = node.style?.width;
+      const hasSize = (typeof node.width === 'number' && node.width > 0)
+        || (typeof styleWidth === 'number' && styleWidth > 0)
+        || (typeof styleWidth === 'string' && styleWidth.length > 0);
+      const sized = node.type === CANVAS_NODE_TYPES.group && definition.defaultSize
+        ? { style: {
+            ...(node.style ?? {}),
+            width: containerDimension(node.style?.width, node.width, node.measured?.width, definition.defaultSize.width),
+            height: containerDimension(node.style?.height, node.height, node.measured?.height, definition.defaultSize.height),
+          } }
+        : node.type === CANVAS_NODE_TYPES.blueprint && !hasSize && definition.defaultSize
+          ? { style: { ...(node.style ?? {}), width: definition.defaultSize.width, height: definition.defaultSize.height } }
+          : {};
+
       return {
         ...node,
+        ...sized,
         type: node.type as CanvasNodeType,
         data: mergedData,
       };
     })
     .filter((node): node is CanvasNode => Boolean(node));
 }
-
-function normalizeHistory(history?: CanvasHistoryState): CanvasHistoryState {
-  if (!history || typeof history !== 'object') {
-    return { past: [], future: [] };
-  }
-
-  const normalizeSnapshot = (snapshot: unknown): CanvasHistorySnapshot => {
-    const snapshotRecord =
-      snapshot && typeof snapshot === 'object'
-        ? (snapshot as Partial<CanvasHistorySnapshot>)
-        : {};
-    const rawNodes = Array.isArray(snapshotRecord.nodes) ? snapshotRecord.nodes : [];
-    const rawEdges = Array.isArray(snapshotRecord.edges) ? snapshotRecord.edges : [];
-    const migrated = migrateLegacyTagGraph(rawNodes, rawEdges);
-    reportTagMigrationDiagnostics('canvas-history', migrated.diagnostics);
-    const normalizedNodes = normalizeNodes(migrated.nodes);
-    return {
-      nodes: normalizedNodes,
-      edges: normalizeEdgesWithNodes(migrated.edges, normalizedNodes),
-    };
-  };
-
-  const rawPast = Array.isArray(history.past) ? history.past : [];
-  const rawFuture = Array.isArray(history.future) ? history.future : [];
-
-  return {
-    past: trimHistorySnapshots(rawPast.slice(-MAX_HISTORY_STEPS).map(normalizeSnapshot)),
-    future: trimHistorySnapshots(rawFuture.slice(-MAX_HISTORY_STEPS).map(normalizeSnapshot)),
-  };
+/** Shared load boundary for project records, legacy history and the live canvas. */
+export function normalizeCanvasGraph(nodes: CanvasNode[], edges: CanvasEdge[]): CanvasHistorySnapshot {
+  const migrated = migrateLegacyTagGraph(nodes, edges);
+  reportTagMigrationDiagnostics('project-graph', migrated.diagnostics);
+  const normalizedNodes = normalizeBatchStacks(normalizeNodes(migrated.nodes));
+  return { nodes: normalizedNodes, edges: normalizeEdgesWithNodes(migrated.edges, normalizedNodes) };
 }
+
 
 function createSnapshot(nodes: CanvasNode[], edges: CanvasEdge[]): CanvasHistorySnapshot {
   return { nodes, edges };
@@ -1026,49 +1068,6 @@ function resolveAbsolutePosition(
   return { x, y };
 }
 
-function pushSnapshot(
-  snapshots: CanvasHistorySnapshot[],
-  snapshot: CanvasHistorySnapshot
-): CanvasHistorySnapshot[] {
-  const last = snapshots[snapshots.length - 1];
-  if (last && last.nodes === snapshot.nodes && last.edges === snapshot.edges) {
-    return snapshots;
-  }
-
-  return trimHistorySnapshots([...snapshots, snapshot]);
-}
-
-function isHeavyHistorySnapshot(snapshot: CanvasHistorySnapshot): boolean {
-  if (!Array.isArray(snapshot.nodes)) {
-    return false;
-  }
-
-  return snapshot.nodes.some((node) => {
-    if (
-      node.type === CANVAS_NODE_TYPES.blueprint ||
-      node.type === CANVAS_NODE_TYPES.panorama ||
-      node.type === CANVAS_NODE_TYPES.storyboardSplit ||
-      node.type === CANVAS_NODE_TYPES.storyboardGen
-    ) {
-      return true;
-    }
-
-    const data = node.data as Record<string, unknown>;
-    return [
-      data.imageUrl,
-      data.previewImageUrl,
-      data.sourceImageUrl,
-      data.snapshotUrl,
-      data.backgroundImageUrl,
-      data.backgroundPanoramaUrl,
-    ].some((value) => typeof value === 'string' && value.startsWith('data:image/') && value.length > 250_000);
-  });
-}
-
-function trimHistorySnapshots(snapshots: CanvasHistorySnapshot[]): CanvasHistorySnapshot[] {
-  const limit = snapshots.some(isHeavyHistorySnapshot) ? MAX_HEAVY_HISTORY_STEPS : MAX_HISTORY_STEPS;
-  return snapshots.length > limit ? snapshots.slice(-limit) : snapshots;
-}
 
 /**
  * Selection invariant: `node.selected` is the only truth and `selectedNodeId` is always
@@ -1090,6 +1089,7 @@ function reconcileSelectionPatch(
       nodes = selectNodesExclusive(nodes, intended ? [intended] : []);
     }
   }
+  nodes = normalizeBatchStacks(nodes);
   return { ...patch, nodes, selectedNodeId: deriveSelectedNodeId(nodes) };
 }
 
@@ -1102,11 +1102,36 @@ const withDerivedSelection = (
         ? (partial as (current: CanvasState) => Partial<CanvasState> | CanvasState)(state)
         : partial as Partial<CanvasState>;
       if (!patch || patch === state) return state;
-      return reconcileSelectionPatch(state, patch);
+      const reconciled = reconcileSelectionPatch(state, patch);
+      for (const key of Object.keys(reconciled) as (keyof CanvasState)[]) {
+        if (!Object.is(reconciled[key], state[key])) return reconciled;
+      }
+      return state;
     }, replace as false);
   }) as StoreApi<CanvasState>['setState'];
   api.setState = reconcilingSet;
-  return config(reconcilingSet, get, api);
+  const recordingSet = ((partial: unknown, replace?: boolean) => {
+    reconcilingSet((state: CanvasState) => {
+      let patch = typeof partial === 'function'
+        ? (partial as (current: CanvasState) => Partial<CanvasState>)(state)
+        : partial as Partial<CanvasState>;
+      if (patch && patch !== state && patch.nodes) {
+        const nodes = normalizeBatchStacks(patch.nodes, patch.nodes.length < state.nodes.length ? state.nodes : undefined);
+        if (nodes !== patch.nodes) patch = { ...patch, nodes };
+      }
+      if (!patch || patch === state || patch.history !== undefined || patch.revision === undefined
+        || patch.revision === state.revision || (!patch.nodes && !patch.edges)) return patch;
+      return {
+        ...patch,
+        history: appendCanvasHistory(state.history, state, {
+          nodes: patch.nodes ?? state.nodes,
+          edges: patch.edges ?? state.edges,
+        }),
+        dragHistorySnapshot: null,
+      };
+    }, replace as false);
+  }) as StoreApi<CanvasState>['setState'];
+  return config(recordingSet, get, api);
 };
 
 function resolveActiveToolDialog(
@@ -1154,31 +1179,11 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
 
   onNodesChange: (changes) => {
     set((state) => {
-      // ResizeObserver measurements are layout bookkeeping, not undoable edits.
-      // In particular, remounting visible/LOD nodes must not consume undo history.
-      const isMeasurement = (change: NodeChange<CanvasNode>) => (
-        change.type === 'dimensions'
-        && change.resizing === undefined
-        && !change.setAttributes
+      // Alignment owns its gesture finalizer even when snapping produces the existing position.
+      const alignedChanges = applyAlignmentToNodeChanges(changes, state);
+      const effectiveChanges = filterRedundantCanvasNodeChanges(
+        alignedChanges, state.nodes, state.dragHistorySnapshot !== null,
       );
-      const nodesById = changes.some(isMeasurement)
-        ? new Map(state.nodes.map((node) => [node.id, node]))
-        : null;
-      const changedIds = new Set<string>();
-      const effectiveChanges = changes.filter((change) => {
-        if (!isMeasurement(change) || change.type !== 'dimensions') {
-          if ('id' in change) changedIds.add(change.id);
-          return true;
-        }
-        if (changedIds.has(change.id)) return true;
-        const node = nodesById?.get(change.id);
-        if (!node || !change.dimensions || (
-          node.measured?.width === change.dimensions.width
-          && node.measured?.height === change.dimensions.height
-        )) return false;
-        changedIds.add(change.id);
-        return true;
-      });
       if (effectiveChanges.length === 0) return state;
 
       const resizedNodeIds = new Set(
@@ -1193,7 +1198,9 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
           .map((change) => change.id)
       );
 
-      let nextNodes = applyNodeChanges<CanvasNode>(effectiveChanges, state.nodes);
+      const changedNodes = applyNodeChanges<CanvasNode>(effectiveChanges, state.nodes);
+      let nextNodes = effectiveChanges.every((change) => change.type === 'position' || change.type === 'dimensions')
+        ? retainBatchStackNormalization(changedNodes) : normalizeBatchStacks(changedNodes, state.nodes);
       if (resizedNodeIds.size > 0) {
         nextNodes = nextNodes.map((node) => {
           if (!resizedNodeIds.has(node.id) || !isImageAutoResizableType(node.type)) {
@@ -1203,7 +1210,7 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
         });
       }
       const hasMeaningfulChange = effectiveChanges.some((change) => (
-        change.type !== 'select' && !isMeasurement(change)
+        change.type !== 'select' && !isCanvasMeasurementChange(change)
       ));
       const hasDragMove = effectiveChanges.some(
         (change) =>
@@ -1241,16 +1248,10 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
 
       if (hasInteractionEnd) {
         const snapshot = nextDragHistorySnapshot ?? createSnapshot(state.nodes, state.edges);
-        nextHistory = {
-          past: pushSnapshot(state.history.past, snapshot),
-          future: [],
-        };
+        nextHistory = appendCanvasHistory(state.history, snapshot, { nodes: nextNodes, edges: state.edges });
         nextDragHistorySnapshot = null;
       } else if (hasMeaningfulChange && !hasInteractionMove) {
-        nextHistory = {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        };
+        nextHistory = appendCanvasHistory(state.history, state, { nodes: nextNodes, edges: state.edges });
         nextDragHistorySnapshot = null;
       }
 
@@ -1266,8 +1267,10 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
 
   onEdgesChange: (changes) => {
     set((state) => {
-      const nextEdges = applyEdgeChanges<CanvasEdge>(changes, state.edges);
-      const hasMeaningfulChange = changes.some((change) => change.type !== 'select');
+      const effectiveChanges = filterRedundantCanvasEdgeChanges(changes, state.edges);
+      if (effectiveChanges.length === 0) return state;
+      const nextEdges = applyEdgeChanges<CanvasEdge>(effectiveChanges, state.edges);
+      const hasMeaningfulChange = effectiveChanges.some((change) => change.type !== 'select');
 
       if (!hasMeaningfulChange) {
         return { edges: nextEdges };
@@ -1276,10 +1279,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       return {
         edges: nextEdges,
         revision: nextCanvasRevision(state.revision),
-        history: {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        },
         dragHistorySnapshot: null,
       };
     });
@@ -1303,10 +1302,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
           state.edges
         ),
         revision: nextCanvasRevision(state.revision),
-        history: {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        },
         dragHistorySnapshot: null,
       };
     });
@@ -1315,7 +1310,7 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
   setCanvasData: (nodes, edges, history) => {
     const migrated = migrateLegacyTagGraph(nodes, edges);
     reportTagMigrationDiagnostics('canvas-current', migrated.diagnostics);
-    const normalizedNodes = normalizeNodes(migrated.nodes);
+    const normalizedNodes = normalizeBatchStacks(normalizeNodes(migrated.nodes));
     const normalizedEdges = normalizeEdgesWithNodes(migrated.edges, normalizedNodes);
 
     set((state) => ({
@@ -1325,7 +1320,12 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       revision: nextCanvasRevision(state.revision),
       activeDirectorStudioNodeId: null,
       activeToolDialog: null,
-      history: normalizeHistory(history),
+      history: normalizeCanvasHistory(history, { nodes: normalizedNodes, edges: normalizedEdges }, (snapshot) => {
+        const migratedSnapshot = migrateLegacyTagGraph(snapshot.nodes, snapshot.edges);
+        reportTagMigrationDiagnostics('canvas-history', migratedSnapshot.diagnostics);
+        const snapshotNodes = normalizeBatchStacks(normalizeNodes(migratedSnapshot.nodes));
+        return { nodes: snapshotNodes, edges: normalizeEdgesWithNodes(migratedSnapshot.edges, snapshotNodes) };
+      }),
       dragHistorySnapshot: null,
     }));
   },
@@ -1392,10 +1392,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
     set({
       nodes: [...state.nodes, newNode],
       revision: nextCanvasRevision(state.revision),
-      history: {
-        past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-        future: [],
-      },
       dragHistorySnapshot: null,
     });
     return newNode.id;
@@ -1426,15 +1422,12 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       return {
         ...node,
         measured: { width, height },
+        style: { ...(node.style ?? {}), width, height },
       };
     });
     set({
       nodes: [...state.nodes, ...newNodes],
       revision: nextCanvasRevision(state.revision),
-      history: {
-        past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-        future: [],
-      },
       dragHistorySnapshot: null,
     });
     return newNodes.map((node) => node.id);
@@ -1459,17 +1452,13 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
             ? state.activeDirectorStudioNodeId
             : null,
         revision: committedRevision,
-        history: {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        },
         dragHistorySnapshot: null,
       };
     });
     return committedRevision;
   },
 
-  addEdge: (source, target) => {
+  addEdge: (source, target, options) => {
     const state = get();
     // Check if both nodes exist
     const sourceNode = state.nodes.find((n) => n.id === source);
@@ -1477,7 +1466,7 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
     if (!sourceNode || !targetNode) {
       return null;
     }
-    const validation = validateCanvasConnection(source, target, state.nodes, state.edges);
+    const validation = validateCanvasConnection(source, target, state.nodes, state.edges, options);
     if (!validation.valid) {
       return null;
     }
@@ -1571,10 +1560,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       revision: nextCanvasRevision(state.revision),
       selectedNodeId: node.id,
       activeToolDialog: null,
-      history: {
-        past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-        future: [],
-      },
       dragHistorySnapshot: null,
     });
 
@@ -1644,10 +1629,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       revision: nextCanvasRevision(state.revision),
       selectedNodeId: node.id,
       activeToolDialog: null,
-      history: {
-        past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-        future: [],
-      },
       dragHistorySnapshot: null,
     });
 
@@ -1676,10 +1657,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       revision: nextCanvasRevision(state.revision),
       selectedNodeId: node.id,
       activeToolDialog: null,
-      history: {
-        past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-        future: [],
-      },
       dragHistorySnapshot: null,
     });
 
@@ -1725,13 +1702,26 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       return {
         nodes: nextNodes,
         revision: nextCanvasRevision(state.revision),
-        history: {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        },
         dragHistorySnapshot: null,
       };
     });
+  },
+
+  consumeDirectorOpenRequest: (nodeId) => {
+    const node = get().nodes.find((candidate) => candidate.id === nodeId);
+    const request = node?.type === CANVAS_NODE_TYPES.blueprint
+      ? (node.data as BlueprintNodeData).openDirectorStudioOnCreate
+      : undefined;
+    if (request !== true && request !== 'previs') return null;
+    set((state) => ({
+      nodes: state.nodes.map((candidate) => candidate.id === nodeId
+        ? { ...candidate, data: { ...candidate.data, openDirectorStudioOnCreate: false } }
+        : candidate),
+      revision: nextCanvasRevision(state.revision),
+      // An explicit history value tells the recording wrapper not to append an entry.
+      history: state.history,
+    }));
+    return request === 'previs' ? 'previs' : 'director';
   },
 
   updateDirectorStudioProjectLibrary: (projects, sourceNodeId, sourcePatch = {}) => {
@@ -1785,10 +1775,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       return {
         nodes: nextNodes,
         revision: nextCanvasRevision(state.revision),
-        history: {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        },
         dragHistorySnapshot: null,
       };
     });
@@ -1867,10 +1853,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       return {
         nodes: nextNodes,
         revision: nextCanvasRevision(state.revision),
-        history: {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        },
         dragHistorySnapshot: null,
       };
     });
@@ -1915,10 +1897,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       return {
         nodes: nextNodes,
         revision: nextCanvasRevision(state.revision),
-        history: {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        },
         dragHistorySnapshot: null,
       };
     });
@@ -1953,10 +1931,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
         nodes: nextNodes,
         edges: normalizeEdgesWithNodes(state.edges, nextNodes),
         revision: nextCanvasRevision(state.revision),
-        history: {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        },
         dragHistorySnapshot: null,
       };
     });
@@ -1966,6 +1940,22 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
 
   deleteNode: (nodeId) => {
     get().deleteNodes([nodeId]);
+  },
+
+  setBatchPrimary: (batchId, nodeId) => {
+    const state = get();
+    if (!state.nodes.some((node) => node.id === nodeId && node.data.batchId === batchId)) return false;
+    const nodes = updateBatchStack(state.nodes, batchId, { primaryId: nodeId });
+    if (nodes !== state.nodes) set({ nodes, revision: nextCanvasRevision(state.revision) });
+    return true;
+  },
+
+  setBatchCollapsed: (batchId, collapsed) => {
+    const state = get();
+    if (!state.nodes.some((node) => node.data.batchId === batchId)) return false;
+    const nodes = updateBatchStack(state.nodes, batchId, { collapsed });
+    if (nodes !== state.nodes) set({ nodes, revision: nextCanvasRevision(state.revision) });
+    return true;
   },
 
   deleteNodes: (nodeIds) => {
@@ -2002,10 +1992,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
           state.activeToolDialog && deleteSet.has(state.activeToolDialog.nodeId)
             ? null
             : state.activeToolDialog,
-        history: {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        },
         dragHistorySnapshot: null,
       };
     });
@@ -2148,10 +2134,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
         state.activeToolDialog && memberSet.has(state.activeToolDialog.nodeId)
           ? null
           : state.activeToolDialog,
-      history: {
-        past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-        future: [],
-      },
       dragHistorySnapshot: null,
     });
 
@@ -2203,10 +2185,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       revision: nextCanvasRevision(state.revision),
       activeToolDialog:
         state.activeToolDialog?.nodeId === groupNodeId ? null : state.activeToolDialog,
-      history: {
-        past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-        future: [],
-      },
       dragHistorySnapshot: null,
     });
 
@@ -2223,10 +2201,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       return {
         edges: state.edges.filter((edge) => edge.id !== edgeId),
         revision: nextCanvasRevision(state.revision),
-        history: {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        },
         dragHistorySnapshot: null,
       };
     });
@@ -2259,17 +2233,17 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       return false;
     }
 
-    const currentSnapshot = createSnapshot(state.nodes, state.edges);
+    const restored = applyCanvasHistoryEntry(state, target, 'undo');
     const nextPast = state.history.past.slice(0, -1);
 
     set({
-      nodes: carrySelection(target.nodes, state.nodes),
-      edges: target.edges,
+      nodes: carrySelection(restored.nodes, state.nodes),
+      edges: restored.edges,
       revision: nextCanvasRevision(state.revision),
-      activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, target.nodes),
+      activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, restored.nodes),
       history: {
         past: nextPast,
-        future: pushSnapshot(state.history.future, currentSnapshot),
+        future: [...state.history.future, target],
       },
       dragHistorySnapshot: null,
     });
@@ -2283,16 +2257,16 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
       return false;
     }
 
-    const currentSnapshot = createSnapshot(state.nodes, state.edges);
+    const restored = applyCanvasHistoryEntry(state, target, 'redo');
     const nextFuture = state.history.future.slice(0, -1);
 
     set({
-      nodes: carrySelection(target.nodes, state.nodes),
-      edges: target.edges,
+      nodes: carrySelection(restored.nodes, state.nodes),
+      edges: restored.edges,
       revision: nextCanvasRevision(state.revision),
-      activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, target.nodes),
+      activeToolDialog: resolveActiveToolDialog(state.activeToolDialog, restored.nodes),
       history: {
-        past: pushSnapshot(state.history.past, currentSnapshot),
+        past: [...state.history.past, target],
         future: nextFuture,
       },
       dragHistorySnapshot: null,
@@ -2313,10 +2287,6 @@ export const useCanvasStore = create<CanvasState>()(withDerivedSelection((set, g
         selectedNodeId: null,
         activeDirectorStudioNodeId: null,
         activeToolDialog: null,
-        history: {
-          past: pushSnapshot(state.history.past, createSnapshot(state.nodes, state.edges)),
-          future: [],
-        },
         dragHistorySnapshot: null,
       };
     });

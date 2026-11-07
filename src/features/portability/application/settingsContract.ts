@@ -1,17 +1,26 @@
+import { imageHostSettingsSchema, normalizeImageHostSettings } from '@/features/settings/imageHostSettings';
+import { z } from 'zod';
 import type { CustomProviderConfig } from '@/stores/customProvidersStore';
+import { agentDefaultSettingsSchema, THEME_TONE_PRESETS } from '@/stores/settingsStore';
+import { comfyWorkflowCollectionSchema } from '@/features/channels/application/comfyWorkflows';
+import { channelProfileSchema } from '@/features/channels/domain/profile';
+import { isSpecialLegacyProvider, type ChannelRecord } from '@/features/channels/store/channelStore';
 import {
   SETTINGS_BUNDLE_MAX_BYTES,
   type SettingsBundlePayload,
 } from './types';
 import { isPlainRecord, validateSettingsBundle } from './validation';
+import { isCredentialKey, isPortableCredentialReference, isPortableSecretRef, redactPortableCredentials } from './credentialRedaction';
+import { secretRefFromToken, secretToken } from '@/features/secrets/secretStore';
 
-const SENSITIVE_KEY_PATTERN = /(?:api[-_]?key|token|password|secret|session|authorization|cookie|credential|dreamina)/i;
 const SENSITIVE_HEADER_PATTERN = /^(?:authorization|proxy-authorization|x-api-key|cookie|set-cookie)$/i;
 const API_ENDPOINT_PATH_KEY_PATTERN = /(?:endpoint|content|status|result).*path$/i;
 const DANGEROUS_OBJECT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const migrationIssueKindSchema = z.enum(['dropped', 'converted', 'unsupported']);
 
 export const GENERAL_FIELDS = [
   'hideProviderGuidePopover',
+  'agentDefaults',
   'downloadPresetPaths',
   'useUploadFilenameAsNodeTitle',
   'storyboardGenKeepStyleConsistent',
@@ -35,7 +44,7 @@ export const GENERAL_FIELDS = [
   'enableUpdateDialog',
 ] as const;
 
-export const APPEARANCE_FIELDS = ['uiRadiusPreset', 'themeTonePreset', 'accentColor'] as const;
+export const APPEARANCE_FIELDS = ['uiRadiusPreset', 'themeTonePreset', 'accentColor', 'accentSource'] as const;
 export const PROMPT_FIELDS = [
   'promptDefaultLanguage',
   'promptTemplateOverrides',
@@ -47,7 +56,6 @@ export const PROMPT_FIELDS = [
 export const MODEL_FIELDS = [
   'grsaiNanoBananaProModel',
   'lastModelConfigByPanel',
-  'audioGenerationSettings',
 ] as const;
 
 const SETTINGS_CATEGORIES = new Set([
@@ -94,11 +102,14 @@ const PROVIDER_FIELDS = new Set([
   'supportedModelVersions',
   'modelMetadata',
   'extraParams',
+  'comfyWorkflows',
   'note',
+  'credentialRef',
+  'apiKey',
 ]);
 
 export function isSensitiveSettingsKey(key: string): boolean {
-  return SENSITIVE_KEY_PATTERN.test(key);
+  return key !== 'auth' && isCredentialKey(key) && !/(?:Ref|Refs)$/.test(key);
 }
 
 export function isMachineAbsolutePath(value: string, key = ''): boolean {
@@ -112,7 +123,7 @@ export function isMachineAbsolutePath(value: string, key = ''): boolean {
 }
 
 function sanitizeUnknown(value: unknown, key = ''): unknown {
-  if (isSensitiveSettingsKey(key)) return undefined;
+  if (isPortableSecretRef(value)) return value;
   if (typeof value === 'string') return isMachineAbsolutePath(value, key) ? undefined : value;
   if (Array.isArray(value)) {
     return value.map((item) => sanitizeUnknown(item)).filter((item) => item !== undefined);
@@ -120,7 +131,6 @@ function sanitizeUnknown(value: unknown, key = ''): unknown {
   if (!isPlainRecord(value)) return value;
   const output: Record<string, unknown> = {};
   for (const [childKey, child] of Object.entries(value)) {
-    if (SENSITIVE_HEADER_PATTERN.test(childKey)) continue;
     const sanitized = sanitizeUnknown(child, childKey);
     if (sanitized !== undefined) output[childKey] = sanitized;
   }
@@ -128,7 +138,7 @@ function sanitizeUnknown(value: unknown, key = ''): unknown {
 }
 
 export function sanitizeSettingsCategory(value: Record<string, unknown>): Record<string, unknown> {
-  return (sanitizeUnknown(value) ?? {}) as Record<string, unknown>;
+  return (sanitizeUnknown(redactPortableCredentials(value)) ?? {}) as Record<string, unknown>;
 }
 
 export function assertSettingsBundleSize(raw: string): void {
@@ -139,15 +149,16 @@ export function assertSettingsBundleSize(raw: string): void {
 
 function assertKnownFields(
   value: Record<string, unknown>,
-  allowed: ReadonlySet<string>,
+  allowed: ReadonlySet<string> | Readonly<Record<string, true>>,
   path: string
 ): void {
-  const unknownField = Object.keys(value).find((field) => !allowed.has(field));
+  const unknownField = Object.keys(value).find((field) => allowed instanceof Set ? !allowed.has(field) : !Object.hasOwn(allowed, field));
   if (unknownField) throw new Error(`${path}.${unknownField} is not supported by this settings schema.`);
 }
 
 function assertPortableJson(value: unknown, path: string, depth = 0): void {
   if (depth > 64) throw new Error(`${path} exceeds the maximum nesting depth.`);
+  if (isPortableSecretRef(value)) return;
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
   if (typeof value === 'number' && Number.isFinite(value)) return;
   if (Array.isArray(value)) {
@@ -158,7 +169,8 @@ function assertPortableJson(value: unknown, path: string, depth = 0): void {
   for (const [key, child] of Object.entries(value)) {
     if (DANGEROUS_OBJECT_KEYS.has(key)) throw new Error(`${path}.${key} is not allowed.`);
     if (SENSITIVE_HEADER_PATTERN.test(key) || isSensitiveSettingsKey(key)) {
-      throw new Error(`${path}.${key} must be stored in the credentials section.`);
+      if (isPortableCredentialReference(child)) continue;
+      throw new Error(`${path}.${key} cannot contain portable credentials.`);
     }
     if (typeof child === 'string' && isMachineAbsolutePath(child, key)) {
       throw new Error(`${path}.${key} contains a machine-specific absolute path.`);
@@ -176,7 +188,7 @@ function assertStringArray(value: unknown, path: string): asserts value is strin
 export function parseProviderStructures(value: unknown): CustomProviderConfig[] {
   if (!Array.isArray(value)) throw new Error('providers.items must be an array.');
   const seen = new Set<string>();
-  return value.map((item, index) => {
+  return redactPortableCredentials(value).map((item, index) => {
     const path = `providers.items[${index}]`;
     if (!isPlainRecord(item)) throw new Error(`${path} must be an object.`);
     assertKnownFields(item, PROVIDER_FIELDS, path);
@@ -222,11 +234,15 @@ export function parseProviderStructures(value: unknown): CustomProviderConfig[] 
         if (!isPlainRecord(metadata)) throw new Error(`${path}.modelMetadata.${modelId} must be an object.`);
         assertKnownFields(
           metadata,
-          new Set(['supportsMultimodal', 'contextWindow', 'maxOutputTokens', 'description']),
+          { supportsMultimodal: true, supportsTools: true, supportsStreaming: true, supportsReasoningSummary: true,
+            supportsToolSearch: true, agentProtocol: true, contextWindow: true, maxOutputTokens: true, description: true },
           `${path}.modelMetadata.${modelId}`
         );
-        if (metadata.supportsMultimodal !== undefined && typeof metadata.supportsMultimodal !== 'boolean') {
-          throw new Error(`${path}.modelMetadata.${modelId}.supportsMultimodal must be boolean.`);
+        for (const field of ['supportsMultimodal', 'supportsTools', 'supportsStreaming', 'supportsReasoningSummary', 'supportsToolSearch']) {
+          if (metadata[field] !== undefined && typeof metadata[field] !== 'boolean') throw new Error(`${path}.modelMetadata.${modelId}.${field} must be boolean.`);
+        }
+        if (metadata.agentProtocol !== undefined && !['openai-responses', 'openai-chat-completions', 'anthropic-messages', 'google-gemini'].includes(String(metadata.agentProtocol))) {
+          throw new Error(`${path}.modelMetadata.${modelId}.agentProtocol is invalid.`);
         }
         for (const field of ['contextWindow', 'maxOutputTokens'] as const) {
           if (metadata[field] !== undefined && metadata[field] !== null
@@ -243,16 +259,86 @@ export function parseProviderStructures(value: unknown): CustomProviderConfig[] 
     if (item.extraParams !== undefined && !isPlainRecord(item.extraParams)) {
       throw new Error(`${path}.extraParams must be an object.`);
     }
+    if (item.comfyWorkflows !== undefined) {
+      if (item.apiStyle !== 'comfyui') throw new Error(`${path}.comfyWorkflows requires a ComfyUI provider.`);
+      comfyWorkflowCollectionSchema.parse(item.comfyWorkflows);
+    }
     assertPortableJson(item, path);
-    return { ...(item as unknown as Omit<CustomProviderConfig, 'apiKey'>), apiKey: '' };
+    const credentialRef = isPortableSecretRef(item.credentialRef) ? item.credentialRef
+      : typeof item.apiKey === 'string' ? secretRefFromToken(item.apiKey) : null;
+    return { ...(item as unknown as Omit<CustomProviderConfig, 'apiKey'>),
+      ...(credentialRef ? { credentialRef } : {}), apiKey: credentialRef ? secretToken(credentialRef) : '' };
   });
 }
+
+/** Channel transport paths and auth field names are schema, not local files or credentials. */
+function assertChannelJson(value: unknown, path: string, key = '', depth = 0): void {
+  if (depth > 64) throw new Error(`${path} exceeds the maximum nesting depth.`);
+  if (isPortableSecretRef(value)) return;
+  if (isSensitiveSettingsKey(key) && value !== '' && value !== null
+    && !isPortableCredentialReference(value)
+    && !(typeof value === 'string' && /^{{[^{}]+}}$/.test(value))) {
+    throw new Error(`${path} cannot contain portable credentials.`);
+  }
+  if (typeof value === 'string') {
+    const transportPath = /\.profile\.operations\.(?:chat|image\.generate|image\.edit|video\.generate|audio\.generate|models\.list)\.(?:path|response\.poll\.(?:path|resultRequest\.path))$/.test(path);
+    if (isMachineAbsolutePath(value, transportPath ? 'endpointPath' : '')) {
+      throw new Error(`${path} contains a machine-specific absolute path; export cannot silently remove channel configuration.`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((child, index) => assertChannelJson(child, `${path}[${index}]`, key, depth + 1));
+    return;
+  }
+  if (value === null || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) return;
+  if (!isPlainRecord(value)) throw new Error(`${path} contains an unsupported value.`);
+  for (const [childKey, child] of Object.entries(value)) {
+    if (DANGEROUS_OBJECT_KEYS.has(childKey)) throw new Error(`${path}.${childKey} is not allowed.`);
+    assertChannelJson(child, `${path}.${childKey}`, childKey, depth + 1);
+  }
+}
+
+export function parseChannelRecords(value: unknown): ChannelRecord[] {
+  if (!Array.isArray(value)) throw new Error('providers.channels must be an array.');
+  const seen = new Set<string>();
+  return redactPortableCredentials(value).map((item, index) => {
+    const path = `providers.channels[${index}]`;
+    if (!isPlainRecord(item)) throw new Error(`${path} must be an object.`);
+    assertKnownFields(item, { profile: true, origin: true, migrationIssues: true, createdAt: true, updatedAt: true, credentialRef: true }, path);
+    const profile = channelProfileSchema.parse(item.profile);
+    assertChannelJson(profile, `${path}.profile`);
+    if (seen.has(profile.id)) throw new Error(`${path}.profile.id is duplicated.`);
+    seen.add(profile.id);
+    if (item.origin !== 'native' || !Number.isFinite(item.createdAt) || !Number.isFinite(item.updatedAt)) {
+      throw new Error(`${path} has invalid origin or timestamps.`);
+    }
+    if (!Array.isArray(item.migrationIssues)) throw new Error(`${path}.migrationIssues must be an array.`);
+    for (const issue of item.migrationIssues) {
+      if (!isPlainRecord(issue)) throw new Error(`${path}.migrationIssues contains an invalid issue.`);
+      assertKnownFields(issue, { key: true, value: true, reason: true, kind: true }, `${path}.migrationIssues`);
+      if (typeof issue.key !== 'string' || typeof issue.reason !== 'string' || !Object.hasOwn(issue, 'value')) {
+        throw new Error(`${path}.migrationIssues contains an invalid issue.`);
+      }
+      if (issue.kind !== undefined && !migrationIssueKindSchema.safeParse(issue.kind).success) {
+        throw new Error(`${path}.migrationIssues contains an invalid issue classification.`);
+      }
+      assertPortableJson(issue, `${path}.migrationIssues`);
+    }
+    return { profile, origin: 'native', migrationIssues: item.migrationIssues as ChannelRecord['migrationIssues'],
+      ...(isPortableSecretRef(item.credentialRef) ? { credentialRef: item.credentialRef } : {}),
+      createdAt: item.createdAt as number, updatedAt: item.updatedAt as number } as ChannelRecord;
+  });
+}
+
 
 function validateGeneralCategory(category: Record<string, unknown>): void {
   assertKnownFields(category, new Set(GENERAL_FIELDS), 'general');
   for (const [field, value] of Object.entries(category)) {
     if (GENERAL_BOOLEAN_FIELDS.has(field)) {
       if (typeof value !== 'boolean') throw new Error(`general.${field} must be boolean.`);
+    } else if (field === 'agentDefaults') {
+      agentDefaultSettingsSchema.parse(value);
     } else if (field === 'downloadPresetPaths') {
       assertStringArray(value, `general.${field}`);
       if (value.some((path) => isMachineAbsolutePath(path, field))) {
@@ -285,8 +371,11 @@ function validateAppearanceCategory(category: Record<string, unknown>): void {
     throw new Error('appearance.uiRadiusPreset is invalid.');
   }
   if (category.themeTonePreset !== undefined
-    && !['neutral', 'warm', 'cool'].includes(String(category.themeTonePreset))) {
+    && !THEME_TONE_PRESETS.some((tone) => tone === category.themeTonePreset)) {
     throw new Error('appearance.themeTonePreset is invalid.');
+  }
+  if (category.accentSource !== undefined && category.accentSource !== 'theme' && category.accentSource !== 'custom') {
+    throw new Error('appearance.accentSource is invalid.');
   }
   if (category.accentColor !== undefined
     && (typeof category.accentColor !== 'string' || !/^#[0-9a-f]{6}$/i.test(category.accentColor))) {
@@ -366,22 +455,14 @@ function validateModelsCategory(category: Record<string, unknown>): void {
       }
     }
   }
-  if (category.audioGenerationSettings !== undefined) {
-    const audio = category.audioGenerationSettings;
-    if (!isPlainRecord(audio)
-      || typeof audio.apiBaseUrl !== 'string'
-      || !['server', 'segmented'].includes(String(audio.defaultOutputMode))
-      || !Number.isFinite(audio.defaultTimeoutMs)
-      || !Array.isArray(audio.voices)
-      || !Array.isArray(audio.categories)
-      || typeof audio.selectedVoiceId !== 'string'
-      || !Array.isArray(audio.models)) {
-      throw new Error('models.audioGenerationSettings is invalid.');
-    }
-  }
+
 }
 
 function validateImageHostingCategory(category: Record<string, unknown>): void {
+  if (category.version === 2) {
+    if (!imageHostSettingsSchema.safeParse(category).success) throw new Error('imageHosting is invalid.');
+    return;
+  }
   assertKnownFields(category, new Set(['enabled', 'provider', 'pixhost', 'seedvault']), 'imageHosting');
   if (typeof category.enabled !== 'boolean'
     || !['pixhost', 'seedvault'].includes(String(category.provider))
@@ -390,7 +471,7 @@ function validateImageHostingCategory(category: Record<string, unknown>): void {
     throw new Error('imageHosting is invalid.');
   }
   assertKnownFields(category.pixhost, new Set(['apiBaseUrl', 'contentType', 'maxThumbnailSize']), 'imageHosting.pixhost');
-  assertKnownFields(category.seedvault, new Set(['apiBaseUrl', 'strategyId']), 'imageHosting.seedvault');
+  assertKnownFields(category.seedvault, new Set(['apiBaseUrl', 'strategyId', 'passwordRef', 'tokenRef']), 'imageHosting.seedvault');
   if (![category.pixhost.apiBaseUrl, category.pixhost.contentType, category.pixhost.maxThumbnailSize,
     category.seedvault.apiBaseUrl, category.seedvault.strategyId].every((item) => typeof item === 'string')) {
     throw new Error('imageHosting contains an invalid field.');
@@ -399,7 +480,14 @@ function validateImageHostingCategory(category: Record<string, unknown>): void {
 
 export function validatePortableSettingsPayload(input: unknown): SettingsBundlePayload {
   const validated = validateSettingsBundle(input);
-  const payload = { ...validated, categories: { ...validated.categories } };
+  const payload = { ...validated, categories: redactPortableCredentials(validated.categories) };
+  if (payload.categories.imageHosting) {
+    validateImageHostingCategory(payload.categories.imageHosting);
+    const normalized = normalizeImageHostSettings(payload.categories.imageHosting);
+    payload.categories.imageHosting = { ...normalized,
+      extraHeaders: Object.fromEntries(Object.entries(normalized.extraHeaders).map(([name, value]) => [name, secretRefFromToken(value) ? value : ''])),
+    };
+  }
   if (payload.categories.general) {
     payload.categories.general = Object.fromEntries(
       Object.entries(payload.categories.general).filter(
@@ -407,16 +495,28 @@ export function validatePortableSettingsPayload(input: unknown): SettingsBundleP
       )
     );
   }
+  if (payload.categories.models) {
+    // Older bundles remain importable, but the retired adapters are not executable settings.
+    const { audioGenerationSettings: _retiredAudio, ...models } = payload.categories.models;
+    payload.categories.models = models;
+  }
   for (const [categoryName, category] of Object.entries(payload.categories)) {
     if (!SETTINGS_CATEGORIES.has(categoryName)) throw new Error(`Unknown settings category: ${categoryName}`);
-    assertPortableJson(category, categoryName);
+    if (categoryName !== 'providers') assertPortableJson(category, categoryName);
     if (categoryName === 'general') validateGeneralCategory(category);
     if (categoryName === 'appearance') validateAppearanceCategory(category);
     if (categoryName === 'prompts') validatePromptsCategory(category);
     if (categoryName === 'models') validateModelsCategory(category);
     if (categoryName === 'providers') {
-      assertKnownFields(category, new Set(['items']), 'providers');
-      parseProviderStructures(category.items);
+      assertKnownFields(category, payload.schemaVersion === 1 ? { items: true } : { items: true, channels: true, legacyBackupIds: true }, 'providers');
+      const providers = parseProviderStructures(category.items);
+      if (payload.schemaVersion === 2) {
+        if (providers.some((provider) => !isSpecialLegacyProvider(provider) || provider.extraParams?.channelProfileId)) {
+          throw new Error('providers.items accepts only special adapters; HTTP configuration belongs in providers.channels.');
+        }
+        parseChannelRecords(category.channels);
+        if (category.legacyBackupIds !== undefined) assertStringArray(category.legacyBackupIds, 'providers.legacyBackupIds');
+      }
     }
     if (categoryName === 'imageHosting') validateImageHostingCategory(category);
   }

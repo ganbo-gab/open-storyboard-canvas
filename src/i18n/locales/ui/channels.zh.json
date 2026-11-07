@@ -1,0 +1,300 @@
+{
+  "sizeGuide": {
+    "title": "画面规格怎么选",
+    "hint": "选择展示方式后，下方尺寸选项会同步切换。勾选需要的规格，再选择默认值。",
+    "pixels": "像素尺寸",
+    "pixelsExample": "例如 1024 × 1024，直接选择最终尺寸",
+    "ratio-resolution": "比例 + 分辨率",
+    "ratio-resolutionExample": "例如 1:1 + 1K，分两项选择",
+    "exactValues": "展示方式不会改变接口值，只显示当前已声明的有效组合；auto 等特殊选项仍保留。",
+    "mapping": "调整比例与分辨率标签",
+    "mappingHint": "默认按像素的精确比例和长边标注；1K / 2K / 4K 在此表示长边 1024 / 2048 / 4096。模型的档位定义可能不同，可按文档改标签，不会修改原尺寸。",
+    "ratio": "比例",
+    "resolution": "分辨率",
+    "actualSize": "实际尺寸：{{size}}",
+    "nativePair": "此接口已分别声明「{{ratio}}」和「{{resolution}}」。优先使用下方现有选项；没有明确像素映射时不猜测 1K 对应尺寸。",
+    "next": "想快速接入，可保留模板选项并选择默认值。想细调，可展开参数设置；新增接口字段还需在高级请求模板中绑定，并查看请求预览。"
+  },
+  "cap": {
+    "chat": {
+      "short": "语言",
+      "long": "大语言模型"
+    },
+    "image": {
+      "short": "图片",
+      "long": "图片模型"
+    },
+    "video": {
+      "short": "视频",
+      "long": "视频模型"
+    },
+    "audio": {
+      "short": "音频",
+      "long": "音频模型"
+    },
+    "model": {
+      "short": "3D",
+      "long": "3D模型"
+    }
+  },
+  "catalog": {
+    "back": "返回模板列表",
+    "use": "使用这个模板",
+    "docs": "查看官方文档",
+    "hint": "先选择你想生成的内容，再查看模板支持的模型、输入与参数。选好后填入地址和密钥即可。",
+    "all": "全部",
+    "search": "搜索渠道或模型",
+    "details": "查看模型与能力",
+    "localTitle": "本地工作流",
+    "localHint": "连接自己的 ComfyUI，导入并运行已有工作流。",
+    "localOpen": "连接 ComfyUI",
+    "supports": "支持 {{capabilities}}，提供 {{count}} 个模型配置。"
+  },
+  "detail": {
+    "noModels": "尚未声明模型",
+    "capabilityTabs": "切换模型能力"
+  },
+  "operation": {
+    "chat": "文本对话",
+    "imageGenerate": "文生图",
+    "imageEdit": "参考图编辑",
+    "videoGenerate": "生成视频",
+    "audioGenerate": "生成音频",
+    "modelGenerate": "生成3D模型",
+    "modelsList": "查询模型"
+  },
+  "model": {
+    "ref": {
+      "image": "图片 ≤ {{count}} 张",
+      "video": "视频 ≤ {{count}} 个",
+      "audio": "音频 ≤ {{count}} 个"
+    },
+    "unlimited": "不限",
+    "ways": "生成方式",
+    "inputs": "参考输入",
+    "textOnly": "文字描述",
+    "keyParams": "常用参数",
+    "hideDetails": "收起详情",
+    "showDetails": "模式与参数详情",
+    "sharedParams": "通用参数",
+    "slotUnlimited": "{{min}} 张起",
+    "default": "默认 {{value}}"
+  },
+  "status": {
+    "method": {
+      "models": "模型连接测试",
+      "smoke": "实际试跑"
+    },
+    "untestedHint": "已配置密钥不等于已验证连接，请先测试",
+    "untested": "未测试",
+    "passed": "连接已测试",
+    "failed": "测试失败",
+    "keyReady": "密钥已配置",
+    "noKey": "待配置密钥",
+    "keyNotRequired": "无需密钥"
+  },
+  "market": {
+    "nav": "渠道与模型",
+    "title": "渠道与模型",
+    "subtitle": "{{channels}} 个渠道 · {{models}} 个模型，统一管理创作能力。",
+    "add": "接入渠道",
+    "view": "浏览方式",
+    "channels": "我的渠道",
+    "models": "模型广场",
+    "back": "返回渠道与模型",
+    "search": "搜索渠道、模型或地址",
+    "filterChannel": "筛选渠道",
+    "allChannels": "所有渠道",
+    "filterStatus": "筛选配置状态",
+    "grid": "卡片视图",
+    "table": "列表视图",
+    "configure": "配置",
+    "configureChannel": "渠道设置",
+    "configureModel": "配置模型",
+    "tryModel": "试运行",
+    "details": "查看详情",
+    "defaultMode": "按渠道声明运行",
+    "browseModels": "查看 {{count}} 个模型",
+    "showingModels": "找到 {{count}} 个模型",
+    "shape": {
+      "single": "单模型",
+      "multiple": "多模型",
+      "mixed": "多模型 · 跨类别"
+    },
+    "shapeHint": {
+      "single": "这个渠道接入 1 个模型，输入和参数由该模型的声明决定。",
+      "multiple": "这个渠道共享连接配置，提供 {{count}} 个同类模型。",
+      "mixed": "这个渠道提供 {{count}} 个模型，覆盖 {{categories}} 类创作能力；每个模型分别配置接口和参数。"
+    },
+    "status": {
+      "all": "所有配置状态",
+      "ready": "配置就绪",
+      "missing": "待完善",
+      "failed": "测试失败"
+    },
+    "columns": {
+      "model": "模型",
+      "channel": "所属渠道",
+      "capability": "输出类别",
+      "availability": "配置状态"
+    },
+    "emptyTitle": "接入你的第一个渠道",
+    "emptyHint": "可以接入一个专用模型，也可以接入提供多类模型的中转站。",
+    "noMatches": "没有符合条件的结果",
+    "filterHint": "调整类别、渠道或状态筛选再试试。",
+    "reset": "清除筛选",
+    "testHint": "配置就绪表示地址与凭据已填写；测试状态单独记录。模型数量与类别来自保存的声明，不代表上游实时可用。",
+    "useInStage": "3D 模型可在舞台的图生 3D 中选择。",
+    "create": "用它创作{{kind}}",
+    "replaceDraft": "切换模型并开始新创作",
+    "replaceDraftHint": "工作台还有未发送的草稿和参考素材。确认后清空草稿并使用这个模型。",
+    "setupHint": "先选择协议或提供接口文档，再逐个确认模型、类别和模式。保存不会自动生成。"
+  },
+  "manage": {
+    "title": "模型管理",
+    "hint": "每个模型分别声明用途和模式，共用当前渠道地址与凭据。",
+    "search": "搜索此渠道的模型",
+    "importModels": "从读取结果添加（{{count}}）",
+    "importTitle": "选择要接入的模型",
+    "edit": "编辑模型",
+    "modelId": "上游模型名称",
+    "modelIdHint": "必须与接口接受的模型名称完全一致。",
+    "label": "显示名称",
+    "duplicate": "复制为另一个模型",
+    "remove": "移除此模型",
+    "minimum": "渠道至少保留一个模型",
+    "copyFrom": "沿用哪套模型接口配置",
+    "copyHint": "复制此模型的类别、模式、参数和输入槽位；不会根据新名称猜测能力。",
+    "discoveryHint": "模型列表通常只提供名称。请仅选择使用同一套接口的模型，不同类别分批添加。",
+    "addSelected": "添加 {{count}} 个模型",
+    "selected": "已选 {{count}} 个",
+    "duplicateId": "这个模型名称已存在。",
+    "operations": "输出用途",
+    "operationHint": "只开启这个模型实际支持且当前渠道已配置的接口。",
+    "fromChannel": "沿用当前渠道模型",
+    "fromTemplate": "增加其他类别 / 接口模板",
+    "templateHint": "只适用于当前渠道确实支持这套接口的情况。仅复制模型请求方式，不更换渠道地址或密钥；保存前请核对请求预览。",
+    "headersIncompatible": "这套接口需要当前渠道没有的专用请求头，无法只复制模型。请把它作为独立渠道接入，避免影响已有模型。",
+    "endpointBound": "此模式绑定了独立的请求与结果格式。若要改输出类别，请选择对应模板；完整协议可在高级 JSON 中修改并校验。"
+  },
+  "setup": {
+    "chooseModels": "选择要接入的模型",
+    "chooseHint": "只接一个模型就勾选一个；同一渠道可以同时接入不同类别的模型，后续可继续添加。",
+    "selectAll": "全选",
+    "clear": "取消全选"
+  },
+  "templates": {
+    "generic-audio-json": {
+      "title": "自定义音频 · JSON",
+      "vendor": "自定义接口",
+      "summary": "按文档填写音频模型和返回地址字段。"
+    }
+  },
+  "templateHelp": {
+    "open": "接入指南",
+    "openFor": "{{name}} 接入指南",
+    "title": "{{name}} · 接入指南",
+    "intro": "模板提供请求格式。先连接你的服务，再选择实际可用的模型，最后审阅参数；这里的参数样例不会自动添加模型。",
+    "connectTitle": "填写地址和密钥",
+    "connectBody": "使用服务商提供的 API 根地址和 API Key。根地址与下方请求路径会拼接成完整接口，请核对版本前缀是否重复。",
+    "modelsTitle": "读取并选择你的模型",
+    "modelsBody": "获取模型列表，或手动填写模型 ID，再勾选需要接入的模型。系统建议的类别可以修改；类别正确后仍需选择该服务支持的请求协议。",
+    "modelList": "此模板的模型列表接口：{{path}}。若服务商未开放列表，可改用手动填写。",
+    "manualModels": "此模板没有声明模型列表接口。可手动填写模型 ID，或按服务商文档设置列表路径。",
+    "reviewTitle": "审阅参数和请求后保存",
+    "reviewBody": "检查每个模型与模式的输入、选项、默认值和能力。只保留服务商确实支持的设置，再用请求预览核对实际发送的内容。",
+    "routesTitle": "当前模板的请求路径",
+    "routesHint": "路径来自此模板及其模式配置；模型 ID、任务 ID 等占位符会在实际请求时替换。不同模式可能使用不同路径。",
+    "body": "请求体：{{format}}",
+    "poll": "查询原任务：{{path}}",
+    "sizeTimeTitle": "尺寸和时长怎么填",
+    "pixels": "{{fields}} 的选项使用宽×高像素值，例如 1024x1024。可以把界面显示为“比例 + 分辨率”，实际请求仍发送原选项值；不要把 1:1 或 1K 直接替换到像素字段。",
+    "nativeSize": "{{fields}} 按模板分别传递比例或分辨率档位。1K、2K 等值不等于固定宽×高；只使用此模型声明的选项，不自动推算像素。",
+    "time": "视频接口可能使用 seconds、duration 或嵌套字段。请核对下方映射、数值类型及参数说明中的单位；字符串“4”和数字 4 也可能有不同要求，不要只修改显示名称。",
+    "parametersTitle": "查看参数与接口值",
+    "parametersHint": "以下是模板中的参数参考，按标注的模型或模式使用。显示名称可以自定义，等号右侧是发送给接口的原始值；选项不是所有模型通用的能力承诺。",
+    "appliesTo": "适用样例：{{contexts}}",
+    "valueType": {
+      "enum": "按声明选项选择",
+      "number": "数字",
+      "boolean": "开启 / 关闭",
+      "text": "文本"
+    },
+    "customize": "自己的服务与模板略有不同，可以在下一步的高级 JSON 中调整请求路径、字段映射、允许的值或响应解析，再查看请求预览。以服务商文档为准，预览不会发起生成。",
+    "notesTitle": "模板补充说明"
+  },
+  "frameOptions": {
+    "selectionHint": "勾选要在工作台提供的选项，已启用 {{count}} 项。取消默认项会自动改用其余第一项。",
+    "special": "自动与其他选项",
+    "default": "默认选择",
+    "noDefault": "不指定默认值",
+    "more": "添加常用选项",
+    "candidatesHint": "这些是常见候选，不代表当前模型都支持。请按渠道文档勾选，只有启用的值会出现在工作台。像素组合会保留原尺寸，不自动补齐其他组合。",
+    "custom": "添加自定义选项",
+    "wireValue": "接口值",
+    "valueExample": "例如 16:9、2K 或 1920x1080",
+    "label": "显示名称（可选）",
+    "add": "添加选项",
+    "advanced": "高级编辑：字段、标签与原始选项",
+    "keepOne": "至少保留一个选项；不需要此参数可在高级编辑中移除。",
+    "empty": "请添加至少一个选项，或在高级编辑中移除此参数。"
+  },
+  "combinations": {
+    "hint": "分辨率档位与比例分开勾选，应用后可在工作台自由组合；默认值也分别选择。",
+    "custom": "添加其他比例或档位",
+    "customTier": "自定义分辨率档位",
+    "customRatio": "自定义比例",
+    "addTier": "添加档位",
+    "addRatio": "添加比例",
+    "mapping": "查看 / 修改 {{count}} 个组合的实际尺寸",
+    "mappingHint": "保留已有组合的接口值。新组合默认按长边 1K=1024、2K=2048、4K=4096 推算，短边取整；不同模型可能有像素步长或尺寸限制，请按文档调整后应用。自定义档位需填写实际接口尺寸。",
+    "suggested": "推算待核对",
+    "existing": "沿用已配置值",
+    "enterSize": "填写接口接受的尺寸",
+    "reviewHint": "{{tiers}} 档分辨率 × {{ratios}} 个比例 = {{count}} 个组合。应用前请确认渠道支持这些尺寸；不会发送生成请求。",
+    "missing": "部分组合缺少接口尺寸，请展开映射补全。",
+    "conflict": "不同组合不能使用同一个接口值，请检查尺寸映射。",
+    "apply": "应用 {{count}} 个组合",
+    "applied": "已更新，保存渠道后生效。",
+    "enabled": "当前已启用 {{count}} 个尺寸组合。修改下方选择后，点击“应用组合”更新。"
+  },
+  "batch": {
+    "title": "统一配置",
+    "hint": "把一个模型已配置好的工作台参数，批量应用到本渠道的其他模型或模式。每个模型之后仍可单独修改。",
+    "source": "配置来源：模型与模式",
+    "parameters": "要复用的参数",
+    "parameter": "复用参数",
+    "noParameters": "这个来源尚未声明参数，请先配置。",
+    "copyDefaults": "同时使用来源模型的默认值",
+    "defaultHint": "默认保留各目标的有效默认值；不再可用时改用来源默认值或首个选项。",
+    "targets": "应用到哪些模型 / 模式",
+    "target": "目标",
+    "search": "搜索目标模型或模式",
+    "selectCompatible": "选中可应用项",
+    "clear": "清空选择",
+    "noTargets": "还没有其他图片或视频模型可应用。",
+    "review": "预览 {{count}} 项变更",
+    "apply": "应用到 {{count}} 项",
+    "back": "返回选择",
+    "reviewSummary": "来源：{{source}}。将 {{params}} 个参数应用到 {{count}} 个模型 / 模式。",
+    "preserved": "保留其他 {{count}} 个参数及原有请求、素材槽位。",
+    "supportHint": "下方检查的是配置结构；不同模型是否支持相同选项仍以渠道文档为准。本次只修改草稿，保存渠道后生效。",
+    "before": "原配置",
+    "after": "应用后",
+    "notDeclared": "尚未声明，将新增",
+    "unset": "未指定",
+    "defaultValue": "默认：{{value}}",
+    "failed": "应用失败，请重新检查配置。",
+    "stale": "预览期间渠道配置已变化，请返回选择重新预览。",
+    "applied": "统一配置已应用到草稿。保存渠道后生效；后续修改不会自动联动其他模型。",
+    "undo": "撤销本次应用",
+    "undoChanged": "已有后续修改，不能直接撤销覆盖这些修改。"
+  },
+  "autoImage": {
+    "auto": "自动识别",
+    "hint": "无参考图时文生图，添加参考图后自动选择可用的图片编辑模式。也可手动固定模式。",
+    "edit": "图片编辑",
+    "generate": "文生图",
+    "choose": "请选择模式"
+  }
+}

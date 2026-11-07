@@ -1,0 +1,128 @@
+[
+  {
+    "round": 1,
+    "operation": "pan",
+    "zoom": 0.1,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"zoom\":0.1,\"visibility\":\"visible\",\"dpr\":2,\"nodes\":1000,\"edges\":1000,\"mounted\":1000,\"mountedEdges\":1000,\"images\":350,\"thumbs\":{\"live\":350,\"idle\":40,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":2841,\"failures\":0},\"frames\":240,\"transforms\":178,\"p50\":16.699999999953434,\"p95\":17.599999999976717,\"max\":67.59999999997672,\"over50\":1,\"graphStable\":true,\"historyStable\":true,\"end\":[112.24465402301075,24.53012183098508,0.1]}\n```"
+        }
+      ]
+    }
+  },
+  {
+    "round": 1,
+    "operation": "pan",
+    "zoom": 0.6,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"zoom\":0.6,\"visibility\":\"visible\",\"dpr\":2,\"nodes\":1000,\"edges\":1000,\"mounted\":40,\"mountedEdges\":80,\"images\":40,\"thumbs\":{\"live\":40,\"idle\":96,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":2881,\"failures\":0},\"frames\":181,\"transforms\":177,\"p50\":16.699999999953434,\"p95\":17.5,\"max\":17.600000000093132,\"over50\":0,\"graphStable\":true,\"historyStable\":true,\"end\":[112.24465402301075,24.53012183098508,0.6]}\n```"
+        }
+      ]
+    }
+  },
+  {
+    "round": 1,
+    "operation": "pan",
+    "zoom": 1,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"zoom\":1,\"visibility\":\"visible\",\"dpr\":2,\"nodes\":1000,\"edges\":1000,\"mounted\":15,\"mountedEdges\":30,\"images\":15,\"thumbs\":{\"live\":15,\"idle\":96,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":2886,\"failures\":0},\"frames\":180,\"transforms\":173,\"p50\":16.699999999953434,\"p95\":17.5,\"max\":17.70000000006985,\"over50\":0,\"graphStable\":true,\"historyStable\":true,\"end\":[112.24465402301075,24.53012183098508,1]}\n```"
+        }
+      ]
+    }
+  },
+  {
+    "round": 1,
+    "operation": "drag10",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"operation\":\"drag\",\"count\":10,\"canonical\":1000,\"changed\":[\"qa-n-0\",\"qa-n-1\",\"qa-n-2\",\"qa-n-3\",\"qa-n-4\",\"qa-n-5\",\"qa-n-6\",\"qa-n-7\",\"qa-n-8\",\"qa-n-9\"],\"historyDelta\":1,\"undoExact\":true,\"frames\":90,\"p50\":16.699999999953434,\"p95\":17.5,\"max\":17.600000000093132,\"over50\":0}\n```"
+        }
+      ]
+    }
+  },
+  {
+    "round": 1,
+    "operation": "zoom",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"operation\":\"zoom\",\"canonical\":1000,\"edges\":1000,\"frames\":149,\"range\":[0.1,1.00142],\"transforms\":61,\"p50\":16.699999999953434,\"p95\":17.5,\"max\":66.30000000004657,\"over50\":2,\"graphStable\":true,\"historyStable\":true,\"markersClean\":true,\"end\":[19.999999999996135,49.99999999999761,0.10000000000000062],\"thumbs\":{\"live\":350,\"idle\":46,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":3182,\"failures\":0}}\n```"
+        }
+      ]
+    }
+  },
+  {
+    "round": 2,
+    "operation": "pan",
+    "zoom": 0.1,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"zoom\":0.1,\"visibility\":\"visible\",\"dpr\":2,\"nodes\":1000,\"edges\":1000,\"mounted\":1000,\"mountedEdges\":1000,\"images\":350,\"thumbs\":{\"live\":350,\"idle\":46,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":3182,\"failures\":0},\"frames\":249,\"transforms\":180,\"p50\":16.699999999953434,\"p95\":17.5,\"max\":49.90000000002328,\"over50\":0,\"graphStable\":true,\"historyStable\":true,\"end\":[112.24465402301075,24.53012183098508,0.1]}\n```"
+        }
+      ]
+    }
+  },
+  {
+    "round": 2,
+    "operation": "pan",
+    "zoom": 0.6,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"zoom\":0.6,\"visibility\":\"visible\",\"dpr\":2,\"nodes\":1000,\"edges\":1000,\"mounted\":40,\"mountedEdges\":80,\"images\":40,\"thumbs\":{\"live\":40,\"idle\":96,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":3222,\"failures\":0},\"frames\":181,\"transforms\":179,\"p50\":16.699999999953434,\"p95\":17.5,\"max\":17.699999999953434,\"over50\":0,\"graphStable\":true,\"historyStable\":true,\"end\":[109.1015926154962,25.621657871334946,0.6]}\n```"
+        }
+      ]
+    }
+  },
+  {
+    "round": 2,
+    "operation": "pan",
+    "zoom": 1,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"zoom\":1,\"visibility\":\"visible\",\"dpr\":2,\"nodes\":1000,\"edges\":1000,\"mounted\":15,\"mountedEdges\":30,\"images\":15,\"thumbs\":{\"live\":15,\"idle\":96,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":3227,\"failures\":0},\"frames\":182,\"transforms\":173,\"p50\":16.699999999953434,\"p95\":17.5,\"max\":17.600000000093132,\"over50\":0,\"graphStable\":true,\"historyStable\":true,\"end\":[112.24465402301075,24.53012183098508,1]}\n```"
+        }
+      ]
+    }
+  },
+  {
+    "round": 2,
+    "operation": "drag10",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"operation\":\"drag\",\"count\":10,\"canonical\":1000,\"changed\":[\"qa-n-0\",\"qa-n-1\",\"qa-n-2\",\"qa-n-3\",\"qa-n-4\",\"qa-n-5\",\"qa-n-6\",\"qa-n-7\",\"qa-n-8\",\"qa-n-9\"],\"historyDelta\":1,\"undoExact\":true,\"frames\":95,\"p50\":16.699999999953434,\"p95\":17.5,\"max\":17.699999999953434,\"over50\":0}\n```"
+        }
+      ]
+    }
+  },
+  {
+    "round": 2,
+    "operation": "zoom",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Script ran on page and returned:\n```json\n{\"operation\":\"zoom\",\"canonical\":1000,\"edges\":1000,\"frames\":147,\"range\":[0.1,1.00142],\"transforms\":61,\"p50\":16.699999999953434,\"p95\":17.599999999976717,\"max\":67,\"over50\":1,\"graphStable\":true,\"historyStable\":true,\"markersClean\":true,\"end\":[19.999999999996135,49.99999999999761,0.10000000000000062],\"thumbs\":{\"live\":350,\"idle\":46,\"heavyActive\":0,\"heavyQueued\":0,\"generated\":0,\"durableHits\":3523,\"failures\":0}}\n```"
+        }
+      ]
+    }
+  }
+]

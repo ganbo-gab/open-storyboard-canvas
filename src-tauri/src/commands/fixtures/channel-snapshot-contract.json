@@ -1,0 +1,1134 @@
+{
+  "formatVersion": 1,
+  "generatedBy": "scripts/generate-native-channel-contract.mjs",
+  "profileSourceSha256": "ff8bb7b1e02df1a297186e59afb3819313e0e3d5601b3c77e9b8aa10d64ce758",
+  "accepted": [
+    {
+      "version": 2,
+      "adapter": "template",
+      "profile": {
+        "version": 2,
+        "id": "fixture-known-capabilities",
+        "name": "Known model contract fixture",
+        "baseUrl": "https://api.openai.com",
+        "auth": {
+          "type": "bearer"
+        },
+        "docsUrl": "https://platform.openai.com/docs/api-reference",
+        "operations": {
+          "chat": {
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "body": "json",
+            "template": {
+              "model": "{{model}}",
+              "messages": "{{messages}}",
+              "tools": "{{tools}}",
+              "tool_choice": "{{toolChoice}}",
+              "temperature": "{{param.temperature}}",
+              "max_tokens": "{{param.max_tokens}}",
+              "top_p": "{{param.top_p}}",
+              "max_completion_tokens": "{{param.max_completion_tokens}}",
+              "parallel_tool_calls": "{{param.parallel_tool_calls}}",
+              "stream": "{{param.stream}}",
+              "stream_options": "{{chatPayload.stream_options}}",
+              "response_format": "{{chatPayload.response_format}}",
+              "stop": "{{chatPayload.stop}}",
+              "reasoning_effort": "{{param.reasoning_effort}}"
+            },
+            "response": {
+              "mode": "sync",
+              "outputs": []
+            },
+            "errorPath": "error.message"
+          },
+          "image.generate": {
+            "method": "POST",
+            "path": "/v1/images/generations",
+            "body": "json",
+            "template": {
+              "model": "{{model}}",
+              "prompt": "{{prompt}}",
+              "n": "{{param.n}}",
+              "size": "{{param.size}}",
+              "quality": "{{param.quality}}"
+            },
+            "response": {
+              "mode": "sync",
+              "outputs": [
+                {
+                  "path": "data[*].b64_json",
+                  "as": "base64",
+                  "kind": "image"
+                },
+                {
+                  "path": "data[*].url",
+                  "as": "url",
+                  "kind": "image"
+                }
+              ]
+            },
+            "errorPath": "error.message"
+          },
+          "image.edit": {
+            "method": "POST",
+            "path": "/v1/images/edits",
+            "body": "multipart",
+            "template": {
+              "model": "{{model}}",
+              "prompt": "{{prompt}}",
+              "n": "{{param.n}}",
+              "size": "{{param.size}}",
+              "quality": "{{param.quality}}"
+            },
+            "files": {
+              "field": "image[]",
+              "cardinality": "repeat"
+            },
+            "response": {
+              "mode": "sync",
+              "outputs": [
+                {
+                  "path": "data[*].b64_json",
+                  "as": "base64",
+                  "kind": "image"
+                },
+                {
+                  "path": "data[*].url",
+                  "as": "url",
+                  "kind": "image"
+                }
+              ]
+            },
+            "errorPath": "error.message"
+          },
+          "models.list": {
+            "method": "GET",
+            "path": "/v1/models",
+            "body": "none",
+            "response": {
+              "mode": "sync",
+              "outputs": []
+            },
+            "errorPath": "error.message"
+          }
+        },
+        "models": [
+          {
+            "id": "deepseek-v4.1-flash",
+            "label": "GPT-4o mini",
+            "operations": [
+              "chat"
+            ],
+            "params": [
+              {
+                "key": "temperature",
+                "label": "Temperature",
+                "type": "number",
+                "min": 0,
+                "max": 2,
+                "step": 0.1
+              },
+              {
+                "key": "max_tokens",
+                "label": "最大输出 token",
+                "type": "number",
+                "min": 1,
+                "step": 1
+              },
+              {
+                "key": "top_p",
+                "label": "Top P",
+                "type": "number",
+                "min": 0,
+                "max": 1
+              },
+              {
+                "key": "max_completion_tokens",
+                "label": "最大完成 token",
+                "type": "number",
+                "min": 1,
+                "step": 1
+              },
+              {
+                "key": "parallel_tool_calls",
+                "label": "并行工具",
+                "type": "boolean"
+              },
+              {
+                "key": "reasoning_effort",
+                "label": "推理强度",
+                "type": "text"
+              },
+              {
+                "key": "stream",
+                "label": "流式输出",
+                "type": "boolean",
+                "default": false
+              }
+            ],
+            "capabilities": {
+              "contextWindow": 1000000,
+              "maxOutputTokens": 393216,
+              "supportsMultimodal": true,
+              "supportsTools": true,
+              "supportsStreaming": true
+            }
+          }
+        ]
+      },
+      "input": {
+        "jobId": "fixture-known-capabilities-job",
+        "channelId": "fixture-known-capabilities",
+        "modelId": "deepseek-v4.1-flash",
+        "operation": "chat",
+        "prompt": "",
+        "params": {},
+        "refs": [],
+        "count": 1
+      },
+      "submit": {}
+    },
+    {
+      "version": 2,
+      "adapter": "template",
+      "profile": {
+        "version": 2,
+        "id": "fixture-all-declarations",
+        "name": "All declarations",
+        "baseUrl": "https://fixture.example",
+        "auth": {
+          "type": "header",
+          "name": "X-Api-Key",
+          "prefix": "Key "
+        },
+        "headers": {
+          "X-Client": "Fixture"
+        },
+        "docsUrl": "https://fixture.example/docs",
+        "notes": [
+          "Schema coverage"
+        ],
+        "operations": {},
+        "models": [
+          {
+            "id": "model",
+            "label": "Fixture model",
+            "operations": [
+              "model.generate"
+            ],
+            "params": [
+              {
+                "key": "quality_0",
+                "label": "Quality 0",
+                "type": "enum",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": 1
+                  }
+                ],
+                "min": 0,
+                "max": 1,
+                "step": 0.5,
+                "default": 1,
+                "required": false,
+                "description": "Fixture parameter",
+                "group": "advanced",
+                "display": "auto"
+              },
+              {
+                "key": "quality_1",
+                "label": "Quality 1",
+                "type": "enum",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": 1
+                  }
+                ],
+                "min": 0,
+                "max": 1,
+                "step": 0.5,
+                "default": 1,
+                "required": false,
+                "description": "Fixture parameter",
+                "group": "advanced",
+                "display": "buttons"
+              },
+              {
+                "key": "quality_2",
+                "label": "Quality 2",
+                "type": "enum",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": 1
+                  }
+                ],
+                "min": 0,
+                "max": 1,
+                "step": 0.5,
+                "default": 1,
+                "required": false,
+                "description": "Fixture parameter",
+                "group": "advanced",
+                "display": "select"
+              },
+              {
+                "key": "quality_3",
+                "label": "Quality 3",
+                "type": "enum",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": 1
+                  }
+                ],
+                "min": 0,
+                "max": 1,
+                "step": 0.5,
+                "default": 1,
+                "required": false,
+                "description": "Fixture parameter",
+                "group": "advanced",
+                "display": "slider"
+              },
+              {
+                "key": "quality_4",
+                "label": "Quality 4",
+                "type": "enum",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": 1
+                  }
+                ],
+                "min": 0,
+                "max": 1,
+                "step": 0.5,
+                "default": 1,
+                "required": false,
+                "description": "Fixture parameter",
+                "group": "advanced",
+                "display": "hidden"
+              },
+              {
+                "key": "size",
+                "label": "Frame",
+                "type": "enum",
+                "options": [
+                  {
+                    "label": "Square",
+                    "value": "1024x1024",
+                    "size": {
+                      "ratio": "1:1",
+                      "resolution": "1K"
+                    }
+                  },
+                  {
+                    "label": "Auto",
+                    "value": "auto"
+                  }
+                ],
+                "default": "1024x1024",
+                "sizeDisplay": "ratio-resolution"
+              },
+              {
+                "key": "pixelSize",
+                "label": "Pixel frame",
+                "type": "enum",
+                "options": [
+                  {
+                    "label": "Portrait",
+                    "value": "1024x1536",
+                    "size": {
+                      "ratio": "2:3",
+                      "resolution": "1536px"
+                    }
+                  }
+                ],
+                "sizeDisplay": "pixels"
+              }
+            ],
+            "refs": {
+              "image": 1,
+              "video": 0,
+              "audio": 0
+            },
+            "mention": "natural",
+            "modes": [
+              {
+                "id": "image-to-model",
+                "label": "From image",
+                "description": "Mode declaration",
+                "operation": "model.generate",
+                "endpoint": {
+                  "method": "POST",
+                  "path": "/model/{{mode}}",
+                  "body": "multipart",
+                  "template": {
+                    "model": "{{model}}",
+                    "image": "{{slotFirst.reference}}",
+                    "quality": "{{param.quality_0}}"
+                  },
+                  "files": {
+                    "field": "image",
+                    "cardinality": "single"
+                  },
+                  "imageEncoding": "url",
+                  "response": {
+                    "mode": "async",
+                    "taskIdPath": "id",
+                    "poll": {
+                      "method": "POST",
+                      "path": "/jobs/{{taskId}}",
+                      "template": {
+                        "id": "{{taskId}}"
+                      },
+                      "intervalSec": 1,
+                      "timeoutMin": 2,
+                      "statusPath": "status",
+                      "success": [
+                        "done"
+                      ],
+                      "failure": [
+                        "failed"
+                      ],
+                      "progressPath": "progress",
+                      "outputs": [
+                        {
+                          "url": "/models/{{taskId}}/file.glb",
+                          "kind": "model",
+                          "auth": true
+                        },
+                        {
+                          "path": "preview.url",
+                          "as": "url",
+                          "kind": "image"
+                        }
+                      ],
+                      "resultRequest": {
+                        "method": "GET",
+                        "path": "/result/{{poll.file_id}}",
+                        "template": {
+                          "original": "{{submit.id}}"
+                        }
+                      }
+                    }
+                  },
+                  "errorPath": "error.message"
+                },
+                "params": [
+                  {
+                    "key": "quality_0",
+                    "label": "Quality 0",
+                    "type": "enum",
+                    "options": [
+                      {
+                        "label": "One",
+                        "value": 1
+                      }
+                    ],
+                    "min": 0,
+                    "max": 1,
+                    "step": 0.5,
+                    "default": 1,
+                    "required": false,
+                    "description": "Fixture parameter",
+                    "group": "advanced",
+                    "display": "auto"
+                  },
+                  {
+                    "key": "quality_1",
+                    "label": "Quality 1",
+                    "type": "enum",
+                    "options": [
+                      {
+                        "label": "One",
+                        "value": 1
+                      }
+                    ],
+                    "min": 0,
+                    "max": 1,
+                    "step": 0.5,
+                    "default": 1,
+                    "required": false,
+                    "description": "Fixture parameter",
+                    "group": "advanced",
+                    "display": "buttons"
+                  },
+                  {
+                    "key": "quality_2",
+                    "label": "Quality 2",
+                    "type": "enum",
+                    "options": [
+                      {
+                        "label": "One",
+                        "value": 1
+                      }
+                    ],
+                    "min": 0,
+                    "max": 1,
+                    "step": 0.5,
+                    "default": 1,
+                    "required": false,
+                    "description": "Fixture parameter",
+                    "group": "advanced",
+                    "display": "select"
+                  },
+                  {
+                    "key": "quality_3",
+                    "label": "Quality 3",
+                    "type": "enum",
+                    "options": [
+                      {
+                        "label": "One",
+                        "value": 1
+                      }
+                    ],
+                    "min": 0,
+                    "max": 1,
+                    "step": 0.5,
+                    "default": 1,
+                    "required": false,
+                    "description": "Fixture parameter",
+                    "group": "advanced",
+                    "display": "slider"
+                  },
+                  {
+                    "key": "quality_4",
+                    "label": "Quality 4",
+                    "type": "enum",
+                    "options": [
+                      {
+                        "label": "One",
+                        "value": 1
+                      }
+                    ],
+                    "min": 0,
+                    "max": 1,
+                    "step": 0.5,
+                    "default": 1,
+                    "required": false,
+                    "description": "Fixture parameter",
+                    "group": "advanced",
+                    "display": "hidden"
+                  },
+                  {
+                    "key": "size",
+                    "label": "Frame",
+                    "type": "enum",
+                    "options": [
+                      {
+                        "label": "Square",
+                        "value": "1024x1024",
+                        "size": {
+                          "ratio": "1:1",
+                          "resolution": "1K"
+                        }
+                      },
+                      {
+                        "label": "Auto",
+                        "value": "auto"
+                      }
+                    ],
+                    "default": "1024x1024",
+                    "sizeDisplay": "ratio-resolution"
+                  },
+                  {
+                    "key": "pixelSize",
+                    "label": "Pixel frame",
+                    "type": "enum",
+                    "options": [
+                      {
+                        "label": "Portrait",
+                        "value": "1024x1536",
+                        "size": {
+                          "ratio": "2:3",
+                          "resolution": "1536px"
+                        }
+                      }
+                    ],
+                    "sizeDisplay": "pixels"
+                  }
+                ],
+                "slots": [
+                  {
+                    "key": "reference",
+                    "label": "Reference",
+                    "kind": "image",
+                    "min": 0,
+                    "max": 1,
+                    "description": "Optional fixture"
+                  }
+                ]
+              }
+            ],
+            "capabilities": {
+              "contextWindow": 1048576,
+              "maxOutputTokens": 131072,
+              "supportsMultimodal": false,
+              "supportsTools": true,
+              "supportsStreaming": false
+            }
+          }
+        ]
+      },
+      "input": {
+        "jobId": "fixture-all-declarations-job",
+        "channelId": "fixture-all-declarations",
+        "modelId": "model",
+        "modeId": "image-to-model",
+        "operation": "model.generate",
+        "prompt": "",
+        "params": {},
+        "refs": [],
+        "count": 1
+      },
+      "submit": {
+        "id": "accepted-once"
+      },
+      "credentialSource": "transient",
+      "outputs": [
+        {
+          "kind": "model",
+          "url": "https://fixture.example/original.glb",
+          "auth": true
+        },
+        {
+          "kind": "text",
+          "text": "Fixture text output"
+        }
+      ],
+      "assets": [
+        "imported-model-fixture",
+        "Fixture text output"
+      ],
+      "assetKinds": [
+        "model",
+        "text"
+      ],
+      "failure": {
+        "category": "credential",
+        "message": "Credential access paused",
+        "raw": "Safe fixture diagnostic",
+        "status": 401
+      }
+    },
+    {
+      "version": 2,
+      "adapter": "template",
+      "profile": {
+        "version": 2,
+        "id": "fixture-known-capabilities",
+        "name": "Known model contract fixture",
+        "baseUrl": "https://api.openai.com",
+        "auth": {
+          "type": "bearer"
+        },
+        "docsUrl": "https://platform.openai.com/docs/api-reference",
+        "operations": {
+          "chat": {
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "body": "json",
+            "template": {
+              "model": "{{model}}",
+              "messages": "{{messages}}",
+              "tools": "{{tools}}",
+              "tool_choice": "{{toolChoice}}",
+              "temperature": "{{param.temperature}}",
+              "max_tokens": "{{param.max_tokens}}",
+              "top_p": "{{param.top_p}}",
+              "max_completion_tokens": "{{param.max_completion_tokens}}",
+              "parallel_tool_calls": "{{param.parallel_tool_calls}}",
+              "stream": "{{param.stream}}",
+              "stream_options": "{{chatPayload.stream_options}}",
+              "response_format": "{{chatPayload.response_format}}",
+              "stop": "{{chatPayload.stop}}",
+              "reasoning_effort": "{{param.reasoning_effort}}"
+            },
+            "response": {
+              "mode": "sync",
+              "outputs": []
+            },
+            "errorPath": "error.message"
+          },
+          "image.generate": {
+            "method": "POST",
+            "path": "/v1/images/generations",
+            "body": "json",
+            "template": {
+              "model": "{{model}}",
+              "prompt": "{{prompt}}",
+              "n": "{{param.n}}",
+              "size": "{{param.size}}",
+              "quality": "{{param.quality}}"
+            },
+            "response": {
+              "mode": "sync",
+              "outputs": [
+                {
+                  "path": "data[*].b64_json",
+                  "as": "base64",
+                  "kind": "image"
+                },
+                {
+                  "path": "data[*].url",
+                  "as": "url",
+                  "kind": "image"
+                }
+              ]
+            },
+            "errorPath": "error.message"
+          },
+          "image.edit": {
+            "method": "POST",
+            "path": "/v1/images/edits",
+            "body": "multipart",
+            "template": {
+              "model": "{{model}}",
+              "prompt": "{{prompt}}",
+              "n": "{{param.n}}",
+              "size": "{{param.size}}",
+              "quality": "{{param.quality}}"
+            },
+            "files": {
+              "field": "image[]",
+              "cardinality": "repeat"
+            },
+            "response": {
+              "mode": "sync",
+              "outputs": [
+                {
+                  "path": "data[*].b64_json",
+                  "as": "base64",
+                  "kind": "image"
+                },
+                {
+                  "path": "data[*].url",
+                  "as": "url",
+                  "kind": "image"
+                }
+              ]
+            },
+            "errorPath": "error.message"
+          },
+          "models.list": {
+            "method": "GET",
+            "path": "/v1/models",
+            "body": "none",
+            "response": {
+              "mode": "sync",
+              "outputs": []
+            },
+            "errorPath": "error.message"
+          }
+        },
+        "models": [
+          {
+            "id": "deepseek-v4.1-flash",
+            "label": "GPT-4o mini",
+            "operations": [
+              "chat"
+            ],
+            "params": [
+              {
+                "key": "temperature",
+                "label": "Temperature",
+                "type": "number",
+                "min": 0,
+                "max": 2,
+                "step": 0.1
+              },
+              {
+                "key": "max_tokens",
+                "label": "最大输出 token",
+                "type": "number",
+                "min": 1,
+                "step": 1
+              },
+              {
+                "key": "top_p",
+                "label": "Top P",
+                "type": "number",
+                "min": 0,
+                "max": 1
+              },
+              {
+                "key": "max_completion_tokens",
+                "label": "最大完成 token",
+                "type": "number",
+                "min": 1,
+                "step": 1
+              },
+              {
+                "key": "parallel_tool_calls",
+                "label": "并行工具",
+                "type": "boolean"
+              },
+              {
+                "key": "reasoning_effort",
+                "label": "推理强度",
+                "type": "text"
+              },
+              {
+                "key": "stream",
+                "label": "流式输出",
+                "type": "boolean",
+                "default": false
+              }
+            ],
+            "capabilities": {}
+          }
+        ]
+      },
+      "input": {
+        "jobId": "fixture-empty-capabilities-job",
+        "channelId": "fixture-known-capabilities",
+        "modelId": "deepseek-v4.1-flash",
+        "operation": "chat",
+        "prompt": "",
+        "params": {},
+        "refs": [],
+        "count": 1
+      },
+      "submit": {}
+    }
+  ],
+  "rejectedProfileMutations": [
+    {
+      "path": "/profile/models/0/capabilities/contextWindow",
+      "value": 0
+    },
+    {
+      "path": "/profile/models/0/capabilities/contextWindow",
+      "value": -1
+    },
+    {
+      "path": "/profile/models/0/capabilities/contextWindow",
+      "value": 1.5
+    },
+    {
+      "path": "/profile/models/0/capabilities/contextWindow",
+      "value": "1000"
+    },
+    {
+      "path": "/profile/models/0/capabilities/contextWindow",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/capabilities/contextWindow",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/capabilities/contextWindow",
+      "value": 9007199254740992
+    },
+    {
+      "path": "/profile/models/0/capabilities/maxOutputTokens",
+      "value": 0
+    },
+    {
+      "path": "/profile/models/0/capabilities/maxOutputTokens",
+      "value": -1
+    },
+    {
+      "path": "/profile/models/0/capabilities/maxOutputTokens",
+      "value": 1.5
+    },
+    {
+      "path": "/profile/models/0/capabilities/maxOutputTokens",
+      "value": "1000"
+    },
+    {
+      "path": "/profile/models/0/capabilities/maxOutputTokens",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/capabilities/maxOutputTokens",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/capabilities/maxOutputTokens",
+      "value": 9007199254740992
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsMultimodal",
+      "value": "true"
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsMultimodal",
+      "value": 1
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsMultimodal",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsMultimodal",
+      "value": {}
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsTools",
+      "value": "true"
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsTools",
+      "value": 1
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsTools",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsTools",
+      "value": {}
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsStreaming",
+      "value": "true"
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsStreaming",
+      "value": 1
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsStreaming",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/capabilities/supportsStreaming",
+      "value": {}
+    },
+    {
+      "path": "/profile/models/0/capabilities",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/capabilities",
+      "value": []
+    },
+    {
+      "path": "/profile/models/0/capabilities",
+      "value": "untyped"
+    },
+    {
+      "path": "/profile/models/0/capabilities/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/capabilities/apiKey",
+      "value": "PRIVATE_FIXTURE"
+    },
+    {
+      "path": "/profile/models/0/params/0/display",
+      "value": "range"
+    },
+    {
+      "path": "/profile/models/0/params/0/display",
+      "value": ""
+    },
+    {
+      "path": "/profile/models/0/params/0/display",
+      "value": false
+    },
+    {
+      "path": "/profile/models/0/params/0/display",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/params/0/display",
+      "value": {}
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/0/display",
+      "value": "range"
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/0/display",
+      "value": ""
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/0/display",
+      "value": false
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/0/display",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/0/display",
+      "value": {}
+    },
+    {
+      "path": "/profile/models/0/params/5/sizeDisplay",
+      "value": "range"
+    },
+    {
+      "path": "/profile/models/0/params/5/sizeDisplay",
+      "value": ""
+    },
+    {
+      "path": "/profile/models/0/params/5/sizeDisplay",
+      "value": false
+    },
+    {
+      "path": "/profile/models/0/params/5/sizeDisplay",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/params/5/sizeDisplay",
+      "value": {}
+    },
+    {
+      "path": "/profile/models/0/params/5/options/0/size",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/params/5/options/0/size",
+      "value": []
+    },
+    {
+      "path": "/profile/models/0/params/5/options/0/size",
+      "value": "1K"
+    },
+    {
+      "path": "/profile/models/0/params/5/options/0/size",
+      "value": {
+        "ratio": "1:1"
+      }
+    },
+    {
+      "path": "/profile/models/0/params/5/options/0/size",
+      "value": {
+        "ratio": 1,
+        "resolution": "1K"
+      }
+    },
+    {
+      "path": "/profile/models/0/params/5/options/0/size",
+      "value": {
+        "ratio": "1:1",
+        "resolution": ""
+      }
+    },
+    {
+      "path": "/profile/models/0/params/5/options/0/size/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/sizeDisplay",
+      "value": "range"
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/sizeDisplay",
+      "value": ""
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/sizeDisplay",
+      "value": false
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/sizeDisplay",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/sizeDisplay",
+      "value": {}
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/options/0/size",
+      "value": null
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/options/0/size",
+      "value": []
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/options/0/size",
+      "value": "1K"
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/options/0/size",
+      "value": {
+        "ratio": "1:1"
+      }
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/options/0/size",
+      "value": {
+        "ratio": 1,
+        "resolution": "1K"
+      }
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/options/0/size",
+      "value": {
+        "ratio": "1:1",
+        "resolution": ""
+      }
+    },
+    {
+      "path": "/profile/models/0/modes/0/params/5/options/0/size/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/auth/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/refs/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/params/0/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/params/0/options/0/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/modes/0/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/modes/0/slots/0/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/modes/0/endpoint/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/modes/0/endpoint/files/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/modes/0/endpoint/response/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/modes/0/endpoint/response/poll/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/modes/0/endpoint/response/poll/resultRequest/invented",
+      "value": true
+    },
+    {
+      "path": "/profile/models/0/modes/0/endpoint/response/poll/outputs/0/invented",
+      "value": true
+    }
+  ]
+}

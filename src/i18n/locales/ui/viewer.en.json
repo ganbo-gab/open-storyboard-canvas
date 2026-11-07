@@ -1,0 +1,15 @@
+{
+  "title": "Media viewer",
+  "position": "{{index}} of {{count}}",
+  "previous": "Previous",
+  "next": "Next",
+  "zoomOut": "Zoom out",
+  "zoomIn": "Zoom in",
+  "fit": "Fit to window",
+  "prompt": "Prompt",
+  "actions": "Use this media",
+  "keys": "← → Browse · Double-click to zoom · Esc to return",
+  "model": "Model",
+  "status": "Status",
+  "mediaMissing": "This media cannot be loaded. Return to the task and choose “Retrieve original results”."
+}

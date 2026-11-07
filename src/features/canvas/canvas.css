@@ -9,6 +9,7 @@
 
   .canvas-root {
     --canvas-ui-scale: 1;
+    --canvas-handle-scale: 1;
     position: relative;
     height: 100%;
     width: 100%;
@@ -179,6 +180,44 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Multi-result stack: badge + (when selected) prev / next / collapse controls. */
+  .node-stack {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .node-stack[data-collapsed] {
+    background: rgb(var(--accent-rgb) / 0.14);
+    color: rgb(var(--accent-rgb));
+  }
+
+  .node-stack > svg,
+  .node-stack__actions svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  .node-stack__actions {
+    display: inline-flex;
+    margin-left: 2px;
+  }
+
+  .node-stack__actions button {
+    display: inline-flex;
+    width: 16px;
+    height: 16px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    color: inherit;
+  }
+
+  .node-stack__actions button:hover {
+    background: var(--press);
+    color: rgb(var(--text-rgb));
+  }
+
   .node-frame__status {
     display: inline-flex;
     flex: none;
@@ -244,6 +283,12 @@
     background: var(--canvas-node-media-bg);
   }
 
+  .node-frame[data-variant='group'] .node-frame__card {
+    border-radius: calc(var(--node-radius) + 6px);
+    background: var(--group-node-bg);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+  }
+
   .react-flow__node:hover .node-frame__card {
     box-shadow:
       inset 0 0 0 1px var(--canvas-node-border-hover),
@@ -276,6 +321,62 @@
       0 0 0 calc(8px * var(--canvas-ui-scale)) rgb(var(--accent-rgb) / 0.18);
   }
 
+  /* A card that would refuse the dragged connection: red ring + reason chip centred on the card. */
+  .canvas-root[data-connecting] .react-flow__node:hover .node-frame[data-connection-reject] .node-frame__card,
+  .node-frame[data-connection-reject] .node-frame__card {
+    box-shadow:
+      0 0 0 calc(2px * var(--canvas-ui-scale)) rgb(var(--danger-rgb)),
+      0 0 0 calc(8px * var(--canvas-ui-scale)) rgb(var(--danger-rgb) / 0.16);
+  }
+
+  .canvas-root[data-connecting] .node-frame[data-connection-reject] {
+    cursor: not-allowed;
+  }
+
+  /* Drag snap guides (flow coordinates via ViewportPortal); 1 screen px at any zoom. */
+  .canvas-alignment-guides {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1000;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .canvas-alignment-guides line {
+    stroke: rgb(var(--accent-rgb));
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .node-frame__reject {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 5;
+    display: inline-flex;
+    width: max-content;
+    max-width: max(90%, 240px);
+    transform: translate(-50%, -50%);
+    align-items: center;
+    gap: calc(5px * var(--canvas-ui-scale));
+    border-radius: calc(8px * var(--canvas-ui-scale));
+    background: rgb(var(--danger-rgb));
+    box-shadow: 0 4px 14px rgb(0 0 0 / 0.3);
+    padding: calc(4px * var(--canvas-ui-scale)) calc(8px * var(--canvas-ui-scale));
+    color: #fff;
+    font-size: calc(12px * var(--canvas-ui-scale));
+    line-height: 1.3;
+    pointer-events: none;
+  }
+
+  .node-frame__reject svg {
+    width: calc(13px * var(--canvas-ui-scale));
+    height: calc(13px * var(--canvas-ui-scale));
+    flex: none;
+  }
+
   .node-frame[data-generating] .node-frame__card::after {
     content: '';
     position: absolute;
@@ -292,6 +393,239 @@
     background-size: 240% 100%;
     animation: node-shimmer 1.8s linear infinite;
     pointer-events: none;
+  }
+
+  /* ---------- Generator face (image / video / text / audio / storyboard) ---------- */
+
+  .gen-face {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    flex-direction: column;
+  }
+
+  .gen-face__well {
+    position: relative;
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    color: rgb(var(--text-subtle-rgb) / 0.7);
+  }
+
+  .gen-face__badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: var(--canvas-node-media-overlay);
+    color: rgb(255 255 255 / 0.85);
+    font-size: 11px;
+    line-height: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .gen-face__caption {
+    display: -webkit-box;
+    flex: none;
+    margin: 0;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    border-top: 1px solid var(--canvas-node-divider);
+    padding: 8px 12px 10px;
+    color: rgb(var(--text-muted-rgb));
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  .gen-face__spin {
+    animation: ui-spin 0.9s linear infinite;
+  }
+
+  /* Storyboard: the grid is the node. Each cell is one shot; the selected cell is edited in the composer. */
+  .gen-face__grid-area {
+    container-type: size;
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+  }
+
+  .storyboard-grid {
+    display: grid;
+    gap: 3px;
+    width: min(100cqw, 100cqh * var(--sheet-ratio));
+    aspect-ratio: var(--sheet-ratio);
+  }
+
+  .storyboard-cell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--canvas-node-bg);
+    box-shadow: inset 0 0 0 1px var(--canvas-node-border);
+    padding: 18px 6px 4px;
+    color: rgb(var(--text-muted-rgb));
+    font-size: 11px;
+    line-height: 15px;
+    text-align: left;
+    transition: box-shadow var(--dur-1) ease, background-color var(--dur-1) ease;
+  }
+
+  .storyboard-cell:hover {
+    box-shadow: inset 0 0 0 1px var(--canvas-node-border-hover);
+  }
+
+  .storyboard-cell[data-active] {
+    background: rgb(var(--accent-rgb) / 0.08);
+    box-shadow: inset 0 0 0 1.5px rgb(var(--accent-rgb));
+    color: rgb(var(--text-rgb));
+  }
+
+  .storyboard-cell__index {
+    position: absolute;
+    top: 4px;
+    left: 6px;
+    color: rgb(var(--text-subtle-rgb));
+    font-size: 10px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .storyboard-cell[data-active] .storyboard-cell__index {
+    color: rgb(var(--accent-rgb));
+  }
+
+  .storyboard-cell__text {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    word-break: break-word;
+  }
+
+  .storyboard-cell__empty {
+    color: rgb(var(--text-subtle-rgb) / 0.6);
+  }
+
+  /* ---------- Text node ---------- */
+
+  .node-frame[data-variant='card'] .node-text {
+    padding: 0;
+  }
+
+  .node-text__view,
+  .node-text__editor {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    padding: 12px 14px;
+    color: rgb(var(--text-rgb) / 0.92);
+    font-size: 14px;
+    line-height: 22px;
+  }
+
+  .node-text__editor {
+    resize: none;
+    background: transparent;
+    outline: none;
+    cursor: text;
+  }
+
+  .node-text__empty {
+    color: rgb(var(--text-subtle-rgb));
+  }
+
+  .node-markdown {
+    overflow-wrap: anywhere;
+  }
+
+  .node-markdown > * + * {
+    margin-top: 10px;
+  }
+
+  .node-markdown h1,
+  .node-markdown h2,
+  .node-markdown h3 {
+    color: rgb(var(--text-rgb));
+    font-weight: 600;
+    line-height: 1.35;
+  }
+
+  .node-markdown h1 { font-size: 17px; }
+  .node-markdown h2 { font-size: 15.5px; }
+  .node-markdown h3 { font-size: 14.5px; }
+
+  .node-markdown ul,
+  .node-markdown ol {
+    padding-left: 20px;
+  }
+
+  .node-markdown ul { list-style: disc; }
+  .node-markdown ol { list-style: decimal; }
+
+  .node-markdown li + li {
+    margin-top: 2px;
+  }
+
+  .node-markdown a {
+    color: rgb(var(--accent-rgb));
+  }
+
+  .node-markdown blockquote {
+    padding-left: 12px;
+    box-shadow: inset 2px 0 0 var(--line-strong);
+    color: rgb(var(--text-muted-rgb));
+  }
+
+  .node-markdown code {
+    padding: 1px 5px;
+    border-radius: var(--r-xs);
+    background: var(--hover);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+
+  .node-markdown pre {
+    overflow: auto;
+    padding: 10px 12px;
+    border-radius: var(--r-sm);
+    background: var(--hover);
+  }
+
+  .node-markdown pre code {
+    padding: 0;
+    background: none;
+  }
+
+  .node-markdown hr {
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .node-markdown table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+
+  .node-markdown th,
+  .node-markdown td {
+    padding: 4px 8px;
+    border: 1px solid var(--line);
+    text-align: left;
   }
 
   /* Placeholder face for media nodes without a result yet. */
@@ -334,6 +668,123 @@
     color: rgb(var(--text-muted-rgb));
     font-size: 13px;
     line-height: 20px;
+  }
+
+  button.node-face {
+    width: 100%;
+    height: 100%;
+    transition: background-color var(--dur-1) ease, color var(--dur-1) ease;
+  }
+
+  button.node-face:disabled {
+    cursor: default;
+  }
+
+  button.node-face:not(:disabled):hover {
+    background: var(--hover);
+    color: rgb(var(--text-muted-rgb));
+  }
+
+  /* Empty material slot: dashed inner outline invites a drop. */
+  button.node-face.node-face--drop {
+    margin: 8px;
+    width: calc(100% - 16px);
+    height: calc(100% - 16px);
+    border: 1.5px dashed var(--line-strong);
+    border-radius: calc(var(--node-radius) - 4px);
+  }
+
+  .node-face strong {
+    color: rgb(var(--text-rgb) / 0.9);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .node-face span {
+    font-size: 12.5px;
+    line-height: 19px;
+  }
+
+  .node-face__detail {
+    max-width: 100%;
+    max-height: 88px;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    color: rgb(var(--text-muted-rgb));
+  }
+
+  .node-face[data-tone='error'] {
+    background: rgb(var(--danger-rgb) / 0.07);
+  }
+
+  .node-face[data-tone='error'] svg,
+  .node-face[data-tone='error'] strong {
+    color: rgb(var(--danger-rgb));
+    opacity: 1;
+  }
+
+  .node-face[data-tone='attention'] {
+    background: rgb(var(--warning-rgb) / 0.07);
+  }
+
+  .node-face[data-tone='attention'] svg,
+  .node-face[data-tone='attention'] strong {
+    color: rgb(var(--warning-rgb));
+    opacity: 1;
+  }
+
+  /* A recovery button inside a problem face keeps the control kit's icon size and colour. */
+  .node-face .ui-btn svg {
+    width: 15px;
+    height: 15px;
+    color: currentColor;
+    opacity: 1;
+  }
+
+  /* Estimated progress for long jobs: a thin bar on the card's bottom edge. */
+  .node-progress {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: calc(3px * var(--canvas-ui-scale));
+    overflow: hidden;
+    background: rgb(var(--accent-rgb) / 0.14);
+    pointer-events: none;
+  }
+
+  .node-progress__bar {
+    height: 100%;
+    background: rgb(var(--accent-rgb));
+    transform-origin: left;
+    transition: transform 200ms linear;
+  }
+
+  .node-warning {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    z-index: 2;
+    display: flex;
+    max-height: 64px;
+    gap: 6px;
+    overflow-y: auto;
+    padding: 6px 8px;
+    border-radius: var(--r-sm);
+    background: rgb(var(--elevated-rgb) / 0.92);
+    box-shadow: inset 0 0 0 1px rgb(var(--warning-rgb) / 0.45);
+    color: rgb(var(--text-rgb) / 0.9);
+    font-size: 11.5px;
+    line-height: 16px;
+    backdrop-filter: blur(8px);
+  }
+
+  .node-warning svg {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    color: rgb(var(--warning-rgb));
   }
 
   /* ---------- Connection handles (⊕) ---------- */
@@ -379,6 +830,9 @@
     box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-pop);
     color: rgb(var(--text-muted-rgb));
     opacity: 0;
+    /* Keep idle connection artwork out of WebKit compositing. The separate
+       handle hit area stays available before hover or a connection starts. */
+    visibility: hidden;
     pointer-events: none;
     transform: translate(-50%, -50%) scale(calc(var(--canvas-ui-scale) * 0.7));
     transition:
@@ -397,7 +851,13 @@
   .react-flow__node.selected .node-handle__dot,
   .canvas-root[data-connecting] .node-handle__dot {
     opacity: 1;
+    visibility: visible;
     transform: translate(-50%, -50%) scale(var(--canvas-ui-scale));
+  }
+
+  .canvas-root[data-viewport-transform] .node-handle__dot,
+  .canvas-root[data-panning] .node-handle__dot {
+    visibility: hidden;
   }
 
   .canvas-root .node-handle:hover .node-handle__dot,
@@ -418,14 +878,41 @@
   /* ---------- Resize corners ---------- */
 
   .canvas-root .node-resize.react-flow__resize-control.handle {
-    width: calc(12px * var(--canvas-ui-scale));
-    height: calc(12px * var(--canvas-ui-scale));
-    border: calc(1.5px * var(--canvas-ui-scale)) solid rgb(var(--accent-rgb));
-    border-radius: calc(3px * var(--canvas-ui-scale));
+    width: calc(12px * var(--canvas-handle-scale));
+    height: calc(12px * var(--canvas-handle-scale));
+    border: calc(1.5px * var(--canvas-handle-scale)) solid rgb(var(--accent-rgb));
+    border-radius: calc(3px * var(--canvas-handle-scale));
     background: rgb(var(--elevated-rgb));
   }
 
   /* ---------- Edges ---------- */
+
+  .canvas-viewport-edges {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    display: none;
+    pointer-events: none;
+    transform-origin: 0 0;
+  }
+
+  .canvas-root[data-viewport-edges] .react-flow__edges > svg[data-viewport-edge-cached] {
+    visibility: hidden;
+  }
+
+  /* Cached GPU ink owns the visible stroke while the SVG remains in the tree for
+     focus, keyboard selection and its wider hit path. */
+  .canvas-root[data-viewport-edge-cache-ready] .react-flow__edges > svg[data-viewport-edge-cached] .canvas-edge__base,
+  .canvas-root[data-viewport-edge-cache-ready] .react-flow__edges > svg[data-viewport-edge-cached] .canvas-edge__flow {
+    visibility: hidden;
+  }
+
+  .canvas-root[data-viewport-edge-cache-ready] .react-flow__edges > svg[data-viewport-edge-cached] .canvas-edge__hit,
+  .canvas-root[data-viewport-edge-cache-ready] .react-flow__edges > svg[data-viewport-edge-cached] .react-flow__edge-interaction {
+    stroke: none;
+    pointer-events: stroke;
+  }
 
   .canvas-root .canvas-edge__base {
     stroke: var(--canvas-edge);
@@ -434,12 +921,13 @@
   }
 
   .canvas-root .canvas-edge__flow {
+    /* WebKit still composites opacity-zero SVG paths across the full edge bounds.
+       Keep inactive highlights out of rendering; the base and hit paths stay live. */
+    display: none;
     stroke: rgb(var(--accent-rgb));
     stroke-width: 2.4;
     stroke-linecap: round;
     stroke-dasharray: 2 10;
-    opacity: 0;
-    transition: opacity var(--dur-1) ease;
   }
 
   .canvas-root .react-flow__edge:hover .canvas-edge__base,
@@ -451,12 +939,26 @@
   .canvas-root .react-flow__edge:hover .canvas-edge__flow,
   .canvas-root .react-flow__edge.selected .canvas-edge__flow,
   .canvas-root .canvas-edge__flow.is-active {
-    opacity: 1;
+    display: inline;
     animation: edge-flow 0.7s linear infinite;
+  }
+
+  /* Moving the view retains the connection itself without animating a second
+     large SVG surface. Restore activity/selection feedback on release. */
+  .canvas-root[data-pointer-transform] .react-flow__edge .canvas-edge__flow,
+  .canvas-root[data-viewport-transform] .react-flow__edge .canvas-edge__flow,
+  .canvas-root[data-panning] .react-flow__edge .canvas-edge__flow {
+    display: none;
   }
 
   .canvas-root .canvas-edge__hit {
     cursor: pointer;
+    pointer-events: stroke;
+  }
+
+  .canvas-root[data-pointer-transform] .react-flow__edge,
+  .canvas-root[data-pointer-transform] .canvas-edge__hit {
+    pointer-events: none;
   }
 
   .canvas-edge__cut {
@@ -670,6 +1172,26 @@
     white-space: nowrap;
   }
 
+  /* Result of a "more" action (saved / downloaded / nothing to do), floating under the bar. */
+  .canvas-selection-bar__feedback {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    translate: -50% 0;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: rgb(var(--elevated-rgb));
+    box-shadow: var(--shadow-pop);
+    color: rgb(var(--text-rgb));
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .canvas-selection-bar__feedback[data-tone='error'] {
+    color: rgb(var(--danger-rgb));
+  }
+
   .canvas-action {
     display: inline-flex;
     height: 30px;
@@ -717,6 +1239,61 @@
     width: 30px;
     padding: 0;
     justify-content: center;
+  }
+
+  /* Single-node toolbar: as many actions as fit, the rest in "More" (NodeToolbar.tsx). */
+  .node-toolbar {
+    position: relative;
+    height: 40px;
+    align-items: center;
+    gap: 2px;
+    padding: 0 4px;
+    animation: ui-pop var(--dur-2) var(--ease-out) both;
+  }
+
+  .canvas-action svg.canvas-action__chevron {
+    width: 12px;
+    height: 12px;
+    margin-left: -2px;
+    opacity: 0.7;
+  }
+
+  .node-toolbar__measure {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+    gap: 2px;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  .node-toolbar__feedback {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 50%;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    translate: -50% 0;
+    border-radius: 999px;
+    background: rgb(var(--elevated-rgb));
+    box-shadow: var(--shadow-pop);
+    color: rgb(var(--success-rgb));
+    font-size: 12px;
+    white-space: nowrap;
+    animation: ui-pop var(--dur-2) var(--ease-out) both;
+  }
+
+  .node-toolbar__feedback[data-tone='error'] {
+    color: rgb(var(--danger-rgb));
+  }
+
+  .node-toolbar__feedback svg {
+    width: 13px;
+    height: 13px;
   }
 
   /* ---------- Empty state & hints ---------- */
@@ -870,21 +1447,138 @@
     color: rgb(var(--text-muted-rgb));
   }
 
+  /* ---------- Node composer (floating generator) ---------- */
+
   .node-composer {
     display: flex;
+    width: min(640px, calc(100vw - 48px));
     flex-direction: column;
-    gap: 8px;
-    padding: 12px;
+    gap: 10px;
+    padding: 12px 12px 10px;
     border-radius: var(--r-xl);
     background: rgb(var(--elevated-rgb));
     box-shadow: var(--shadow-float);
+    animation: ui-pop var(--dur-2) var(--ease-out) both;
   }
 
-  .node-composer__field {
+  .node-composer__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+  }
+  .node-composer__actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 3px 7px;
+    border-radius: var(--r-sm);
+    font-size: 12px;
+    color: rgb(var(--text-muted-rgb));
+  }
+  .node-composer__actions button:hover { background: var(--hover); color: rgb(var(--text-rgb)); }
+  .node-composer__actions svg { width: 14px; height: 14px; }
+
+  .node-composer__refs {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 4px 2px 2px;
+  }
+
+  .node-composer__ref-tile {
     position: relative;
-    min-height: 0;
-    flex: 1;
-    border-radius: var(--r-md);
+    display: inline-flex;
+    flex: none;
+  }
+
+  .node-composer__ref-remove {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    z-index: 1;
+    display: grid;
+    width: 18px;
+    height: 18px;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: rgb(var(--elevated-rgb));
+    color: rgb(var(--text-muted-rgb));
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+  }
+  .node-composer__ref-remove:hover,
+  .node-composer__ref-remove:focus-visible {
+    background: rgb(var(--danger-rgb));
+    color: #fff;
+  }
+  .node-composer__ref-remove svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .node-composer__ref {
+    position: relative;
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    overflow: hidden;
+    border-radius: var(--r-sm);
+    background: var(--hover);
+    box-shadow: inset 0 0 0 1px var(--line);
+    transition: box-shadow var(--dur-1) ease, transform var(--dur-1) ease;
+  }
+
+  .node-composer__ref:hover {
+    box-shadow: inset 0 0 0 1.5px rgb(var(--accent-rgb) / 0.7);
+  }
+
+  .node-composer__ref:active {
+    transform: scale(0.96);
+  }
+
+  .node-composer__ref img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .node-composer__ref-icon {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    color: rgb(var(--text-muted-rgb));
+  }
+
+  .node-composer__ref-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .node-composer__ref-label {
+    position: absolute;
+    bottom: 2px;
+    left: 2px;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: rgb(0 0 0 / 0.62);
+    color: #fff;
+    font-size: 10px;
+    line-height: 15px;
+  }
+
+  .node-composer__notice {
+    margin: -2px 2px 0;
+    color: rgb(var(--warning-rgb));
+    font-size: 12px;
+    line-height: 17px;
   }
 
   .node-composer__bar {
@@ -894,40 +1588,201 @@
     gap: 6px;
   }
 
-  .btn-generate {
+  .node-composer__params {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .node-composer__send {
     display: inline-flex;
+    width: 34px;
     height: 34px;
     flex: none;
     align-items: center;
-    gap: 6px;
-    padding: 0 14px;
+    justify-content: center;
     border-radius: 999px;
     background: var(--primary-bg);
     color: var(--primary-fg);
-    font-size: 13px;
-    font-weight: 600;
     transition: background-color var(--dur-1) ease, transform var(--dur-1) ease, opacity var(--dur-1) ease;
   }
 
-  .btn-generate:hover {
+  .node-composer__send:hover:not(:disabled) {
     background: var(--primary-hover);
   }
 
-  .btn-generate:active {
-    transform: scale(0.97);
+  .node-composer__send:active:not(:disabled) {
+    transform: scale(0.94);
   }
 
-  .btn-generate:disabled {
-    cursor: not-allowed;
-    opacity: 0.4;
+  .node-composer__send:disabled {
+    cursor: progress;
+    opacity: 0.6;
   }
 
-  .btn-generate svg {
-    width: 15px;
-    height: 15px;
+  .node-composer__send svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  /* Parameter chip: model, ratio, count. Opens a menu or popover. */
+  .composer-chip {
+    display: inline-flex;
+    height: 30px;
+    max-width: 220px;
+    flex: none;
+    align-items: center;
+    gap: 5px;
+    padding: 0 9px;
+    border-radius: var(--r-md);
+    color: rgb(var(--text-muted-rgb));
+    font-size: 12.5px;
+    white-space: nowrap;
+    transition: background-color var(--dur-1) ease, color var(--dur-1) ease;
+  }
+
+  .composer-chip:hover,
+  .composer-chip[aria-expanded='true'] {
+    background: var(--hover);
+    color: rgb(var(--text-rgb));
+  }
+
+  .composer-chip[data-active] {
+    background: rgb(var(--accent-rgb) / 0.14);
+    color: rgb(var(--accent-rgb));
+  }
+
+  .composer-chip svg {
+    width: 14px;
+    height: 14px;
+    flex: none;
+  }
+
+  .composer-chip__text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ---------- Prompt editor ---------- */
+
+  .composer-prompt {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .composer-source-chip {
+    display: inline-flex;
+    height: 24px;
+    align-self: flex-start;
+    align-items: center;
+    gap: 4px;
+    padding: 0 4px 0 9px;
+    border-radius: 999px;
+    background: rgb(var(--accent-rgb) / 0.14);
+    color: rgb(var(--accent-rgb));
+    font-size: 12px;
+  }
+
+  .composer-source-chip button {
+    display: inline-flex;
+    width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+  }
+
+  .composer-source-chip button:hover {
+    background: rgb(var(--accent-rgb) / 0.2);
+  }
+
+  .composer-source-chip svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .composer-prompt__field {
+    position: relative;
+    min-height: 72px;
+    max-height: 220px;
+  }
+
+  .composer-prompt__highlight,
+  .composer-prompt__input {
+    padding: 2px 4px;
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 22px;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  .composer-prompt__highlight {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    color: rgb(var(--text-rgb));
+    pointer-events: none;
+  }
+
+  /* The textarea grows with its content (field-sizing) and scrolls past max-height. */
+  .composer-prompt__input {
+    position: relative;
+    display: block;
+    width: 100%;
+    min-height: 72px;
+    max-height: 220px;
+    field-sizing: content;
+    overflow-y: auto;
+    resize: none;
+    background: transparent;
+    caret-color: rgb(var(--text-rgb));
+    color: transparent;
+    outline: none;
+  }
+
+  .composer-prompt__input::placeholder {
+    color: rgb(var(--text-subtle-rgb));
+  }
+
+  .composer-token {
+    border-radius: 5px;
+    background: rgb(var(--accent-rgb) / 0.2);
+    box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / 0.35);
+    color: rgb(var(--accent-rgb));
+  }
+
+  .composer-ref-thumb {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    object-fit: cover;
+  }
+
+  .composer-menu-label-icon {
+    display: inline;
+    width: 12px;
+    height: 12px;
+    margin-right: 4px;
+    vertical-align: -1px;
   }
 
   /* ---------- Level of detail (far zoom) ---------- */
+
+  /* Reuse each small far-zoom card's raster during camera movement. Without
+     promotion Chromium repaints the whole thousand-card surface on every pan.
+     Close-up nodes keep ordinary compositing and visibility culling. */
+  .canvas-root[data-far-zoom] .react-flow__node {
+    will-change: transform;
+  }
 
   .node-lod {
     position: relative;
@@ -1104,6 +1959,103 @@
     gap: 12px;
     color: rgb(var(--text-rgb) / 0.88);
     font-size: 13px;
+  }
+
+  /* ---------- Agent launcher (lives in the app top bar's actions slot) ---------- */
+
+  .canvas-agent-launcher {
+    position: relative;
+    height: 26px;
+    gap: 6px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0 10px;
+    color: rgb(var(--text-muted-rgb));
+    font-size: 12px;
+    transition: background-color var(--dur-1) ease, color var(--dur-1) ease, border-color var(--dur-1) ease;
+  }
+
+  .canvas-agent-launcher svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .canvas-agent-launcher:hover {
+    border-color: rgb(var(--accent-rgb) / 0.5);
+    color: rgb(var(--text-rgb));
+  }
+
+  .canvas-agent-launcher[aria-pressed='true'] {
+    border-color: rgb(var(--accent-rgb) / 0.55);
+    background: rgb(var(--accent-rgb) / 0.14);
+    color: rgb(var(--text-rgb));
+  }
+
+  /* ---------- Shared interaction states ----------
+     Keyboard focus uses the kit ring (rounded, follows radius) instead of the square base outline;
+     press feedback is background-only so inline transforms (edge cut, screen scaling) stay intact. */
+
+  .canvas-action:focus-visible,
+  .canvas-tool:focus-visible,
+  .canvas-controls__zoom:focus-visible,
+  .canvas-agent-launcher:focus-visible,
+  .composer-chip:focus-visible,
+  .composer-source-chip button:focus-visible,
+  .node-frame__actions button:focus-visible,
+  .canvas-edge__cut:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--bg-rgb)), 0 0 0 4px rgb(var(--accent-rgb) / 0.7);
+  }
+
+  .canvas-palette__item:focus-visible,
+  .storyboard-cell:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / 0.7);
+  }
+
+  .node-frame__title-input:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--accent-rgb) / 0.35);
+  }
+
+  .canvas-action:active:not(:disabled),
+  .canvas-tool:active:not(:disabled),
+  .canvas-controls__zoom:active:not(:disabled),
+  .canvas-palette__item:active,
+  .canvas-agent-launcher:active,
+  .composer-chip:active:not(:disabled),
+  .node-frame__actions button:active:not(:disabled) {
+    background: var(--press);
+  }
+
+  .canvas-agent-launcher:hover {
+    background: var(--hover);
+  }
+
+  .composer-source-chip button:active {
+    background: rgb(var(--accent-rgb) / 0.3);
+  }
+
+  .canvas-edge__cut:active {
+    background: rgb(var(--danger-rgb) / 0.82);
+    color: #fff;
+  }
+
+  .storyboard-cell:active {
+    background: var(--press);
+  }
+
+  /* Actions reveal on hover/selection; keyboard users reaching them must see them too. */
+  .node-frame__actions:focus-within {
+    opacity: 1;
+  }
+
+  .canvas-action:disabled,
+  .canvas-tool:disabled,
+  .composer-chip:disabled,
+  .node-frame__actions button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 }
 

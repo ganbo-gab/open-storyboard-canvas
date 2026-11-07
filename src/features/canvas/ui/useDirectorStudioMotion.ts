@@ -7,24 +7,39 @@ import type {
   BlueprintItem,
   BlueprintNodeData,
   DirectorActionClip,
+  DirectorCameraRig,
+  DirectorCameraRigKind,
+  DirectorMotionKeyframeBase,
   DirectorMotionProjectV1,
   DirectorMotionVector3,
 } from '@/features/canvas/domain/canvasNodes';
 import {
-  DIRECTOR_STATIC_POSE_MAP,
+  DIRECTOR_CAMERA_RIG_DEFAULTS,
+  DIRECTOR_CAMERA_RIG_MIN_SECONDS,
+  DIRECTOR_MOTION_MAX_DURATION_SECONDS,
+  DIRECTOR_MOTION_MIN_DURATION_SECONDS,
   createClipFromActionTrack,
-  createDirectorCameraRouteTrack,
   createDirectorCameraPresetTrack,
   createDirectorMotionId,
-  createDirectorObjectRouteTrack,
   createObjectKeyframeFromItem,
   deleteDirectorMotionClip,
   normalizeDirectorMotionProject,
   retimeDirectorTrack,
   sampleNormalizedDirectorMotion,
+  splitDirectorActionSegment,
+  splitDirectorCameraRig,
+  duplicateDirectorCameraRig,
+  bringDirectorCameraRigToFront,
+  retimeDirectorCameraRig,
   upsertDirectorKeyframe,
   type DirectorCameraPresetId,
 } from '@/features/canvas/application/directorMotion';
+import { prepareStageCommands } from '@/features/stage/application/stageOperations';
+import { retimeStageRoute, toggleStageRouteClosed } from '@/features/stage/application/stageRouteEditing';
+import type { StageCommand, StageLookAt } from '@/features/stage/domain/stage';
+import { showErrorDialog } from '@/features/canvas/application/errorDialog';
+import { resolvePersonActionPose } from '@/features/canvas/application/personMotionLibrary';
+import { applyPersonPosePatch, normalizePersonPose, overlayPersonPose, type PersonPosePatch } from '@/features/canvas/domain/personPose';
 import {
   DirectorRecordingCancelledError,
   downloadDirectorVideo,
@@ -42,6 +57,19 @@ import type {
   DirectorSceneCameraSnapshot,
 } from './BlueprintScene';
 import type { DirectorKeyframePatch, DirectorKeyframeSelection } from './DirectorMotionInspector';
+
+export type DirectorKeyframeTrackRef = Pick<DirectorKeyframeSelection, 'kind' | 'trackId'>;
+
+/** Apply one track update to the camera, object or action track named by `ref`. */
+function updateKeyframeTrack(
+  project: DirectorMotionProjectV1,
+  ref: DirectorKeyframeTrackRef,
+  update: <T extends DirectorMotionKeyframeBase>(track: T[]) => T[],
+): DirectorMotionProjectV1 {
+  if (ref.kind === 'camera') return { ...project, cameraTrack: update(project.cameraTrack) };
+  if (ref.kind === 'object') return { ...project, objectTracks: { ...project.objectTracks, [ref.trackId]: update(project.objectTracks[ref.trackId] ?? []) } };
+  return { ...project, actionTracks: { ...project.actionTracks, [ref.trackId]: update(project.actionTracks[ref.trackId] ?? []) } };
+}
 
 type Options = {
   data: BlueprintNodeData;
@@ -62,6 +90,9 @@ export interface DirectorVideoExportRequest {
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
+
+/** Half a 24 fps frame: an edit at the playhead updates a keyframe sitting on that frame. */
+const POSE_KEYFRAME_SNAP_SECONDS = 1 / 48;
 
 export function useDirectorStudioMotion({
   data,
@@ -133,66 +164,212 @@ export function useDirectorStudioMotion({
     onUpdateNodeData({ motionProject: normalizeDirectorMotionProject(nextProject) });
   }, [onUpdateNodeData]);
 
-  const patchMotionKeyframe = useCallback((selection: DirectorKeyframeSelection, patch: DirectorKeyframePatch) => {
+  const splitAtTime = useCallback((kind: 'camera' | 'object' | 'action', trackId: string, time: number) => {
+    try {
+      const data = latestDataRef.current;
+      if (kind !== 'camera' && data.items.find((item) => item.id === trackId)?.locked) throw new Error(t('ui.stage.selection.lockedHint', { name: data.items.find((item) => item.id === trackId)?.label }));
+      updateMotionProject((project) => {
+        if (kind === 'action') {
+          const frame = [...(project.actionTracks[trackId] ?? [])].reverse().find((entry) => entry.time <= time);
+          if (frame?.clipId) return prepareStageCommands(data, [{ type: 'clip.split', clipId: frame.clipId, time, clipStart: frame.time - (frame.actionOffsetSeconds ?? 0) }]).data.motionProject!;
+          return splitDirectorActionSegment(project, trackId, time).project;
+        }
+        const track = kind === 'camera' ? project.cameraTrack : project.objectTracks[trackId] ?? [];
+        const before = [...track].reverse().find((frame) => frame.time < time);
+        const after = track.find((frame) => frame.time > time);
+        if (!before || !after || time - before.time < 0.2 || after.time - time < 0.2) throw new Error(t('ui.stage.rig.editError'));
+        const sampled = sampleNormalizedDirectorMotion(project, time, data.items);
+        const [rangeStart, rangeEnd] = after.easingRange ?? [0, 1];
+        const midpoint = rangeStart + (time - before.time) / (after.time - before.time) * (rangeEnd - rangeStart);
+        const leftRange: [number, number] = [rangeStart, midpoint];
+        const rightRange: [number, number] = [midpoint, rangeEnd];
+        if (kind === 'camera') {
+          if (!sampled.camera) throw new Error(t('ui.stage.rig.editError'));
+          const adjusted = project.cameraTrack.map((frame) => frame.id === after.id ? { ...frame, easingRange: rightRange } : frame);
+          return { ...project, cameraTrack: upsertDirectorKeyframe(adjusted, { ...sampled.camera, id: createDirectorMotionId('camera-cut'), time, easing: after.easing, easingRange: leftRange }) };
+        }
+        const object = sampled.objects[trackId];
+        if (!object) throw new Error(t('ui.stage.rig.editError'));
+        const adjusted = (project.objectTracks[trackId] ?? []).map((frame) => frame.id === after.id ? { ...frame, easingRange: rightRange } : frame);
+        return { ...project, objectTracks: { ...project.objectTracks, [trackId]: upsertDirectorKeyframe(adjusted, { ...object, id: createDirectorMotionId('object-cut'), time, easing: after.easing, easingRange: leftRange }) } };
+      });
+    } catch (error) { void showErrorDialog(error instanceof Error ? error.message : t('ui.stage.rig.editError'), t('common.error')); }
+  }, [t, updateMotionProject]);
+
+  const copyMotionTrack = useCallback((kind: 'camera' | 'object', trackId: string, start: number, end: number) => {
+    const item = latestDataRef.current.items.find((entry) => entry.id === trackId);
+    if (kind === 'object' && item?.locked) return;
     updateMotionProject((project) => {
-      const patchTrack = <T extends { id: string; time: number }>(track: T[]): T[] => track
-        .map((keyframe) => keyframe.id === selection.keyframeId ? { ...keyframe, ...patch } as T : keyframe)
-        .sort((a, b) => a.time - b.time);
-      if (selection.kind === 'camera') return { ...project, cameraTrack: patchTrack(project.cameraTrack) };
-      if (selection.kind === 'object') return { ...project, objectTracks: { ...project.objectTracks, [selection.trackId]: patchTrack(project.objectTracks[selection.trackId] ?? []) } };
-      return { ...project, actionTracks: { ...project.actionTracks, [selection.trackId]: patchTrack(project.actionTracks[selection.trackId] ?? []) } };
+      if (kind === 'camera') {
+        const copied = retimeDirectorTrack(project.cameraTrack, start, end, project.durationSeconds).map((frame) => ({ ...frame, id: createDirectorMotionId('camera-copy') }));
+        return { ...project, cameraTrack: [...project.cameraTrack, ...copied].sort((a, b) => a.time - b.time) };
+      }
+      const copied = retimeDirectorTrack(project.objectTracks[trackId] ?? [], start, end, project.durationSeconds).map((frame) => ({ ...frame, id: createDirectorMotionId('object-copy') }));
+      return { ...project, objectTracks: { ...project.objectTracks, [trackId]: [...project.objectTracks[trackId] ?? [], ...copied].sort((a, b) => a.time - b.time) } };
     });
   }, [updateMotionProject]);
+
+  const editCameraRigSegment = useCallback((id: string, operation: 'split' | 'duplicate' | 'front') => {
+    try { updateMotionProject((project) => operation === 'split' ? splitDirectorCameraRig(project, id, motionTimeRef.current).project
+      : operation === 'duplicate' ? duplicateDirectorCameraRig(project, id, motionTimeRef.current).project : bringDirectorCameraRigToFront(project, id)); }
+    catch (error) { void showErrorDialog(error instanceof Error ? error.message : t('ui.stage.rig.editError'), t('common.error')); }
+  }, [updateMotionProject, t]);
+  const retimeCameraRig = useCallback((id: string, start: number, end: number, copy: boolean) => {
+    try { updateMotionProject((project) => {
+      if (!copy) return retimeDirectorCameraRig(project, id, start, end);
+      const duplicated = duplicateDirectorCameraRig(project, id, start);
+      return retimeDirectorCameraRig(duplicated.project, duplicated.rigId, start, end);
+    }); } catch (error) { void showErrorDialog(error instanceof Error ? error.message : t('ui.stage.rig.editError'), t('common.error')); }
+  }, [updateMotionProject, t]);
+
+  // Rig parameters stream while a slider is dragged: render the preview from a draft project and
+  // commit once on release, so one drag is one undo step.
+  const [rigDraft, setRigDraft] = useState<DirectorCameraRig | null>(null);
+  const previewProject = useMemo(
+    () => rigDraft ? { ...motionProject, cameraRigs: motionProject.cameraRigs.map((rig) => rig.id === rigDraft.id ? rigDraft : rig) } : motionProject,
+    [motionProject, rigDraft],
+  );
+
+  /** Add a follow / close-up rig on `itemId` from the playhead to the end of its route (or the shot). */
+  const addCameraRig = useCallback((kind: DirectorCameraRigKind, itemId: string) => {
+    const item = latestDataRef.current.items.find((candidate) => candidate.id === itemId);
+    if (!item) return null;
+    const project = motionProjectRef.current;
+    const start = Math.min(motionTimeRef.current, project.durationSeconds - DIRECTOR_CAMERA_RIG_MIN_SECONDS);
+    const route = project.objectTracks[itemId] ?? [];
+    const routeEnd = route.length ? route[route.length - 1].time : 0;
+    const end = routeEnd > start + DIRECTOR_CAMERA_RIG_MIN_SECONDS ? routeEnd : project.durationSeconds;
+    const rig: DirectorCameraRig = {
+      id: createDirectorMotionId(`rig-${kind}`),
+      kind,
+      targetId: itemId,
+      start,
+      end,
+      ...DIRECTOR_CAMERA_RIG_DEFAULTS[kind],
+    };
+    updateMotionProject((current) => ({ ...current, cameraRigs: [...current.cameraRigs, rig] }));
+    return rig.id;
+  }, [updateMotionProject]);
+
+  const previewCameraRig = useCallback((rigId: string, patch: Partial<DirectorCameraRig>) => {
+    const base = motionProjectRef.current.cameraRigs.find((rig) => rig.id === rigId);
+    if (!base) return;
+    setRigDraft((draft) => ({ ...(draft?.id === rigId ? draft : base), ...patch }));
+  }, []);
+
+  /** Commits a rig edit and drops the preview draft; an unchanged patch records no undo step. */
+  const updateCameraRig = useCallback((rigId: string, patch: Partial<DirectorCameraRig>) => {
+    setRigDraft(null);
+    const current = motionProjectRef.current.cameraRigs.find((rig) => rig.id === rigId);
+    if (!current || (Object.keys(patch) as Array<keyof DirectorCameraRig>).every((key) => Object.is(current[key], patch[key]))) return;
+    updateMotionProject((project) => ({
+      ...project,
+      cameraRigs: project.cameraRigs.map((rig) => rig.id === rigId ? { ...rig, ...patch } : rig),
+    }));
+  }, [updateMotionProject]);
+
+  const deleteCameraRig = useCallback((rigId: string) => {
+    setRigDraft(null);
+    updateMotionProject((project) => ({ ...project, cameraRigs: project.cameraRigs.filter((rig) => rig.id !== rigId) }));
+  }, [updateMotionProject]);
+
+  /**
+   * Bake a rig into ordinary camera keyframes (4 per second) so it can be hand-tweaked; the rig is removed.
+   * Keys outside the rig's interval are kept.
+   */
+  const bakeCameraRig = useCallback((rigId: string) => {
+    setRigDraft(null);
+    let firstId: string | null = null;
+    updateMotionProject((project) => {
+      const rig = project.cameraRigs.find((entry) => entry.id === rigId);
+      const item = rig ? latestDataRef.current.items.find((candidate) => candidate.id === rig.targetId) : undefined;
+      if (!rig || !item) return project;
+      const steps = Math.max(1, Math.ceil((rig.end - rig.start) * 4));
+      const rest = { ...project, cameraRigs: project.cameraRigs.filter((entry) => entry.id !== rigId) };
+      const frames = Array.from({ length: steps + 1 }, (_, index) => {
+        const time = rig.start + (rig.end - rig.start) * (index / steps);
+        const sampled = sampleNormalizedDirectorMotion(project, time, latestDataRef.current.items).camera;
+        return {
+          id: createDirectorMotionId('rig-bake'),
+          time,
+          easing: 'linear' as const,
+          position: sampled?.position ?? { x: 0, y: 1.6, z: 5 },
+          target: sampled?.target ?? { x: 0, y: 1, z: 0 },
+          fov: sampled?.fov ?? rig.fov,
+          trackTargetId: null,
+          trackTargetBodyPart: null,
+        };
+      });
+      firstId = frames[0].id;
+      return {
+        ...rest,
+        cameraTrack: [
+          ...project.cameraTrack.filter((frame) => frame.time < rig.start - 0.001 || frame.time > rig.end + 0.001),
+          ...frames,
+        ].sort((a, b) => a.time - b.time),
+      };
+    });
+    if (firstId) setMotionSelection({ kind: 'camera', trackId: 'camera', keyframeId: firstId });
+  }, [updateMotionProject]);
+
+  const patchMotionKeyframes = useCallback((ref: DirectorKeyframeTrackRef, keyframeIds: string[], patch: DirectorKeyframePatch) => {
+    const ids = new Set(keyframeIds);
+    updateMotionProject((project) => updateKeyframeTrack(project, ref, (track) => track
+      .map((keyframe) => ids.has(keyframe.id) ? { ...keyframe, ...patch } as typeof keyframe : keyframe)
+      .sort((a, b) => a.time - b.time)));
+  }, [updateMotionProject]);
+
+  const patchMotionKeyframe = useCallback((selection: DirectorKeyframeSelection, patch: DirectorKeyframePatch) => {
+    patchMotionKeyframes(selection, [selection.keyframeId], patch);
+  }, [patchMotionKeyframes]);
 
   const moveMotionKeyframe = useCallback((selection: DirectorKeyframeSelection, time: number) => {
     patchMotionKeyframe(selection, { time: Math.min(motionProject.durationSeconds, Math.max(0, time)) });
   }, [motionProject.durationSeconds, patchMotionKeyframe]);
 
-  const retimeMotionTrack = useCallback((kind: 'camera' | 'object', trackId: string, start: number, end: number) => {
-    updateMotionProject((project) => {
-      if (kind === 'camera') {
-        return { ...project, cameraTrack: retimeDirectorTrack(project.cameraTrack, start, end, project.durationSeconds) };
-      }
-      return {
-        ...project,
-        objectTracks: {
-          ...project.objectTracks,
-          [trackId]: retimeDirectorTrack(project.objectTracks[trackId] ?? [], start, end, project.durationSeconds),
-        },
-      };
-    });
+  /** Copy a keyframe to `time` (⌘-drag, duplicate); the copy becomes the selection. */
+  const copyMotionKeyframe = useCallback((selection: DirectorKeyframeSelection, time: number) => {
+    const id = createDirectorMotionId('duplicate');
+    let copied = false;
+    updateMotionProject((project) => updateKeyframeTrack(project, selection, (track) => {
+      const source = track.find((keyframe) => keyframe.id === selection.keyframeId);
+      if (!source) return track;
+      copied = true;
+      return upsertDirectorKeyframe(track, { ...cloneJson(source), id, time: Math.min(project.durationSeconds, Math.max(0, time)) });
+    }));
+    if (copied) setMotionSelection({ kind: selection.kind, trackId: selection.trackId, keyframeId: id });
   }, [updateMotionProject]);
 
   const duplicateMotionKeyframe = useCallback((selection: DirectorKeyframeSelection) => {
-    updateMotionProject((project) => {
-      const duplicateTrack = <T extends { id: string; time: number }>(track: T[]): T[] => {
-        const source = track.find((keyframe) => keyframe.id === selection.keyframeId);
-        if (!source) return track;
-        return upsertDirectorKeyframe(track, { ...cloneJson(source), id: createDirectorMotionId('duplicate'), time: Math.min(project.durationSeconds, source.time + 0.5) });
-      };
-      if (selection.kind === 'camera') return { ...project, cameraTrack: duplicateTrack(project.cameraTrack) };
-      if (selection.kind === 'object') return { ...project, objectTracks: { ...project.objectTracks, [selection.trackId]: duplicateTrack(project.objectTracks[selection.trackId] ?? []) } };
-      return { ...project, actionTracks: { ...project.actionTracks, [selection.trackId]: duplicateTrack(project.actionTracks[selection.trackId] ?? []) } };
-    });
+    const source = [
+      ...motionProject.cameraTrack,
+      ...(motionProject.objectTracks[selection.trackId] ?? []),
+      ...(motionProject.actionTracks[selection.trackId] ?? []),
+    ].find((keyframe) => keyframe.id === selection.keyframeId);
+    if (source) copyMotionKeyframe(selection, source.time + 0.5);
+  }, [copyMotionKeyframe, motionProject]);
+
+  const deleteMotionKeyframes = useCallback((ref: DirectorKeyframeTrackRef, keyframeIds: string[]) => {
+    const ids = new Set(keyframeIds);
+    updateMotionProject((project) => updateKeyframeTrack(project, ref, (track) => track.filter((keyframe) => !ids.has(keyframe.id))));
+    setMotionSelection((selection) => selection && ids.has(selection.keyframeId) ? null : selection);
   }, [updateMotionProject]);
 
   const deleteMotionKeyframe = useCallback((selection: DirectorKeyframeSelection) => {
-    updateMotionProject((project) => {
-      if (selection.kind === 'camera') return { ...project, cameraTrack: project.cameraTrack.filter((keyframe) => keyframe.id !== selection.keyframeId) };
-      if (selection.kind === 'object') return { ...project, objectTracks: { ...project.objectTracks, [selection.trackId]: (project.objectTracks[selection.trackId] ?? []).filter((keyframe) => keyframe.id !== selection.keyframeId) } };
-      return { ...project, actionTracks: { ...project.actionTracks, [selection.trackId]: (project.actionTracks[selection.trackId] ?? []).filter((keyframe) => keyframe.id !== selection.keyframeId) } };
-    });
-    setMotionSelection(null);
-  }, [updateMotionProject]);
+    deleteMotionKeyframes(selection, [selection.keyframeId]);
+  }, [deleteMotionKeyframes]);
 
-  const saveCameraKeyframe = useCallback((snapshot: DirectorSceneCameraSnapshot) => {
+  /** Upsert the camera keyframe at the playhead; returns its id. */
+  const saveCameraKeyframe = useCallback((snapshot: DirectorSceneCameraSnapshot): string => {
     const time = motionTimeRef.current;
+    let keyframeId = createDirectorMotionId('camera');
     updateMotionProject((project) => {
       const existing = project.cameraTrack.find((keyframe) => Math.abs(keyframe.time - time) <= 0.025);
+      if (existing) keyframeId = existing.id;
       return {
         ...project,
         cameraTrack: upsertDirectorKeyframe(project.cameraTrack, {
-          id: existing?.id ?? createDirectorMotionId('camera'),
+          id: keyframeId,
           time,
           easing: existing?.easing ?? 'smooth',
           position: snapshot.position,
@@ -203,17 +380,29 @@ export function useDirectorStudioMotion({
         }),
       };
     });
+    return keyframeId;
   }, [pilotTargetId, updateMotionProject]);
 
+  // Explicit keying (◇ button, K) selects the new key so Delete / easing act on it right away.
   const addCameraMotionKeyframe = useCallback(() => {
     const snapshot = editorRef.current?.getCameraSnapshot();
-    if (snapshot) saveCameraKeyframe(snapshot);
+    if (!snapshot) return;
+    const keyframeId = saveCameraKeyframe(snapshot);
+    setMotionSelection({ kind: 'camera', trackId: 'camera', keyframeId });
   }, [editorRef, saveCameraKeyframe]);
 
   const addObjectMotionKeyframe = useCallback((itemId: string) => {
     const item = latestDataRef.current.items.find((candidate) => candidate.id === itemId);
     if (!item) return;
-    updateMotionProject((project) => ({ ...project, objectTracks: { ...project.objectTracks, [itemId]: upsertDirectorKeyframe(project.objectTracks[itemId] ?? [], createObjectKeyframeFromItem(item, motionTimeRef.current)) } }));
+    const keyframe = createObjectKeyframeFromItem(item, motionTimeRef.current);
+    let keyframeId = keyframe.id;
+    updateMotionProject((project) => {
+      const track = project.objectTracks[itemId] ?? [];
+      const existing = track.find((frame) => Math.abs(frame.time - keyframe.time) <= 0.025);
+      if (existing) keyframeId = existing.id;
+      return { ...project, objectTracks: { ...project.objectTracks, [itemId]: upsertDirectorKeyframe(track, keyframe) } };
+    });
+    setMotionSelection({ kind: 'object', trackId: itemId, keyframeId });
   }, [updateMotionProject]);
 
   const addActionMotionKeyframe = useCallback((itemId: string, state?: { poseId?: string; actionId?: string; clipId?: string; pose?: BlueprintActionPose; bodyControls?: BlueprintBodyControls }) => {
@@ -222,7 +411,7 @@ export function useDirectorStudioMotion({
     const action = {
       ...(state ?? {
         poseId: item.action ?? undefined,
-        pose: item.action ? DIRECTOR_STATIC_POSE_MAP[item.action] ?? latestDataRef.current.customActionPoses?.[item.action] : undefined,
+        pose: overlayPersonPose(resolvePersonActionPose(item.action ?? undefined, latestDataRef.current.customActionPoses), normalizePersonPose(item.pose)),
       }),
       bodyControls: cloneJson(state?.bodyControls ?? item.bodyControls ?? {}),
     };
@@ -234,17 +423,86 @@ export function useDirectorStudioMotion({
     setMotionSelection({ kind: 'action', trackId: itemId, keyframeId: id });
   }, [updateMotionProject]);
 
+  /**
+   * Viewport/inspector pose edit in previs: overlay the edited joints on the
+   * action keyframe under the playhead (keeping its action and phase), or
+   * create one holding exactly the pose that was on screen.
+   */
+  const recordPersonPose = useCallback((itemId: string, edit: { patch: PersonPosePatch; pose: BlueprintActionPose }) => {
+    const item = latestDataRef.current.items.find((candidate) => candidate.id === itemId);
+    if (!item || item.category !== 'person') return;
+    const time = motionTimeRef.current;
+    let keyframeId = '';
+    updateMotionProject((project) => {
+      const track = project.actionTracks[itemId] ?? [];
+      const existing = track.find((keyframe) => Math.abs(keyframe.time - time) <= POSE_KEYFRAME_SNAP_SECONDS);
+      const keyframe = existing
+        ? { ...existing, pose: applyPersonPosePatch(existing.pose, edit.patch) }
+        : { id: createDirectorMotionId('action'), time, easing: 'smooth' as const, pose: edit.pose, bodyControls: cloneJson(item.bodyControls ?? {}) };
+      keyframeId = keyframe.id;
+      return { ...project, actionTracks: { ...project.actionTracks, [itemId]: upsertDirectorKeyframe(track, keyframe) } };
+    });
+    if (keyframeId) setMotionSelection({ kind: 'action', trackId: itemId, keyframeId });
+  }, [updateMotionProject]);
+
+  /** Drop pose edits from the keyframe under the playhead; a pose-only keyframe is removed. */
+  const clearPersonPoseAt = useCallback((itemId: string) => {
+    const time = motionTimeRef.current;
+    updateMotionProject((project) => {
+      const track = project.actionTracks[itemId] ?? [];
+      const existing = track.find((keyframe) => Math.abs(keyframe.time - time) <= POSE_KEYFRAME_SNAP_SECONDS);
+      if (!existing?.pose) return project;
+      const { pose: _dropped, ...rest } = existing;
+      const next = rest.poseId || rest.actionId || rest.clipId
+        ? track.map((keyframe) => keyframe.id === existing.id ? rest : keyframe)
+        : track.filter((keyframe) => keyframe.id !== existing.id);
+      return { ...project, actionTracks: { ...project.actionTracks, [itemId]: next } };
+    });
+  }, [updateMotionProject]);
+
+  const applyStageEdit = useCallback((commands: StageCommand[]) => {
+    try {
+      const result = prepareStageCommands(latestDataRef.current, commands);
+      onUpdateNodeData({ motionProject: result.data.motionProject });
+      return result;
+    } catch (cause) {
+      void showErrorDialog(commands[0]?.type === 'playback.update'
+        ? t('ui.stage.durationConflict') : cause instanceof Error ? cause.message : String(cause), t('common.error'));
+      return null;
+    }
+  }, [onUpdateNodeData, t]);
+
+  const retimeMotionTrack = useCallback((kind: 'camera' | 'object', trackId: string, start: number, end: number) => {
+    const commands = retimeStageRoute(motionProjectRef.current, { kind, trackId }, start, end);
+    if (commands.length) applyStageEdit(commands);
+  }, [applyStageEdit]);
+
+  const toggleMotionRouteClosed = useCallback((kind: 'camera' | 'object', trackId: string) => {
+    const commands = toggleStageRouteClosed(motionProjectRef.current, { kind, trackId });
+    if (commands.length) applyStageEdit(commands);
+  }, [applyStageEdit]);
+
+  const setCameraLookAt = useCallback((lookAt: StageLookAt) => {
+    const time = motionTimeRef.current;
+    const sampled = sampleNormalizedDirectorMotion(motionProjectRef.current, time, latestDataRef.current.items).camera;
+    if (sampled?.rigId) {
+      void showErrorDialog(t('ui.stage.camera.bakeFirst'), t('common.error'));
+      return false;
+    }
+    const snapshot = sampled ?? editorRef.current?.getCameraSnapshot();
+    if (!snapshot) return false;
+    const result = applyStageEdit([{ type: 'camera.lookAt', time, lookAt, position: snapshot.position, fov: snapshot.fov }]);
+    const frame = result?.data.motionProject?.cameraTrack.find((entry) => Math.abs(entry.time - time) < 0.000001);
+    if (frame) setMotionSelection({ kind: 'camera', trackId: 'camera', keyframeId: frame.id });
+    return Boolean(result);
+  }, [applyStageEdit, editorRef, t]);
+
   const updateMotionDuration = useCallback((duration: number) => {
-    const nextDuration = Math.min(30, Math.max(0.5, duration));
-    updateMotionProject((project) => ({
-      ...project,
-      durationSeconds: nextDuration,
-      cameraTrack: project.cameraTrack.map((keyframe) => ({ ...keyframe, time: Math.min(nextDuration, keyframe.time) })),
-      objectTracks: Object.fromEntries(Object.entries(project.objectTracks).map(([id, track]) => [id, track.map((keyframe) => ({ ...keyframe, time: Math.min(nextDuration, keyframe.time) }))])),
-      actionTracks: Object.fromEntries(Object.entries(project.actionTracks).map(([id, track]) => [id, track.map((keyframe) => ({ ...keyframe, time: Math.min(nextDuration, keyframe.time) }))])),
-    }));
-    publishMotionTime(Math.min(motionTimeRef.current, nextDuration));
-  }, [publishMotionTime, updateMotionProject]);
+    const nextDuration = Math.min(DIRECTOR_MOTION_MAX_DURATION_SECONDS, Math.max(DIRECTOR_MOTION_MIN_DURATION_SECONDS, duration));
+    if (applyStageEdit([{ type: 'playback.update', duration: nextDuration }])) {
+      publishMotionTime(Math.min(motionTimeRef.current, nextDuration));
+    }
+  }, [applyStageEdit, publishMotionTime]);
 
   const applyMotionActionState = useCallback((state: { poseId?: string; actionId?: string; clipId?: string; pose?: BlueprintActionPose; bodyControls?: BlueprintBodyControls }) => {
     if (!selectedItem || selectedItem.category !== 'person') return;
@@ -298,46 +556,26 @@ export function useDirectorStudioMotion({
   const completeMotionRouteDraft = useCallback((points: DirectorMotionVector3[]) => {
     const draft = motionRouteDraft;
     if (!draft || points.length < 2) return;
-    const startTime = Math.min(motionTimeRef.current, Math.max(0, motionProject.durationSeconds - 0.5));
-    let createdSelection: DirectorKeyframeSelection | null = null;
-    updateMotionProject((project) => {
-      const routeEndTime = Math.min(project.durationSeconds, startTime + 4);
-      if (draft.kind === 'camera') {
-        const camera = editorRef.current?.getCameraSnapshot();
-        if (!camera) return project;
-        const routePoints = points.map((point) => ({ ...point, y: camera.position.y }));
-        const route = createDirectorCameraRouteTrack(routePoints, camera, startTime, routeEndTime);
-        if (route.length < 2) return project;
-        createdSelection = { kind: 'camera', trackId: 'camera', keyframeId: route[0].id };
-        return { ...project, cameraTrack: [
-          ...project.cameraTrack.filter((frame) => frame.time < startTime - 0.025),
-          ...route,
-        ] };
-      }
-      const item = latestDataRef.current.items.find((candidate) => candidate.id === draft.trackId);
-      if (!item || item.category !== 'person') return project;
-      const baseY = item.pos3d?.y ?? 0;
-      const routePoints = points.map((point) => ({ ...point, y: baseY }));
-      const route = createDirectorObjectRouteTrack(routePoints, item, startTime, routeEndTime);
-      if (route.length < 2) return project;
-      createdSelection = { kind: 'object', trackId: item.id, keyframeId: route[0].id };
-      return { ...project, objectTracks: { ...project.objectTracks, [item.id]: [
-        ...(project.objectTracks[item.id] ?? []).filter((frame) => frame.time < startTime - 0.025),
-        ...route,
-      ] } };
-    });
-    if (createdSelection) {
-      setMotionSelection(createdSelection);
-      publishMotionTime(startTime);
-    }
+    const project = normalizeDirectorMotionProject(latestDataRef.current.motionProject);
+    const start = Math.min(motionTimeRef.current, Math.max(0, project.durationSeconds - 0.5));
+    const camera = draft.kind === 'camera' ? editorRef.current?.getCameraSnapshot() : undefined;
+    if (draft.kind === 'camera' && !camera) return;
+    const item = latestDataRef.current.items.find((entry) => entry.id === draft.trackId);
+    const height = camera?.position.y ?? item?.pos3d?.y ?? 0;
+    const result = applyStageEdit([{ type: 'trajectory.set', targetId: draft.kind === 'camera' ? 'camera' : draft.trackId,
+      method: draft.method === 'draw' ? 'freehand' : draft.method, points: points.map((point) => ({ ...point, y: height })),
+      start, duration: Math.min(4, project.durationSeconds - start), ...(camera ? { camera } : {}) }]);
+    if (!result) return;
+    if (result.createdIds[0]) setMotionSelection({ kind: draft.kind, trackId: draft.trackId, keyframeId: result.createdIds[0] });
+    publishMotionTime(start);
     setMotionRouteDraft(null);
-  }, [editorRef, motionProject.durationSeconds, motionRouteDraft, publishMotionTime, updateMotionProject]);
+  }, [applyStageEdit, editorRef, motionRouteDraft, publishMotionTime]);
 
   const setMotionTimeAndApply = useCallback((time: number) => {
     const nextTime = Math.min(motionProject.durationSeconds, Math.max(0, time));
     publishMotionTime(nextTime);
-    editorRef.current?.applyMotionFrame(sampleNormalizedDirectorMotion(motionProject, nextTime, latestDataRef.current.items), motionPreviewMode);
-  }, [editorRef, motionPreviewMode, motionProject, publishMotionTime]);
+    editorRef.current?.applyMotionFrame(sampleNormalizedDirectorMotion(previewProject, nextTime, latestDataRef.current.items), motionPreviewMode);
+  }, [editorRef, motionPreviewMode, previewProject, publishMotionTime]);
 
   const selectMotionRouteKeyframe = useCallback((selection: DirectorMotionRouteSelection, time: number) => {
     setMotionSelection(selection);
@@ -405,17 +643,17 @@ export function useDirectorStudioMotion({
   const setPreviewModeAndApply = useCallback((mode: 'route' | 'shot') => {
     setMotionPreviewMode(mode);
     motionPreviewModeRef.current = mode;
-    editorRef.current?.applyMotionFrame(sampleNormalizedDirectorMotion(motionProject, motionTimeRef.current, latestDataRef.current.items), mode);
-  }, [editorRef, motionProject]);
+    editorRef.current?.applyMotionFrame(sampleNormalizedDirectorMotion(previewProject, motionTimeRef.current, latestDataRef.current.items), mode);
+  }, [editorRef, previewProject]);
 
   useEffect(() => {
     editorRef.current?.applyMotionFrame(
       previewEnabled
-        ? sampleNormalizedDirectorMotion(motionProject, motionTimeRef.current, latestDataRef.current.items)
+        ? sampleNormalizedDirectorMotion(previewProject, motionTimeRef.current, latestDataRef.current.items)
         : sampleNormalizedDirectorMotion(normalizeDirectorMotionProject(undefined), 0, latestDataRef.current.items),
       previewEnabled ? motionPreviewMode : 'route',
     );
-  }, [editorRef, motionPreviewMode, motionProject, previewEnabled]);
+  }, [editorRef, motionPreviewMode, previewEnabled, previewProject]);
 
   const setMotionPlaying = useCallback((update: boolean | ((playing: boolean) => boolean)) => {
     const nextPlaying = typeof update === 'function' ? update(motionPlayingRef.current) : update;
@@ -573,6 +811,7 @@ export function useDirectorStudioMotion({
 
   return {
     motionProject,
+    previewProject,
     motionTimeSource,
     playbackSource,
     playbackRate,
@@ -594,15 +833,26 @@ export function useDirectorStudioMotion({
     videoExportResult,
     availableVideoFormat,
     updateMotionProject,
+    splitAtTime,
+    copyMotionTrack,
+    editCameraRigSegment,
+    retimeCameraRig,
     patchMotionKeyframe,
+    patchMotionKeyframes,
     moveMotionKeyframe,
     retimeMotionTrack,
+    toggleMotionRouteClosed,
+    setCameraLookAt,
+    copyMotionKeyframe,
     duplicateMotionKeyframe,
     deleteMotionKeyframe,
+    deleteMotionKeyframes,
     addCameraMotionKeyframe,
     recordPilotCamera: saveCameraKeyframe,
     addObjectMotionKeyframe,
     addActionMotionKeyframe,
+    recordPersonPose,
+    clearPersonPoseAt,
     updateMotionDuration,
     applyMotionActionState,
     saveMotionClip,
@@ -610,6 +860,11 @@ export function useDirectorStudioMotion({
     duplicateMotionClip,
     deleteMotionClip,
     applyCameraPreset,
+    addCameraRig,
+    previewCameraRig,
+    updateCameraRig,
+    deleteCameraRig,
+    bakeCameraRig,
     startMotionRouteDraft,
     finishMotionRouteDraft,
     cancelMotionRouteDraft,

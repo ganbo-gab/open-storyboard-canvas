@@ -9,7 +9,7 @@ import {
   tauriAiGateway,
 } from '../infrastructure/tauriAiGateway';
 import { tauriImageSplitGateway } from '../infrastructure/tauriImageSplitGateway';
-import { materializeCustomProviderImageResult } from '../infrastructure/customProviderGateway';
+import { materializeCustomProviderImageResult } from '../infrastructure/providerResultMaterialization';
 
 export const canvasEventBus = new InMemoryCanvasEventBus();
 export const canvasNodeFactory = new CanvasNodeFactory(uuidGenerator, nodeCatalog);

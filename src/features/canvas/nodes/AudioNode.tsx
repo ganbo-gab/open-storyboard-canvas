@@ -1,3 +1,4 @@
+import { BatchStackControl } from '@/features/canvas/ui/BatchStackControl';
 import {
   memo,
   useCallback,
@@ -9,23 +10,24 @@ import {
   type DragEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
+import { useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { AlertTriangle, Check, Loader2, Music2, Pause, Play, RefreshCw, Scissors, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { UiIconButton } from '@/components/ui';
 import {
   CANVAS_NODE_TYPES,
   type AudioNodeData,
   type CanvasNodeType,
 } from '@/features/canvas/domain/canvasNodes';
 import { isNodeUsingDefaultDisplayName, resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
-import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
+import { useAssetDisplaySource } from '@/features/assets/ui/useAssetDisplaySource';
 import { isAudioFile, resolveDroppedAudioFile } from '@/features/canvas/application/imageDragDrop';
 import { prepareAudioNodeDataFromFile } from '@/features/canvas/application/audioUpload';
-import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
-import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
+import { NodeFrame, resolveNodeBox } from '@/features/canvas/ui/NodeFrame';
+import { GenerationReferenceRetry } from '@/features/canvas/ui/GenerationReferenceRetry';
 import { formatGenerationElapsedMs } from '@/features/canvas/ui/generationElapsed';
-import { loadAudioSourceDataUrl } from '@/commands/image';
+import { MediaEditError, runNodeMediaEdit } from '@/features/canvas/application/media';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 
@@ -43,12 +45,6 @@ const AUDIO_NODE_MAX_WIDTH = 900;
 const AUDIO_NODE_MAX_HEIGHT = 420;
 const MIN_AUDIO_TRIM_SECONDS = 0.1;
 
-function resolveNodeDimension(value: number | undefined, fallback: number): number {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 1) {
-    return Math.round(value);
-  }
-  return fallback;
-}
 
 function formatAudioTime(value: number | null | undefined): string {
   if (!Number.isFinite(value ?? NaN) || !value || value < 0) {
@@ -65,82 +61,6 @@ function clampNumber(value: number, min: number, max: number): number {
     return min;
   }
   return Math.min(max, Math.max(min, value));
-}
-
-function sanitizeAudioFileStem(raw: string): string {
-  const compact = raw.trim().replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '').replace(/\s+/g, '-');
-  return compact.replace(/^\.+|\.+$/g, '') || 'audio';
-}
-
-async function fetchAudioBlob(source: string): Promise<Blob> {
-  if (/^data:audio\//i.test(source.trim())) {
-    return await (await fetch(source)).blob();
-  }
-  const response = await fetch(source);
-  if (!response.ok) {
-    throw new Error(`Audio download failed: HTTP ${response.status}`);
-  }
-  return await response.blob();
-}
-
-async function readAudioArrayBuffer(source: string, displaySource: string): Promise<ArrayBuffer> {
-  try {
-    return await (await fetchAudioBlob(displaySource)).arrayBuffer();
-  } catch (error) {
-    console.warn('Failed to fetch display audio source, falling back to native loader', error);
-    const dataUrl = await loadAudioSourceDataUrl(source);
-    return await (await fetchAudioBlob(dataUrl)).arrayBuffer();
-  }
-}
-
-function audioBufferToWavDataUrl(buffer: AudioBuffer, startSeconds: number, endSeconds: number): string {
-  const sampleRate = buffer.sampleRate;
-  const channelCount = buffer.numberOfChannels;
-  const startFrame = Math.max(0, Math.min(buffer.length, Math.floor(startSeconds * sampleRate)));
-  const endFrame = Math.max(startFrame + 1, Math.min(buffer.length, Math.ceil(endSeconds * sampleRate)));
-  const frameCount = endFrame - startFrame;
-  const bytesPerSample = 2;
-  const blockAlign = channelCount * bytesPerSample;
-  const dataSize = frameCount * blockAlign;
-  const arrayBuffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(arrayBuffer);
-  let offset = 0;
-  const writeString = (text: string) => {
-    for (let index = 0; index < text.length; index += 1) {
-      view.setUint8(offset, text.charCodeAt(index));
-      offset += 1;
-    }
-  };
-
-  writeString('RIFF');
-  view.setUint32(offset, 36 + dataSize, true); offset += 4;
-  writeString('WAVE');
-  writeString('fmt ');
-  view.setUint32(offset, 16, true); offset += 4;
-  view.setUint16(offset, 1, true); offset += 2;
-  view.setUint16(offset, channelCount, true); offset += 2;
-  view.setUint32(offset, sampleRate, true); offset += 4;
-  view.setUint32(offset, sampleRate * blockAlign, true); offset += 4;
-  view.setUint16(offset, blockAlign, true); offset += 2;
-  view.setUint16(offset, 16, true); offset += 2;
-  writeString('data');
-  view.setUint32(offset, dataSize, true); offset += 4;
-
-  for (let frame = startFrame; frame < endFrame; frame += 1) {
-    for (let channel = 0; channel < channelCount; channel += 1) {
-      const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[frame] ?? 0));
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-      offset += 2;
-    }
-  }
-
-  const bytes = new Uint8Array(arrayBuffer);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
-  }
-  return `data:audio/wav;base64,${btoa(binary)}`;
 }
 
 const AUDIO_WAVEFORM_BARS = Array.from({ length: 48 }, (_, index) => {
@@ -168,18 +88,18 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
 
   const isGenerating = data.isGenerating === true;
   const rawAudioSource = data.localAudioUrl || data.audioUrl || objectUrl;
-  const audioSource = useMemo(
-    () => (rawAudioSource ? resolveImageDisplayUrl(rawAudioSource) : null),
-    [rawAudioSource]
-  );
+  // Playable URL; null while an asset-media handle hydrates. Presence checks use the durable source.
+  const audioSource = useAssetDisplaySource(rawAudioSource).url;
   const generationError = typeof data.generationError === 'string' ? data.generationError.trim() : '';
-  const hasGenerationError = !isGenerating && !audioSource && generationError.length > 0;
+  const hasGenerationError = !isGenerating && !rawAudioSource && generationError.length > 0;
+  const referenceFailure = hasGenerationError ? data.generationReferenceFailure ?? null : null;
   const generationStartedAt = typeof data.generationStartedAt === 'number' ? data.generationStartedAt : null;
   const generationDurationMs = typeof data.generationDurationMs === 'number' ? data.generationDurationMs : 180000;
-  const resolvedWidth = resolveNodeDimension(width, AUDIO_NODE_DEFAULT_WIDTH);
-  const resolvedHeight = Math.max(
-    resolveNodeDimension(height, AUDIO_NODE_DEFAULT_HEIGHT),
-    AUDIO_NODE_MIN_HEIGHT
+  const { width: resolvedWidth, height: resolvedHeight } = resolveNodeBox(
+    CANVAS_NODE_TYPES.audio,
+    width ?? AUDIO_NODE_DEFAULT_WIDTH,
+    height ?? AUDIO_NODE_DEFAULT_HEIGHT,
+    { minWidth: AUDIO_NODE_MIN_WIDTH, minHeight: AUDIO_NODE_MIN_HEIGHT },
   );
   const resolvedTitle = useMemo(() => {
     const sourceFileName = typeof data.sourceFileName === 'string' ? data.sourceFileName.trim() : '';
@@ -193,10 +113,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
 
     return resolveNodeDisplayName(type as CanvasNodeType, data);
   }, [data, type, useUploadFilenameAsNodeTitle]);
-  const liveGenerationElapsedMs = isGenerating && generationStartedAt !== null
-    ? Math.max(0, now - generationStartedAt)
-    : data.generationElapsedMs;
-  const generationElapsedText = formatGenerationElapsedMs(liveGenerationElapsedMs);
+  const finishedElapsed = !isGenerating ? formatGenerationElapsedMs(data.generationElapsedMs) : '';
   const sourceReferenceAudioTitle =
     typeof data.sourceReferenceAudioTitle === 'string' && data.sourceReferenceAudioTitle.trim()
       ? data.sourceReferenceAudioTitle.trim()
@@ -259,13 +176,6 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
   );
   const trimLeftPercent = safeTrimDuration > 0 ? (trimStart / safeTrimDuration) * 100 : 0;
   const trimWidthPercent = safeTrimDuration > 0 ? ((trimEnd - trimStart) / safeTrimDuration) * 100 : 100;
-  const suggestedAudioStem = sanitizeAudioFileStem(
-    data.generatedFileName
-    || data.sourceFileName
-    || data.displayName
-    || `audio-${id}`
-  );
-
   useEffect(() => {
     setIsPlaying(false);
     setCurrentTime(0);
@@ -344,10 +254,10 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
 
   const handleClick = useCallback(() => {
     setSelectedNode(id);
-    if (!audioSource && !isGenerating) {
+    if (!rawAudioSource && !isGenerating) {
       inputRef.current?.click();
     }
-  }, [audioSource, id, isGenerating, setSelectedNode]);
+  }, [id, isGenerating, rawAudioSource, setSelectedNode]);
 
   const togglePlayback = useCallback(async () => {
     const audioElement = audioRef.current;
@@ -465,111 +375,57 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
     setTrimNotice('');
   }, [id, updateNodeData]);
 
+  /** One undoable media-edit transaction: the slice lands as a durable, source-connected audio node. */
   const applyAudioTrim = useCallback(async () => {
-    if (!rawAudioSource || !audioSource || !canTrim || isTrimming) {
+    if (!canTrim || isTrimming) {
       return;
     }
     setIsTrimming(true);
     setTrimNotice('');
-    let context: AudioContext | null = null;
     try {
-      const arrayBuffer = await readAudioArrayBuffer(rawAudioSource, audioSource);
-      const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioContextCtor) {
-        throw new Error('当前环境不支持音频裁剪');
-      }
-      context = new AudioContextCtor();
-      const decoded = await context.decodeAudioData(arrayBuffer.slice(0));
-      const finalEnd = Math.min(trimEnd, decoded.duration);
-      const finalStart = Math.min(trimStart, Math.max(0, finalEnd - MIN_AUDIO_TRIM_SECONDS));
-      const trimmedDataUrl = audioBufferToWavDataUrl(decoded, finalStart, finalEnd);
-      await context.close();
-      context = null;
-
-      const canvasState = useCanvasStore.getState();
-      const resultNodeId = canvasState.addNode(
-        CANVAS_NODE_TYPES.audio,
-        canvasState.findNodePosition(id, 360, 170),
-        {
-          displayName: `${data.displayName || '音频'} · 裁剪`,
-          audioUrl: trimmedDataUrl,
-          localAudioUrl: trimmedDataUrl,
-          sourceFileName: `${suggestedAudioStem}-trim.wav`,
-          durationSeconds: Math.max(1, Math.round(finalEnd - finalStart)),
-          sourcePrompt: data.sourcePrompt,
-          sourceModelId: data.sourceModelId,
-          sourceAudioMode: 'trim',
-        }
-      );
-      canvasState.addEdge(id, resultNodeId);
+      await runNodeMediaEdit(id, { kind: 'audio.slice', startSeconds: trimStart, endSeconds: trimEnd });
       updateNodeData(id, {
         isAudioTrimMode: false,
         audioTrimStartSeconds: null,
         audioTrimEndSeconds: null,
       });
-      setTrimNotice('已生成裁剪音频');
+      setTrimNotice(t('mediaEdit.audioSliced'));
     } catch (error) {
-      console.error('Failed to trim audio', error);
-      setTrimNotice(error instanceof Error ? error.message : '音频裁剪失败');
+      setTrimNotice(error instanceof MediaEditError ? t(`mediaEdit.errors.${error.code}`) : error instanceof Error ? error.message : String(error));
     } finally {
-      if (context) {
-        await context.close().catch(() => undefined);
-      }
       setIsTrimming(false);
     }
-  }, [
-    audioSource,
-    canTrim,
-    data.displayName,
-    data.sourceModelId,
-    data.sourcePrompt,
-    id,
-    isTrimming,
-    rawAudioSource,
-    suggestedAudioStem,
-    trimEnd,
-    trimStart,
-    updateNodeData,
-  ]);
+  }, [canTrim, id, isTrimming, t, trimEnd, trimStart, updateNodeData]);
+
 
   return (
-    <div
-      className={`
-        group relative overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-0 shadow-(--canvas-node-shadow) transition-colors duration-150
-        ${hasGenerationError
-          ? (selected
-            ? 'border-red-400 shadow-[0_0_0_1px_rgba(248,113,113,0.42)]'
-            : 'border-red-500/70 bg-[rgba(127,29,29,0.12)] hover:border-red-400/80')
-          : selected
-            ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-            : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
-      `}
-      style={{ width: resolvedWidth, height: resolvedHeight }}
-      onClick={handleClick}
-      onDrop={handleDrop}
-      onDragOver={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      }}
+    <NodeFrame
+      type={type as CanvasNodeType}
+      selected={selected}
+      icon={<Music2 />}
+      title={resolvedTitle}
+      onRename={(displayName) => updateNodeData(id, { displayName })}
+      meta={resolvedPlaybackDuration ? formatAudioTime(resolvedPlaybackDuration) : undefined}
+      status={isGenerating
+        ? { kind: 'generating', startedAt: generationStartedAt }
+        : hasGenerationError ? { kind: 'error', label: generationError } : null}
+      badges={<>{finishedElapsed ? <span className="node-frame__badge" title={t('node.audioNode.generationElapsed')}>{finishedElapsed}</span> : null}{typeof data.batchId === 'string' && data.batchId && typeof data.batchIndex === 'number' && typeof data.batchTotal === 'number' && data.batchTotal > 1 ? <BatchStackControl nodeId={id} batchId={data.batchId} index={data.batchIndex+1} total={data.batchTotal} collapsed={data.batchCollapsed===true} selected={Boolean(selected)} /> : null}</>}
+      width={resolvedWidth}
+      height={resolvedHeight}
+      resize={{ minWidth: AUDIO_NODE_MIN_WIDTH, minHeight: AUDIO_NODE_MIN_HEIGHT, maxWidth: AUDIO_NODE_MAX_WIDTH, maxHeight: AUDIO_NODE_MAX_HEIGHT }}
+      className="group"
+      bodyStyle={{ padding: 0 }}
     >
-      <NodeHeader
-        className={NODE_HEADER_FLOATING_POSITION_CLASS}
-        icon={<Music2 className="h-4 w-4" />}
-        titleText={resolvedTitle}
-        editable
-        onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
-        rightSlot={generationElapsedText ? (
-          <span
-            className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-px text-[10px] font-medium leading-tight text-white"
-            title={t('node.audioNode.generationElapsed') as string}
-          >
-            {generationElapsedText}
-          </span>
-        ) : null}
-      />
-
-      <div className={`relative flex h-full w-full flex-col justify-center overflow-hidden rounded-(--node-radius) p-3 ${hasGenerationError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-(--canvas-node-media-bg)'}`}>
-        {audioSource ? (
+      <div
+        className={`relative flex h-full w-full flex-col justify-center overflow-hidden p-3 ${hasGenerationError ? 'bg-danger/12' : 'bg-(--canvas-node-media-bg)'}`}
+        onClick={handleClick}
+        onDrop={handleDrop}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
+        {rawAudioSource ? (
           <div className="flex h-full min-h-0 flex-col justify-center gap-2.5">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-accent">
@@ -585,17 +441,18 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
                       : data.sourceFileName || data.sourceVoiceId || t('node.audioNode.ready')}
                 </div>
               </div>
-              <button
-                type="button"
-                className="nodrag nowheel inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-text-muted transition-colors hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover) hover:text-text-dark"
+              <UiIconButton
+                variant="secondary"
+                className="nodrag nowheel"
                 title={t('node.audioNode.replace') as string}
+                aria-label={t('node.audioNode.replace') as string}
                 onClick={(event) => {
                   event.stopPropagation();
                   inputRef.current?.click();
                 }}
               >
                 <RefreshCw className="h-4 w-4" />
-              </button>
+              </UiIconButton>
             </div>
             <div
               className="nodrag nowheel flex items-center gap-3 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-3 py-2"
@@ -603,9 +460,9 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
               onMouseDown={(event) => event.stopPropagation()}
               onPointerDown={(event) => event.stopPropagation()}
             >
-              <button
-                type="button"
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-text-dark transition-colors hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)"
+              <UiIconButton
+                variant="secondary"
+                className="text-text-dark"
                 title={isPlaying ? '暂停' : '播放'}
                 aria-label={isPlaying ? '暂停音频' : '播放音频'}
                 onClick={(event) => {
@@ -614,9 +471,9 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
                 }}
               >
                 {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
-              </button>
+              </UiIconButton>
               <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <div ref={waveformRef} className="relative h-8 w-full">
+                <div ref={waveformRef} className="relative h-8 w-full rounded-md has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-accent/60">
                   {!isAudioTrimMode ? (
                     <input
                       type="range"
@@ -625,25 +482,25 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
                       step={0.01}
                       value={Math.min(currentTime, resolvedPlaybackDuration ?? currentTime)}
                       aria-label="音频播放进度"
-                      className="nodrag nowheel absolute inset-0 z-30 h-full w-full cursor-pointer appearance-none bg-transparent opacity-0"
+                      className="ui-range nodrag nowheel absolute inset-0 z-30 h-full w-full cursor-pointer bg-transparent opacity-0"
                       onChange={(event) => seekPlayback(event.target.value)}
                       onClick={(event) => event.stopPropagation()}
                       onMouseDown={(event) => event.stopPropagation()}
                       onPointerDown={(event) => event.stopPropagation()}
                     />
                   ) : null}
-                  <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-md bg-[rgba(148,163,184,0.08)]">
+                  <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-md bg-(--hover)">
                     <div className="absolute inset-0 flex items-center gap-[2px] px-1">
                       {AUDIO_WAVEFORM_BARS.map((barHeight, index) => (
                         <span
                           key={index}
-                          className="relative z-10 min-w-[2px] flex-1 rounded-full bg-slate-600/45"
+                          className="relative z-10 min-w-[2px] flex-1 rounded-full bg-text-subtle/45"
                           style={{ height: `${barHeight}%` }}
                         />
                       ))}
                     </div>
                     <div
-                      className="absolute inset-y-0 left-0 overflow-hidden rounded-md bg-slate-500/10"
+                      className="absolute inset-y-0 left-0 overflow-hidden rounded-md bg-(--hover)"
                       style={{ width: `${playbackProgress * 100}%` }}
                     >
                       <div
@@ -653,7 +510,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
                         {AUDIO_WAVEFORM_BARS.map((barHeight, index) => (
                           <span
                             key={index}
-                            className="relative z-20 min-w-[2px] flex-1 rounded-full bg-slate-300/85"
+                            className="relative z-20 min-w-[2px] flex-1 rounded-full bg-text-dark/85"
                             style={{ height: `${barHeight}%` }}
                           />
                         ))}
@@ -663,20 +520,20 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
                   {isAudioTrimMode ? (
                     <div className="absolute inset-0 z-40">
                       <div
-                        className="absolute inset-y-0 cursor-grab rounded-md border border-accent/80 bg-accent/18 shadow-[0_0_0_999px_rgba(0,0,0,0.34)] active:cursor-grabbing"
+                        className="absolute inset-y-0 cursor-grab rounded-md border border-accent/80 bg-accent/18 shadow-[0_0_0_999px_var(--scrim)] active:cursor-grabbing"
                         style={{ left: `${trimLeftPercent}%`, width: `${trimWidthPercent}%` }}
                         onPointerDown={(event) => beginTrimDrag('move', event)}
                       >
                         <button
                           type="button"
                           aria-label="调整裁剪开始位置"
-                          className="absolute -left-1.5 top-1/2 h-7 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border border-accent/80 bg-(--canvas-node-menu-bg) shadow-lg"
+                          className="absolute -left-1.5 top-1/2 h-7 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border border-accent/80 bg-(--canvas-node-menu-bg) shadow-lg transition-colors hover:border-accent hover:bg-(--canvas-node-menu-hover) active:bg-(--press)"
                           onPointerDown={(event) => beginTrimDrag('start', event)}
                         />
                         <button
                           type="button"
                           aria-label="调整裁剪结束位置"
-                          className="absolute -right-1.5 top-1/2 h-7 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border border-accent/80 bg-(--canvas-node-menu-bg) shadow-lg"
+                          className="absolute -right-1.5 top-1/2 h-7 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border border-accent/80 bg-(--canvas-node-menu-bg) shadow-lg transition-colors hover:border-accent hover:bg-(--canvas-node-menu-hover) active:bg-(--press)"
                           onPointerDown={(event) => beginTrimDrag('end', event)}
                         />
                       </div>
@@ -700,10 +557,12 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
                 <span className="min-w-0 flex-1 truncate text-[11px] text-text-muted">
                   {isTrimming ? '裁剪中...' : `保留 ${formatAudioTime(trimEnd - trimStart)}`}
                 </span>
-                <button
-                  type="button"
-                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-text-muted transition-colors hover:text-text-dark disabled:cursor-not-allowed disabled:opacity-50"
+                <UiIconButton
+                  size="sm"
+                  variant="secondary"
+                  className="h-6 w-6"
                   title="取消裁剪"
+                  aria-label="取消裁剪"
                   disabled={isTrimming}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -711,11 +570,12 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
                   }}
                 >
                   <X className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-accent/60 bg-accent/20 text-white transition-colors hover:bg-accent/30 disabled:cursor-not-allowed disabled:opacity-50"
+                </UiIconButton>
+                <UiIconButton
+                  size="sm"
+                  className="h-6 w-6 border border-accent/60 bg-accent/20 text-accent hover:bg-accent/30"
                   title="生成裁剪音频"
+                  aria-label="生成裁剪音频"
                   disabled={isTrimming}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -723,7 +583,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
                   }}
                 >
                   {isTrimming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                </button>
+                </UiIconButton>
               </div>
             ) : null}
             {trimNotice ? (
@@ -731,7 +591,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
             ) : null}
             <audio
               ref={audioRef}
-              src={audioSource}
+              src={audioSource ?? undefined}
               className="hidden"
               preload="metadata"
               onLoadedMetadata={(event) => {
@@ -755,14 +615,15 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
             />
           </div>
         ) : hasGenerationError ? (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-red-700 dark:text-red-300">
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-danger">
             <AlertTriangle className="h-7 w-7 opacity-90" />
-            <span className="text-center text-[12px] font-semibold leading-5 text-red-800 dark:text-red-200">
+            <span className="text-center text-[12px] font-semibold leading-5 text-danger">
               {t('node.audioNode.generationFailed')}
             </span>
-            <span className="max-h-[72px] overflow-y-auto wrap-break-word text-center text-[11px] leading-5 text-red-800/90 dark:text-red-200/90">
-              {generationError}
+            <span className="max-h-[72px] overflow-y-auto wrap-break-word text-center text-[11px] leading-5 text-danger/90">
+              {referenceFailure ? t('reference.needsPublicUrl', { slotKey: referenceFailure.slotKey }) : generationError}
             </span>
+            {referenceFailure ? <GenerationReferenceRetry nodeId={id} failure={referenceFailure} /> : null}
           </div>
         ) : (
           <div className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-2 text-text-muted/85">
@@ -779,9 +640,9 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
 
         {isGenerating && (
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="absolute inset-0 bg-bg-dark/55" />
+            <div className="absolute inset-0 bg-bg/55" />
             <div
-              className="absolute left-0 top-0 h-full w-full origin-left bg-linear-to-r from-[rgba(255,255,255,0.34)] to-[rgba(255,255,255,0.05)] transition-transform duration-100 ease-linear"
+              className="absolute left-0 top-0 h-full w-full origin-left bg-linear-to-r from-text-dark/30 to-text-dark/5 transition-transform duration-100 ease-linear"
               style={{ transform: `scaleX(${progress})` }}
             />
           </div>
@@ -796,25 +657,7 @@ export const AudioNode = memo(({ id, data, selected, type, width, height }: Audi
         onChange={handleFileChange}
       />
 
-      <Handle
-        type="target"
-        id="target"
-        position={Position.Left}
-        className="h-2! w-2! border-surface-dark! bg-accent!"
-      />
-      <Handle
-        type="source"
-        id="source"
-        position={Position.Right}
-        className="h-2! w-2! border-surface-dark! bg-accent!"
-      />
-      <NodeResizeHandle
-        minWidth={AUDIO_NODE_MIN_WIDTH}
-        minHeight={AUDIO_NODE_MIN_HEIGHT}
-        maxWidth={AUDIO_NODE_MAX_WIDTH}
-        maxHeight={AUDIO_NODE_MAX_HEIGHT}
-      />
-    </div>
+    </NodeFrame>
   );
 });
 

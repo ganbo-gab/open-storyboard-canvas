@@ -7,6 +7,7 @@ import {
   type DirectorMotionProjectV1,
 } from '@/features/canvas/domain/canvasNodes';
 import { MAX_CANVAS_BATCH_ADD_NODES, useCanvasStore } from './canvasStore';
+import { createCanvasHistoryEntry } from './canvasHistory';
 
 function resetCanvasStore(): void {
   useCanvasStore.setState({
@@ -78,6 +79,8 @@ describe('canvasStore.addNodesBatch', () => {
     expect(importedState.undo()).toBe(true);
     expect(useCanvasStore.getState().nodes).toHaveLength(0);
     expect(useCanvasStore.getState().undo()).toBe(false);
+    expect(useCanvasStore.getState().redo()).toBe(true);
+    expect(useCanvasStore.getState().nodes).toEqual(importedState.nodes);
   });
 
   it('preserves imported custom names when another node is deleted', () => {
@@ -170,7 +173,7 @@ describe('canvasStore dimension bookkeeping', () => {
       data: {},
     } as CanvasNode];
     const snapshot = { nodes, edges: [] };
-    const history = { past: [], future: [snapshot] };
+    const history = { past: [], future: [createCanvasHistoryEntry(snapshot, { nodes: [], edges: [] })!] };
     useCanvasStore.setState({ nodes, history, dragHistorySnapshot: snapshot, revision: 7 });
 
     useCanvasStore.getState().onNodesChange([{
@@ -335,6 +338,7 @@ describe('canvasStore Director Studio persistence', () => {
       objectTracks: {},
       actionTracks: {},
       customClips: [],
+      cameraRigs: [],
     };
     const node = createDirectorNode({
       motionProject,
@@ -360,6 +364,48 @@ describe('canvasStore Director Studio persistence', () => {
     expect(data.directorStudioProjects?.[0].snapshot.motionProject).toEqual(motionProject);
   });
 
+  it('restores item and custom poses in workspace and saved snapshots without dropping unrelated data', () => {
+    const anatomical = {
+      chest: { y: 0.3 }, neck: { z: 0.2 }, leftClavicle: { x: 0.1 },
+      leftUpperArm: { x: 1.1 }, leftForearm: { x: 0.8 }, leftWrist: { y: -0.4 },
+      leftFingers: { curl: 0.7, index: 0.1, thumb: 0.4, spread: 0.2 },
+      rightThigh: { z: 0.2 }, rightShin: { x: 1.2 }, rightFoot: { y: 0.1 }, rightToes: { x: 0.3 },
+      scaleY: 1.1, groupY: 0.3, groupRotX: -0.2, groupRotZ: 0.4,
+    };
+    const legacy = { leftShoulder: { x: -0.8, z: -0.3 }, rightElbow: { x: -1.1 }, torso: { x: -0.2 }, head: { y: 0.1 } };
+    const sceneData = {
+      items: [
+        { id: 'anatomical', label: 'Anatomical', color: '#fff', x: 0, y: 0, pose: anatomical, importedMetadata: { source: 'image' } },
+        { id: 'legacy', label: 'Legacy', color: '#fff', x: 0, y: 0, pose: legacy },
+      ],
+      customActionPoses: { detailed: anatomical, legacy, neutral: {} },
+      importedSceneMetadata: { version: 7 },
+    };
+    const node = createDirectorNode({
+      ...sceneData,
+      directorStudioProjects: [{
+        id: 'saved', name: 'Saved', createdAt: 1, updatedAt: 2,
+        snapshot: { mode: 'flat', referenceImages: [], aspectRatio: '16:9', ...sceneData },
+      }],
+    });
+
+    useCanvasStore.getState().setCanvasData([node], []);
+
+    const data = useCanvasStore.getState().nodes[0].data as BlueprintNodeData;
+    for (const restored of [data, data.directorStudioProjects![0].snapshot]) {
+      expect(restored.items[0]).toMatchObject({ pose: anatomical, importedMetadata: { source: 'image' } });
+      expect(restored.items[1].pose).toEqual({
+        rightUpperArm: { x: 0.8, z: 0.3 }, leftForearm: { x: 1.1 }, spine: { x: 0.2 }, head: { y: 0.1 },
+      });
+      expect(restored.customActionPoses?.detailed).toEqual(anatomical);
+      expect(restored.customActionPoses?.legacy).toEqual(restored.items[1].pose);
+      expect(restored.customActionPoses?.neutral).toEqual({});
+      expect(restored).toMatchObject({ importedSceneMetadata: { version: 7 } });
+    }
+    expect(node.data.items).toEqual(sceneData.items);
+    expect(node.data.customActionPoses).toEqual(sceneData.customActionPoses);
+  });
+
   it('keeps legacy missing motion absent until an edit creates it', () => {
     useCanvasStore.getState().setCanvasData([createDirectorNode()], []);
 
@@ -377,5 +423,20 @@ describe('canvasStore Director Studio persistence', () => {
 
     useCanvasStore.getState().setCanvasData([createDirectorNode()], []);
     expect(useCanvasStore.getState().activeDirectorStudioNodeId).toBeNull();
+  });
+
+  it('consumes the open-on-create request once, persists it, and lets one undo remove the new node', () => {
+    const nodeId = useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.blueprint, { x: 0, y: 0 }, { openDirectorStudioOnCreate: 'previs' });
+    const pastAfterCreate = useCanvasStore.getState().history.past.length;
+    const revision = useCanvasStore.getState().revision;
+
+    expect(useCanvasStore.getState().consumeDirectorOpenRequest(nodeId)).toBe('previs');
+    expect((useCanvasStore.getState().nodes[0].data as BlueprintNodeData).openDirectorStudioOnCreate).toBe(false);
+    expect(useCanvasStore.getState().revision).toBeGreaterThan(revision);
+    expect(useCanvasStore.getState().history.past).toHaveLength(pastAfterCreate);
+    expect(useCanvasStore.getState().consumeDirectorOpenRequest(nodeId)).toBeNull();
+
+    expect(useCanvasStore.getState().undo()).toBe(true);
+    expect(useCanvasStore.getState().nodes).toHaveLength(0);
   });
 });

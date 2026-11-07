@@ -4,6 +4,8 @@ import type { NodePositionChange } from '@xyflow/react';
 import type { CanvasNode } from '@/features/canvas/domain/canvasNodes';
 import type { CanvasClipboardApi } from '@/features/canvas/clipboard/useCanvasClipboard';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { beginAlignmentDrag } from './alignment';
+import { IS_MAC } from './shortcuts';
 
 const ALT_DRAG_COPY_Z_INDEX = 2000;
 
@@ -35,6 +37,7 @@ export function useAltDragCopy(
   const stateRef = useRef<AltDragState | null>(null);
 
   const onNodeDragStart = useCallback((event: MouseEvent | TouchEvent, node: CanvasNode) => {
+    beginAlignmentDrag(IS_MAC ? event.metaKey : event.ctrlKey);
     stateRef.current = null;
     if (!event.altKey) return;
     const { nodes } = useCanvasStore.getState();
@@ -60,6 +63,7 @@ export function useAltDragCopy(
       if (copyId) copyIdBySource.set(sourceId, copyId);
     }
     if (copyIdBySource.size === 0) return;
+    beginAlignmentDrag(IS_MAC ? event.metaKey : event.ctrlKey, copyIdBySource.values());
 
     const copyIds = new Set(copyIdBySource.values());
     useCanvasStore.setState((state) => ({

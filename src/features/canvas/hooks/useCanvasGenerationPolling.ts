@@ -32,6 +32,8 @@ import {
   resolveCustomGeneratedImageName,
   resolveCustomGeneratedVideoName,
 } from '@/features/canvas/application/generatedMediaNaming';
+import { publishGenerationJobResults } from '@/features/canvas/application/generation/publishJobResults';
+import { generationCanvasMutations } from '@/features/canvas/application/generation/canvasMutations';
 
 interface GenerationStoryboardMetadata {
   gridRows: number;
@@ -170,7 +172,9 @@ export function useCanvasGenerationPolling(nodes: CanvasNode[], apiKeys: Record<
         nodeId: pendingNode.id,
         startedAt: Date.now(),
         apiKeys,
-        updateNodeData,
+        updateNodeData: generationCanvasMutations(
+          typeof pendingNode.data.generationAgentTurnId === 'string' ? pendingNode.data.generationAgentTurnId : undefined,
+        ).updateNodeData,
         finalize: () => {
           activePollNodeIdsRef.current.delete(pendingNode.id);
         },
@@ -776,6 +780,21 @@ async function pollSingleJob(ctx: PollContext): Promise<void> {
           preserveRetryMetadata: true,
           jobState: 'recoverable_wait',
         });
+        return;
+      }
+
+      if (status.status === 'succeeded' && status.results?.length) {
+        const resultNodeIds = publishGenerationJobResults(nodeId, status);
+        const output = status.results[resultNodeIds.indexOf(nodeId)];
+        if (!output) {
+          markGenerationFailed(nodeId, '上游返回的结果数量少于请求数量', null, updateNodeData);
+          return;
+        }
+        // Keep the existing primary preparation contract (storyboard metadata,
+        // measured aspect ratio and generated file naming); extra outputs are
+        // already durable and visible through their own typed result nodes.
+        if (output.kind === 'video') await prepareCompletedVideoResult(nodeId, output.source, currentData, updateNodeData, translateError);
+        else if (output.kind === 'image') await prepareCompletedImageResult(nodeId, output.source, currentData, updateNodeData, translateError, currentStatusWarning);
         return;
       }
 

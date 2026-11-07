@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { AGNES_PROVIDER_DEFAULTS } from '@/stores/customProvidersStore';
 import { buildChatModelCatalog, resolveAgentProtocol } from './chatModelCatalog';
+import { migrateAgnesSettingsCredential } from '@/features/channels/runtime/agnesChannel';
+import { getChannelCatalogProviders } from '@/features/channels/application/channelCatalog';
 
 describe('Agnes chat catalog', () => {
   it('places Agnes 2.5 first and retains saved-project compatibility ids', () => {
-    const entries = buildChatModelCatalog([], 'agnes-key');
+    migrateAgnesSettingsCredential('agnes-key');
+    const entries = buildChatModelCatalog(getChannelCatalogProviders());
     expect(entries.map((entry) => entry.modelId)).toEqual([
       AGNES_PROVIDER_DEFAULTS.models.chat25Flash,
       AGNES_PROVIDER_DEFAULTS.models.chat20Flash,
@@ -13,8 +16,8 @@ describe('Agnes chat catalog', () => {
     ]);
   });
 
-  it('does not expose Agnes models without a saved key', () => {
-    expect(buildChatModelCatalog([], '   ')).toEqual([]);
+  it('does not synthesize models outside declared channel projections', () => {
+    expect(buildChatModelCatalog([])).toEqual([]);
   });
 
   it('uses an explicit standard endpoint shape before a stale provider kind', () => {

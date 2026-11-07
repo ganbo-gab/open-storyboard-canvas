@@ -1,0 +1,14 @@
+[
+  {
+    "case": "huo",
+    "durationMs": 8038.74,
+    "idleSampleMs": 7433.49,
+    "note": "Tool-paced trusted pointer smoke, NOT FPS or input-to-photon; visible, Chromium DPR2, zoom 0.1"
+  },
+  {
+    "case": "control",
+    "durationMs": 13197.59,
+    "idleSampleMs": 12078.51,
+    "note": "Tool-paced trusted pointer smoke, NOT FPS or input-to-photon; visible, Chromium DPR2, zoom 0.1"
+  }
+]

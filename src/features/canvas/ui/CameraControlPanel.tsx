@@ -1,8 +1,8 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { X, ChevronUp, ChevronDown, Save, FolderOpen, Camera as CameraIcon } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronUp, ChevronDown, Save, FolderOpen, Camera as CameraIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { Tooltip, UiButton, UiIconButton, UiModal, UiSwitch } from '@/components/ui';
 import { type CameraControlOptions } from '@/features/canvas/domain/canvasNodes';
 import {
   APERTURES,
@@ -129,10 +129,7 @@ function LensBodySvg({ profile, className }: { profile: LensProfile; className?:
   );
 }
 
-/** A 900ms delayed tooltip shown on hover. Rendered into a portal with fixed
- *  positioning so it can escape ancestor `overflow: hidden` (the outer panel
- *  has rounded corners + overflow-hidden, which would otherwise clip the
- *  tooltip's top edge when cards near the panel's top-left spawn an upward tip). */
+/** Shared tooltip owns delayed display, overlay cancellation and timer cleanup. */
 interface HoverTipProps {
   title: string;
   description?: string;
@@ -140,94 +137,14 @@ interface HoverTipProps {
   children: React.ReactNode;
 }
 const HoverTip = memo(({ title, description, useCase, children }: HoverTipProps) => {
-  const [coords, setCoords] = useState<
-    | { left: number; top: number; placement: 'top' | 'bottom' }
-    | null
-  >(null);
-  const anchorRef = useRef<HTMLDivElement | null>(null);
-  const tipRef = useRef<HTMLDivElement | null>(null);
-  const timerRef = useRef<number | null>(null);
-
-  // Pick placement by where the anchor sits vertically in the viewport:
-  // upper half → tooltip goes BELOW (more room); lower half → goes ABOVE.
-  // This avoids the case where a tooltip anchored high in the panel overflows
-  // past the viewport top and gets hidden behind the panel header.
-  const computePlacement = useCallback(() => {
-    const el = anchorRef.current;
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    const tooltipWidth = 260;
-    const margin = 10;
-    let left = rect.left + rect.width / 2 - tooltipWidth / 2;
-    left = Math.max(margin, Math.min(window.innerWidth - tooltipWidth - margin, left));
-    const anchorCenter = rect.top + rect.height / 2;
-    const placement: 'top' | 'bottom' = anchorCenter > window.innerHeight * 0.55 ? 'top' : 'bottom';
-    const top = placement === 'top' ? rect.top - margin : rect.bottom + margin;
-    return { left, top, placement };
-  }, []);
-
-  // After mount, re-measure real tooltip height and if the chosen placement
-  // overshoots a viewport edge, flip to the opposite side and re-clamp.
-  useEffect(() => {
-    if (!coords) return;
-    const tip = tipRef.current;
-    const anchor = anchorRef.current;
-    if (!tip || !anchor) return;
-    const tipH = tip.getBoundingClientRect().height;
-    const rect = anchor.getBoundingClientRect();
-    const margin = 10;
-    let placement = coords.placement;
-    if (placement === 'top' && rect.top - tipH - margin < 0) placement = 'bottom';
-    else if (placement === 'bottom' && rect.bottom + tipH + margin > window.innerHeight) placement = 'top';
-    if (placement !== coords.placement) {
-      const top = placement === 'top' ? rect.top - margin : rect.bottom + margin;
-      setCoords((c) => (c ? { ...c, placement, top } : c));
-    }
-  }, [coords]);
-
-  const handleEnter = () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => {
-      const c = computePlacement();
-      if (c) setCoords(c);
-    }, 900);
-  };
-  const handleLeave = () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = null;
-    setCoords(null);
-  };
-
   return (
-    <div ref={anchorRef} className="relative" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
+    <Tooltip delay={900} side="top" label={<span className="block max-w-64 whitespace-normal text-left">
+      <span className="block text-xs font-semibold">{title}</span>
+      {description && <span className="mt-1 block text-[11px] leading-5 text-text-muted">{description}</span>}
+      {useCase && <span className="mt-2 block text-[11px] leading-5 text-text-muted">使用场景：{useCase}</span>}
+    </span>}>
       {children}
-      {coords &&
-        createPortal(
-          <div
-            ref={tipRef}
-            className="pointer-events-none fixed z-20000 w-[260px] rounded-lg border border-white/15 bg-[#1a1a1a]/98 p-3 shadow-2xl"
-            style={{
-              left: `${coords.left}px`,
-              top: coords.placement === 'bottom' ? `${coords.top}px` : undefined,
-              bottom:
-                coords.placement === 'top'
-                  ? `${window.innerHeight - coords.top}px`
-                  : undefined,
-            }}
-          >
-            <div className="text-[12px] font-semibold text-white/95">{title}</div>
-            {description && (
-              <div className="mt-1 text-[11px] text-white/70 leading-5">{description}</div>
-            )}
-            {useCase && (
-              <div className="mt-2 rounded-sm bg-white/5 px-2 py-1 text-[10px] text-white/55">
-                使用场景：{useCase}
-              </div>
-            )}
-          </div>,
-          document.body
-        )}
-    </div>
+    </Tooltip>
   );
 });
 HoverTip.displayName = 'HoverTip';
@@ -247,34 +164,36 @@ interface CardColumnProps {
 const CardColumn = memo(({ label, tooltipTitle, tooltipDesc, tooltipUseCase, visual, cornerBadge, captionBelow, onPrev, onNext }: CardColumnProps) => {
   return (
     <div className="flex flex-1 flex-col items-center gap-1.5">
-      <button
-        type="button"
+      <UiIconButton
+        size="sm"
         onClick={onPrev}
-        className="flex h-5 w-full items-center justify-center rounded-md text-white/35 hover:bg-white/5 hover:text-white/80 transition-colors"
+        className="h-5 w-full"
         title="上一项"
+        aria-label="上一项"
       >
         <ChevronUp className="h-3.5 w-3.5" />
-      </button>
+      </UiIconButton>
       <HoverTip title={tooltipTitle} description={tooltipDesc} useCase={tooltipUseCase}>
-        <div className="relative flex h-[140px] w-[140px] flex-col items-center justify-between rounded-xl border border-white/10 bg-white/3 px-3 pt-2 pb-2 hover:border-white/25 hover:bg-white/6 transition-colors cursor-help">
-          <span className="text-[11px] font-medium tracking-wide text-white/55">{label}</span>
+        <div className="relative flex h-[140px] w-[140px] flex-col items-center justify-between rounded-xl border border-[var(--line)] bg-[var(--field-bg)] px-3 pt-2 pb-2 hover:border-[var(--line-strong)] hover:bg-[var(--hover)] transition-colors duration-[var(--dur-1)] cursor-help">
+          <span className="text-[11px] font-medium tracking-wide text-text-muted">{label}</span>
           <div className="flex flex-1 items-center justify-center w-full">{visual}</div>
           {cornerBadge && (
-            <div className="absolute top-1.5 right-1.5 rounded-md bg-black/50 px-1.5 py-0.5 text-[10px] font-medium text-white/80">
+            <div className="absolute top-1.5 right-1.5 rounded-md bg-[var(--press)] px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
               {cornerBadge}
             </div>
           )}
         </div>
       </HoverTip>
-      <button
-        type="button"
+      <UiIconButton
+        size="sm"
         onClick={onNext}
-        className="flex h-5 w-full items-center justify-center rounded-md text-white/35 hover:bg-white/5 hover:text-white/80 transition-colors"
+        className="h-5 w-full"
         title="下一项"
+        aria-label="下一项"
       >
         <ChevronDown className="h-3.5 w-3.5" />
-      </button>
-      <span className="max-w-full truncate text-[11px] text-white/70 text-center leading-4">{captionBelow}</span>
+      </UiIconButton>
+      <span className="max-w-full truncate text-[11px] text-text-muted text-center leading-4">{captionBelow}</span>
     </div>
   );
 });
@@ -295,6 +214,7 @@ export const CameraControlPanel = memo(({ isOpen, onClose, cameraControl, onAppl
   const [focal, setFocal] = useState<number>(cameraControl?.focalLength ?? 50);
   const [aperture, setAperture] = useState<number>(cameraControl?.aperture ?? 4);
   const [showPresets, setShowPresets] = useState(false);
+  const [savePresetOnOpen, setSavePresetOnOpen] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -305,6 +225,7 @@ export const CameraControlPanel = memo(({ isOpen, onClose, cameraControl, onAppl
     setLensIdx(nextLensIdx >= 0 ? nextLensIdx : 0);
     setFocal(cameraControl?.focalLength ?? 50);
     setAperture(cameraControl?.aperture ?? 4);
+    setShowPresets(false);
   }, [cameraControl, isOpen]);
 
   const currentCamera = CAMERA_PROFILES[cameraIdx];
@@ -351,19 +272,21 @@ export const CameraControlPanel = memo(({ isOpen, onClose, cameraControl, onAppl
 
   if (!isOpen) return null;
 
-  return (
-    <div
-      className="absolute bottom-full left-0 z-50 mb-2 w-[760px] overflow-hidden rounded-2xl border border-white/10 bg-[#151515]/96 shadow-2xl backdrop-blur-md"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="flex items-center justify-between border-b border-white/8 px-5 py-3">
-        <h2 className="text-sm font-semibold text-white/95">{t('cameraControl.title')}</h2>
-        <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-md text-white/50 hover:bg-white/10 hover:text-white/90" title="关闭">
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      <div className="flex gap-3 px-5 py-5 justify-center">
+  return <>
+    <UiModal isOpen={isOpen} title={t('cameraControl.title')} onClose={onClose} widthClassName="w-[760px]"
+      description="开启后，这些摄影设置会在生成时追加为提示词，用于引导机身质感、镜头、焦距和景深。"
+      footer={<div className="flex w-full flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-2">
+          <UiButton size="sm" icon={<Save className="h-3.5 w-3.5" />} onClick={() => { setSavePresetOnOpen(true); setShowPresets(true); }}>{t('cameraControl.preset.saveAs')}</UiButton>
+          <UiButton size="sm" icon={<FolderOpen className="h-3.5 w-3.5" />} onClick={() => { setSavePresetOnOpen(false); setShowPresets(true); }}>{t('cameraControl.preset.myPresets')}</UiButton>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-text-muted"><span>{enabled ? '开启' : '关闭'}</span><UiSwitch aria-label="启用摄像机控制" checked={enabled} onCheckedChange={setEnabled} /></label>
+          <UiButton size="sm" variant="ghost" onClick={onClose}>{t('common.cancel')}</UiButton>
+          <UiButton variant="primary" size="sm" icon={<CameraIcon className="h-3.5 w-3.5" />} onClick={handleApply}>{t('cameraControl.apply')}</UiButton>
+        </div>
+      </div>}>
+      <div className="flex gap-3 overflow-x-auto py-4 justify-start sm:justify-center">
         <CardColumn
           label="相机"
           tooltipTitle={`${currentCamera.zhName} · ${currentCamera.label}`}
@@ -391,8 +314,8 @@ export const CameraControlPanel = memo(({ isOpen, onClose, cameraControl, onAppl
           tooltipUseCase={focalMeta?.useCase}
           visual={
             <div className="flex flex-col items-center">
-              <div className="text-[40px] font-light leading-none text-white/95">{focal}</div>
-              <div className="mt-1 text-[10px] tracking-wider text-white/40">mm</div>
+              <div className="text-[40px] font-light leading-none text-text-dark">{focal}</div>
+              <div className="mt-1 text-[10px] tracking-wider text-text-subtle">mm</div>
             </div>
           }
           cornerBadge={focalMeta?.zhName}
@@ -407,10 +330,10 @@ export const CameraControlPanel = memo(({ isOpen, onClose, cameraControl, onAppl
           tooltipUseCase={apertureMeta?.useCase}
           visual={
             <div className="flex flex-col items-center">
-              <div className="text-[30px] font-light leading-none text-white/95">
-                <span className="text-white/50 text-[18px]">f/</span>{aperture}
+              <div className="text-[30px] font-light leading-none text-text-dark">
+                <span className="text-text-subtle text-[18px]">f/</span>{aperture}
               </div>
-              <div className="mt-1 text-[10px] tracking-wider text-white/40">aperture</div>
+              <div className="mt-1 text-[10px] tracking-wider text-text-subtle">aperture</div>
             </div>
           }
           cornerBadge={apertureMeta?.zhName}
@@ -420,58 +343,12 @@ export const CameraControlPanel = memo(({ isOpen, onClose, cameraControl, onAppl
         />
       </div>
 
-      <div className="mx-5 mb-3 rounded-lg border border-white/8 bg-white/3 px-3.5 py-2.5">
-        <div className="text-[10px] uppercase tracking-wide text-white/40">当前配置</div>
-        <div className="mt-0.5 text-xs text-white/90">{summary}</div>
+      <div className="mb-3 rounded-lg border border-[var(--line)] bg-[var(--field-bg)] px-3.5 py-2.5">
+        <div className="text-[10px] uppercase tracking-wide text-text-subtle">当前配置</div>
+        <div className="mt-0.5 text-xs text-text-dark">{summary}</div>
       </div>
 
-      <div className="flex items-center justify-between gap-2 border-t border-white/8 bg-black/20 px-5 py-3">
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setShowPresets(true)}
-            className="flex items-center gap-1 rounded-md bg-white/8 px-3 py-1.5 text-xs text-white/80 hover:bg-white/14"
-            title="保存当前配置为预设"
-          >
-            <Save className="h-3 w-3" /> {t('cameraControl.preset.saveAs')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowPresets(true)}
-            className="flex items-center gap-1 rounded-md bg-white/8 px-3 py-1.5 text-xs text-white/80 hover:bg-white/14"
-            title="载入已保存的预设"
-          >
-            <FolderOpen className="h-3 w-3" /> {t('cameraControl.preset.myPresets')}
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2" title={enabled ? '当前启用摄像机控制' : '当前关闭摄像机控制'}>
-            <span className={`text-xs transition-colors ${enabled ? 'text-emerald-400 font-medium' : 'text-white/45'}`}>
-              {enabled ? '开启' : '关闭'}
-            </span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={enabled}
-              onClick={() => setEnabled((v) => !v)}
-              className={`relative inline-flex h-6 w-11 cursor-pointer items-center rounded-full transition-colors ${enabled ? 'bg-emerald-500/95' : 'bg-white/15'}`}
-            >
-              <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${enabled ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
-            </button>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleApply}
-            className="rounded-md bg-white px-4 py-1.5 text-xs font-medium text-black transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-white/95 active:scale-95"
-          >
-            <CameraIcon className="mr-1 inline h-3 w-3" />
-            {t('cameraControl.apply')}
-          </button>
-        </div>
-      </div>
-
+    </UiModal>
       <CameraPresetsPanel
         isOpen={showPresets}
         onClose={() => setShowPresets(false)}
@@ -482,7 +359,7 @@ export const CameraControlPanel = memo(({ isOpen, onClose, cameraControl, onAppl
           focalLength: focal,
           aperture,
         }}
-        openWithSaveDialog={false}
+        openWithSaveDialog={savePresetOnOpen}
         onApply={(cc) => {
           const ci = CAMERA_PROFILES.findIndex((c) => c.id === cc.camera);
           const li = LENS_PROFILES.findIndex((l) => l.id === cc.lens);
@@ -493,8 +370,7 @@ export const CameraControlPanel = memo(({ isOpen, onClose, cameraControl, onAppl
           setEnabled(cc.enabled === true);
         }}
       />
-    </div>
-  );
+  </>;
 });
 
 CameraControlPanel.displayName = 'CameraControlPanel';

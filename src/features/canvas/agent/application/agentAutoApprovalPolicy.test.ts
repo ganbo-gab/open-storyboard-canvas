@@ -42,3 +42,12 @@ describe('built-in Agent auto approval policy', () => {
     })).allowed).toBe(true);
   });
 });
+
+it('full execution permits app submissions while questions and expired approvals still wait', () => {
+  const generation = prepared({ arguments: { type: 'generation.submit', input: { nodeIds: ['node'] } }, impact: { effect: 'external-submit', title: 'generate', summary: 'generate', affectedNodeCount: 1, affectedEdgeCount: 0, externalSideEffect: true } });
+  expect(decideAgentAutoApproval(generation, 'manual').allowed).toBe(false);
+  expect(decideAgentAutoApproval(generation, 'auto').allowed).toBe(false);
+  expect(decideAgentAutoApproval(generation, 'full').allowed).toBe(true);
+  expect(decideAgentAutoApproval(prepared({ toolName: 'request_user_input' }), 'full').allowed).toBe(false);
+  expect(decideAgentAutoApproval(prepared({ expiresAt: Date.now() - 1 }), 'full').allowed).toBe(false);
+});

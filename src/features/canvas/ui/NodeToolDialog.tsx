@@ -290,7 +290,7 @@ export function NodeToolDialog() {
         resultKind: 'generic',
         displayName: resolveResultNodeTitle(activeToolDialog.toolType),
       });
-      addEdge(sourceNode.id, newNodeId);
+      addEdge(sourceNode.id, newNodeId, { provenance: 'generationResult' });
       closeDialog();
       setIsProcessing(false);
 
@@ -348,7 +348,7 @@ export function NodeToolDialog() {
           result.frameAspectRatio
         );
         if (createdNodeId) {
-          addEdge(sourceNode.id, createdNodeId);
+          addEdge(sourceNode.id, createdNodeId, { provenance: 'generationResult' });
         }
       } else if (result.outputImageUrl) {
         const prepared = await prepareNodeImage(result.outputImageUrl);
@@ -365,7 +365,7 @@ export function NodeToolDialog() {
           }
         );
         if (createdNodeId) {
-          addEdge(sourceNode.id, createdNodeId);
+          addEdge(sourceNode.id, createdNodeId, { provenance: 'generationResult' });
         }
       }
 
@@ -427,7 +427,7 @@ export function NodeToolDialog() {
 
     if (activePlugin.editor === 'annotate' && sourceImageUrl) {
       return (
-        <Suspense fallback={<div className="p-6 text-sm text-white/60">正在加载标注编辑器…</div>}>
+        <Suspense fallback={<div className="p-6 text-sm text-text-muted">正在加载标注编辑器…</div>}>
           <AnnotateToolEditor
             plugin={activePlugin}
             sourceImageUrl={sourceImageUrl}
@@ -491,7 +491,7 @@ export function NodeToolDialog() {
     >
       <div className="space-y-3 max-h-[82vh] overflow-y-auto pr-1">
         {editorContent}
-        {error && <div className="text-xs text-red-400">{error}</div>}
+        {error && <div className="text-xs text-danger">{error}</div>}
       </div>
     </UiModal>
   );

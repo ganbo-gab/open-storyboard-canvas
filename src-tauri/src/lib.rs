@@ -7,8 +7,11 @@ use commands::ai as ai_commands;
 use commands::diagnostic_log;
 use commands::external_agent;
 use commands::image;
+use commands::knowledge;
+use commands::model;
 use commands::portability;
 use commands::project_state;
+use commands::secrets;
 use commands::system;
 use commands::update;
 use tauri::Manager;
@@ -125,24 +128,16 @@ pub fn run() {
 
             #[cfg(target_os = "macos")]
             {
+                // Keep an opaque WebView. Full-window vibrancy was only used for rounded corners,
+                // but forces expensive compositing while large media canvases pan or resize.
                 let mut mac_window_config = window_config;
-                // Window effects radius only works for transparent windows on macOS.
-                mac_window_config.transparent = true;
-
+                mac_window_config.decorations = true;
+                mac_window_config.title_bar_style = tauri::TitleBarStyle::Overlay;
+                mac_window_config.hidden_title = true;
                 let window =
                     tauri::WebviewWindowBuilder::from_config(app, &mac_window_config)?.build()?;
-
                 if let Err(err) = window.hide() {
                     warn!("failed to hide main window on startup: {err}");
-                }
-
-                if let Err(err) = window.set_effects(Some(
-                    tauri::window::EffectsBuilder::new()
-                        .effect(tauri::window::Effect::Titlebar)
-                        .radius(10.0)
-                        .build(),
-                )) {
-                    warn!("failed to apply macOS window effects: {err}");
                 }
             }
 
@@ -170,6 +165,26 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             frontend_ready,
+            secrets::secret_get,
+            secrets::secret_retry_access,
+            secrets::secret_set,
+            secrets::secret_delete,
+            secrets::secret_has,
+            model::download_model_asset,
+            model::cancel_model_download,
+            knowledge::knowledge_init_vault,
+            knowledge::knowledge_open_vault,
+            knowledge::knowledge_list_tree,
+            knowledge::knowledge_read_note,
+            knowledge::knowledge_read_notes,
+            knowledge::knowledge_write_note,
+            knowledge::knowledge_write_attachment,
+            knowledge::knowledge_read_attachment,
+            knowledge::knowledge_remove_attachment,
+            knowledge::knowledge_rename,
+            knowledge::knowledge_delete,
+            knowledge::knowledge_list_trash,
+            knowledge::knowledge_restore,
             commands::check_dreamina_login,
             commands::dreamina_oauth_start,
             commands::dreamina_oauth_check,
@@ -218,6 +233,8 @@ pub fn run() {
             image::persist_image_source,
             image::persist_video_source,
             image::persist_image_binary,
+            model::persist_model_binary,
+            model::read_model_file,
             image::rename_local_media_files,
             image::save_image_source_to_downloads,
             image::save_image_source_to_path,
@@ -229,6 +246,8 @@ pub fn run() {
             image::save_image_source_to_app_debug_dir,
             image::copy_image_source_to_clipboard,
             image::read_system_clipboard,
+            image::write_system_clipboard_text,
+            image::canvas_clipboard_pointer,
             ai_commands::set_api_key,
             ai_commands::submit_generate_image_job,
             ai_commands::get_generate_image_job,

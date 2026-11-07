@@ -74,8 +74,9 @@ describe('TitleBar runtime capabilities', () => {
     const html = renderToStaticMarkup(<TitleBar onSettingsClick={() => {}} />);
 
     expect(runtimeMocks.getCurrentWindow).toHaveBeenCalledTimes(1);
-    expect(html).toContain('titleBar.minimize');
-    expect(html).toContain('titleBar.maximize');
-    expect(html).toContain('titleBar.close');
+    const mac = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform} ${navigator.userAgent}`);
+    if (mac) { expect(html).toContain('w-[82px]'); expect(html).not.toContain('titleBar.close'); }
+    else { expect(html).toContain('titleBar.minimize'); expect(html).toContain('titleBar.maximize'); expect(html).toContain('titleBar.close'); }
   });
+
 });

@@ -156,6 +156,8 @@ export function projectCanvasNodeForRead(node: CanvasNode): unknown {
     position: node.position,
     parentId: node.parentId ?? null,
     selected: Boolean(node.selected),
+    hidden: Boolean(node.hidden),
+    visibility: node.hidden ? 'collapsed-stack-member' : 'visible',
     data: projectCanvasReadValue(node.data, 'data'),
   };
 }

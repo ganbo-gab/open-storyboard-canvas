@@ -7,6 +7,8 @@ import {
 } from '@/features/canvas/domain/canvasNodes';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useCustomProvidersStore } from '@/stores/customProvidersStore';
+import { buildChannelAudioModelCatalog } from '@/features/channels/application/audioModelCatalog';
+import { useChannelStore } from '@/features/channels/store/channelStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
   getGenerationJobRecord,
@@ -575,7 +577,8 @@ export function inspectRedactedProviderConfig(): unknown[] {
     endpointPath: provider.endpointPath,
     modelIds: provider.models,
     apiStyle: provider.apiStyle,
-    accessState: provider.apiKey.trim() ? 'configured' : 'missing',
+    // `apiKey` now holds a vault token even when the stored secret is gone or locked; only the vault state is evidence.
+    accessState: provider.credentialState === 'present' ? 'configured' : 'missing',
     modelCapabilities: Object.entries(provider.modelMetadata ?? {}).map(([modelId, metadata]) => ({ modelId, ...metadata })),
   }));
 }
@@ -641,23 +644,15 @@ export function inspectRedactedApplicationConfig(): unknown {
       lightingTemplateState: settings.lightingPromptTemplate.trim() ? 'configured' : 'missing',
     },
     audio: {
-      defaultOutputMode: settings.audioGenerationSettings.defaultOutputMode,
-      defaultTimeoutMs: settings.audioGenerationSettings.defaultTimeoutMs,
-      voiceCount: settings.audioGenerationSettings.voices.length,
-      selectedVoiceState: settings.audioGenerationSettings.selectedVoiceId ? 'configured' : 'missing',
-      models: settings.audioGenerationSettings.models.map((model) => ({
-        id: model.id,
-        name: model.name,
-        providerKind: model.providerKind,
-        outputMode: model.outputMode,
-        timeoutMs: model.timeoutMs,
-        enabled: model.enabled,
-        defaultVoiceState: model.defaultVoiceId ? 'configured' : 'missing',
+      models: buildChannelAudioModelCatalog(useChannelStore.getState().channels).map((entry) => ({
+        id: entry.id, name: entry.modelLabel, provider: entry.providerLabel, usable: entry.usable,
+        modes: entry.modes.map((mode) => ({ id: mode.mode.id, operation: mode.operation })),
       })),
     },
     imageHosting: {
       enabled: settings.imageHostSettings.enabled,
-      provider: settings.imageHostSettings.provider,
+      provider: 'custom',
+      configured: Boolean(settings.imageHostSettings.uploadUrl.trim()),
     },
     panelModels: Object.entries(settings.lastModelConfigByPanel ?? {}).flatMap(([panel, config]) => config ? [{
       panel,

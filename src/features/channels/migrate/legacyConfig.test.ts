@@ -98,7 +98,7 @@ describe('migrateLegacyConfig', () => {
       vendorExtension, unrecognized: 42,
     } }));
     expect(result.request.body).toEqual({ mode: 'json', json: {
-      model: 'image-model', prompt: 'a castle', n: 1, quality: 'high', seed: 7,
+      model: 'image-model', prompt: 'a castle', n: 1, size: '1024x1024', quality: 'high', seed: 7,
       safety: { level: 2 }, enabled: false, tags: ['a', 'b'],
     } });
     expect(result.profile.models[0].params).toEqual(expect.arrayContaining([
@@ -238,7 +238,7 @@ describe('migrateLegacyConfig', () => {
   it('retains literal null, empty strings, false, and zero in fixed defaults', async () => {
     const result = await wire(provider({ extraParams: { defaultRequestParams: { optional: null, suffix: '', enabled: false, seed: 0 } } }));
     expect(result.request.body).toEqual({ mode: 'json', json: {
-      optional: null, suffix: '', enabled: false, seed: 0, model: 'image-model', prompt: 'a castle', n: 1,
+      optional: null, suffix: '', enabled: false, seed: 0, model: 'image-model', prompt: 'a castle', n: 1, size: '1024x1024',
     } });
   });
 
@@ -246,7 +246,7 @@ describe('migrateLegacyConfig', () => {
     const chat = await wire(provider({ mediaType: 'chat', apiStyle: 'anthropic', endpointPath: '/messages',
       extraParams: { providerKind: 'anthropic-messages', defaultRequestParams: { max_tokens: 256 } } }), { operation: 'chat', messages: [{ role: 'user', content: 'hello' }] });
     expect(chat.request.headers['x-api-key']).toBe('private-credential');
-    expect(chat.request.body).toEqual({ mode: 'json', json: { model: 'image-model', max_tokens: 256, messages: [{ role: 'user', content: 'hello' }] } });
+    expect(chat.request.body).toEqual({ mode: 'json', json: { model: 'image-model', max_tokens: 256, stream: false, messages: [{ role: 'user', content: 'hello' }] } });
     const gemini = await wire(provider({ endpointPath: '/models/{model}:generateContent', supportedResolutions: ['1K', '2K'], extraParams: {
       providerConfigVersion: 'new-v1', providerKind: 'google-gemini', supportedRatios: ['16:9', '1:1'],
     } }), { params: { size: '2K', aspectRatio: '16:9' } });
@@ -262,9 +262,17 @@ describe('migrateLegacyConfig', () => {
     expect(result.unmigrated).toContainEqual(expect.objectContaining({ key: 'apiStyle', value: apiStyle }));
   });
 
-  it('does not substitute JSON for form-urlencoded, signing, invalid V1 contracts, or multiple multipart file fields', () => {
+  it('preserves form-urlencoded rather than substituting JSON', async () => {
+    const result = await wire(provider({ extraParams: { requestBodyMode: 'form-urlencoded' } }), { params: { size: '1024x1024' } });
+    expect(result.request.body).toEqual({ mode: 'form-urlencoded', fields: [
+      { name: 'model', value: 'image-model' }, { name: 'prompt', value: 'a castle' },
+      { name: 'size', value: '1024x1024' }, { name: 'n', value: '1' },
+    ] });
+    expect(result.request.headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+  });
+
+  it('does not substitute HTTP for signing, invalid V1 contracts, or multiple multipart file fields', () => {
     const inputs = [
-      provider({ extraParams: { requestBodyMode: 'form-urlencoded' } }),
       provider({ extraParams: { transport: 'signed', signedAuth: { required: true } } }),
       provider({ extraParams: { imageRequestContract: { version: 1, textToImage: { method: 'DELETE' } } } }),
       provider({ extraParams: { imageRequestContract: { version: 1, imageToImage: { bodyMode: 'multipart', imageFields: [{ name: 'image', mode: 'repeat' }, { name: 'mask', mode: 'single' }] } } } }),
@@ -275,5 +283,50 @@ describe('migrateLegacyConfig', () => {
       expect(result.profile.operations).toEqual({});
       expect(result.unmigrated.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('explicit migrated multimodal template variables', () => {
+  it('preserves Chat Completions reference content instead of dropping image edits', async () => {
+    const result = await wire(preset('openai_chat_image'), { operation: 'image.edit', refs });
+    expect(result.request.body).toMatchObject({ mode: 'json', json: { messages: [{ role: 'user', content: [
+      { type: 'text', text: 'a castle' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,asset-1' } },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,asset-2' } },
+    ] }] } });
+  });
+
+  it('omits the entire optional Xai image object when no reference was supplied', async () => {
+    const config = provider({ mediaType: 'video', endpointPath: '/videos/generations', extraParams: {
+      providerKind: 'xai-grok-video', defaultRequestParams: { seconds: 5 },
+    } });
+    const result = await wire(config, { operation: 'video.generate', params: { size: '720p' } });
+    expect(result.request.body).toEqual({ mode: 'json', json: { model: 'image-model', prompt: 'a castle',
+      duration: 5, seconds: 5, aspect_ratio: '16:9', resolution: '720p' } });
+    const edit = await wire(config, { operation: 'video.generate', refs: refs.slice(0, 1) });
+    expect(edit.request.body).toMatchObject({ mode: 'json', json: { image: { url: 'data:image/png;base64,asset-1' } } });
+  });
+
+  it('retains exact Seedance images-first content order via an explicit template variable', async () => {
+    const result = await wire(provider({ mediaType: 'video', endpointPath: '/contents/generations/tasks', extraParams: {
+      providerKind: 'seedance-video',
+    } }), { operation: 'video.generate', refs });
+    expect(result.request.body).toMatchObject({ mode: 'json', json: { model: 'image-model', content: [
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,asset-1' } },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,asset-2' } },
+      { type: 'text', text: 'a castle' },
+    ] } });
+  });
+
+  it('migrates single-brace configured video templates and singular video/audio reference bindings', async () => {
+    const references: JobRef[] = [
+      { kind: 'video', assetId: 'clip', path: '/assets/clip.mp4', mime: 'video/mp4' },
+      { kind: 'audio', assetId: 'sound', path: '/assets/sound.mp3', mime: 'audio/mpeg' },
+    ];
+    const result = await wire(provider({ mediaType: 'video', endpointPath: '/tasks', extraParams: {
+      videoRequestBodyTemplate: { model: '{modelName}', prompt: '{prompt}', videos: '{videos}', audios: '{audios}' },
+    } }), { operation: 'video.generate', refs: references });
+    expect(result.request.body).toEqual({ mode: 'json', json: { model: 'image-model', prompt: 'a castle',
+      videos: ['data:image/png;base64,clip'], audios: ['data:image/png;base64,sound'] } });
   });
 });

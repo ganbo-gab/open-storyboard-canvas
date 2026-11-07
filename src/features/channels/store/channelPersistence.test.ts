@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { channelPersistenceStorage } from './channelPersistence';
-import { useChannelStore } from './channelStore';
+import { useChannelStore, channelProviderId } from './channelStore';
 import { useCustomProvidersStore } from '@/stores/customProvidersStore';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -15,11 +15,12 @@ describe('channel initialization without browser storage', () => {
     channelPersistenceStorage.removeItem('node-storage-probe');
     expect(channelPersistenceStorage.getItem('node-storage-probe')).toBeNull();
     const provider = { id: 'node-legacy', label: 'Node provider', baseUrl: 'https://relay.example', apiKey: '', apiStyle: 'openai-compatible', models: ['model'], supportsWebSearch: false };
-    useCustomProvidersStore.getState().addProvider(provider);
-    expect(useCustomProvidersStore.getState().providers).toContainEqual(provider);
-    expect(useChannelStore.getState().channels.some((entry) => entry.profile.id === provider.id)).toBe(true);
-    useCustomProvidersStore.getState().removeProvider(provider.id);
-    useChannelStore.setState((state) => ({ channels: state.channels.filter((entry) => entry.profile.id !== provider.id) }));
+    await useCustomProvidersStore.getState().addProvider(provider);
+    const projectedId = channelProviderId(provider.id, 'image');
+    expect(useCustomProvidersStore.getState().providers).toContainEqual(expect.objectContaining({ id: projectedId, apiStyle: 'channel-template-v2' }));
+    expect(useChannelStore.getState().channels.find((entry) => entry.profile.id === provider.id)?.origin).toBe('native');
+    useCustomProvidersStore.getState().removeProvider(projectedId);
+    expect(useChannelStore.getState().channels.some((entry) => entry.profile.id === provider.id)).toBe(false);
   });
 
   it('uses browser storage when it becomes available and invokes real hydration callbacks', async () => {

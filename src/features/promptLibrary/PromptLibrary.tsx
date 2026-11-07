@@ -16,7 +16,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
-import { UiButton, UiChipButton, UiInput, UiModal } from '@/components/ui';
+import { UiButton, UiChipButton, UiIconButton, UiInput, UiModal } from '@/components/ui';
 import {
   BUNDLED_COMMUNITY_PROMPTS,
   LOCAL_PROMPTS,
@@ -52,11 +52,6 @@ function sortLabels(values: string[]): string[] {
   return [...values].sort((left, right) => left.localeCompare(right, 'zh-CN'));
 }
 
-function filterChipClassName(isActive: boolean): string {
-  return isActive
-    ? 'border-accent! bg-accent! text-white! shadow-[0_0_0_1px_rgba(var(--accent-rgb),0.3),0_10px_22px_rgba(var(--accent-rgb),0.2)]'
-    : '';
-}
 
 export function resolvePromptCardLabels(
   entry: Pick<PromptLibraryEntry, 'category' | 'tags'>
@@ -111,61 +106,47 @@ function PromptCard({
   onToggleFavorite,
 }: PromptCardProps) {
   return (
-    <article className="group flex h-full min-h-[360px] flex-col overflow-hidden rounded-lg border border-border-dark bg-surface-dark text-left shadow-xs transition-[transform,border-color,box-shadow,translate,scale,rotate] duration-150 hover:-translate-y-0.5 hover:border-accent/55 hover:shadow-xl">
-      <div className="relative h-44 w-full overflow-hidden bg-bg-dark">
-        <button type="button" className="block h-full w-full text-left" onClick={onOpen}>
+    <article className="studio-card-host relative min-w-0">
+      <button type="button" className="studio-card h-full w-full" onClick={onOpen}>
+        <span className="studio-card__media block aspect-4/3 w-full">
           <img
             src={entry.coverUrl}
             alt={entry.title}
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
             draggable={false}
             loading="lazy"
           />
-        </button>
-        <div className="absolute left-3 top-3 rounded-md border border-white/15 bg-black/55 px-2 py-1 text-[11px] font-medium text-white/85">
-          {entry.source}
+          <span className="studio-card__badge max-w-[calc(100%-56px)] truncate">{entry.category}</span>
+          <span className="studio-card__overlay">
+            <span className="truncate text-xs font-medium">{entry.source}</span>
+            <span className="text-[11px] opacity-75">{formatPromptDate(entry.updatedAt)}</span>
+          </span>
+        </span>
+        <div className="flex w-full min-w-0 flex-1 flex-col gap-2 px-1">
+          <h3 className="line-clamp-2 text-sm font-medium leading-5 text-text-dark">{entry.title}</h3>
+          <p className="line-clamp-2 text-xs leading-5 text-text-muted">{entry.excerpt}</p>
+          <span className="mt-auto flex flex-wrap gap-1.5">
+            {resolvePromptCardLabels(entry).map((label) => (
+              <span key={label} className="rounded-md bg-[var(--hover)] px-2 py-1 text-[11px] text-text-muted">
+                {label}
+              </span>
+            ))}
+          </span>
         </div>
-        <button
+      </button>
+      <div className="studio-card__actions" style={isFavorite ? { opacity: 1 } : undefined}>
+        <UiIconButton
           type="button"
+          variant="ghost"
+          active={isFavorite}
           aria-label={isFavorite ? removeFavoriteLabel : favoriteLabel}
           title={isFavorite ? removeFavoriteLabel : favoriteLabel}
           onClick={(event) => {
             event.stopPropagation();
             onToggleFavorite();
           }}
-          className={`absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
-            isFavorite
-              ? 'border-rose-300/70 bg-rose-500/25 text-rose-100'
-              : 'border-white/18 bg-black/45 text-white/75 hover:bg-black/65 hover:text-white'
-          }`}
         >
           <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
-        </button>
-      </div>
-
-      <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
-        <button type="button" className="block text-left" onClick={onOpen}>
-          <div className="flex items-start justify-between gap-3">
-            <h3 className="min-w-0 text-base font-semibold leading-snug text-text-dark">
-              {entry.title}
-            </h3>
-            <span className="shrink-0 text-[11px] text-text-muted">
-              {formatPromptDate(entry.updatedAt)}
-            </span>
-          </div>
-          <p className="mt-2 line-clamp-3 text-sm leading-6 text-text-muted">{entry.excerpt}</p>
-        </button>
-
-        <div className="mt-auto flex flex-wrap gap-1.5">
-          {resolvePromptCardLabels(entry).map((label) => (
-            <span
-              key={label}
-              className="rounded-md bg-[rgba(var(--accent-rgb),0.12)] px-2 py-1 text-[11px] font-medium text-accent"
-            >
-              {label}
-            </span>
-          ))}
-        </div>
+        </UiIconButton>
       </div>
     </article>
   );
@@ -238,7 +219,7 @@ function TargetChooser({
       }
     >
       <div className="space-y-4">
-        <div className="rounded-lg border border-[rgba(255,255,255,0.1)] bg-bg-dark/55 p-3">
+        <div className="rounded-lg border border-[var(--line)] bg-[var(--field-bg)] p-3">
           <div className="text-xs font-medium text-text-muted">
             {t('promptLibrary.applyDialog.prompt')}
           </div>
@@ -246,49 +227,44 @@ function TargetChooser({
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <button
+          <UiChipButton
             type="button"
             disabled={projects.length === 0}
             onClick={() => setMode('existing')}
-            className={`flex h-10 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
-              mode === 'existing'
-                ? 'border-accent/60 bg-accent/16 text-text-dark'
-                : 'border-border-dark bg-bg-dark/55 text-text-muted hover:text-text-dark'
-            }`}
+            active={mode === 'existing'}
+            className="h-10 justify-center text-sm"
           >
             <FolderOpen className="h-4 w-4" />
             {t('promptLibrary.applyDialog.existingProject')}
-          </button>
-          <button
+          </UiChipButton>
+          <UiChipButton
             type="button"
             onClick={() => setMode('new')}
-            className={`flex h-10 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors ${
-              mode === 'new'
-                ? 'border-accent/60 bg-accent/16 text-text-dark'
-                : 'border-border-dark bg-bg-dark/55 text-text-muted hover:text-text-dark'
-            }`}
+            active={mode === 'new'}
+            className="h-10 justify-center text-sm"
           >
             <Plus className="h-4 w-4" />
             {t('promptLibrary.applyDialog.newProject')}
-          </button>
+          </UiChipButton>
         </div>
 
         {mode === 'existing' ? (
           <div className="ui-scrollbar max-h-[260px] space-y-2 overflow-y-auto pr-1">
             {projects.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border-dark p-6 text-center text-sm text-text-muted">
+              <div className="rounded-lg border border-dashed border-[var(--line)] p-6 text-center text-sm text-text-muted">
                 {t('promptLibrary.applyDialog.noProjects')}
               </div>
             ) : (
               projects.map((project) => (
-                <button
+                <UiButton
                   key={project.id}
                   type="button"
                   onClick={() => setSelectedProjectId(project.id)}
-                  className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
+                  variant="ghost"
+                  className={`h-auto w-full justify-between border px-3 py-3 text-left ${
                     selectedProjectId === project.id
-                      ? 'border-accent/65 bg-accent/14'
-                      : 'border-border-dark bg-bg-dark/55 hover:border-accent/35'
+                      ? 'border-accent/65 bg-accent/10'
+                      : 'border-[var(--line)]'
                   }`}
                 >
                   <span className="min-w-0">
@@ -306,7 +282,7 @@ function TargetChooser({
                         : 'border-text-muted/45'
                     }`}
                   />
-                </button>
+                </UiButton>
               ))
             )}
           </div>
@@ -326,7 +302,7 @@ function TargetChooser({
         )}
 
         {error ? (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+          <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
             {error}
           </div>
         ) : null}
@@ -536,81 +512,65 @@ export function PromptLibrary() {
 
   return (
     <div
-      className="ui-scrollbar h-full min-h-0 w-full overflow-y-auto overflow-x-hidden bg-bg-dark bg-[radial-gradient(rgba(255,255,255,0.11)_1px,transparent_1px)] p-6 bg-size-[18px_18px]"
+      className="studio-page ui-scrollbar h-full min-h-0 w-full overflow-y-auto overflow-x-hidden px-6 py-8 sm:px-10"
       onScroll={handleLibraryScroll}
     >
-      <div className="mx-auto max-w-7xl pb-10">
-        <div className="mb-7 text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-lg border border-border-dark bg-surface-dark/90 px-3 py-1.5 text-xs font-medium text-text-muted">
-            <BookOpen className="h-4 w-4 text-accent" />
-            {communityEntries.length > 0
-              ? t('promptLibrary.liveBadge')
-              : t('promptLibrary.builtInBadge')}
+      <div className="mx-auto max-w-[1180px] pb-10">
+        <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-text-dark">{t('promptLibrary.title')}</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-text-muted">{t('promptLibrary.description')}</p>
           </div>
-          <h1 className="text-3xl font-bold text-text-dark">{t('promptLibrary.title')}</h1>
-          <p className="mx-auto mt-3 max-w-3xl text-sm leading-6 text-text-muted">
-            {t('promptLibrary.description')}
-          </p>
-        </div>
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-2 text-xs text-text-muted">
+              <BookOpen className="h-4 w-4" />
+              {communityEntries.length > 0 ? t('promptLibrary.liveBadge') : t('promptLibrary.builtInBadge')}
+            </span>
+            <UiButton type="button" variant="secondary" disabled={isCommunityFetching} onClick={handleRefresh}>
+              <RefreshCw className={`h-4 w-4 ${isCommunityFetching ? 'animate-spin' : ''}`} />
+              {isCommunityFetching ? t('promptLibrary.refreshing') : t('promptLibrary.refresh')}
+            </UiButton>
+          </div>
+        </header>
 
-        <div className="mb-5 grid gap-3 lg:grid-cols-[minmax(260px,1fr)_auto_auto] lg:items-center">
-          <div className="relative">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="relative w-full sm:max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
             <UiInput
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder={t('promptLibrary.searchPlaceholder')}
-              className="h-11 pl-9"
+              className="pl-9"
             />
           </div>
 
-          <div className="inline-flex rounded-lg border border-border-dark bg-surface-dark p-1">
-            <button
+          <div className="inline-flex flex-wrap gap-2">
+            <UiChipButton
               type="button"
               aria-pressed={viewMode === 'all'}
               onClick={() => setViewMode('all')}
-              className={`inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-medium transition-colors ${
-                viewMode === 'all'
-                  ? 'bg-accent text-white'
-                  : 'text-text-muted hover:bg-bg-dark/75 hover:text-text-dark'
-              }`}
+              active={viewMode === 'all'}
             >
               <ImageIcon className="h-4 w-4" />
               {t('promptLibrary.allPrompts')}
-            </button>
-            <button
+            </UiChipButton>
+            <UiChipButton
               type="button"
               aria-pressed={viewMode === 'favorites'}
               onClick={() => setViewMode('favorites')}
-              className={`inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-medium transition-colors ${
-                viewMode === 'favorites'
-                  ? 'bg-accent text-white'
-                  : 'text-text-muted hover:bg-bg-dark/75 hover:text-text-dark'
-              }`}
+              active={viewMode === 'favorites'}
             >
               <Heart className={`h-4 w-4 ${viewMode === 'favorites' ? 'fill-current' : ''}`} />
               {t('promptLibrary.myFavorites', { count: favoriteEntries.length })}
-            </button>
+            </UiChipButton>
           </div>
 
-          <UiButton
-            type="button"
-            variant="muted"
-            className="gap-2"
-            disabled={isCommunityFetching}
-            onClick={handleRefresh}
-          >
-            <RefreshCw className={`h-4 w-4 ${isCommunityFetching ? 'animate-spin' : ''}`} />
-            {isCommunityFetching
-              ? t('promptLibrary.refreshing')
-              : t('promptLibrary.refresh')}
-          </UiButton>
         </div>
 
-        <div className="mb-6 rounded-lg border border-border-dark bg-surface-dark/92 p-4">
+        <div className="mb-6 rounded-xl border border-[var(--line)] bg-surface p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2 text-sm text-text-muted">
-              <span className="inline-flex items-center gap-2 rounded-md border border-border-dark bg-bg-dark/45 px-2.5 py-1.5">
+              <span className="inline-flex items-center gap-2 text-xs">
                 <ImageIcon className="h-4 w-4 text-accent" />
                 {t('promptLibrary.resultCount', {
                   count: filteredEntries.length,
@@ -618,14 +578,14 @@ export function PromptLibrary() {
                   remote: communityEntries.length,
                 })}
               </span>
-              <span className="inline-flex items-center gap-2 rounded-md border border-border-dark bg-bg-dark/45 px-2.5 py-1.5">
+              <span className="inline-flex items-center gap-2 text-xs">
                 <Clock3 className="h-4 w-4 text-accent" />
                 {fetchedAtLabel
                   ? t('promptLibrary.lastUpdated', { time: fetchedAtLabel })
                   : t('promptLibrary.updating')}
               </span>
               {remoteErrorCount > 0 ? (
-                <span className="inline-flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-amber-100">
+                <span className="inline-flex items-center gap-2 rounded-md bg-warning/10 px-2.5 py-1.5 text-xs text-warning">
                   <WifiOff className="h-4 w-4" />
                   {t('promptLibrary.partialOffline')}
                 </span>
@@ -644,7 +604,7 @@ export function PromptLibrary() {
             </UiButton>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-3">
+          <div className="space-y-4">
             <div>
               <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-text-muted">
                 <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -661,7 +621,7 @@ export function PromptLibrary() {
                       onClick={() =>
                         toggleFilterValue(category, selectedCategories, setSelectedCategories)
                       }
-                      className={`h-8 text-xs ${filterChipClassName(isActive)}`}
+                      className="h-8 text-xs"
                     >
                       {category}
                     </UiChipButton>
@@ -684,7 +644,7 @@ export function PromptLibrary() {
                       type="button"
                       active={isActive}
                       onClick={() => toggleFilterValue(source, selectedSources, setSelectedSources)}
-                      className={`h-8 text-xs ${filterChipClassName(isActive)}`}
+                      className="h-8 text-xs"
                     >
                       {source}
                     </UiChipButton>
@@ -707,7 +667,7 @@ export function PromptLibrary() {
                       type="button"
                       active={isActive}
                       onClick={() => toggleFilterValue(tag, selectedTags, setSelectedTags)}
-                      className={`h-8 text-xs ${filterChipClassName(isActive)}`}
+                      className="h-8 text-xs"
                     >
                       {tag}
                     </UiChipButton>
@@ -718,8 +678,12 @@ export function PromptLibrary() {
           </div>
         </div>
 
-        {filteredEntries.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border-dark bg-surface-dark/92 p-12 text-center">
+        {isCommunityFetching && allEntries.length === 0 ? (
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {Array.from({ length: 8 }, (_, index) => <span key={index} className="studio-skeleton aspect-4/3" />)}
+          </div>
+        ) : filteredEntries.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[var(--line)] bg-surface p-12 text-center">
             <Search className="mx-auto h-10 w-10 text-text-muted/60" />
             <div className="mt-4 text-base font-semibold text-text-dark">
               {viewMode === 'favorites'
@@ -751,14 +715,14 @@ export function PromptLibrary() {
         {filteredEntries.length > 0 ? (
           <div className="mt-6 flex justify-center">
             {hasMoreEntries ? (
-              <UiButton type="button" variant="muted" onClick={revealMoreEntries}>
+              <UiButton type="button" variant="secondary" onClick={revealMoreEntries}>
                 {t('promptLibrary.loadMore', {
                   visible: visibleEntries.length,
                   total: filteredEntries.length,
                 })}
               </UiButton>
             ) : (
-              <div className="rounded-md border border-border-dark bg-surface-dark/80 px-3 py-2 text-xs text-text-muted">
+              <div className="rounded-md border border-[var(--line)] bg-surface px-3 py-2 text-xs text-text-muted">
                 {t('promptLibrary.endOfList', {
                   total: filteredEntries.length,
                 })}
@@ -781,7 +745,7 @@ export function PromptLibrary() {
               </UiButton>
               <UiButton
                 type="button"
-                variant="muted"
+                variant="secondary"
                 className="gap-2"
                 onClick={() => toggleFavorite(selectedEntry)}
               >
@@ -812,20 +776,20 @@ export function PromptLibrary() {
               <img
                 src={selectedEntry.coverUrl}
                 alt={selectedEntry.title}
-                className="aspect-4/3 w-full rounded-lg border border-border-dark object-cover"
+                className="aspect-4/3 w-full rounded-xl border border-[var(--line)] object-cover"
                 draggable={false}
               />
               <div className="flex flex-wrap gap-2">
-                <span className="rounded-md border border-border-dark bg-bg-dark/55 px-2 py-1 text-xs text-text-muted">
+                <span className="rounded-md border border-[var(--line)] bg-[var(--hover)] px-2 py-1 text-xs text-text-muted">
                   {selectedEntry.category}
                 </span>
-                <span className="rounded-md border border-border-dark bg-bg-dark/55 px-2 py-1 text-xs text-text-muted">
+                <span className="rounded-md border border-[var(--line)] bg-[var(--hover)] px-2 py-1 text-xs text-text-muted">
                   {selectedEntry.source}
                 </span>
                 {selectedEntry.tags.map((tag) => (
                   <span
                     key={tag}
-                    className="rounded-md bg-[rgba(var(--accent-rgb),0.12)] px-2 py-1 text-xs font-medium text-accent"
+                    className="rounded-md bg-accent/10 px-2 py-1 text-xs font-medium text-accent"
                   >
                     {tag}
                   </span>
@@ -843,7 +807,7 @@ export function PromptLibrary() {
                 <div className="text-xs font-medium uppercase text-text-muted">
                   {t('promptLibrary.detail.fullPrompt')}
                 </div>
-                <pre className="ui-scrollbar mt-2 max-h-[430px] overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-border-dark bg-bg-dark/65 p-4 text-sm leading-7 text-text-dark">
+                <pre className="ui-scrollbar mt-2 max-h-[430px] overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-[var(--line)] bg-[var(--field-bg)] p-4 text-sm leading-7 text-text-dark">
                   {selectedEntry.prompt}
                 </pre>
               </div>
@@ -852,7 +816,7 @@ export function PromptLibrary() {
                   <div className="text-xs font-medium uppercase text-text-muted">
                     {t('promptLibrary.detail.preview')}
                   </div>
-                  <pre className="ui-scrollbar mt-2 max-h-[180px] overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-border-dark bg-bg-dark/45 p-3 text-xs leading-6 text-text-muted">
+                  <pre className="ui-scrollbar mt-2 max-h-[180px] overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-[var(--line)] bg-[var(--field-bg)] p-3 text-xs leading-6 text-text-muted">
                     {selectedEntry.preview}
                   </pre>
                 </div>

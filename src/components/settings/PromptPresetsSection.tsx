@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Check, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { UiButton, UiInput, UiTextArea } from '@/components/ui';
+import { UiButton, UiField, UiInput, UiTextArea } from '@/components/ui';
 import { useSettingsStore, type PromptPreset } from '@/stores/settingsStore';
 
 interface PresetFormState {
@@ -42,6 +42,8 @@ export function PromptPresetsSection() {
   const [form, setForm] = useState<PresetFormState>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const nameInputId = useId();
+  const promptInputId = useId();
 
   const editingPreset = editingId
     ? promptPresets.find((preset) => preset.id === editingId) ?? null
@@ -98,75 +100,77 @@ export function PromptPresetsSection() {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="border-b border-border-dark px-6 py-5">
-        <h2 className="text-lg font-semibold text-text-dark">
+    <>
+      <div className="border-b border-[var(--line)] px-6 py-5">
+        <h2 className="text-[15px] font-semibold text-text-dark">
           {t('settings.promptPresets.title')}
         </h2>
-        <p className="mt-1 text-sm text-text-muted">
+        <p className="mt-1 text-[13px] text-text-muted">
           {t('settings.promptPresets.desc')}
         </p>
       </div>
 
-      <div className="ui-scrollbar flex-1 space-y-5 overflow-y-auto p-6">
-        <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
+      <div className="ui-scrollbar flex-1 space-y-4 overflow-y-auto p-6">
+        <section className="rounded-xl border border-[var(--line)] bg-surface p-4">
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-medium text-text-dark">
+            <div className="min-w-0">
+              <h3 className="text-[13px] font-semibold text-text-dark">
                 {editingId
                   ? t('settings.promptPresets.editTitle')
                   : t('settings.promptPresets.addTitle')}
               </h3>
-              <p className="mt-1 text-xs text-text-muted">
+              <p className="mt-1 text-[12px] text-text-muted">
                 {t('settings.promptPresets.formHint')}
               </p>
             </div>
             {editingId ? (
-              <UiButton type="button" variant="ghost" size="sm" onClick={resetForm}>
-                <X className="mr-1.5 h-3.5 w-3.5" />
+              <UiButton variant="ghost" size="sm" icon={<X />} onClick={resetForm}>
                 {t('common.cancel')}
               </UiButton>
             ) : null}
           </div>
 
           <div className="mt-4 grid gap-3">
-            <label className="text-xs font-medium text-text-muted">
-              {t('settings.promptPresets.nameLabel')}
+            <UiField label={t('settings.promptPresets.nameLabel')} htmlFor={nameInputId}>
               <UiInput
+                id={nameInputId}
                 value={form.name}
                 onChange={(event) => setForm((previous) => ({ ...previous, name: event.target.value }))}
                 placeholder={t('settings.promptPresets.namePlaceholder')}
-                className="mt-2 h-9"
               />
-            </label>
-            <label className="text-xs font-medium text-text-muted">
-              {t('settings.promptPresets.promptLabel')}
+            </UiField>
+            <UiField label={t('settings.promptPresets.promptLabel')} htmlFor={promptInputId}>
               <UiTextArea
+                id={promptInputId}
                 value={form.prompt}
                 onChange={(event) =>
                   setForm((previous) => ({ ...previous, prompt: event.target.value }))
                 }
                 placeholder={t('settings.promptPresets.promptPlaceholder')}
-                className="mt-2 h-32"
+                className="h-32"
               />
-            </label>
+            </UiField>
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3">
-            <div className="min-h-5 text-xs text-red-300">{error}</div>
-            <UiButton type="button" variant="primary" size="sm" onClick={handleSubmit}>
-              {editingId ? <Check className="mr-1.5 h-3.5 w-3.5" /> : <Plus className="mr-1.5 h-3.5 w-3.5" />}
+            <div className="min-h-5 text-[12px] text-danger">{error}</div>
+            <UiButton
+              variant="primary"
+              size="sm"
+              icon={editingId ? <Check /> : <Plus />}
+              onClick={handleSubmit}
+            >
               {editingId ? t('settings.promptPresets.saveEdit') : t('settings.promptPresets.addButton')}
             </UiButton>
           </div>
-        </div>
+        </section>
 
-        <div className="space-y-3">
+        <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-text-dark">
+            <h3 className="text-[13px] font-semibold text-text-dark">
               {t('settings.promptPresets.listTitle')}
             </h3>
-            <span className="text-xs text-text-muted">
+            <span className="text-[12px] text-text-muted">
               {t('settings.promptPresets.count', { count: promptPresets.length })}
             </span>
           </div>
@@ -175,40 +179,38 @@ export function PromptPresetsSection() {
             promptPresets.map((preset) => (
               <div
                 key={preset.id}
-                className="rounded-lg border border-border-dark bg-bg-dark p-4"
+                className="rounded-xl border border-[var(--line)] bg-surface p-4"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <h4 className="truncate text-sm font-medium text-text-dark">{preset.name}</h4>
-                    <div className="mt-1 text-[11px] text-text-muted">
+                    <h4 className="truncate text-[13px] font-medium text-text-dark">{preset.name}</h4>
+                    <div className="mt-1 text-[12px] text-text-subtle">
                       {t('settings.promptPresets.updatedAt', {
                         time: formatPresetDate(preset.updatedAt),
                       })}
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-2">
-                    <UiButton type="button" variant="muted" size="sm" onClick={() => startEditing(preset)}>
-                      <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                    <UiButton variant="secondary" size="sm" icon={<Pencil />} onClick={() => startEditing(preset)}>
                       {t('common.edit')}
                     </UiButton>
-                    <UiButton type="button" variant="ghost" size="sm" onClick={() => deletePromptPreset(preset.id)}>
-                      <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    <UiButton variant="ghost" size="sm" icon={<Trash2 />} onClick={() => deletePromptPreset(preset.id)}>
                       {t('common.delete')}
                     </UiButton>
                   </div>
                 </div>
-                <div className="mt-3 max-h-24 overflow-hidden whitespace-pre-wrap wrap-break-word rounded-sm bg-surface-dark p-3 text-xs leading-5 text-text-muted">
+                <div className="mt-3 max-h-24 overflow-hidden whitespace-pre-wrap wrap-break-word rounded-lg bg-[var(--field-bg)] p-3 text-[12px] leading-5 text-text-muted">
                   {preset.prompt}
                 </div>
               </div>
             ))
           ) : (
-            <div className="rounded-lg border border-dashed border-border-dark bg-bg-dark/50 p-6 text-center text-sm text-text-muted">
+            <div className="rounded-xl border border-dashed border-[var(--line)] p-6 text-center text-[13px] text-text-muted">
               {t('settings.promptPresets.empty')}
             </div>
           )}
-        </div>
+        </section>
       </div>
-    </div>
+    </>
   );
 }

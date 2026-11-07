@@ -1,17 +1,19 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import {
-  useChannelStore, projectChannelProviders, subscribeChannelCredentials, migrateLegacyProviders,
-  removeChannelRecord,
+  useChannelStore, projectChannelProviders, subscribeChannelCredentials, migrateLegacyProviders, channelStoresHydrated, subscribeChannelHydration,
+  removeChannelRecord, isSpecialLegacyProvider,
 } from '@/features/channels/store/channelStore';
 import { channelPersistenceStorage } from '@/features/channels/store/channelPersistence';
+import { createSecretStorage, protectCredentials } from '@/features/secrets/credentialMigration';
+import { credentialState, secretRefFromToken, secretStore, type CredentialState, type SecretRef } from '@/features/secrets/secretStore';
+import { normalizeComfyUIProvider, readComfyUIWorkflows, withComfyUIWorkflows, type ComfyUIWorkflowCollection, type ComfyUIWorkflowDefinition } from '@/features/channels/application/comfyWorkflows';
 
-/**
- * User-defined image-generation provider config. Intentionally flexible — most
- * real deployments are reverse proxies / aggregators with non-standard shapes,
- * so we store the raw fields and let the generation adapter reshape them.
- */
-export type CustomProviderMediaType = 'image' | 'video' | 'chat';
+const providerCredentialStorage = createSecretStorage(channelPersistenceStorage, 'provider');
+
+/** Special-adapter configurations and a transient channel projection for the remaining settings list.
+ * HTTP profiles and credentials are authoritative only in channelStore. */
+export type CustomProviderMediaType = 'image' | 'video' | 'audio' | 'chat';
 
 export interface CustomProviderChatModelMetadata {
   supportsMultimodal?: boolean;
@@ -41,6 +43,8 @@ export interface CustomProviderConfig {
   /** HTTP method for the endpoint. Default POST. */
   httpMethod?: 'POST' | 'GET';
   apiKey: string;
+  credentialRef?: SecretRef;
+  credentialState?: CredentialState;
   /** "openai" | "anthropic" | "generic-json" | "dreamina-cli" etc — freeform tag the adapter uses. */
   apiStyle: string;
   models: string[];
@@ -63,10 +67,14 @@ export interface CustomProviderConfig {
    *  `models` so existing image/video pickers remain compatible. */
   modelMetadata?: Record<string, CustomProviderChatModelMetadata>;
   extraParams?: Record<string, unknown>;
+  comfyWorkflows?: ComfyUIWorkflowCollection;
   note?: string;
 }
 
 export function customProviderMediaType(provider: Pick<CustomProviderConfig, 'mediaType' | 'extraParams'>): CustomProviderMediaType {
+  if (provider.mediaType === 'audio' || provider.extraParams?.mediaType === 'audio') {
+    return 'audio';
+  }
   if (provider.mediaType === 'chat' || provider.extraParams?.mediaType === 'chat') {
     return 'chat';
   }
@@ -93,11 +101,29 @@ interface CustomProvidersState {
   /** ID of a provider the user asked to edit from the 我的配置 list; the
    *  添加服务商 page reads this on mount to populate its draft. */
   pendingEditId: string | null;
-  addProvider: (provider: CustomProviderConfig) => void;
-  updateProvider: (id: string, patch: Partial<CustomProviderConfig>) => void;
+  addProvider: (provider: CustomProviderConfig) => Promise<void>;
+  updateProvider: (id: string, patch: Partial<CustomProviderConfig>) => Promise<void>;
   removeProvider: (id: string) => void;
-  replaceAll: (providers: CustomProviderConfig[]) => void;
+  replaceAll: (providers: CustomProviderConfig[]) => Promise<void>;
   setPendingEditId: (id: string | null) => void;
+  addComfyWorkflow: (providerId: string, workflow: Omit<ComfyUIWorkflowDefinition, 'id'> & { id?: string }) => Promise<string>;
+  updateComfyWorkflow: (providerId: string, workflowId: string, patch: Partial<Omit<ComfyUIWorkflowDefinition, 'id'>>) => Promise<void>;
+  removeComfyWorkflow: (providerId: string, workflowId: string) => Promise<void>;
+  selectComfyWorkflow: (providerId: string, workflowId: string) => Promise<void>;
+}
+
+const workflowWrites = new Map<string, Promise<void>>();
+async function changeComfyWorkflows(providerId: string, change: (collection: ComfyUIWorkflowCollection) => void): Promise<void> {
+  const previous = workflowWrites.get(providerId) ?? Promise.resolve();
+  const write = previous.catch(() => undefined).then(async () => {
+    const provider = useCustomProvidersStore.getState().providers.find((entry) => entry.id === providerId);
+    if (!provider) throw new Error('ComfyUI 连接不存在');
+    const collection = readComfyUIWorkflows(provider);
+    change(collection);
+    await useCustomProvidersStore.getState().updateProvider(providerId, withComfyUIWorkflows(provider, collection));
+  });
+  workflowWrites.set(providerId, write);
+  try { await write; } finally { if (workflowWrites.get(providerId) === write) workflowWrites.delete(providerId); }
 }
 
 export const useCustomProvidersStore = create<CustomProvidersState>()(
@@ -105,45 +131,91 @@ export const useCustomProvidersStore = create<CustomProvidersState>()(
     (set) => ({
       providers: [],
       pendingEditId: null,
-      addProvider: (p) => set((s) => ({ providers: [...s.providers, p] })),
-      updateProvider: (id, patch) => set((s) => ({
-        providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-      })),
+      addProvider: async (provider) => {
+        const safe = normalizeComfyUIProvider(await protectCredentials(provider, 'provider', provider.id));
+        safe.credentialRef = secretRefFromToken(safe.apiKey) ?? undefined;
+        safe.credentialState = credentialState(safe.credentialRef);
+        set((state) => ({ providers: [...state.providers, safe] }));
+      },
+      updateProvider: async (id, patch) => {
+        const current = useCustomProvidersStore.getState().providers.find((provider) => provider.id === id);
+        if (!current) return;
+        const safe = normalizeComfyUIProvider(await protectCredentials({ ...current, ...patch }, 'provider', id));
+        safe.credentialRef = secretRefFromToken(safe.apiKey) ?? undefined;
+        safe.credentialState = credentialState(safe.credentialRef);
+        set((state) => ({ providers: state.providers.map((provider) => provider.id === id ? safe : provider) }));
+      },
       removeProvider: (id) => {
         const provider = useCustomProvidersStore.getState().providers.find((entry) => entry.id === id);
         if (typeof provider?.extraParams?.channelProfileId === 'string') removeChannelRecord(provider.extraParams.channelProfileId);
         set((s) => ({ providers: s.providers.filter((p) => p.id !== id) }));
       },
-      replaceAll: (providers) => set({ providers }),
+      replaceAll: async (providers) => {
+        const safe = await Promise.all(providers.map(async (provider) => normalizeComfyUIProvider(await protectCredentials(provider, 'provider', provider.id))));
+        set({ providers: safe });
+      },
       setPendingEditId: (id) => set({ pendingEditId: id }),
+      addComfyWorkflow: async (providerId, workflow) => {
+        const id = workflow.id ?? crypto.randomUUID();
+        const detached = structuredClone({ ...workflow, id });
+        await changeComfyWorkflows(providerId, (collection) => {
+          if (collection.workflows.some((entry) => entry.id === id)) throw new Error('ComfyUI 工作流 ID 已存在');
+          collection.workflows.push(detached);
+          collection.selectedWorkflowId ??= id;
+        });
+        return id;
+      },
+      updateComfyWorkflow: async (providerId, workflowId, patch) => {
+        const detached = structuredClone(patch);
+        await changeComfyWorkflows(providerId, (collection) => {
+          const index = collection.workflows.findIndex((entry) => entry.id === workflowId);
+          if (index < 0) throw new Error('ComfyUI 工作流不存在');
+          collection.workflows[index] = { ...collection.workflows[index], ...detached, id: workflowId };
+        });
+      },
+      removeComfyWorkflow: async (providerId, workflowId) => changeComfyWorkflows(providerId, (collection) => {
+        if (!collection.workflows.some((entry) => entry.id === workflowId)) throw new Error('ComfyUI 工作流不存在');
+        collection.workflows = collection.workflows.filter((entry) => entry.id !== workflowId);
+        if (collection.selectedWorkflowId === workflowId) collection.selectedWorkflowId = collection.workflows[0]?.id ?? null;
+      }),
+      selectComfyWorkflow: async (providerId, workflowId) => changeComfyWorkflows(providerId, (collection) => {
+        if (!collection.workflows.some((entry) => entry.id === workflowId)) throw new Error('ComfyUI 工作流不存在');
+        collection.selectedWorkflowId = workflowId;
+      }),
     }),
     {
       name: 'custom-providers-storage',
-      storage: createJSONStorage(() => channelPersistenceStorage),
+      storage: createJSONStorage(() => providerCredentialStorage),
       // Don't persist ephemeral pendingEditId across reloads.
       partialize: (s) => ({ providers: s.providers.filter((provider) => !provider.extraParams?.channelProfileId) }) as unknown as CustomProvidersState,
     }
   )
 );
 
-// Compatibility projection only: native v2 credentials are transient here, never
-// duplicated in legacy persistence. Existing built-in/special providers are kept.
+// Settings-list projection only. HTTP legacy inputs are backed up and migrated,
+// then removed from this store; only independent special adapters remain here.
 let projectingChannels = false;
 function synchronizeChannelProviders(): void {
-  if (projectingChannels) return;
+  if (projectingChannels || !channelStoresHydrated() || !useCustomProvidersStore.persist.hasHydrated()) return;
   projectingChannels = true;
   try {
     const legacy = useCustomProvidersStore.getState().providers.filter((provider) => !provider.extraParams?.channelProfileId);
     migrateLegacyProviders(legacy);
     const projected = projectChannelProviders(useChannelStore.getState().channels);
-    useCustomProvidersStore.setState({ providers: [...legacy, ...projected.filter((provider) => !legacy.some((entry) => entry.id === provider.id))] });
+    const providers = [...legacy.filter(isSpecialLegacyProvider), ...projected].map((provider) => {
+      const ref = provider.credentialRef ?? secretRefFromToken(provider.apiKey) ?? undefined;
+      return { ...normalizeComfyUIProvider(provider), credentialRef: ref, credentialState: credentialState(ref) };
+    });
+    const previous = useCustomProvidersStore.getState().providers;
+    if (JSON.stringify(previous) !== JSON.stringify(providers)) useCustomProvidersStore.setState({ providers });
   } finally { projectingChannels = false; }
 }
 useChannelStore.subscribe(synchronizeChannelProviders);
 subscribeChannelCredentials(synchronizeChannelProviders);
+secretStore.subscribe(synchronizeChannelProviders);
 useCustomProvidersStore.subscribe(synchronizeChannelProviders);
 useCustomProvidersStore.persist.onFinishHydration(synchronizeChannelProviders);
-useChannelStore.persist.onFinishHydration(synchronizeChannelProviders);
+subscribeChannelHydration(synchronizeChannelProviders);
 synchronizeChannelProviders();
 
 /** Curated templates by API shape. Keep this list format-focused instead of

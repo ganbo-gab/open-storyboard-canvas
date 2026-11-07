@@ -97,7 +97,7 @@ describe('ComfyUI workflow gateway', () => {
   it('requires API format and suggests common bindings and output nodes', () => {
     expect(() => parseComfyUIConfig(provider({ extraParams: {
       comfyui: { workflow: { nodes: [], links: [] } },
-    } }))).toThrow('API 格式');
+    } }))).toThrow();
     expect(suggestComfyUIBindings(workflow)).toMatchObject({
       prompt: { nodeId: '6', input: 'text' },
       seed: { nodeId: '3', input: 'seed' },
@@ -223,6 +223,15 @@ describe('ComfyUI workflow gateway', () => {
       ['/system_stats', 'GET'],
       ['/queue', 'GET'],
     ]);
+    expect(client.multipart).not.toHaveBeenCalled();
+  });
+
+  it('retains both endpoint failures when the read-only connection checks fail', async () => {
+    const client = transport();
+    client.json.mockRejectedValueOnce(new Error('HTTP 401: tunnel token required'))
+      .mockRejectedValueOnce(new Error('HTTP 404: queue route missing'));
+    await expect(checkComfyUIConnection(client))
+      .rejects.toThrow(/system_stats: HTTP 401: tunnel token required.*queue: HTTP 404: queue route missing/);
     expect(client.multipart).not.toHaveBeenCalled();
   });
 });

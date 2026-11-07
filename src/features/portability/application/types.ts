@@ -3,7 +3,7 @@ import type { ProjectRecord } from '@/commands/projectState';
 export const PROJECT_BUNDLE_FORMAT = 'open-storyboard-project' as const;
 export const PROJECT_BUNDLE_SCHEMA_VERSION = 1 as const;
 export const SETTINGS_BUNDLE_FORMAT = 'open-storyboard-settings' as const;
-export const SETTINGS_BUNDLE_SCHEMA_VERSION = 1 as const;
+export const SETTINGS_BUNDLE_SCHEMA_VERSION = 2 as const;
 
 export const PROJECT_BUNDLE_LIMITS = {
   maxExpandedBytes: 4 * 1024 * 1024 * 1024,
@@ -89,21 +89,12 @@ export interface PortabilityProgress {
 
 export interface SettingsBundlePayload {
   format: typeof SETTINGS_BUNDLE_FORMAT;
-  schemaVersion: typeof SETTINGS_BUNDLE_SCHEMA_VERSION;
+  schemaVersion: 1 | typeof SETTINGS_BUNDLE_SCHEMA_VERSION;
   appVersion: string;
   createdAt: string;
-  includesCredentials: boolean;
+  /** Legacy metadata retained for readers; portable bundles never contain vault values. */
+  includesCredentials: false;
   categories: Record<string, Record<string, unknown>>;
-  credentials?: {
-    providerApiKeys?: Record<string, string>;
-    agnesApiKey?: string;
-    customProviderApiKeys?: Record<string, string>;
-    imageHost?: {
-      email?: string;
-      password?: string;
-      token?: string;
-    };
-  };
 }
 
 export interface SettingsCategoryDiff {
@@ -113,9 +104,8 @@ export interface SettingsCategoryDiff {
   fields: SettingsFieldDiff[];
 }
 
-export type SettingsPreviewValue =
-  | { kind: 'value'; text: string }
-  | { kind: 'credential'; configuredCount: number };
+/** Truncated JSON text of a setting; credentials never reach previews. */
+export type SettingsPreviewValue = string;
 
 export interface SettingsFieldDiff {
   field: string;

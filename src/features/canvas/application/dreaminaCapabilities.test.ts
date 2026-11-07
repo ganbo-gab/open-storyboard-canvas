@@ -214,7 +214,7 @@ describe('Dreamina catalogs', () => {
   });
 
   it('projects exact video command capabilities and removes old 3.x rows', () => {
-    const entries = buildVideoModelCatalog([], '', { loggedIn: true })
+    const entries = buildVideoModelCatalog([], { loggedIn: true })
       .filter((entry) => entry.providerId === 'dreamina');
 
     expect(entries).toHaveLength(28);
@@ -232,7 +232,7 @@ describe('Dreamina catalogs', () => {
   });
 
   it('does not silently migrate a removed Dreamina model to a paid current model', () => {
-    const catalog = buildVideoModelCatalog([], '', { loggedIn: true });
+    const catalog = buildVideoModelCatalog([], { loggedIn: true });
     expect(resolveVideoModelConfig(catalog, {
       entryId: 'dreamina:image-video:3.0',
       duration: '5',

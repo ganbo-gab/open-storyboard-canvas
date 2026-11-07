@@ -2,8 +2,11 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+import { startAgnesCredentialSync } from "./features/channels/runtime/agnesChannel";
 import "./i18n";
 import "./index.css";
+
+startAgnesCredentialSync();
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -17,6 +17,7 @@ import {
   type CanvasNode,
 } from '@/features/canvas/domain/canvasNodes';
 import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
+import { selectCanvasContentNodes } from './canvasContentSelector';
 
 export type GraphReferenceKind = 'image' | 'video' | 'audio' | 'text';
 
@@ -263,6 +264,7 @@ function getCachedGraphReferenceIndex(
   nodes: CanvasNode[],
   edges: CanvasEdge[],
 ): GraphReferenceIndex {
+  nodes = selectCanvasContentNodes(nodes);
   let byEdges = graphIndexCache.get(nodes);
   if (!byEdges) {
     byEdges = new WeakMap<CanvasEdge[], GraphReferenceIndex>();

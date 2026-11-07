@@ -1,4 +1,5 @@
 import { memo, useCallback, useRef, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { readCanvasClipboardPointer } from '@/commands/image';
 import {
   Background,
   BackgroundVariant,
@@ -24,7 +25,9 @@ import { CanvasActionsProvider, useCreateCanvasActions } from '@/features/canvas
 import { useAltDragCopy } from '@/features/canvas/engine/useAltDragCopy';
 import { useCanvasBridges } from '@/features/canvas/engine/useCanvasBridges';
 import { useCanvasConnections } from '@/features/canvas/engine/useCanvasConnections';
+import { useCanvasFlowGraphBridge } from '@/features/canvas/engine/useCanvasFlowGraphBridge';
 import { useCanvasGestures } from '@/features/canvas/engine/useCanvasGestures';
+import { useCanvasViewportEdges } from '@/features/canvas/engine/useCanvasViewportEdges';
 import { useCanvasHotkeys, useCanvasPointer } from '@/features/canvas/engine/useCanvasHotkeys';
 import { useCanvasGenerationPolling } from '@/features/canvas/hooks/useCanvasGenerationPolling';
 import { useCanvasPersistence } from '@/features/canvas/hooks/useCanvasPersistence';
@@ -32,6 +35,7 @@ import { useCanvasWasdPan } from '@/features/canvas/hooks/useCanvasWasdPan';
 import { useMaterialImport } from '@/features/canvas/io/useMaterialImport';
 import { AddNodeMenu } from '@/features/canvas/menus/AddNodeMenu';
 import { CanvasContextMenu } from '@/features/canvas/menus/CanvasContextMenu';
+import { AlignmentGuidesOverlay } from '@/features/canvas/overlays/AlignmentGuidesOverlay';
 import { SelectionToolbar } from '@/features/canvas/overlays/SelectionToolbar';
 import { CanvasAssetPanel } from '@/features/canvas/panels/CanvasAssetPanel';
 import { useCanvasUiStore, type FlowPoint } from '@/features/canvas/state/canvasUiStore';
@@ -41,6 +45,10 @@ import { useSettingsStore, type CanvasLeftDragMode } from '@/stores/settingsStor
 import { edgeTypes } from './edges';
 import { nodeTypes } from './nodes';
 import { ImageViewerModal } from './ui/ImageViewerModal';
+import { MediaEditDialogHost } from './ui/MediaEditDialog';
+import { CanvasAssetEditHost } from '@/features/assets/ui/CanvasAssetEditHost';
+import { GenerationDraftOptionsDialogHost } from './ui/GenerationDraftOptionsDialog';
+import { KnowledgeCaptureDialogHost } from '@/features/knowledge/ui/KnowledgeCaptureDialog';
 import { NodeToolDialog } from './ui/NodeToolDialog';
 import { SelectedNodeOverlay } from './ui/SelectedNodeOverlay';
 
@@ -78,19 +86,35 @@ export function Canvas() {
       ? reactFlow.screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
       : { x: 0, y: 0 };
   }, [pointerRef, reactFlow]);
-  const clipboard = useCanvasClipboard({ materialImport, resolvePastePosition, scheduleCanvasPersist });
+  const resolveShortcutPastePosition = useCallback(async (): Promise<FlowPoint> => {
+    const fallback = resolvePastePosition();
+    const rect = wrapperRef.current?.getBoundingClientRect();
+    const viewport = reactFlow.getViewport();
+    try {
+      const cursor = await readCanvasClipboardPointer();
+      if (cursor && rect && cursor.x >= rect.left && cursor.x <= rect.right && cursor.y >= rect.top && cursor.y <= rect.bottom) {
+        return { x: (cursor.x - rect.left - viewport.x) / viewport.zoom, y: (cursor.y - rect.top - viewport.y) / viewport.zoom };
+      }
+    } catch { /* Older hosts retain the captured DOM pointer fallback. */ }
+    return fallback;
+  }, [reactFlow, resolvePastePosition]);
+  const clipboard = useCanvasClipboard({ materialImport, resolvePastePosition, resolveShortcutPastePosition, scheduleCanvasPersist });
   const actions = useCreateCanvasActions({ reactFlow, wrapper: getWrapper, clipboard, scheduleCanvasPersist });
 
-  useCanvasGestures(wrapperRef);
   useCanvasHotkeys(actions, wrapperRef, pointerRef);
   useCanvasBridges(wrapperRef);
 
+  const projectId = useProjectStore((state) => state.currentProjectId);
   const saveViewport = useCallback((viewport: Viewport) => {
-    useCanvasStore.getState().setViewportState(viewport);
     const projects = useProjectStore.getState();
-    if (projects.getCurrentProject() && !isRestoringCanvasRef.current) projects.saveCurrentProjectViewport(viewport);
-  }, [isRestoringCanvasRef]);
+    if (projects.currentProjectId !== projectId || isRestoringCanvasRef.current) return;
+    const canvas = useCanvasStore.getState();
+    if (canvas.currentViewport.x !== viewport.x || canvas.currentViewport.y !== viewport.y || canvas.currentViewport.zoom !== viewport.zoom) canvas.setViewportState(viewport);
+    if (projects.getCurrentProject()) projects.saveCurrentProjectViewport(viewport);
+  }, [isRestoringCanvasRef, projectId]);
   const cancelViewportSave = useCallback(() => useProjectStore.getState().cancelPendingViewportPersist(), []);
+  const gestures = useCanvasGestures(wrapperRef, { onViewportCommit: saveViewport, onViewportStart: cancelViewportSave });
+  useCanvasViewportEdges(wrapperRef);
   const enableWasdPan = useSettingsStore((state) => state.enableCanvasWasdPan);
   const wasdSensitivity = useSettingsStore((state) => state.canvasWasdPanSensitivity);
   useCanvasWasdPan({
@@ -144,8 +168,8 @@ export function Canvas() {
           clipboard={clipboard}
           onDragOver={materialImport.handleDragOver}
           onDrop={materialImport.handleDrop}
-          onMoveStart={cancelViewportSave}
-          onMoveEnd={saveViewport}
+          onMoveStart={gestures.onMoveStart}
+          onMoveEnd={gestures.onMoveEnd}
         />
         <CanvasEmptyState materialImport={materialImport} />
         <CanvasToolRail onOpenAddMenu={openAddMenu} onQuickAdd={quickAdd} onOpenAssets={openAssets} />
@@ -168,6 +192,10 @@ export function Canvas() {
         {sheet === 'palette' ? <CanvasCommandPalette /> : null}
         {sheet === 'shortcuts' ? <CanvasShortcutsSheet /> : null}
         <NodeToolDialog />
+        <MediaEditDialogHost />
+        <CanvasAssetEditHost />
+        <GenerationDraftOptionsDialogHost />
+        <KnowledgeCaptureDialogHost />
         <ImageViewerModal
           open={imageViewer.isOpen}
           imageUrl={imageViewer.currentImageUrl || ''}
@@ -194,8 +222,8 @@ interface CanvasFlowProps {
 }
 
 /**
- * The only component subscribed to the whole graph: it re-renders per drag frame, so it holds
- * nothing but the controlled <ReactFlow>. Chrome lives beside it and never re-renders with it.
+ * Graph edits reach Flow through the synchronous canonical-store bridge, not a React-prop
+ * roundtrip per drag frame. This assembly only re-renders when interaction configuration changes.
  */
 const CanvasFlow = memo(function CanvasFlow({
   tool,
@@ -207,11 +235,11 @@ const CanvasFlow = memo(function CanvasFlow({
   onMoveStart,
   onMoveEnd,
 }: CanvasFlowProps) {
-  const nodes = useCanvasStore((state) => state.nodes);
-  const edges = useCanvasStore((state) => state.edges);
+  useCanvasFlowGraphBridge();
   const studioOpen = useCanvasStore((state) => state.activeDirectorStudioNodeId !== null);
   const snapToGrid = useCanvasUiStore((state) => state.snapToGrid);
   const minimapOpen = useCanvasUiStore((state) => state.minimapOpen);
+  const keepAllNodesRendered = useCanvasUiStore((state) => state.zoomRendering.keepAllNodesRendered);
   const connections = useCanvasConnections(scheduleCanvasPersist);
   const altDrag = useAltDragCopy(clipboard, scheduleCanvasPersist);
   const selecting = tool === 'select';
@@ -248,8 +276,6 @@ const CanvasFlow = memo(function CanvasFlow({
 
   return (
     <ReactFlow<CanvasNode, CanvasEdge>
-      nodes={nodes}
-      edges={edges}
       onNodesChange={handleNodesChange}
       onEdgesChange={handleEdgesChange}
       onConnect={connections.onConnect}
@@ -289,7 +315,7 @@ const CanvasFlow = memo(function CanvasFlow({
       snapGrid={SNAP_GRID}
       deleteKeyCode={null}
       connectionRadius={28}
-      onlyRenderVisibleElements={!studioOpen}
+      onlyRenderVisibleElements={!studioOpen && !keepAllNodesRendered}
       proOptions={PRO_OPTIONS}
     >
       <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--canvas-grid-dot)" />
@@ -304,6 +330,7 @@ const CanvasFlow = memo(function CanvasFlow({
         />
       ) : null}
       <SelectedNodeOverlay />
+      <AlignmentGuidesOverlay />
     </ReactFlow>
   );
 });

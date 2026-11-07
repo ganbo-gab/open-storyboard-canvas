@@ -109,6 +109,9 @@ enum RemoteMediaAttemptFailure {
     InvalidContent {
         message: String,
     },
+    Credential {
+        message: String,
+    },
     TooLarge {
         message: String,
     },
@@ -119,7 +122,7 @@ impl RemoteMediaAttemptFailure {
         match self {
             Self::Status { retryable, .. } => *retryable,
             Self::Network { .. } | Self::InvalidContent { .. } => true,
-            Self::TooLarge { .. } => false,
+            Self::TooLarge { .. } | Self::Credential { .. } => false,
         }
     }
 
@@ -129,7 +132,7 @@ impl RemoteMediaAttemptFailure {
                 fallback_allowed, ..
             } => *fallback_allowed,
             Self::Network { .. } | Self::InvalidContent { .. } => true,
-            Self::TooLarge { .. } => false,
+            Self::TooLarge { .. } | Self::Credential { .. } => false,
         }
     }
 
@@ -138,6 +141,7 @@ impl RemoteMediaAttemptFailure {
             Self::Status { message, .. }
             | Self::Network { message }
             | Self::InvalidContent { message }
+            | Self::Credential { message }
             | Self::TooLarge { message } => message,
         }
     }
@@ -348,11 +352,17 @@ async fn try_remote_media_request_with_limit(
             fallback_allowed: false,
         });
     }
+    let mut redactor = super::secrets::SecretRedactor::default();
 
     for redirect_count in 0..=REMOTE_MEDIA_MAX_REDIRECTS {
         let url_label = describe_remote_media_url(current_url.as_str());
+        let request_url = redactor
+            .resolve_markers(current_url.as_str(), true)
+            .map_err(|error| RemoteMediaAttemptFailure::Credential {
+                message: error.to_string(),
+            })?;
         let mut request = client
-            .get(current_url.clone())
+            .get(request_url.as_ref())
             .timeout(media_download_timeout(media_kind))
             .header(reqwest::header::ACCEPT, accept_header)
             .header(reqwest::header::ACCEPT_ENCODING, "identity")
@@ -364,7 +374,12 @@ async fn try_remote_media_request_with_limit(
                     if trimmed_key.is_empty() || !should_forward_remote_image_header(trimmed_key) {
                         continue;
                     }
-                    request = request.header(trimmed_key, value.as_str());
+                    let value = redactor.resolve_markers(value, false).map_err(|error| {
+                        RemoteMediaAttemptFailure::Credential {
+                            message: error.to_string(),
+                        }
+                    })?;
+                    request = request.header(trimmed_key, value.as_ref());
                 }
             }
         }
@@ -408,9 +423,10 @@ async fn try_remote_media_request_with_limit(
                     retryable: false,
                     fallback_allowed: false,
                 })?;
+            let location = redactor.redact(location);
             let next_url =
                 current_url
-                    .join(location)
+                    .join(&location)
                     .map_err(|_| RemoteMediaAttemptFailure::Status {
                         message: format!(
                             "{} route received malformed redirect for remote {} {}",
@@ -473,6 +489,8 @@ async fn try_remote_media_request_with_limit(
             .and_then(|value| value.to_str().ok())
             .unwrap_or("none")
             .to_string();
+        let content_type = redactor.redact_owned(content_type);
+        let content_encoding = redactor.redact_owned(content_encoding);
         if response
             .content_length()
             .is_some_and(|length| length > byte_limit as u64)
@@ -500,6 +518,16 @@ async fn try_remote_media_request_with_limit(
         }
         bytes.extend_from_slice(&chunk);
     }
+        if !redactor.is_empty() {
+            if let Ok(text) = std::str::from_utf8(&bytes) {
+                if content_type_is_textual_non_image(&content_type)
+                    || looks_like_json_text(text.trim_start())
+                    || looks_like_html_text(text.trim_start())
+                {
+                    bytes = redactor.redact(text).into_bytes();
+                }
+            }
+        }
 
         if let Some(message) = remote_media_content_error(media_kind, &content_type, &bytes) {
             return Err(RemoteMediaAttemptFailure::InvalidContent {
@@ -696,6 +724,7 @@ pub struct SystemClipboardImage {
 pub struct SystemClipboardContent {
     pub image: Option<SystemClipboardImage>,
     pub text: Option<String>,
+    pub file_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3536,24 +3565,91 @@ pub async fn read_system_clipboard() -> Result<SystemClipboardContent, String> {
     let mut clipboard =
         Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
 
+    let mut failures = Vec::new();
+    let mut record_failure = |error: arboard::Error| {
+        if !matches!(
+            error,
+            arboard::Error::ContentNotAvailable | arboard::Error::ClipboardNotSupported
+        ) {
+            failures.push(error.to_string());
+        }
+    };
     let text = match clipboard.get_text() {
         Ok(value) => {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
+            if value.trim().is_empty() {
                 None
             } else {
                 Some(value)
             }
         }
-        Err(_) => None,
+        Err(error) => {
+            record_failure(error);
+            None
+        }
     };
-
-    let image = match clipboard.get_image() {
-        Ok(image_data) => Some(arboard_image_to_system_clipboard_image(image_data)?),
-        Err(_) => read_macos_pasteboard_encoded_image(),
+    // File copies (Finder / Explorer) may also expose a thumbnail. Prefer the actual files.
+    let file_paths = match clipboard.get().file_list() {
+        Ok(paths) => paths
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            record_failure(error);
+            Vec::new()
+        }
     };
+    let image = if file_paths.is_empty() {
+        match clipboard.get_image() {
+            Ok(image_data) => Some(arboard_image_to_system_clipboard_image(image_data)?),
+            Err(error) => {
+                let fallback = read_macos_pasteboard_encoded_image();
+                if fallback.is_none() {
+                    record_failure(error);
+                }
+                fallback
+            }
+        }
+    } else {
+        None
+    };
+    if text.is_none() && image.is_none() && file_paths.is_empty() && !failures.is_empty() {
+        return Err(format!(
+            "Failed to read system clipboard: {}",
+            failures.join("; ")
+        ));
+    }
 
-    Ok(SystemClipboardContent { image, text })
+    Ok(SystemClipboardContent {
+        image,
+        text,
+        file_paths,
+    })
+}
+
+#[tauri::command]
+pub fn write_system_clipboard_text(text: String) -> Result<(), String> {
+    let mut clipboard =
+        Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
+    clipboard
+        .set_text(text)
+        .map_err(|e| format!("Failed to write clipboard text: {}", e))
+}
+
+#[derive(Serialize)]
+pub struct CanvasClipboardPointer {
+    x: f64,
+    y: f64,
+}
+
+#[tauri::command]
+pub fn canvas_clipboard_pointer(window: tauri::Window) -> Result<CanvasClipboardPointer, String> {
+    let cursor = window.cursor_position().map_err(|e| e.to_string())?;
+    let origin = window.inner_position().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    Ok(CanvasClipboardPointer {
+        x: (cursor.x - origin.x as f64) / scale,
+        y: (cursor.y - origin.y as f64) / scale,
+    })
 }
 
 #[tauri::command]
@@ -4045,5 +4141,18 @@ mod remote_media_tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn credential_failures_never_retry_or_change_network_route() {
+        let failure = RemoteMediaAttemptFailure::Credential {
+            message: "{\"state\":\"locked\",\"code\":\"storage_locked\"}".to_string(),
+        };
+        assert!(!failure.retryable());
+        assert!(!failure.fallback_allowed());
+        assert_eq!(
+            failure.into_message(),
+            "{\"state\":\"locked\",\"code\":\"storage_locked\"}"
+        );
     }
 }

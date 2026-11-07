@@ -4,6 +4,7 @@ import {
   getConfiguredApiKeyCount,
   type ProviderApiKeys,
 } from '@/stores/settingsStore';
+import { credentialState, secretRefFromToken } from '@/features/secrets/secretStore';
 
 interface DreaminaProviderStatus {
   loggedIn: boolean;
@@ -62,7 +63,8 @@ export function customProviderAllowsMissingApiKey(provider: CustomProviderConfig
 }
 
 export function hasCustomProviderCredential(provider: CustomProviderConfig): boolean {
-  return hasText(provider.apiKey) || customProviderAllowsMissingApiKey(provider);
+  const ref = provider.credentialRef ?? secretRefFromToken(provider.apiKey);
+  return (ref ? credentialState(ref) === 'present' : hasText(provider.apiKey)) || customProviderAllowsMissingApiKey(provider);
 }
 
 export function hasConfiguredCustomProvider(provider: CustomProviderConfig): boolean {
@@ -81,7 +83,8 @@ export function getConfiguredImageProviderCount({
     isImageCustomProvider(provider) && hasConfiguredCustomProvider(provider)
   )).length;
   const dreaminaCount = dreaminaStatus?.loggedIn ? 1 : 0;
-  const agnesCount = hasText(agnesApiKey) ? 1 : 0;
+  const agnesRef = secretRefFromToken(agnesApiKey ?? '');
+  const agnesCount = (agnesRef ? credentialState(agnesRef) === 'present' : hasText(agnesApiKey)) ? 1 : 0;
 
   return builtInCount + customCount + dreaminaCount + agnesCount;
 }

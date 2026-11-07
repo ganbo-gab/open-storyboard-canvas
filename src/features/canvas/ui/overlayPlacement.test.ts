@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { placeNodeOverlay } from "./overlayPlacement";
+import { placeNodeOverlay, placePanelAnchor } from "./overlayPlacement";
 
 describe("node controls stay reachable at viewport boundaries", () => {
   for (const [x, y] of [
@@ -45,5 +45,30 @@ describe("node controls stay reachable at viewport boundaries", () => {
         "bottom",
       ).width,
     ).toBe(351);
+  });
+});
+
+describe("node tool panels open where they fit", () => {
+  // Panels render at (trigger left, trigger bottom + 6).
+  const panelTop = (anchor: { y: number; height: number }) => anchor.y + anchor.height + 6;
+  const trigger = { x: 100, y: 600, width: 80, height: 30 };
+  const viewport = { width: 1000, height: 900 };
+
+  it("keeps the trigger when the panel fits below it", () => {
+    expect(placePanelAnchor({ ...trigger, y: 100 }, { width: 300, height: 300 }, viewport)).toEqual({ ...trigger, y: 100 });
+  });
+
+  it("opens above the trigger when the panel would run off the bottom", () => {
+    const top = panelTop(placePanelAnchor(trigger, { width: 300, height: 400 }, viewport));
+    expect(top).toBe(600 - 6 - 400);
+  });
+
+  it("pins a panel taller than either side to the bottom inset", () => {
+    const top = panelTop(placePanelAnchor({ ...trigger, y: 300 }, { width: 300, height: 700 }, viewport));
+    expect(top).toBe(900 - 8 - 700);
+  });
+
+  it("slides a panel opened near the right edge back inside the viewport", () => {
+    expect(placePanelAnchor({ ...trigger, x: 900, y: 100 }, { width: 320, height: 300 }, viewport).x).toBe(1000 - 8 - 320);
   });
 });

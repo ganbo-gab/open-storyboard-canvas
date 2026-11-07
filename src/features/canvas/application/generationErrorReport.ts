@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { redactSensitiveUrl } from '@/features/canvas/application/imageProviderContracts';
 import { isTauri } from '@tauri-apps/api/core';
 
@@ -7,6 +8,7 @@ export interface GenerationDebugContext {
   requestModel?: string;
   requestSize?: string;
   requestAspectRatio?: string;
+  channelModeId?: string;
   prompt?: string;
   extraParams?: Record<string, unknown>;
   referenceImageCount?: number;
@@ -28,6 +30,93 @@ interface BuildGenerationErrorReportInput {
   errorMessage: string;
   errorDetails?: string;
   context?: unknown;
+}
+
+export type GenerationFailureCategory = 'input_moderation' | 'output_moderation' | 'error';
+export interface GenerationFailureClassification {
+  category: GenerationFailureCategory;
+  /** Provider evidence for an explicit retry action only; never permission to resubmit automatically. */
+  retryable: boolean;
+  /** Includes moderation errors whose input/output direction is not known. */
+  moderation: boolean;
+}
+
+const failureEvidenceSchema = z.object({
+  failure_reason: z.unknown().optional(), failureReason: z.unknown().optional(),
+  reason: z.unknown().optional(), code: z.unknown().optional(), category: z.unknown().optional(),
+  retryable: z.unknown().optional(), moderation: z.unknown().optional(),
+  message: z.unknown().optional(), upstreamMessage: z.unknown().optional(),
+  error: z.unknown().optional(), details: z.unknown().optional(),
+  data: z.unknown().optional(), response: z.unknown().optional(), cause: z.unknown().optional(),
+});
+
+function directedModeration(value: unknown): GenerationFailureCategory | null {
+  if (typeof value !== 'string') return null;
+  if (/\binput[_ -]moderation\b|\binput[_ -](?:image[_ -]|text[_ -])?(?:content[_ -])?(?:policy[_ -]violation|safety[_ -]violation)|输入(?:内容|图片|文本|提示词)?违规/i.test(value)) return 'input_moderation';
+  if (/\boutput[_ -]moderation\b|\boutput[_ -](?:image[_ -]|text[_ -])?(?:content[_ -])?(?:policy[_ -]violation|safety[_ -]violation)|输出(?:内容|图片|文本)?违规/i.test(value)) return 'output_moderation';
+  return null;
+}
+
+function inspectGenerationFailure(
+  value: unknown,
+  ancestors: WeakSet<object>,
+  depth: number,
+): GenerationFailureClassification {
+  const unknownFailure: GenerationFailureClassification = { category: 'error', retryable: false, moderation: false };
+  if (depth > 8) return unknownFailure;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try {
+        const parsed: unknown = JSON.parse(text);
+        return inspectGenerationFailure(parsed, ancestors, depth + 1);
+      } catch { /* Plain provider text may start with a bracket. */ }
+    }
+    const category = directedModeration(text);
+    return {
+      category: category ?? 'error', retryable: false,
+      moderation: category !== null || /moderation|content[_ -](?:policy|filter|safety)|safety[_ -](?:filter|violation)|内容审核|安全策略|敏感内容|违规/i.test(text),
+    };
+  }
+  if (!value || typeof value !== 'object' || ancestors.has(value)) return unknownFailure;
+  ancestors.add(value);
+  try {
+    const parsed = failureEvidenceSchema.safeParse(value instanceof Error
+      ? {
+          ...value,
+          message: value.message,
+          cause: 'cause' in value && Object.prototype.hasOwnProperty.call(value, 'cause') ? value.cause : undefined,
+        }
+      : value);
+    if (!parsed.success) return unknownFailure;
+    const evidence = parsed.data;
+    // Explicit provider codes win over prose; do not inspect prompt/config/credential fields.
+    const markers = [evidence.failure_reason, evidence.failureReason, evidence.reason, evidence.code, evidence.category];
+    for (const field of markers) {
+      const category = directedModeration(field);
+      if (category) return { category, retryable: false, moderation: true };
+    }
+    const nested = [
+      ...markers,
+      evidence.error, evidence.details, evidence.data, evidence.response, evidence.cause,
+      evidence.upstreamMessage, evidence.message,
+    ].map((child) => inspectGenerationFailure(child, ancestors, depth + 1));
+    const directed = nested.find((failure) => failure.category !== 'error');
+    if (directed) return directed;
+    const moderation = evidence.moderation === true || evidence.category === 'moderation'
+      || nested.some((failure) => failure.moderation);
+    return {
+      category: 'error', moderation,
+      retryable: !moderation && (evidence.retryable === true || nested.some((failure) => failure.retryable)),
+    };
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+/** Normalizes provider/persisted failure evidence without guessing an input/output direction. */
+export function classifyGenerationFailure(value: unknown): GenerationFailureClassification {
+  return inspectGenerationFailure(value, new WeakSet<object>(), 0);
 }
 
 function toStringSafe(value: unknown): string {

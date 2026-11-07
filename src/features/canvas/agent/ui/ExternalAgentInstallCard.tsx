@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
-import { Check, FileCode2, Loader2, ShieldCheck } from "lucide-react";
+import { Check, FileCode2, ShieldCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { UiButton, UiConfirm } from "@/components/ui";
 import {
   installExternalAgent,
   uninstallExternalAgent,
@@ -21,6 +22,7 @@ export function ExternalAgentInstallCard({ cli, connected }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [pendingRemoval, setPendingRemoval] = useState<ExternalAgentRuntime | null>(null);
   useEffect(() => {
     let active = true;
     setDiff(null);
@@ -56,13 +58,13 @@ export function ExternalAgentInstallCard({ cli, connected }: Props) {
       setBusy(false);
     }
   };
-  const apply = async (remove: boolean) => {
+  const apply = async (remove: boolean, target: ExternalAgentRuntime = cli) => {
     setBusy(true);
     setError("");
     try {
       const result = remove
-        ? await uninstallExternalAgent(cli)
-        : await installExternalAgent(cli);
+        ? await uninstallExternalAgent(target)
+        : await installExternalAgent(target);
       setInstalled(result.status.installed);
       setDiff(null);
       setNotice(
@@ -75,7 +77,7 @@ export function ExternalAgentInstallCard({ cli, connected }: Props) {
     }
   };
   return (
-    <section className="rounded-xl border border-border-dark bg-bg-dark/50 p-4">
+    <section className="rounded-xl border border-[var(--line)] bg-[var(--field-bg)] p-4">
       <div className="flex items-start gap-3">
         <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
         <div className="min-w-0 flex-1">
@@ -91,7 +93,7 @@ export function ExternalAgentInstallCard({ cli, connected }: Props) {
             </p>
           )}
         </div>
-        {installed && <Check className="h-4 w-4 text-emerald-500" />}
+        {installed && <Check className="h-4 w-4 text-success" />}
       </div>
       {!isTauri() ? (
         <p className="mt-3 text-xs text-text-muted">
@@ -99,68 +101,63 @@ export function ExternalAgentInstallCard({ cli, connected }: Props) {
         </p>
       ) : (
         <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={busy || !connected}
+          <UiButton
+            variant="secondary"
+            disabled={!connected}
+            loading={busy}
+            icon={<FileCode2 />}
             onClick={() => void preview()}
-            className="inline-flex h-9 items-center gap-2 rounded-lg border border-border-dark px-3 text-xs text-text-dark transition-colors hover:bg-surface-dark disabled:opacity-40"
           >
-            {busy ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <FileCode2 className="h-4 w-4" />
-            )}
             {t("rework.external.preview")}
-          </button>
+          </UiButton>
           {installed && (
-            <button
-              type="button"
+            <UiButton
+              variant="ghost"
               disabled={busy}
-              onClick={() => {
-                if (window.confirm(t("rework.external.confirmRemove")))
-                  void apply(true);
-              }}
-              className="h-9 rounded-lg px-3 text-xs text-text-muted hover:text-red-400"
+              onClick={() => setPendingRemoval(cli)}
             >
               {t("rework.external.remove")}
-            </button>
+            </UiButton>
           )}
         </div>
       )}
       {diff !== null && (
         <div className="mt-3 space-y-3">
-          <pre className="max-h-64 overflow-auto rounded-lg bg-surface-dark p-3 text-[11px] leading-relaxed text-text-dark">
+          <pre className="ui-scrollbar max-h-64 overflow-auto rounded-lg border border-[var(--line)] bg-[var(--field-bg)] p-3 text-[11px] leading-relaxed text-text-dark">
             {diff || t("rework.external.noChanges")}
           </pre>
           <div className="flex gap-2">
-            <button
-              type="button"
+            <UiButton
+              variant="primary"
               disabled={busy}
               onClick={() => void apply(false)}
-              className="h-9 rounded-lg bg-accent px-4 text-xs font-medium text-white disabled:opacity-40"
             >
               {t("rework.external.apply")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setDiff(null)}
-              className="px-3 text-xs text-text-muted"
-            >
+            </UiButton>
+            <UiButton variant="ghost" onClick={() => setDiff(null)}>
               {t("common.cancel")}
-            </button>
+            </UiButton>
           </div>
         </div>
       )}
       {notice && (
-        <p role="status" className="mt-3 text-xs text-emerald-500">
+        <p role="status" className="mt-3 text-xs text-success">
           {notice}
         </p>
       )}
       {error && (
-        <p role="alert" className="mt-3 break-words text-xs text-red-400">
+        <p role="alert" className="mt-3 break-words text-xs text-danger">
           {error}
         </p>
       )}
+      <UiConfirm
+        isOpen={pendingRemoval !== null}
+        title={t("rework.external.remove")}
+        description={t("rework.external.confirmRemove")}
+        confirmLabel={t("rework.external.remove")}
+        onConfirm={() => { if (pendingRemoval) void apply(true, pendingRemoval); }}
+        onClose={() => setPendingRemoval(null)}
+      />
     </section>
   );
 }

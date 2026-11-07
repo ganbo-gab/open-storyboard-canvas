@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   normalizeGenerationNetworkSettings,
+  agentDefaultSettingsSchema,
+  normalizeAgentDefaults,
+  resolveAgentDefaults,
   useSettingsStore,
   type CanvasLeftDragMode,
   type CanvasWheelMode,
@@ -80,4 +83,50 @@ describe('canvas gesture settings', () => {
     const migrated = await migrate({ canvasLeftDragMode, canvasWheelMode }, 21);
     expect(migrated).toMatchObject({ canvasLeftDragMode, canvasWheelMode });
   });
+});
+
+describe('global Agent defaults', () => {
+  it('hydrates legacy, partial and malformed persisted values with safe deterministic defaults', async () => {
+    const migrate = useSettingsStore.persist.getOptions().migrate!;
+    expect(await migrate({}, 23)).toMatchObject({ agentDefaults: { modelId: null, executionMode: 'manual' } });
+    expect(normalizeAgentDefaults({ modelId: ' custom:provider:model ', executionMode: 'invalid' }))
+      .toEqual({ modelId: 'custom:provider:model', executionMode: 'manual' });
+    expect(normalizeAgentDefaults({ modelId: 42, executionMode: 'auto' })).toEqual({ modelId: null, executionMode: 'auto' });
+    const merge = useSettingsStore.persist.getOptions().merge!;
+    expect(merge({ agentDefaults: { modelId: [], executionMode: true } }, useSettingsStore.getInitialState()))
+      .toMatchObject({ agentDefaults: { modelId: null, executionMode: 'manual' } });
+    expect(await migrate({ apiKeys: { provider: 'configured' }, agentDefaults: { modelId: 'model', executionMode: 'auto' } }, 23))
+      .toMatchObject({ agentDefaults: { modelId: 'model', executionMode: 'auto' } });
+  });
+
+  it('keeps per-conversation overrides while new conversations inherit the latest global choices', () => {
+    useSettingsStore.getState().setAgentDefaults({ modelId: 'global-model', executionMode: 'auto' });
+    expect(resolveAgentDefaults()).toEqual({ modelId: 'global-model', executionMode: 'auto' });
+    expect(resolveAgentDefaults({ modelId: 'conversation-model', executionMode: 'manual' }))
+      .toEqual({ modelId: 'conversation-model', executionMode: 'manual' });
+    useSettingsStore.getState().setAgentDefaults({ modelId: 'new-default' });
+    expect(resolveAgentDefaults({ modelId: 'conversation-model' })).toEqual({ modelId: 'conversation-model', executionMode: 'auto' });
+    expect(resolveAgentDefaults({ modelId: null })).toEqual({ modelId: null, executionMode: 'auto' });
+    expect(resolveAgentDefaults()).toEqual({ modelId: 'new-default', executionMode: 'auto' });
+  });
+
+  it('rejects malformed settings updates rather than widening approval modes or changing unrelated fields', () => {
+    const before = useSettingsStore.getState().agentDefaults;
+    expect(agentDefaultSettingsSchema.safeParse({ modelId: '', executionMode: 'auto' }).success).toBe(false);
+    expect(agentDefaultSettingsSchema.safeParse({ modelId: null, executionMode: 'automatic' }).success).toBe(false);
+    expect(agentDefaultSettingsSchema.safeParse({ modelId: null, executionMode: 'manual', bypassApproval: true }).success).toBe(false);
+    expect(useSettingsStore.getState().agentDefaults).toEqual(before);
+  });
+});
+
+it('drops retired audio settings from both migrations and same-version hydration', async () => {
+  const legacy = { audioGenerationSettings: { apiBaseUrl: 'http://old.invalid', models: [{ id: 'local-doubao-tts', enabled: true }] }, promptPresets: [{ id: 'keep', name: 'Keep', prompt: 'Preserve other settings', createdAt: 1, updatedAt: 1 }] };
+  const options = useSettingsStore.persist.getOptions();
+  const migrated = await options.migrate!(legacy, 24);
+  expect(migrated).not.toHaveProperty('audioGenerationSettings');
+  expect(migrated).toMatchObject({ promptPresets: legacy.promptPresets });
+  const restored = options.merge!(legacy, useSettingsStore.getInitialState());
+  expect(restored).not.toHaveProperty('audioGenerationSettings');
+  expect(restored).toMatchObject({ promptPresets: legacy.promptPresets });
+  expect(useSettingsStore.getInitialState()).not.toHaveProperty('audioGenerationSettings');
 });

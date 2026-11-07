@@ -1,7 +1,10 @@
 import { useCallback, useEffect, type DragEvent as ReactDragEvent } from 'react';
 
 import { useCanvasStore } from '@/stores/canvasStore';
+import { useProjectStore } from '@/stores/projectStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { importStudioMedia } from '@/features/studio/importStudioMedia';
+import { hasStudioMediaDrag, readStudioMediaDrag } from '@/features/studio/mediaDrag';
 import { CANVAS_NODE_TYPES, type CanvasNodeData, type CanvasNodeType } from '@/features/canvas/domain/canvasNodes';
 import type { FlowPoint } from '@/features/canvas/state/canvasUiStore';
 import { prepareNodeImage, prepareNodeImageFromFile } from '@/features/canvas/application/imageData';
@@ -79,8 +82,10 @@ export function useMaterialImport(options: {
     flowPosition: FlowPoint
   ): Promise<CreatedMaterialNode | null> => {
     try {
+      const projectId = useProjectStore.getState().currentProjectId;
       const adapter = MATERIAL_ADAPTERS[kind];
       const nodeData = await adapter.prepare(input);
+      if (useProjectStore.getState().currentProjectId !== projectId) return null;
       const fileName = 'file' in input ? input.file.name : input.fileName;
       if (useSettingsStore.getState().useUploadFilenameAsNodeTitle && fileName) {
         nodeData.displayName = fileName;
@@ -135,20 +140,33 @@ export function useMaterialImport(options: {
   }, []);
 
   const handleDragOver = useCallback((event: ReactDragEvent<HTMLElement>) => {
-    if (!dataTransferHasExternalFilePayload(event.dataTransfer)) return;
+    const library = hasStudioMediaDrag(event.dataTransfer);
+    if (!library && !dataTransferHasExternalFilePayload(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = (
-      dataTransferHasMaterialFile(event.dataTransfer)
+      library
+      || dataTransferHasMaterialFile(event.dataTransfer)
       || dataTransferHasExternalFilePayload(event.dataTransfer)
     ) ? 'copy' : 'none';
   }, []);
 
   const handleDrop = useCallback((event: ReactDragEvent<HTMLElement>) => {
-    if (!dataTransferHasExternalFilePayload(event.dataTransfer)) return;
+    const library = readStudioMediaDrag(event.dataTransfer);
+    if (!library && !dataTransferHasExternalFilePayload(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
     const flowPosition = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    if (library) {
+      const projectId = useProjectStore.getState().currentProjectId;
+      if (!projectId) return;
+      // Library records are re-read by their stores; the drop lands at the pointer in the open project.
+      void importStudioMedia(library, projectId, flowPosition).then(
+        (nodeIds) => { if (nodeIds[0]) useCanvasStore.getState().setSelectedNode(nodeIds[0]); },
+        (error: unknown) => console.error('Failed to import library media onto canvas', error),
+      );
+      return;
+    }
     const file = resolveDroppedMaterialFile(event.dataTransfer);
     if (file) {
       void createFromFile(file, flowPosition);

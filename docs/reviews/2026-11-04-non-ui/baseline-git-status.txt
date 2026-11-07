@@ -1,0 +1,633 @@
+ M NOTICE
+ M docs/rework/02-渠道接入规格.md
+ M docs/rework/03-画布交互规格.md
+ M docs/rework/04-首页与工作台规格.md
+ M docs/rework/05-舞台规格.md
+ M docs/rework/06-Agent规格.md
+ M docs/rework/07-ComfyUI与外部Agent接入.md
+ M docs/rework/08-实施与验收.md
+ M index.html
+ M package-lock.json
+ M package.json
+D  public/blueprint-figure.glb
+ M src-tauri/Cargo.lock
+ M src-tauri/Cargo.toml
+ M src-tauri/src/ai/mod.rs
+ M src-tauri/src/ai/providers/fal/mod.rs
+ M src-tauri/src/ai/providers/grsai/mod.rs
+ M src-tauri/src/ai/providers/kie/mod.rs
+ M src-tauri/src/ai/providers/ppio/mod.rs
+ M src-tauri/src/commands/ai.rs
+ M src-tauri/src/commands/http.rs
+ M src-tauri/src/commands/image.rs
+ M src-tauri/src/commands/mod.rs
+ M src-tauri/src/commands/portability.rs
+ M src-tauri/src/commands/portability_tests.rs
+ M src-tauri/src/lib.rs
+ M src/App.tsx
+ M src/commands/ai.ts
+ M src/components/AppErrorBoundary.tsx
+ M src/components/GlobalErrorDialog.tsx
+ M src/components/SettingsDialog.tsx
+ M src/components/TitleBar.tsx
+ M src/components/UpdateAvailableDialog.tsx
+ D src/components/settings/AddProvidersSection.tsx
+ M src/components/settings/AgnesSettingsSection.test.tsx
+ M src/components/settings/AgnesSettingsSection.tsx
+ M src/components/settings/AudioModelsSection.tsx
+ D src/components/settings/ChatProvidersSection.tsx
+ M src/components/settings/ComfyBindingEditor.tsx
+ M src/components/settings/ComfyUISettingsSection.tsx
+ M src/components/settings/CustomImageProviderContractEditor.tsx
+ M src/components/settings/CustomImageProviderCreationChoice.tsx
+ M src/components/settings/CustomImageProviderWorkbench.tsx
+ M src/components/settings/CustomProviderConfigAssistantDialog.tsx
+ M src/components/settings/CustomProvidersSection.tsx
+ M src/components/settings/DreaminaSection.tsx
+ D src/components/settings/ModernProvidersSection.tsx
+ M src/components/settings/PromptManagementSection.tsx
+ M src/components/settings/PromptPresetsSection.tsx
+ M src/components/settings/SettingsPortabilitySection.tsx
+ D src/components/settings/VideoProvidersSection.tsx
+ M src/components/settings/customImageProviderWorkbenchState.test.ts
+ M src/components/settings/customImageProviderWorkbenchState.ts
+ M src/components/ui/Menu.tsx
+ M src/components/ui/Tooltip.tsx
+ M src/components/ui/index.ts
+ M src/components/ui/primitives.tsx
+ M src/components/ui/useModalFocus.ts
+ M src/features/agents/application/agentCanvasPlan.ts
+ M src/features/agents/application/scopedAgentReviewRegression.test.ts
+ M src/features/agents/application/scopedAgentRuntime.test.ts
+ M src/features/agents/application/scopedAgentSdkTools.ts
+ M src/features/agents/application/scopedAgentSession.test.ts
+ M src/features/agents/application/scopedAgentSession.ts
+ M src/features/agents/application/scopedAgentToolDefinition.ts
+ M src/features/agents/application/scopedAgentTools.test.ts
+ M src/features/agents/application/scopedAgentTools.ts
+ M src/features/agents/application/stageAgentTools.ts
+ M src/features/agents/ui/ScopedAgentPanel.tsx
+ M src/features/assets/application/assetCatalog.test.ts
+ M src/features/assets/application/assetCatalog.ts
+ M src/features/assets/application/assetMediaStorage.ts
+ M src/features/assets/ui/AssetLibraryPage.tsx
+ M src/features/assets/ui/AssetMedia.tsx
+ M src/features/canvas/Canvas.tsx
+ M src/features/canvas/CanvasWorkspace.tsx
+ M src/features/canvas/agent/application/agentApproval.ts
+ M src/features/canvas/agent/application/agentAutoApprovalPolicy.ts
+ M src/features/canvas/agent/application/agentCanvasRollback.ts
+ M src/features/canvas/agent/application/agentConfigPatch.test.ts
+ M src/features/canvas/agent/application/agentConfigPatch.ts
+ M src/features/canvas/agent/application/agentDiagnostics.test.ts
+ M src/features/canvas/agent/application/agentDiagnostics.ts
+ M src/features/canvas/agent/application/agentRedaction.ts
+ M src/features/canvas/agent/application/agentSkills.test.ts
+ M src/features/canvas/agent/application/agentSkills.ts
+ M src/features/canvas/agent/application/canvasAgentController.ts
+ M src/features/canvas/agent/application/externalAgentCanvasBridge.test.ts
+ M src/features/canvas/agent/application/externalAgentCanvasBridge.ts
+ M src/features/canvas/agent/application/externalAgentEventAdapter.ts
+ M src/features/canvas/agent/infrastructure/agentModelGateway.test.ts
+ M src/features/canvas/agent/infrastructure/agentModelGateway.ts
+ M src/features/canvas/agent/infrastructure/agentSessionRepository.ts
+ M src/features/canvas/agent/infrastructure/sdkRuntime.ts
+ M src/features/canvas/agent/ui/AgentFeedCard.test.tsx
+ M src/features/canvas/agent/ui/AgentFeedCard.tsx
+ M src/features/canvas/agent/ui/CanvasAgentAttachmentPicker.tsx
+ M src/features/canvas/agent/ui/CanvasAgentComposer.test.tsx
+ M src/features/canvas/agent/ui/CanvasAgentComposer.tsx
+ D src/features/canvas/agent/ui/CanvasAgentContextPanel.tsx
+ M src/features/canvas/agent/ui/CanvasAgentDock.tsx
+ M src/features/canvas/agent/ui/CanvasAgentFeedViewport.tsx
+ M src/features/canvas/agent/ui/CanvasAgentHeader.tsx
+ M src/features/canvas/agent/ui/CanvasAgentRuntimePicker.test.tsx
+ M src/features/canvas/agent/ui/CanvasAgentRuntimePicker.tsx
+ M src/features/canvas/agent/ui/ExternalAgentConnectionPanel.tsx
+ M src/features/canvas/agent/ui/ExternalAgentInstallCard.tsx
+ M src/features/canvas/agent/ui/GenerationTasksPanel.tsx
+ M src/features/canvas/agent/ui/agentPanelStore.test.ts
+ M src/features/canvas/agent/ui/agentPanelStore.ts
+ M src/features/canvas/agent/ui/useCanvasAgentAttachments.ts
+ M src/features/canvas/agent/ui/useExternalAgentRuntime.ts
+ M src/features/canvas/application/canvasCommandGraph.ts
+ M src/features/canvas/application/canvasCommandRegistry.test.ts
+ M src/features/canvas/application/canvasCommandRegistry.ts
+ M src/features/canvas/application/canvasCommandService.ts
+ M src/features/canvas/application/canvasConnectionRules.ts
+ M src/features/canvas/application/canvasGenerationFacade.test.ts
+ M src/features/canvas/application/canvasGenerationFacade.ts
+ D src/features/canvas/application/canvasGenerationTriggers.ts
+ M src/features/canvas/application/canvasNodePlacement.ts
+ M src/features/canvas/application/canvasReadProjection.ts
+ M src/features/canvas/application/canvasServices.ts
+ M src/features/canvas/application/canvasToolWorkflowFacade.ts
+ M src/features/canvas/application/canvasWorkflowCommands.ts
+ M src/features/canvas/application/chatModelCatalog.test.ts
+ M src/features/canvas/application/chatModelCatalog.ts
+ M src/features/canvas/application/customImageProviderConfig.test.ts
+ M src/features/canvas/application/customImageProviderConfig.ts
+ M src/features/canvas/application/directorMotion.test.ts
+ M src/features/canvas/application/directorMotion.ts
+ M src/features/canvas/application/dreaminaCapabilities.test.ts
+ M src/features/canvas/application/generationErrorReport.ts
+ M src/features/canvas/application/generationRecovery.test.ts
+ M src/features/canvas/application/generationRecovery.ts
+ M src/features/canvas/application/generationRetry.ts
+ M src/features/canvas/application/graphReferenceResolver.ts
+ M src/features/canvas/application/imageData.ts
+ M src/features/canvas/application/modelCatalog.test.ts
+ M src/features/canvas/application/modelCatalog.ts
+ M src/features/canvas/application/organizeCanvas.ts
+ M src/features/canvas/application/ports.ts
+ M src/features/canvas/application/providerAvailability.ts
+ M src/features/canvas/application/resolveActiveModelForPanel.ts
+ M src/features/canvas/application/safeTags.test.ts
+ M src/features/canvas/application/videoModelCatalog.ts
+ M src/features/canvas/canvas.css
+ M src/features/canvas/chrome/CanvasToolRail.tsx
+ M src/features/canvas/clipboard/useCanvasClipboard.ts
+ M src/features/canvas/domain/canvasCapabilities.test.ts
+ M src/features/canvas/domain/canvasCapabilities.ts
+ M src/features/canvas/domain/canvasCommands.ts
+ M src/features/canvas/domain/canvasNodes.ts
+ M src/features/canvas/domain/directorStudioModelCatalog.ts
+ M src/features/canvas/domain/nodeRegistry.ts
+ M src/features/canvas/edges/DisconnectableEdge.tsx
+ M src/features/canvas/engine/canvasActions.tsx
+ M src/features/canvas/engine/useAltDragCopy.ts
+ M src/features/canvas/engine/useCanvasBridges.ts
+ M src/features/canvas/engine/useCanvasConnections.ts
+ M src/features/canvas/engine/useCanvasGestures.ts
+ M src/features/canvas/engine/viewportMath.test.ts
+ M src/features/canvas/engine/viewportMath.ts
+ M src/features/canvas/hooks/useCanvasGenerationPolling.ts
+ M src/features/canvas/hooks/useCanvasPersistence.ts
+ M src/features/canvas/infrastructure/comfyuiGateway.test.ts
+ M src/features/canvas/infrastructure/comfyuiGateway.ts
+ D src/features/canvas/infrastructure/customProviderGateway.test.ts
+ D src/features/canvas/infrastructure/customProviderGateway.ts
+ M src/features/canvas/infrastructure/minimaxH3Gateway.test.ts
+ M src/features/canvas/infrastructure/tauriAiGateway.ts
+ M src/features/canvas/io/useMaterialImport.ts
+ M src/features/canvas/menus/CanvasContextMenu.tsx
+ M src/features/canvas/nodes/AiAudioNode.tsx
+ M src/features/canvas/nodes/AiTextNode.tsx
+ M src/features/canvas/nodes/AiVideoNode.tsx
+ M src/features/canvas/nodes/AudioNode.tsx
+ M src/features/canvas/nodes/BlueprintNode.tsx
+ M src/features/canvas/nodes/GroupNode.tsx
+ M src/features/canvas/nodes/ImageEditNode.tsx
+ M src/features/canvas/nodes/ImageNode.tsx
+ M src/features/canvas/nodes/JsonCardNode.tsx
+ M src/features/canvas/nodes/NodeLevelOfDetail.tsx
+ M src/features/canvas/nodes/NodeRenderErrorBoundary.tsx
+ M src/features/canvas/nodes/PanoramaNode.tsx
+ M src/features/canvas/nodes/StoryboardGenNode.tsx
+ M src/features/canvas/nodes/StoryboardNode.tsx
+ M src/features/canvas/nodes/TagGroupNode.tsx
+ M src/features/canvas/nodes/TagNode.tsx
+ M src/features/canvas/nodes/TagRelationsDialog.tsx
+ M src/features/canvas/nodes/TextAnnotationNode.tsx
+ M src/features/canvas/nodes/UploadNode.tsx
+ M src/features/canvas/nodes/VideoNode.tsx
+ M src/features/canvas/overlays/SelectionToolbar.tsx
+ M src/features/canvas/panels/CanvasAssetPanel.tsx
+ M src/features/canvas/state/canvasUiStore.ts
+ M src/features/canvas/ui/AssetPanel.tsx
+ M src/features/canvas/ui/BlueprintAssetPicker.tsx
+D  src/features/canvas/ui/BlueprintCustomActionModal.tsx
+ M src/features/canvas/ui/BlueprintObjectConsole.tsx
+ M src/features/canvas/ui/BlueprintPanel.tsx
+D  src/features/canvas/ui/BlueprintPoseEditor.tsx
+D  src/features/canvas/ui/BlueprintPosePreview.tsx
+ M src/features/canvas/ui/BlueprintScene.test.ts
+ M src/features/canvas/ui/BlueprintScene.tsx
+ M src/features/canvas/ui/CameraControlPanel.tsx
+ M src/features/canvas/ui/CameraPresetsPanel.tsx
+ M src/features/canvas/ui/CameraSphereControl.tsx
+ M src/features/canvas/ui/CanvasDiagnosticDrawer.tsx
+ M src/features/canvas/ui/CanvasNodeImage.tsx
+ D src/features/canvas/ui/CanvasTopBar.tsx
+ M src/features/canvas/ui/CustomGridSelector.tsx
+ M src/features/canvas/ui/DirectorActionLibrary.tsx
+ M src/features/canvas/ui/DirectorCameraPilotHud.tsx
+ M src/features/canvas/ui/DirectorMotionInspector.tsx
+D  src/features/canvas/ui/DirectorPrevisButton.tsx
+D  src/features/canvas/ui/DirectorPrevisControls.tsx
+D  src/features/canvas/ui/DirectorPrevisSidebar.tsx
+ M src/features/canvas/ui/DirectorSceneErrorBoundary.tsx
+ M src/features/canvas/ui/DirectorStudioModelThumbnail.tsx
+ M src/features/canvas/ui/DirectorStudioShell.tsx
+ M src/features/canvas/ui/DirectorTimeline.tsx
+ M src/features/canvas/ui/DirectorVideoExportDialog.tsx
+ M src/features/canvas/ui/DreaminaMultiframeEditor.tsx
+ M src/features/canvas/ui/EditPanel.tsx
+ M src/features/canvas/ui/GenerationJobStatus.tsx
+ M src/features/canvas/ui/GridSplitPanel.tsx
+ M src/features/canvas/ui/ImageViewerModal.tsx
+ M src/features/canvas/ui/LightingControlPanel.tsx
+ M src/features/canvas/ui/LightingSphereControl.tsx
+ D src/features/canvas/ui/MediaStageFace.tsx
+ M src/features/canvas/ui/ModelConfigPicker.tsx
+ M src/features/canvas/ui/ModelParamsControls.tsx
+ M src/features/canvas/ui/MultiAnglePanel.tsx
+ M src/features/canvas/ui/MultiFunctionPanel.tsx
+ D src/features/canvas/ui/NodeActionToolbar.tsx
+ D src/features/canvas/ui/NodeDeleteToolbar.tsx
+ M src/features/canvas/ui/NodeFrame.tsx
+ D src/features/canvas/ui/NodeHeader.tsx
+ D src/features/canvas/ui/NodeResizeHandle.tsx
+ M src/features/canvas/ui/NodeToolDialog.tsx
+ M src/features/canvas/ui/PanoramaPanel.tsx
+ M src/features/canvas/ui/PanoramaSetupForm.tsx
+ M src/features/canvas/ui/PromptImportDialog.tsx
+ M src/features/canvas/ui/PromptPresetPanel.tsx
+ M src/features/canvas/ui/PromptTemplateDialog.tsx
+ M src/features/canvas/ui/SafeNodeToolbar.tsx
+ M src/features/canvas/ui/SelectedNodeOverlay.tsx
+ M src/features/canvas/ui/TagGroupToolbar.tsx
+ M src/features/canvas/ui/TextPreviewModal.tsx
+D  src/features/canvas/ui/blueprintGltfFactory.ts
+ D src/features/canvas/ui/blueprintMeshFactory.test.ts
+ M src/features/canvas/ui/blueprintMeshFactory.ts
+D  src/features/canvas/ui/blueprintPosePromptUtils.ts
+ M src/features/canvas/ui/blueprintPresets.ts
+ D src/features/canvas/ui/nodeToolbarConfig.ts
+ M src/features/canvas/ui/overlayPlacement.test.ts
+ M src/features/canvas/ui/overlayPlacement.ts
+ M src/features/canvas/ui/tool-editors/AnnotateToolEditor.tsx
+ M src/features/canvas/ui/tool-editors/CropToolEditor.tsx
+ M src/features/canvas/ui/tool-editors/FormToolEditor.tsx
+ M src/features/canvas/ui/tool-editors/MaskToolEditor.tsx
+ M src/features/canvas/ui/tool-editors/SplitStoryboardToolEditor.tsx
+ M src/features/canvas/ui/useDirectorStudioMotion.ts
+ M src/features/canvas/ui/useDirectorTooltips.ts
+ M src/features/channels/adapters/comfyui/adapter.ts
+ M src/features/channels/adapters/comfyui/url.test.ts
+ M src/features/channels/adapters/comfyui/url.ts
+ M src/features/channels/application/channelService.ts
+ M src/features/channels/application/configurationAssistant.test.ts
+ M src/features/channels/application/configurationAssistant.ts
+ M src/features/channels/domain/channelDomain.test.ts
+ M src/features/channels/domain/errors.ts
+ M src/features/channels/domain/profile.ts
+ M src/features/channels/domain/response.ts
+ M src/features/channels/domain/template.ts
+ M src/features/channels/migrate/legacyConfig.test.ts
+ M src/features/channels/migrate/legacyConfig.ts
+ M src/features/channels/presets/anthropic.ts
+ M src/features/channels/presets/gemini.ts
+ M src/features/channels/presets/index.ts
+ M src/features/channels/presets/openai.ts
+ M src/features/channels/presets/presets.test.ts
+ M src/features/channels/runtime/channelExecution.ts
+ M src/features/channels/runtime/channelIntegration.test.ts
+ M src/features/channels/runtime/comfyExecution.ts
+ M src/features/channels/runtime/submitSnapshot.ts
+ M src/features/channels/runtime/templateAdapter.test.ts
+ M src/features/channels/runtime/templateAdapter.ts
+ M src/features/channels/runtime/transport.ts
+ M src/features/channels/runtime/types.ts
+ M src/features/channels/store/channelPersistence.test.ts
+ M src/features/channels/store/channelStore.ts
+RM src/features/channels/ui/DeclaredParameters.tsx
+src/features/workbench/ui/DeclaredParameters.tsx
+ M src/features/portability/application/settingsContract.ts
+ M src/features/portability/application/settingsPortability.test.ts
+ M src/features/portability/application/settingsPortability.ts
+ M src/features/portability/application/types.ts
+ M src/features/portability/application/validation.test.ts
+ M src/features/portability/application/validation.ts
+ M src/features/portability/infrastructure/webProjectPortability.test.ts
+ M src/features/portability/infrastructure/webProjectPortability.ts
+ M src/features/portability/ui/ProjectPortabilityControls.tsx
+ M src/features/project/ProjectHome.tsx
+ M src/features/project/ProjectManager.tsx
+ M src/features/promptLibrary/PromptLibrary.tsx
+ M src/features/settings/MissingApiKeyHint.tsx
+ M src/features/settings/channels/ChannelProfileForm.tsx
+ M src/features/settings/channels/ChannelRequestPreview.tsx
+ M src/features/settings/channels/ChannelSettingsPage.tsx
+ M src/features/stage/application/stageCommands.test.ts
+ M src/features/stage/application/stageCommands.ts
+ M src/features/stage/application/stageDrafting.ts
+ M src/features/stage/application/stageOperations.ts
+ M src/features/stage/domain/stage.ts
+ M src/features/stage/domain/stageSchemas.ts
+ M src/features/stage/ui/StageHeader.tsx
+D  src/features/stage/ui/StageToolDock.tsx
+ M src/features/studio/StudioHome.tsx
+ M src/features/studio/StudioShell.tsx
+ D src/features/studio/stage.css
+ M src/features/studio/studio.css
+ M src/features/workbench/application/importWorkbenchResult.test.ts
+ M src/features/workbench/application/importWorkbenchResult.ts
+ M src/features/workbench/application/workbenchPersistence.ts
+ M src/features/workbench/application/workbenchTransport.ts
+ M src/features/workbench/application/workspaceDocument.test.ts
+ M src/features/workbench/domain/types.ts
+ M src/features/workbench/store/workbenchStore.test.ts
+ M src/features/workbench/store/workbenchStore.ts
+ M src/features/workbench/ui/GenerationCard.tsx
+ M src/features/workbench/ui/ModelChoice.tsx
+ M src/features/workbench/ui/WorkbenchComposer.tsx
+ M src/features/workbench/ui/WorkbenchPage.tsx
+ M src/features/workbench/ui/useCreationModels.ts
+ M src/i18n/index.ts
+ M src/i18n/locales/en.json
+ M src/i18n/locales/rework.en.json
+ M src/i18n/locales/rework.zh.json
+ M src/i18n/locales/zh.json
+ M src/index.css
+ M src/main.tsx
+ M src/stores/canvasStore.test.ts
+ M src/stores/canvasStore.ts
+ M src/stores/customProvidersStore.ts
+ M src/stores/projectStore.portability.test.ts
+ M src/stores/projectStore.ts
+ M src/stores/settingsStore.test.ts
+ M src/stores/settingsStore.ts
+ M src/types/three-examples.d.ts
+?? docs/rework/09-视频模型预设核实.md
+?? public/__canvas_perf_sw.js
+?? src-tauri/src/commands/knowledge.rs
+?? src-tauri/src/commands/knowledge_attachment_fs.rs
+?? src-tauri/src/commands/knowledge_attachment_windows.rs
+?? src-tauri/src/commands/model.rs
+?? src-tauri/src/commands/secrets.rs
+?? src/components/settings/ComfyBindingEditor.test.tsx
+?? src/components/settings/comfy.css
+?? src/components/topBarSlot.ts
+?? src/components/ui/UiConfirm.tsx
+?? src/components/ui/useModalFocus.test.tsx
+?? src/features/agents/application/agentSkillRecency.test.ts
+?? src/features/agents/application/agentSkillRecency.ts
+?? src/features/agents/application/scopedAgentFlows.acceptance.test.ts
+?? src/features/agents/application/scopedChannelTools.ts
+?? src/features/agents/application/scopedKnowledgeTools.ts
+?? src/features/agents/domain/
+?? src/features/agents/ui/AgentApprovalCard.tsx
+?? src/features/agents/ui/AgentApprovalPreview.tsx
+?? src/features/agents/ui/AgentComposer.test.tsx
+?? src/features/agents/ui/AgentComposer.tsx
+?? src/features/agents/ui/AgentThread.tsx
+?? src/features/agents/ui/AgentToolStep.tsx
+?? src/features/agents/ui/ScopedAgentPanel.test.tsx
+?? src/features/agents/ui/SkillDialogs.tsx
+?? src/features/agents/ui/agent.css
+?? src/features/agents/ui/agentFailureText.ts
+?? src/features/agents/ui/homeAgentHandoff.ts
+?? src/features/agents/ui/useAgentComposerAssist.tsx
+?? src/features/agents/ui/useAgentTurnSelection.test.ts
+?? src/features/agents/ui/useAgentTurnSelection.ts
+?? src/features/assets/application/assetDownloads.test.ts
+?? src/features/assets/application/assetDownloads.ts
+?? src/features/assets/application/assetFiles.ts
+?? src/features/assets/application/assetFilesDownloads.test.ts
+?? src/features/assets/application/assetMetadata.test.ts
+?? src/features/assets/application/assetMetadata.ts
+?? src/features/assets/ui/AssetPickerDialog.tsx
+?? src/features/assets/ui/useAssetDisplaySource.test.tsx
+?? src/features/assets/ui/useAssetDisplaySource.ts
+?? src/features/canvas/agent/application/agentMentions.test.ts
+?? src/features/canvas/agent/application/agentMentions.ts
+?? src/features/canvas/agent/application/agentRedaction.test.ts
+?? src/features/canvas/agent/application/agentSiblingApprovalRebase.test.ts
+?? src/features/canvas/agent/application/agentSiblingApprovalRebase.ts
+?? src/features/canvas/agent/application/agentTurnSafety.ts
+?? src/features/canvas/agent/application/canvasAgentHistory.test.ts
+?? src/features/canvas/agent/application/canvasAgentTurnSafety.test.ts
+?? src/features/canvas/agent/application/externalAgentToolRequest.ts
+?? src/features/canvas/agent/application/userSkills.test.ts
+?? src/features/canvas/agent/application/userSkills.ts
+?? src/features/canvas/agent/infrastructure/agentTurnSafety.test.ts
+?? src/features/canvas/agent/infrastructure/canvasSdkGeneration.ts
+?? src/features/canvas/agent/infrastructure/canvasSdkTools.ts
+?? src/features/canvas/agent/infrastructure/sdkSkillPolicy.test.ts
+?? src/features/canvas/agent/ui/useExternalAgentRuntime.test.tsx
+?? src/features/canvas/application/canvasCommandOriginPolicy.ts
+?? src/features/canvas/application/canvasCommandSchemas.ts
+?? src/features/canvas/application/canvasCommandValidation.ts
+?? src/features/canvas/application/canvasConnectionRules.test.ts
+?? src/features/canvas/application/canvasContentSelector.test.ts
+?? src/features/canvas/application/canvasContentSelector.ts
+?? src/features/canvas/application/canvasImageThumbnails.test.ts
+?? src/features/canvas/application/canvasImageThumbnails.ts
+?? src/features/canvas/application/canvasMediaCancellation.test.ts
+?? src/features/canvas/application/canvasMediaCommand.test.ts
+?? src/features/canvas/application/canvasNodeTree.ts
+?? src/features/canvas/application/canvasSelectionCommands.test.ts
+?? src/features/canvas/application/canvasSelectionOperations.test.ts
+?? src/features/canvas/application/generation/
+?? src/features/canvas/application/generationFailure.test.ts
+?? src/features/canvas/application/media/
+?? src/features/canvas/application/nodeEnablement.test.ts
+?? src/features/canvas/application/personMotionLibrary.ts
+?? src/features/canvas/application/selectionAssets.test.ts
+?? src/features/canvas/application/selectionAssets.ts
+?? src/features/canvas/application/stacks.test.ts
+?? src/features/canvas/application/stacks.ts
+?? src/features/canvas/application/useCanvasImageThumbnail.test.tsx
+?? src/features/canvas/application/useCanvasImageThumbnail.ts
+?? src/features/canvas/clipboard/canvasDuplicateCommand.test.ts
+?? src/features/canvas/clipboard/canvasDuplication.ts
+?? src/features/canvas/clipboard/useCanvasClipboard.test.ts
+?? src/features/canvas/composer/
+?? src/features/canvas/domain/canvasMediaSources.ts
+?? src/features/canvas/domain/personPose.test.ts
+?? src/features/canvas/domain/personPose.ts
+?? src/features/canvas/domain/projectMedia.ts
+?? src/features/canvas/edges/DisconnectableEdge.geometry.test.tsx
+?? src/features/canvas/engine/alignment.test.ts
+?? src/features/canvas/engine/alignment.ts
+?? src/features/canvas/engine/canvasChanges.ts
+?? src/features/canvas/engine/canvasZoomRendering.test.ts
+?? src/features/canvas/engine/canvasZoomRendering.ts
+?? src/features/canvas/engine/useCanvasFlowGraphBridge.test.ts
+?? src/features/canvas/engine/useCanvasFlowGraphBridge.ts
+?? src/features/canvas/engine/useCanvasGestures.test.ts
+?? src/features/canvas/engine/useCanvasNodeLevelOfDetail.test.ts
+?? src/features/canvas/engine/useCanvasNodeLevelOfDetail.ts
+?? src/features/canvas/engine/useCanvasNodePresentation.test.ts
+?? src/features/canvas/engine/useCanvasNodePresentation.ts
+?? src/features/canvas/hooks/useCanvasGenerationPolling.test.ts
+?? src/features/canvas/hooks/useCanvasPersistence.test.ts
+?? src/features/canvas/infrastructure/comfyProviderTransport.test.ts
+?? src/features/canvas/infrastructure/comfyProviderTransport.ts
+?? src/features/canvas/infrastructure/minimaxH3Gateway.ts
+?? src/features/canvas/infrastructure/providerGateway.test.ts
+?? src/features/canvas/infrastructure/providerGateway.ts
+?? src/features/canvas/infrastructure/providerResultMaterialization.ts
+?? src/features/canvas/nodes/NodeRenderErrorBoundary.test.ts
+?? src/features/canvas/nodes/TextAnnotationNode.history.test.tsx
+?? src/features/canvas/nodes/UploadNode.preview.test.ts
+?? src/features/canvas/overlays/AlignmentGuidesOverlay.test.tsx
+?? src/features/canvas/overlays/AlignmentGuidesOverlay.tsx
+?? src/features/canvas/overlays/NodeToolbar.tsx
+?? src/features/canvas/overlays/alignmentGuideSpan.ts
+?? src/features/canvas/overlays/nodeActions.test.ts
+?? src/features/canvas/overlays/nodeActions.tsx
+?? src/features/canvas/panels/panels.css
+?? src/features/canvas/state/canvasUiStore.test.ts
+?? src/features/canvas/ui/BatchStackControl.tsx
+?? src/features/canvas/ui/BlueprintScene.capture.test.tsx
+?? src/features/canvas/ui/CanvasLibraryDialog.tsx
+?? src/features/canvas/ui/DirectorCameraRigPanel.tsx
+?? src/features/canvas/ui/DirectorItemInspector.tsx
+?? src/features/canvas/ui/DirectorPrevisMotion.tsx
+?? src/features/canvas/ui/DirectorStudioShell.capture.test.tsx
+?? src/features/canvas/ui/GenerationDraftOptionsDialog.tsx
+?? src/features/canvas/ui/GenerationReferenceRetry.tsx
+?? src/features/canvas/ui/GeneratorFace.tsx
+?? src/features/canvas/ui/MediaEditDialog.tsx
+?? src/features/canvas/ui/NodeGenerationFace.tsx
+?? src/features/canvas/ui/PersonPoseInspector.tsx
+?? src/features/canvas/ui/blueprintObjectModels.test.ts
+?? src/features/canvas/ui/blueprintObjectThumbnails.test.tsx
+?? src/features/canvas/ui/blueprintReliefItem.ts
+?? src/features/canvas/ui/blueprintReliefMesh.test.ts
+?? src/features/canvas/ui/blueprintReliefMesh.ts
+?? src/features/canvas/ui/connectionRejectText.ts
+?? src/features/canvas/ui/personPoseEditor.ts
+?? src/features/canvas/ui/personRig.test.ts
+?? src/features/canvas/ui/personRig.ts
+?? src/features/channels/application/audioModelCatalog.test.ts
+?? src/features/channels/application/audioModelCatalog.ts
+?? src/features/channels/application/channelCapabilities.ts
+?? src/features/channels/application/channelCatalog.ts
+?? src/features/channels/application/channelMigrationIssues.ts
+?? src/features/channels/application/channelUiStore.ts
+?? src/features/channels/application/comfyConnection.test.ts
+?? src/features/channels/application/comfyConnection.ts
+?? src/features/channels/application/comfyWorkflows.test.ts
+?? src/features/channels/application/comfyWorkflows.ts
+?? src/features/channels/application/generationFields.ts
+?? src/features/channels/application/modelGenerationCatalog.test.ts
+?? src/features/channels/application/modelGenerationCatalog.ts
+?? src/features/channels/application/modelModes.test.ts
+?? src/features/channels/application/modelModes.ts
+?? src/features/channels/application/referenceHosting.test.ts
+?? src/features/channels/application/referenceHosting.ts
+?? src/features/channels/domain/executionSafety.test.ts
+?? src/features/channels/domain/mentions.ts
+?? src/features/channels/domain/referenceErrors.ts
+?? src/features/channels/migrate/channelStore.test.ts
+?? src/features/channels/migrate/legacyWireGoldens.json
+?? src/features/channels/migrate/legacyWireGoldens.test.ts
+?? src/features/channels/migrate/migrationAcceptance.test.ts
+?? src/features/channels/presets/templateCatalog.ts
+?? src/features/channels/presets/videoModels.ts
+?? src/features/channels/runtime/agnesChannel.test.ts
+?? src/features/channels/runtime/agnesChannel.ts
+?? src/features/channels/runtime/channelChat.test.ts
+?? src/features/channels/runtime/channelChat.ts
+?? src/features/channels/runtime/channelChatPayload.ts
+?? src/features/channels/runtime/channelSmoke.test.ts
+?? src/features/channels/runtime/channelSmokeRequest.ts
+?? src/features/channels/runtime/comfyExecution.test.ts
+?? src/features/channels/runtime/comfyLoopback.test.ts
+?? src/features/channels/runtime/comfySnapshot.ts
+?? src/features/channels/runtime/providerTypes.ts
+?? src/features/channels/runtime/requestReferences.test.ts
+?? src/features/channels/runtime/requestReferences.ts
+?? src/features/channels/ui/CapabilityBadge.tsx
+?? src/features/channels/ui/CapabilityModelTabs.tsx
+?? src/features/channels/ui/ChannelModeControls.tsx
+?? src/features/channels/ui/ModelSpecCard.tsx
+?? src/features/channels/ui/ReferenceUploadAction.tsx
+?? src/features/channels/ui/capabilityStyles.ts
+?? src/features/channels/ui/modelDisplay.ts
+?? src/features/characters/
+?? src/features/knowledge/
+?? src/features/library/
+?? src/features/portability/application/credentialRedaction.test.ts
+?? src/features/portability/application/credentialRedaction.ts
+?? src/features/project/ProjectCard.tsx
+?? src/features/secrets/
+?? src/features/settings/channels/ChannelFeedback.tsx
+?? src/features/settings/channels/ChannelSettingsPage.test.tsx
+?? src/features/settings/channels/ChannelSmokeDialog.test.tsx
+?? src/features/settings/channels/ChannelSmokeDialog.tsx
+?? src/features/settings/channels/ChannelStatus.tsx
+?? src/features/settings/channels/ModelModesEditor.tsx
+?? src/features/settings/channels/channels.css
+?? src/features/stage/application/depthRelief.test.ts
+?? src/features/stage/application/depthRelief.ts
+?? src/features/stage/application/depthRelief.worker.ts
+?? src/features/stage/application/depthReliefEstimator.test.ts
+?? src/features/stage/application/depthReliefEstimator.ts
+?? src/features/stage/application/depthReliefPersistence.test.ts
+?? src/features/stage/application/depthReliefProtocol.ts
+?? src/features/stage/application/depthReliefWorker.test.ts
+?? src/features/stage/application/imageTo3d.test.ts
+?? src/features/stage/application/imageTo3d.ts
+?? src/features/stage/application/imageTo3dMaterialization.ts
+?? src/features/stage/application/importModelFile.test.ts
+?? src/features/stage/application/importModelFile.ts
+?? src/features/stage/application/importedModelLibrary.ts
+?? src/features/stage/application/importedModelLinkage.test.ts
+?? src/features/stage/application/importedModelLoader.test.ts
+?? src/features/stage/application/importedModelLoader.ts
+?? src/features/stage/application/importedModelStorage.ts
+?? src/features/stage/application/stageCapture.test.ts
+?? src/features/stage/application/stageCapture.ts
+?? src/features/stage/application/stageCatalogs.ts
+?? src/features/stage/application/stageDirect.test.ts
+?? src/features/stage/application/stageOffscreenCapture.test.ts
+?? src/features/stage/application/stageOffscreenCapture.ts
+?? src/features/stage/application/stageRanges.test.ts
+?? src/features/stage/application/stageRanges.ts
+?? src/features/stage/application/stageSelection.ts
+?? src/features/stage/application/storyCompiler.test.ts
+?? src/features/stage/application/storyCompiler.ts
+?? src/features/stage/application/storyPlan.ts
+?? src/features/stage/domain/depthRelief.ts
+?? src/features/stage/domain/importedModel.test.ts
+?? src/features/stage/domain/importedModel.ts
+?? src/features/stage/domain/objectFlags.ts
+?? src/features/stage/ui/StageDialog.tsx
+?? src/features/stage/ui/StageDraftBuilder.tsx
+?? src/features/stage/ui/StageFlyouts.tsx
+?? src/features/stage/ui/StageImagePicker.tsx
+?? src/features/stage/ui/StageModelBuilder.tsx
+?? src/features/stage/ui/StageOutliner.tsx
+?? src/features/stage/ui/StageProjectsMenu.tsx
+?? src/features/stage/ui/StageReliefBuilder.tsx
+?? src/features/stage/ui/StageSceneBuilder.tsx
+?? src/features/stage/ui/StageSceneInspector.tsx
+?? src/features/stage/ui/StageScenePreview.tsx
+?? src/features/stage/ui/StageSnapshotsPanel.tsx
+?? src/features/stage/ui/StageToolRail.tsx
+?? src/features/stage/ui/StageViewportChrome.tsx
+?? src/features/stage/ui/stage.css
+?? src/features/stage/ui/stageKit.tsx
+?? src/features/stage/ui/timeline.css
+?? src/features/studio/MediaImportDialog.tsx
+?? src/features/studio/TaskDrawer.tsx
+?? src/features/studio/appLocation.ts
+?? src/features/studio/importStudioMedia.ts
+?? src/features/studio/mediaDrag.ts
+?? src/features/studio/studioNavigation.ts
+?? src/features/theme/
+?? src/features/viewer/
+?? src/features/workbench/application/conversationSelectors.test.ts
+?? src/features/workbench/application/conversationSelectors.ts
+?? src/features/workbench/application/nativeChannelInput.ts
+?? src/features/workbench/application/readReferenceFile.test.ts
+?? src/features/workbench/application/readReferenceFile.ts
+?? src/features/workbench/application/taskSelectors.ts
+?? src/features/workbench/application/workbenchTransport.test.ts
+?? src/features/workbench/application/workbenchValidation.test.ts
+?? src/features/workbench/application/workbenchValidation.ts
+?? src/features/workbench/ui/workbench.css
+?? src/features/workbench/ui/workbenchErrorText.ts
+?? src/i18n/locales/ui/
+?? src/stores/__fixtures__/
+?? src/stores/canvasAudioFields.test.ts
+?? src/stores/canvasHistory.test.ts
+?? src/stores/canvasHistory.ts
+?? src/stores/canvasStore.redundancy.test.ts
+?? src/stores/projectStore.history.test.ts
+?? src/stores/projectStore.legacyMigration.test.ts
+?? src/stores/projectStore.migrationAcceptance.test.ts

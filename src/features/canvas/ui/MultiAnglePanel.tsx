@@ -2,6 +2,7 @@ import { memo, useState, useCallback, useEffect } from 'react';
 import { X, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { UiButton, UiChipButton, UiIconButton, UiSegmented, UiSlider, UiSwitch, UiTextArea } from '@/components/ui';
 import {
   buildMultiAnglePromptFromTemplate,
 } from '@/features/canvas/application/panelPromptBuilders';
@@ -356,10 +357,6 @@ export const MultiAnglePanel = memo(
 
     // Resolve panel position: below button, clamp to viewport
     const panelWidth = 860; // closer to reference screenshot width/proportion for left sphere + right controls layout
-    const sliderTrackStyle = (progress: number) => ({
-      background: `linear-gradient(to right, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.92) ${progress}%, rgba(255,255,255,0.18) ${progress}%, rgba(255,255,255,0.18) 100%)`,
-    });
-    const sliderInputClassName = 'w-full h-[4px] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.45)] [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white';
 
     const panelLeft = Math.min(
       Math.max(8, buttonRect.left),
@@ -371,36 +368,31 @@ export const MultiAnglePanel = memo(
 
     return (
       <div
-        className="fixed z-200 rounded-xl border border-[rgba(255,255,255,0.12)] bg-[#202020] shadow-2xl"
+        className="fixed z-200 rounded-xl border border-[var(--line)] bg-elevated shadow-[var(--shadow-pop)]"
         style={{ left: panelLeft, top: panelTop, width: panelWidth }}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[rgba(255,255,255,0.08)]">
-          <span className="text-sm font-semibold text-white">多角度编辑器</span>
-          <button
-            onClick={onClose}
-            className="flex items-center justify-center w-6 h-6 rounded-md text-[rgba(255,255,255,0.5)] hover:text-white hover:bg-[rgba(255,255,255,0.1)] transition-colors"
-          >
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--line)]">
+          <span className="text-sm font-semibold text-text-dark">多角度编辑器</span>
+          <UiIconButton onClick={onClose} aria-label="关闭">
             <X className="w-4 h-4" />
-          </button>
+          </UiIconButton>
         </div>
 
         {/* Preset tabs */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-[rgba(255,255,255,0.06)] overflow-x-auto">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--line)] overflow-x-auto">
           {ANGLE_PRESETS.map((preset) => (
-            <button
+            <UiChipButton
               key={preset.id}
+              active={selectedPreset === preset.id}
+              aria-pressed={selectedPreset === preset.id}
               onClick={() => handlePresetClick(preset.id)}
-              className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
-                selectedPreset === preset.id
-                  ? 'bg-white text-black'
-                  : 'bg-[rgba(255,255,255,0.08)] text-[rgba(255,255,255,0.7)] hover:bg-[rgba(255,255,255,0.14)]'
-              }`}
+              className="shrink-0 rounded-lg text-xs whitespace-nowrap"
             >
               {preset.label}
-            </button>
+            </UiChipButton>
           ))}
         </div>
 
@@ -420,24 +412,16 @@ export const MultiAnglePanel = memo(
           {/* Right: Controls */}
           <div className="flex-1 flex flex-col gap-6 pt-4 pr-2">
             <div className="flex items-start gap-3">
-              <span className="text-xs text-[rgba(255,255,255,0.7)] w-14 shrink-0 pt-2">模式</span>
+              <span className="text-xs text-text-muted w-14 shrink-0 pt-2">模式</span>
               <div className="flex-1 flex flex-wrap gap-2">
-                {PROMPT_MODES.map((mode) => (
-                  <button
-                    key={mode.id}
-                    type="button"
-                    onClick={() => setPromptMode(mode.id)}
-                    className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
-                      promptMode === mode.id
-                        ? 'border-white/30 bg-white text-black'
-                        : 'border-white/10 bg-[rgba(255,255,255,0.05)] text-white/72 hover:bg-[rgba(255,255,255,0.1)]'
-                    }`}
-                    title={mode.hint}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
-                <div className="w-full text-[11px] text-white/32 leading-5">
+                <UiSegmented
+                  value={promptMode}
+                  onChange={setPromptMode}
+                  options={PROMPT_MODES.map((mode) => ({ value: mode.id, label: <span title={mode.hint}>{mode.label}</span> }))}
+                  size="sm"
+                  aria-label="模式"
+                />
+                <div className="w-full text-[11px] text-text-subtle leading-5">
                   建议：{PROMPT_MODES.find((mode) => mode.id === promptMode)?.hint}
                 </div>
               </div>
@@ -445,53 +429,47 @@ export const MultiAnglePanel = memo(
 
             {/* 水平环绕 slider */}
             <div className="flex items-center gap-3">
-              <span className="text-xs text-[rgba(255,255,255,0.7)] w-14 shrink-0">水平环绕</span>
+              <span className="text-xs text-text-muted w-14 shrink-0">水平环绕</span>
               <div className="flex-1 relative">
-                <input
-                  type="range"
-                  min="0"
-                  max="360"
+                <UiSlider
+                  min={0}
+                  max={360}
                   value={horizontal}
-                  onChange={(e) => handlePositionChange(snapToTicks(Number(e.target.value), HORIZONTAL_TICKS, SNAP_THRESHOLD), vertical)}
-                  className={sliderInputClassName}
-                  style={sliderTrackStyle((horizontal / 360) * 100)}
+                  onChange={(value) => handlePositionChange(snapToTicks(value, HORIZONTAL_TICKS, SNAP_THRESHOLD), vertical)}
+                  aria-label="水平环绕"
                 />
                 <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 flex justify-between px-[2px]">
                   {HORIZONTAL_TICKS.map((tick) => (
                     <span
                       key={tick}
-                      className={`rounded-full ${tick % 90 === 0 ? 'h-2.5 w-2.5 bg-white/55' : 'h-2 w-2 bg-white/38'}`}
+                      className={`rounded-full ${tick % 90 === 0 ? 'h-2.5 w-2.5 bg-text-subtle' : 'h-2 w-2 bg-text-subtle/60'}`}
                     />
                   ))}
                 </div>
               </div>
-              <span className="text-xs text-[rgba(255,255,255,0.5)] w-8 text-right">{horizontal}°</span>
+              <span className="text-xs text-text-subtle w-8 text-right">{horizontal}°</span>
             </div>
 
             {/* 垂直俯仰 slider */}
             <div className="flex items-center gap-3">
-              <span className="text-xs text-[rgba(255,255,255,0.7)] w-14 shrink-0">垂直俯仰</span>
+              <span className="text-xs text-text-muted w-14 shrink-0">垂直俯仰</span>
               <div className="flex-1 relative">
-                <input
-                  type="range"
-                  min="-90"
-                  max="90"
+                <UiSlider
+                  min={-90}
+                  max={90}
                   value={vertical}
-                  onChange={(e) => handlePositionChange(horizontal, snapToTicks(Number(e.target.value), VERTICAL_TICKS, SNAP_THRESHOLD))}
-                  className={sliderInputClassName}
-                  style={{
-                    background: 'linear-gradient(to right, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.92) 50%, rgba(255,255,255,0.18) 100%)'
-                  }}
+                  onChange={(value) => handlePositionChange(horizontal, snapToTicks(value, VERTICAL_TICKS, SNAP_THRESHOLD))}
+                  aria-label="垂直俯仰"
                 />
                 <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 flex justify-between px-[2px]">
                   {VERTICAL_TICKS.map((tick) => (
                     <span
                       key={tick}
-                      className={`rounded-full ${tick === 0 ? 'h-2.5 w-2.5 bg-white/75 shadow-[0_0_0_1px_rgba(0,0,0,0.28)]' : 'h-2 w-2 bg-white/52 shadow-[0_0_0_1px_rgba(0,0,0,0.18)]'}`}
+                      className={`rounded-full ${tick === 0 ? 'h-2.5 w-2.5 bg-text-muted' : 'h-2 w-2 bg-text-subtle'}`}
                     />
                   ))}
                 </div>
-                <div className="pointer-events-none absolute left-0 right-0 top-[calc(50%+10px)] flex justify-between px-[2px] text-[9px] text-white/26">
+                <div className="pointer-events-none absolute left-0 right-0 top-[calc(50%+10px)] flex justify-between px-[2px] text-[9px] text-text-subtle">
                   {VERTICAL_TICKS.map((tick) => (
                     <span key={`label-${tick}`} className="-translate-x-1/2 first:translate-x-0 last:-translate-x-full">
                       {tick}
@@ -499,95 +477,66 @@ export const MultiAnglePanel = memo(
                   ))}
                 </div>
               </div>
-              <span className="text-xs text-[rgba(255,255,255,0.5)] w-8 text-right">{vertical}°</span>
+              <span className="text-xs text-text-subtle w-8 text-right">{vertical}°</span>
             </div>
 
             {/* 景别缩放 slider (shot size) */}
             <div className="flex items-center gap-3">
-              <span className="text-xs text-[rgba(255,255,255,0.7)] w-14 shrink-0">景别缩放</span>
+              <span className="text-xs text-text-muted w-14 shrink-0">景别缩放</span>
               <div className="flex-1 relative">
-                <input
-                  type="range"
-                  min="0"
-                  max="6"
-                  step="1"
+                <UiSlider
+                  min={0}
+                  max={6}
+                  step={1}
                   value={SHOT_SIZE_VALUES[shotSize]}
-                  onChange={(e) => setShotSize(SHOT_SIZE_FROM_VALUE[Number(e.target.value)])}
-                  className={sliderInputClassName}
-                  style={sliderTrackStyle((SHOT_SIZE_VALUES[shotSize] / 6) * 100)}
+                  onChange={(value) => setShotSize(SHOT_SIZE_FROM_VALUE[value])}
+                  aria-label="景别缩放"
                 />
               </div>
-              <span className="text-xs text-[rgba(255,255,255,0.5)] w-8 text-right">
+              <span className="text-xs text-text-subtle w-8 text-right">
                 {SHOT_SIZES.find(s => s.id === shotSize)?.label ?? '中景'}
               </span>
             </div>
 
             {/* 提示词 toggle */}
             <div className="flex items-center gap-3">
-              <span className="text-xs text-[rgba(255,255,255,0.7)] w-14 shrink-0">提示词</span>
-              <button
-                type="button"
-                onClick={() => setPromptEnabled(!promptEnabled)}
-                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
-                  promptEnabled ? 'bg-accent' : 'bg-[rgba(255,255,255,0.15)]'
-                }`}
-              >
-                <span
-                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                    promptEnabled ? 'translate-x-4' : 'translate-x-0.5'
-                  }`}
-                />
-              </button>
+              <span className="text-xs text-text-muted w-14 shrink-0">提示词</span>
+              <UiSwitch checked={promptEnabled} onCheckedChange={setPromptEnabled} aria-label="提示词" />
             </div>
 
             {promptEnabled && (
-              <textarea
+              <UiTextArea
                 value={extraPrompt}
                 onChange={(e) => setExtraPrompt(e.target.value)}
                 placeholder="输入你自己的附加提示词，会叠加到系统多角度提示词后面"
-                className="h-24 w-full resize-none rounded-xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-sm leading-6 text-white/82 outline-hidden placeholder:text-white/25 focus:border-[rgba(255,255,255,0.16)]"
+                className="h-24 w-full resize-none text-sm leading-6"
               />
             )}
           </div>
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-5 py-3 border-t border-[rgba(255,255,255,0.08)]">
-          <button
-            onClick={handleReset}
-            className="flex items-center gap-1.5 text-xs text-[rgba(255,255,255,0.5)] hover:text-white transition-colors"
-          >
-            <RotateCcw className="w-3 h-3" />
+        <div className="flex items-center justify-between px-5 py-3 border-t border-[var(--line)]">
+          <UiButton variant="ghost" size="sm" onClick={handleReset} icon={<RotateCcw className="w-3.5 h-3.5" />}>
             重置参数
-          </button>
+          </UiButton>
 
           {/* Model / provider / ratio picker — persisted per panel under
               lastModelConfigByPanel.multiAngle. Sits between 重置参数 and 复制提示词. */}
           <ModelConfigPicker panelKey="multiAngle" />
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onCopyPrompt?.(buildPrompt())}
-              className="rounded-md bg-[rgba(255,255,255,0.08)] px-3 py-1.5 text-xs text-[rgba(255,255,255,0.72)] transition-colors hover:bg-[rgba(255,255,255,0.14)]"
-            >
+            <UiButton size="sm" onClick={() => onCopyPrompt?.(buildPrompt())}>
               复制提示词
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsTemplateDialogOpen(true)}
-              className="rounded-md bg-[rgba(255,255,255,0.08)] px-3 py-1.5 text-xs text-[rgba(255,255,255,0.72)] transition-colors hover:bg-[rgba(255,255,255,0.14)]"
-            >
+            </UiButton>
+            <UiButton size="sm" onClick={() => setIsTemplateDialogOpen(true)}>
               设置提示词
-            </button>
-            <button
-              onClick={handleApply}
-              className="flex items-center justify-center w-9 h-9 rounded-full bg-white text-black hover:bg-gray-100 transition-colors"
-            >
+            </UiButton>
+            <UiButton variant="primary" onClick={handleApply} className="w-9 h-9 rounded-full p-0" aria-label="应用多角度效果">
               <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
                 <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-            </button>
+            </UiButton>
           </div>
         </div>
 

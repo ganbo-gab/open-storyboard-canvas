@@ -1,6 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NodeProps } from '@xyflow/react';
-import { Handle, Position } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
 import { Camera, Maximize2 } from 'lucide-react';
 
@@ -16,6 +15,9 @@ import {
   type BlueprintNodeData,
   type DirectorStudioProjectRecord,
 } from '@/features/canvas/domain/canvasNodes';
+import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
+import { NodeFrame } from '@/features/canvas/ui/NodeFrame';
+import { UiButton } from '@/components/ui';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { canvasEventBus } from '@/features/canvas/application/canvasServices';
 import type { CanvasEventMap } from '@/features/canvas/application/ports';
@@ -114,7 +116,7 @@ function resolveDirectorStudioRequestAspectRatio(data: BlueprintNodeData): strin
  * DirectorStudioShell; this node only keeps graph connections, project data,
  * the latest screenshot thumbnail, and the screenshot-to-AI-canvas handoff.
  */
-export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) => {
+export const BlueprintNode = memo(({ id, data, selected, width, height }: BlueprintNodeProps) => {
   const { t } = useTranslation();
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const updateDirectorStudioProjectLibrary = useCanvasStore((s) => s.updateDirectorStudioProjectLibrary);
@@ -125,6 +127,7 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
   const setActiveDirectorStudioNode = useCanvasStore((s) => s.setActiveDirectorStudioNode);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [directorStudioOpen, setDirectorStudioOpen] = useState(false);
+  const [openWorkspace, setOpenWorkspace] = useState<'director' | 'previs'>('director');
   const [openedDirectorStudioProjects, setOpenedDirectorStudioProjects] = useState<DirectorStudioProjectRecord[] | null>(null);
   const lastRecordedVideoNodeIdRef = useRef<string | null>(null);
   const [recordRequest, setRecordRequest] = useState<DirectorRecordRequest | null>(null);
@@ -154,9 +157,10 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
     return mergedProjects;
   }, [id, updateDirectorStudioProjectLibrary]);
 
-  const openDirectorStudio = useCallback((sourcePatch?: Partial<BlueprintNodeData>) => {
+  const openDirectorStudio = useCallback((sourcePatch?: Partial<BlueprintNodeData>, workspace: 'director' | 'previs' = 'director') => {
     syncDirectorStudioProjectLibrary(sourcePatch);
     setActiveDirectorStudioNode(id);
+    setOpenWorkspace(workspace);
     setDirectorStudioOpen(true);
   }, [id, setActiveDirectorStudioNode, syncDirectorStudioProjectLibrary]);
 
@@ -175,9 +179,10 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
   }, [id, setActiveDirectorStudioNode]);
 
   useEffect(() => {
-    if (data.openDirectorStudioOnCreate !== true) return;
-    openDirectorStudio({ openDirectorStudioOnCreate: false });
-  }, [data.openDirectorStudioOnCreate, openDirectorStudio]);
+    if (data.openDirectorStudioOnCreate !== true && data.openDirectorStudioOnCreate !== 'previs') return;
+    const workspace = useCanvasStore.getState().consumeDirectorOpenRequest(id);
+    if (workspace) openDirectorStudio(undefined, workspace);
+  }, [data.openDirectorStudioOnCreate, id, openDirectorStudio]);
 
   useEffect(() => canvasEventBus.subscribe('director-studio/open', ({ nodeId }) => {
     if (nodeId === id) openDirectorStudio();
@@ -394,7 +399,7 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
         displayName: t('directorStudio.motion.export.canvasNodeName'),
         sourceType: 'director-studio-recording',
       });
-      addEdge(id, videoNodeId);
+      addEdge(id, videoNodeId, { provenance: 'generationResult' });
       setSelectedNode(videoNodeId);
       lastRecordedVideoNodeIdRef.current = videoNodeId;
       return true;
@@ -415,32 +420,31 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
     : t('directorStudio.nodeCard.flatEnvironment');
 
   return (
-    <div
-      className={`overflow-hidden rounded-xl border bg-(--canvas-node-bg) shadow-(--canvas-node-shadow) ${selected ? 'border-accent' : 'border-(--canvas-node-border)'}`}
-      style={{ width: BLUEPRINT_NODE_WIDTH }}
-      onDoubleClick={(e) => e.stopPropagation()}
+    <NodeFrame
+      type={CANVAS_NODE_TYPES.blueprint}
+      selected={selected}
+      icon={<Camera />}
+      title={resolveNodeDisplayName(CANVAS_NODE_TYPES.blueprint, data)}
+      onRename={(displayName) => updateNodeData(id, { displayName })}
+      meta={t('directorStudio.nodeCard.summary', {
+        environment: compactEnvironmentLabel,
+        count: data.items.length,
+        refs: mergedReferenceImages.length,
+      })}
+      width={width ?? BLUEPRINT_NODE_WIDTH}
+      height={height}
+      resize={{ minWidth: BLUEPRINT_NODE_WIDTH, minHeight: 320, maxWidth: 1200, maxHeight: 1000 }}
+      bodyStyle={{ padding: 0 }}
     >
-      <Handle type="target" id="target" position={Position.Left} className="bg-accent/70!" />
-      <Handle type="source" id="source" position={Position.Right} className="bg-accent/70!" />
-
-      <div className="flex items-center justify-between gap-3 border-b border-(--canvas-node-divider) px-3 py-2 text-xs text-text-muted">
-        <div className="min-w-0">
-          <div className="truncate font-medium text-text-dark">{t('directorStudio.title')}</div>
-          <div className="mt-0.5 truncate text-[10px] text-text-muted">
-            {t('directorStudio.nodeCard.summary', {
-              environment: compactEnvironmentLabel,
-              count: data.items.length,
-              refs: mergedReferenceImages.length,
-            })}
-          </div>
-        </div>
-      </div>
-
-      <div className="nodrag nopan flex flex-col gap-3 bg-(--canvas-node-subtle-bg) p-3" onPointerDown={(e) => e.stopPropagation()}>
-        <button
+      <div
+        className="nodrag nopan flex min-h-0 flex-1 flex-col gap-3 overflow-auto bg-(--canvas-node-subtle-bg) p-3"
+        onPointerDown={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        <UiButton variant="ghost"
           type="button"
           onClick={(e) => { e.stopPropagation(); openDirectorStudio(); }}
-          className="group relative overflow-hidden rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) text-left transition-colors hover:border-(--canvas-node-border-hover) hover:bg-(--canvas-node-menu-hover)"
+          className="group relative block h-auto w-full overflow-hidden rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-0 text-left"
           title={t('directorStudio.openFullscreen')}
         >
           <div className="aspect-video bg-(--canvas-node-media-bg)">
@@ -462,7 +466,7 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
             <span className="min-w-0 truncate text-xs font-medium text-white/90">{t('directorStudio.openFullscreen')}</span>
             <Maximize2 className="h-4 w-4 shrink-0 text-white/75 transition-transform group-hover:scale-110" />
           </div>
-        </button>
+        </UiButton>
 
         <div className="grid grid-cols-3 gap-2 text-center">
           <div className="rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-bg-strong) px-2 py-2">
@@ -480,30 +484,31 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
         </div>
 
         <div className="flex gap-2">
-          <button
-            type="button"
+          <UiButton
+            variant="accent"
             onClick={(e) => { e.stopPropagation(); openDirectorStudio(); }}
-            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-2 text-xs font-medium text-white hover:bg-accent/90"
+            className="flex-1 text-xs"
             title={t('directorStudio.openFullscreen')}
           >
             <Maximize2 className="h-3.5 w-3.5" />
             {t('directorStudio.nodeCard.enter')}
-          </button>
-          <button
-            type="button"
+          </UiButton>
+          <UiButton
+            variant="secondary"
             onClick={(e) => { e.stopPropagation(); void handleAddSnapshotToCanvas(data.snapshotUrl ?? null); }}
             disabled={!data.snapshotUrl}
-            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-3 py-2 text-xs text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover) disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex-1 text-xs"
             title={data.snapshotUrl ? t('directorStudio.addToCanvasTitle') : t('directorStudio.addToCanvasNoSnapshot')}
           >
             <Camera className="h-3.5 w-3.5" />
             {t('directorStudio.addToCanvas')}
-          </button>
+          </UiButton>
         </div>
       </div>
 
       {directorStudioOpen && (
         <DirectorStudioShell
+          initialWorkspace={openWorkspace}
           sourceNodeId={id}
           data={directorStudioData}
           referenceImages={mergedReferenceImages}
@@ -521,7 +526,7 @@ export const BlueprintNode = memo(({ id, data, selected }: BlueprintNodeProps) =
           onClose={closeDirectorStudio}
         />
       )}
-    </div>
+    </NodeFrame>
   );
 });
 

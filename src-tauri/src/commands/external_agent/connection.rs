@@ -104,12 +104,18 @@ pub(crate) fn write_connection_descriptor(
     descriptor: &ExternalAgentConnectionDescriptor,
 ) -> Result<PathBuf, ExternalAgentCommandError> {
     std::fs::create_dir_all(descriptor_root).map_err(|error| {
-        ExternalAgentCommandError::process(format!("Failed to prepare the Canvas MCP descriptor directory: {error}"))
+        ExternalAgentCommandError::process(format!(
+            "Failed to prepare the Canvas MCP descriptor directory: {error}"
+        ))
     })?;
-    if std::fs::symlink_metadata(descriptor_root).map_err(|error| {
-        ExternalAgentCommandError::process(error.to_string())
-    })?.file_type().is_symlink() {
-        return Err(ExternalAgentCommandError::permission_denied("Canvas MCP descriptor directory cannot be a symlink."));
+    if std::fs::symlink_metadata(descriptor_root)
+        .map_err(|error| ExternalAgentCommandError::process(error.to_string()))?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(ExternalAgentCommandError::permission_denied(
+            "Canvas MCP descriptor directory cannot be a symlink.",
+        ));
     }
     #[cfg(unix)]
     {
@@ -119,23 +125,36 @@ pub(crate) fn write_connection_descriptor(
     }
     let path = descriptor_root.join(CONNECTION_DESCRIPTOR_NAME);
     let bytes = serde_json::to_vec(descriptor).map_err(|error| {
-        ExternalAgentCommandError::process(format!("Failed to encode the Canvas MCP descriptor: {error}"))
+        ExternalAgentCommandError::process(format!(
+            "Failed to encode the Canvas MCP descriptor: {error}"
+        ))
     })?;
-    let mut file = TempFileBuilder::new().prefix(".osc-").tempfile_in(descriptor_root)
+    let mut file = TempFileBuilder::new()
+        .prefix(".osc-")
+        .tempfile_in(descriptor_root)
         .map_err(|error| ExternalAgentCommandError::process(error.to_string()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        file.as_file().set_permissions(std::fs::Permissions::from_mode(0o600))
+        file.as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o600))
             .map_err(|error| ExternalAgentCommandError::process(error.to_string()))?;
     }
-    file.write_all(&bytes).and_then(|_| file.as_file().sync_all())
-        .map_err(|error| ExternalAgentCommandError::process(format!("Failed to persist the Canvas MCP descriptor: {error}")))?;
-    file.persist(&path).map_err(|error| ExternalAgentCommandError::process(error.to_string()))?;
+    file.write_all(&bytes)
+        .and_then(|_| file.as_file().sync_all())
+        .map_err(|error| {
+            ExternalAgentCommandError::process(format!(
+                "Failed to persist the Canvas MCP descriptor: {error}"
+            ))
+        })?;
+    file.persist(&path)
+        .map_err(|error| ExternalAgentCommandError::process(error.to_string()))?;
     Ok(path)
 }
 
-pub(crate) fn read_connection_descriptor(path: &Path) -> Result<ExternalAgentConnectionDescriptor, String> {
+pub(crate) fn read_connection_descriptor(
+    path: &Path,
+) -> Result<ExternalAgentConnectionDescriptor, String> {
     let metadata = std::fs::symlink_metadata(path)
         .map_err(|_| "请先打开 Open Storyboard Canvas".to_string())?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
@@ -269,18 +288,25 @@ pub(crate) async fn restore_connection(
     app: AppHandle,
     state: &ExternalAgentState,
 ) -> Result<(), ExternalAgentCommandError> {
-    let path = state.inner.connection_descriptor_root.lock()
+    let path = state
+        .inner
+        .connection_descriptor_root
+        .lock()
         .map_err(|_| ExternalAgentCommandError::process("Descriptor root lock is poisoned."))?
         .join(CONNECTION_DESCRIPTOR_NAME);
-    if !path.try_exists().map_err(|error| ExternalAgentCommandError::process(error.to_string()))? {
+    if !path
+        .try_exists()
+        .map_err(|error| ExternalAgentCommandError::process(error.to_string()))?
+    {
         return Ok(());
     }
-    let descriptor = read_connection_descriptor(&path)
-        .map_err(ExternalAgentCommandError::process)?;
+    let descriptor =
+        read_connection_descriptor(&path).map_err(ExternalAgentCommandError::process)?;
     if let Some(request) = descriptor.connection {
         create_connection(app, state, request).await?;
     } else {
-        std::fs::remove_file(path).map_err(|error| ExternalAgentCommandError::process(error.to_string()))?;
+        std::fs::remove_file(path)
+            .map_err(|error| ExternalAgentCommandError::process(error.to_string()))?;
     }
     Ok(())
 }
@@ -504,7 +530,10 @@ mod tests {
         };
         let path = write_connection_descriptor(root.path(), &descriptor).unwrap();
         descriptor.capability_token = "rotated-token".to_string();
-        assert_eq!(write_connection_descriptor(root.path(), &descriptor).unwrap(), path);
+        assert_eq!(
+            write_connection_descriptor(root.path(), &descriptor).unwrap(),
+            path
+        );
         assert_eq!(path, root.path().join("osc.json"));
         let decoded: ExternalAgentConnectionDescriptor =
             serde_json::from_slice(&std::fs::read(path.clone()).unwrap()).unwrap();

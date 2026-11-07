@@ -1,0 +1,16 @@
+{
+  "check": "Check connection and dependencies",
+  "connected": "Connected",
+  "unreachable": "Cannot connect",
+  "unknownVersion": "Unknown version",
+  "queue": "Running {{running}} · Queued {{pending}}",
+  "preflightPassed": "The selected workflow’s node and model dependencies are available.",
+  "missingDependencies": "Missing nodes: {{nodes}}; missing models: {{models}}",
+  "duplicate": "Duplicate workflow",
+  "copy": "copy",
+  "outputType": "Output type",
+  "import": "Add workflow",
+  "apiFormat": "Import ComfyUI API format JSON",
+  "imported": "Workflow added and available in the model picker.",
+  "deleteHint": "Only this workflow configuration is removed. Existing jobs and results remain."
+}

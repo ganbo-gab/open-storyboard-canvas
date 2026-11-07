@@ -11,7 +11,14 @@ import type {
   ChannelProfileV2, JsonValue, OperationKind, OperationSpec, OutputSpec, ParamSpec, Template,
 } from '../domain/profile';
 
-export interface UnmigratedLegacyField { key: string; value: unknown; reason: string }
+export type ChannelMigrationIssueKind = 'dropped' | 'converted' | 'unsupported';
+export interface UnmigratedLegacyField {
+  key: string;
+  value: unknown;
+  reason: string;
+  /** Absent only on records persisted before issue classification was introduced. */
+  kind?: ChannelMigrationIssueKind;
+}
 export interface LegacyConfigMigration {
   profile: ChannelProfileV2;
   unmigrated: UnmigratedLegacyField[];
@@ -67,13 +74,16 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
     return value;
   };
   const take = (path: string): void => { used.add(path); };
-  const report = (key: string, value: unknown, reason: string): void => {
+  const report = (key: string, value: unknown, reason: string, kind: ChannelMigrationIssueKind = 'unsupported'): void => {
     take(key);
-    if (!problems.has(key)) problems.set(key, { key, value: redact(value), reason });
+    if (!problems.has(key)) problems.set(key, { key, value: redact(value), reason, kind });
   };
+  // Credential metadata becomes ChannelRecord state, not an unsupported request field.
+  take('credentialRef');
+  take('credentialState');
   const json = (value: unknown, path: string): JsonValue | undefined => {
     if (containsSecret(value)) {
-      report(path, value, '含密钥的值不能存入渠道配置，请改用独立凭据。');
+      report(path, value, '含密钥的值不能存入渠道配置，请改用独立凭据。', 'dropped');
       return undefined;
     }
     if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
@@ -128,8 +138,8 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
     baseUrl: 'https://invalid.invalid',
     auth: { type: 'bearer' }, operations: {}, models: [],
   };
-  if (!config.id.trim()) report('id', config.id, '空 ID 已替换为迁移标识。');
-  if (!config.label.trim()) report('label', config.label, '空名称已替换为未完成的旧渠道。');
+  if (!config.id.trim()) report('id', config.id, '空 ID 已替换为迁移标识。', 'converted');
+  if (!config.label.trim()) report('label', config.label, '空名称已替换为未完成的旧渠道。', 'converted');
   const notes: string[] = [];
   if (config.note) {
     const note = json(config.note, 'note');
@@ -145,11 +155,11 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
     const query: Record<string, string> = {};
     url.searchParams.forEach((value, key) => { query[key] = value; });
     if (url.search || url.hash) {
-      report('baseUrl', config.baseUrl, 'URL 查询参数已迁入操作路径；片段不参与 HTTP 请求。');
+      report('baseUrl', config.baseUrl, 'URL 查询参数已迁入操作路径；片段不参与 HTTP 请求。', 'converted');
       // Do not put a key embedded in an old URL into any template.
       for (const [key, value] of Object.entries(query)) {
         if (SECRET.test(key) || containsSecret(value)) {
-          report(`baseUrl.query.${key}`, value, 'URL 中的凭据必须迁入独立凭据存储。');
+          report(`baseUrl.query.${key}`, value, 'URL 中的凭据必须迁入独立凭据存储。', 'dropped');
           delete query[key];
         }
       }
@@ -167,7 +177,7 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
         || containsSecret(endpoint.toString())) throw new Error('endpoint');
       profile.baseUrl = endpoint.origin;
       originalBase = endpoint.origin;
-      report('baseUrl', config.baseUrl, '无效根地址；使用完整接口地址的 origin。');
+      report('baseUrl', config.baseUrl, '无效根地址；使用完整接口地址的 origin。', 'converted');
     } catch {
       usableUrl = false;
       report('baseUrl', config.baseUrl, '缺少有效 HTTP 根地址；渠道已禁用，需补全后启用。');
@@ -177,7 +187,7 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
 
   function safeHeader(name: string, value: unknown, path: string): void {
     if (SECRET.test(name) || containsSecret(value)) {
-      report(path, value, '密钥类请求头不能静态保存，请改用 auth 和独立凭据。');
+      report(path, value, '密钥类请求头不能静态保存，请改用 auth 和独立凭据。', 'dropped');
     } else if (typeof value === 'string' && name.trim() && !/[\r\n]/.test(name + value)) {
       (profile.headers ??= {})[name.trim()] = value;
       take(path);
@@ -222,7 +232,7 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
 
   const query: Record<string, string> = { ...baseQuery };
   for (const [key, value] of Object.entries(config.queryParams ?? {})) {
-    if (SECRET.test(key) || containsSecret(value)) report(`queryParams.${key}`, value, '查询凭据必须通过 auth 配置。');
+    if (SECRET.test(key) || containsSecret(value)) report(`queryParams.${key}`, value, '查询凭据必须通过 auth 配置。', 'dropped');
     else { query[key] = value; take(`queryParams.${key}`); }
   }
   const template = (value: unknown, path: string): Template | undefined => {
@@ -230,6 +240,13 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
     if (parsed === undefined) return undefined;
     const convert = (entry: JsonValue): JsonValue => {
       if (typeof entry === 'string') return taskTokens(entry).replace(/{{\s*([^{}]+?)\s*}}/g, (_match, token: string) => {
+        const aliases: Record<string, string> = {
+          modelName: 'model', resolution: 'size', seconds: 'extra.seconds', duration: 'extra.seconds',
+          aspect_ratio: 'aspectRatio', reference_images: 'images', referenceImages: 'images',
+          firstFrame: 'firstImage', reference_videos: 'videos', referenceVideos: 'videos',
+          audio: 'audios', reference_audios: 'audios', referenceAudios: 'audios',
+        };
+        token = aliases[token] ?? token;
         if (token === 'size') return parameter('size');
         if (token === 'aspectRatio') return parameter('aspectRatio');
         if (token === 'firstImage') return '{{image}}';
@@ -241,11 +258,12 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
           parameter(root);
           return `{{param.${name}}}`;
         }
+        if (token.startsWith('chatPayload.')) return `{{${token}}}`;
         if (token.startsWith('param.')) {
           parameter(token.slice(6).split('.')[0]);
           return `{{${token}}}`;
         }
-        if (['model', 'prompt', 'images', 'image', 'videos', 'audios', 'messages', 'taskId'].includes(token)) return `{{${token}}}`;
+        if (['model', 'prompt', 'images', 'image', 'firstImageUrl', 'seedanceContent', 'videos', 'video', 'audios', 'audio', 'messages', 'taskId', 'tools', 'toolChoice', 'openaiImageContent', 'geminiParts', 'openaiImageInput'].includes(token)) return `{{${token}}}`;
         throw new Error(`不支持模板变量 ${token}`);
       });
       if (Array.isArray(entry)) return entry.map(convert);
@@ -263,7 +281,7 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
     }
     let url = buildProviderUrl(originalBase, raw).replace(/\{\{?model(?:Id)?\}?\}/g, '{{model}}');
     for (const [key, value] of Object.entries({ ...query, ...dynamic })) {
-      if (SECRET.test(key) || containsSecret(value)) { report(`${path}.query.${key}`, value, '查询凭据必须通过 auth 配置。'); continue; }
+      if (SECRET.test(key) || containsSecret(value)) { report(`${path}.query.${key}`, value, '查询凭据必须通过 auth 配置。', 'dropped'); continue; }
       const rendered = template(value, `${path}.query.${key}`);
       if (rendered === undefined) return undefined;
       const text = typeof rendered === 'object' ? JSON.stringify(rendered) : String(rendered);
@@ -285,7 +303,7 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
   const defaults: Record<string, JsonValue> = {};
   for (const [key, value] of Object.entries(record(extra.defaultRequestParams))) {
     const source = `extraParams.defaultRequestParams.${key}`;
-    if (SECRET_VALUE_KEY.test(key)) { report(source, value, '密钥参数不能静态保存。'); continue; }
+    if (SECRET_VALUE_KEY.test(key)) { report(source, value, '密钥参数不能静态保存。', 'dropped'); continue; }
     if (containsSecret(key) || ['__proto__', 'prototype', 'constructor'].includes(key)) {
       report(source, value, '不安全或含密钥的参数名不能静态保存。');
       continue;
@@ -316,9 +334,22 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
       take(source);
     } else if (Array.isArray(values) && !values.length) take(source);
   };
+  if (media === 'image' && config.apiStyle === 'openai-compatible' && kind !== 'google-gemini') {
+    const sizes = strings(config.supportedResolutions).filter((value) => /^\d{2,5}x\d{2,5}$/i.test(value));
+    parameter('size', sizes[0] ?? '1024x1024');
+  }
   choices('size', config.supportedResolutions, 'supportedResolutions');
   choices('modelVersion', config.supportedModelVersions, 'supportedModelVersions');
   choices('aspectRatio', extra.supportedRatios, 'extraParams.supportedRatios');
+  if (kind === 'agnes-images' && !params.has('aspectRatio')) {
+    choices('aspectRatio', ['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'], 'extraParams.supportedRatios');
+  }
+  const sizeParam = params.get('size');
+  if (sizeParam?.default !== undefined && sizeParam.options?.length
+    && !sizeParam.options.some((option) => option.value === sizeParam.default)) {
+    sizeParam.options = [...sizeParam.options, { label: String(sizeParam.default), value: sizeParam.default }];
+    report('supportedResolutions', config.supportedResolutions, '旧执行器的默认像素尺寸已保留为额外选项；未声明的符号分辨率/比例计算须改为显式像素尺寸或比例映射。', 'converted');
+  }
   if (config.supportsWebSearch) params.set('web_search', { key: 'web_search', label: '联网搜索', type: 'boolean' });
   take('supportsWebSearch');
 
@@ -404,7 +435,7 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
   }
   const bodyMode = resolveCustomProviderBodyMode(config);
   const local = ['comfyui', 'dreamina-cli', 'minimax-h3', 'local-audio'].includes(config.apiStyle)
-    || ['minimax-h3', 'dreamina-cli', 'local-audio'].includes(kind);
+    || ['comfyui', 'minimax-h3', 'dreamina-cli', 'local-audio'].includes(kind);
   const unsupportedTransport = local || bodyMode === 'signed';
   if (unsupportedTransport) report('apiStyle', config.apiStyle, local
     ? '此渠道必须使用专用适配器，不能迁为 HTTP 模板。' : '签名传输不能迁为静态 HTTP 鉴权。');
@@ -478,47 +509,144 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
   const hints = record(extra.requestBodyHints);
   const buildBody = (edit: boolean): Record<string, JsonValue> => {
     const body: Record<string, JsonValue> = { ...defaults };
+    if (media === 'video') {
+      const configured = extra.videoRequestBodyTemplate ?? extra.requestBodyTemplate;
+      if (configured !== undefined) {
+        const singleBraces = (value: unknown): unknown => typeof value === 'string'
+          ? value.replace(/(?<!\{)\{([^{}]+)\}(?!\})/g, '{{$1}}')
+          : Array.isArray(value) ? value.map(singleBraces)
+            : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, singleBraces(entry)])) : value;
+        const source = extra.videoRequestBodyTemplate === undefined ? 'extraParams.requestBodyTemplate' : 'extraParams.videoRequestBodyTemplate';
+        const parsed = template(singleBraces(configured), source);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        report(source, configured, '视频请求模板不能完整转换；已保留可表达的基础字段，未转换部分列为迁移问题。');
+      }
+      if (kind === 'xai-grok-video') {
+        take('extraParams.providerKind');
+        return { model: '{{model}}', prompt: '{{prompt}}', duration: parameter('seconds'),
+          aspect_ratio: defaults.aspect_ratio ?? '16:9', resolution: parameter('size'), ...defaults,
+          image: '{{firstImageUrl}}' };
+      }
+      if (kind === 'seedance-video') {
+        take('extraParams.providerKind');
+        return { model: '{{model}}', content: '{{seedanceContent}}', duration: parameter('seconds'),
+          ratio: parameter('aspectRatio'), resolution: parameter('size'), ...defaults };
+      }
+      body.model = '{{model}}'; body.prompt = '{{prompt}}'; body.size = parameter('size');
+      body.seconds ??= parameter('seconds');
+      const hints = record(extra.videoRequestBodyHints);
+      const scalar: [string, string, JsonValue][] = [
+        ['modelField', 'model', '{{model}}'], ['promptField', 'prompt', '{{prompt}}'],
+        ['sizeField', 'size', parameter('size')], ['secondsField', 'seconds', parameter('seconds')],
+        ['aspectRatioField', 'aspect_ratio', parameter('aspectRatio')], ['ratioField', 'ratio', parameter('aspectRatio')],
+        ['resolutionField', 'resolution', parameter('size')], ['selectedSizeField', 'size', parameter('size')],
+      ];
+      for (const [hint, canonical, token] of scalar) if (own(hints, hint)) {
+        delete body[canonical];
+        if (string(hints[hint])) put(body, string(hints[hint]), token, `extraParams.videoRequestBodyHints.${hint}`);
+        take(`extraParams.videoRequestBodyHints.${hint}`);
+      }
+      const imagesField = string(hints.imagesField ?? hints.referenceImageField ?? extra.videoReferenceField) || 'reference_images';
+      if (bodyMode !== 'multipart') put(body, imagesField,
+        imagesField.endsWith('[]') || ARRAY_FIELDS[imagesField.toLowerCase()] || ARRAY_FIELDS[imagesField.toLowerCase().replace(/[_-]/g, '')] ? '{{images}}' : '{{image}}', 'extraParams.videoReferenceField');
+      for (const key of ['imagesField', 'referenceImageField']) if (own(hints, key)) take(`extraParams.videoRequestBodyHints.${key}`);
+      if (extra.videoReferenceField !== undefined) take('extraParams.videoReferenceField');
+      const schema = record(extra.videoInputSchema);
+      for (const [media, keys, token] of [['video', ['videosField', 'videoField'], '{{videos}}'], ['audio', ['audioField', 'audiosField'], '{{audios}}']] as const) {
+        const field = string(hints[keys[0]] ?? hints[keys[1]] ?? record(schema[media]).field);
+        if (field) {
+          const array = field.endsWith('[]') || /^(videos|audios|reference_videos|reference_audios)$/i.test(field);
+          put(body, field, array ? token : media === 'video' ? '{{video}}' : '{{audio}}', `extraParams.videoInputSchema.${media}.field`);
+          for (const key of keys) if (own(hints, key)) take(`extraParams.videoRequestBodyHints.${key}`);
+          if (own(record(schema[media]), 'field')) take(`extraParams.videoInputSchema.${media}.field`);
+        }
+      }
+      return body;
+    }
     if (media === 'chat') {
-      if (kind === 'google-gemini') body.contents = [{ role: 'user', parts: [{ text: '{{prompt}}' }] }];
-      else if (kind === 'openai-responses') { body.model = '{{model}}'; body.input = '{{prompt}}'; }
-      else { body.model = '{{model}}'; body.messages = '{{messages}}'; }
-      if (kind === 'anthropic-messages' || config.apiStyle === 'anthropic') body.max_tokens ??= parameter('max_tokens', 8192);
+      const chatFields: Record<string, ParamSpec['type']> = {
+        temperature: 'number', top_p: 'number', max_tokens: 'number', max_completion_tokens: 'number',
+        frequency_penalty: 'number', presence_penalty: 'number', seed: 'number', stop: 'text',
+        response_format: 'text', reasoning_effort: 'text', user: 'text', parallel_tool_calls: 'boolean',
+        stream: 'boolean', stream_options: 'text',
+      };
+      if (kind === 'google-gemini') {
+        body.contents = '{{chatPayload.contents}}';
+        parameter('stream', false);
+        take('extraParams.providerKind');
+        for (const key of ['generationConfig', 'systemInstruction', 'tools', 'toolConfig', 'safetySettings', 'cachedContent']) body[key] = `{{chatPayload.${key}}}`;
+      } else if (kind === 'openai-responses') {
+        body.model = '{{model}}'; body.input = '{{chatPayload.input}}';
+        for (const key of ['instructions', 'tools', 'tool_choice', 'text', 'reasoning', 'previous_response_id', 'include', 'store', 'max_output_tokens', 'parallel_tool_calls', 'stream_options']) body[key] = `{{chatPayload.${key}}}`;
+        body.stream = parameter('stream', false);
+        for (const key of ['temperature', 'top_p']) body[key] ??= parameter(key);
+      } else {
+        body.model = '{{model}}'; body.messages = '{{messages}}';
+        if (kind === 'anthropic-messages' || config.apiStyle === 'anthropic') {
+          body.max_tokens ??= parameter('max_tokens', 8192);
+          for (const key of ['system', 'tools', 'tool_choice', 'thinking', 'stop_sequences', 'metadata', 'betas']) body[key] = `{{chatPayload.${key}}}`;
+        } else {
+          body.tools = '{{tools}}'; body.tool_choice = '{{toolChoice}}';
+          if (kind === 'agnes-chat') body.max_completion_tokens ??= parameter('max_completion_tokens', 65500);
+        }
+        for (const [key, type] of Object.entries(chatFields)) {
+          if (!params.has(key)) params.set(key, { key, label: key, type, ...(key === 'stream' ? { default: false } : {}) });
+          body[key] ??= ['stop', 'response_format', 'stream_options'].includes(key) ? `{{chatPayload.${key}}}` : `{{param.${key}}}`;
+        }
+      }
       return body;
     }
     if (kind === 'google-gemini') {
-      return { contents: [{ role: 'user', parts: [{ text: '{{prompt}}' }] }],
+      return { contents: [{ role: 'user', parts: '{{geminiParts}}' }],
         generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: {
           aspectRatio: parameter('aspectRatio'), imageSize: parameter('size'),
         } } };
     }
     if (kind === 'agnes-images') {
-      return { ...defaults, model: '{{model}}', prompt: '{{prompt}}', size: parameter('size'), n: parameter('n', 1),
-        ...(edit ? { tags: ['img2img'], extra_body: { image: '{{images}}', response_format: 'b64_json' } } : { return_base64: true }) };
+      return { ...defaults, model: '{{model}}', prompt: '{{prompt}}', size: parameter('size'), n: 1,
+        ratio: '{{param.aspectRatio.ratio}}',
+        ...(edit ? { tags: defaults.tags ?? ['img2img'], extra_body: { ...record(json(record(extra.defaultRequestParams).extra_body ?? {}, 'extraParams.defaultRequestParams.extra_body')) as Record<string, JsonValue>, image: '{{images}}', response_format: 'b64_json' } }
+          : { return_base64: defaults.return_base64 ?? true }) };
     }
     if (extra.providerConfigVersion === 'new-v1' && kind === 'stability') {
       return { prompt: '{{prompt}}', aspect_ratio: parameter('aspectRatio'), output_format: 'png', ...defaults };
     }
     if (extra.providerConfigVersion === 'new-v1' && kind === 'fal') {
-      return { prompt: '{{prompt}}', image_size: parameter('image_size', 'square_hd'), num_images: parameter('num_images', 1), ...defaults,
+      return { prompt: '{{prompt}}', image_size: parameter('image_size', 'square_hd'), num_images: 1, ...defaults,
         ...(edit ? { image_url: '{{image}}' } : {}) };
     }
     if (extra.providerConfigVersion === 'new-v1' && kind === 'replicate') {
-      return { ...defaults, version: defaults.version ?? '{{model}}', input: {
+      const { version, model, input: _input, ...topLevel } = defaults;
+      return { ...topLevel, version: version ?? model ?? '{{model}}', input: {
         prompt: '{{prompt}}', aspect_ratio: parameter('aspectRatio'), ...(edit ? { image: '{{image}}' } : {}),
+        ...record(json(record(extra.defaultRequestParams).input ?? {}, 'extraParams.defaultRequestParams.input')) as Record<string, JsonValue>,
       } };
     }
+    if (/\/v1\/draw\/completions\/?$/.test(basePath) || /grsai/i.test(config.baseUrl)) {
+      const represented: Record<string, string> = { promptField: 'prompt', modelField: 'model', sizeField: '', ratioField: 'aspectRatio', referenceImageField: 'urls' };
+      for (const [key, value] of Object.entries(represented)) if (hints[key] === value) take(`extraParams.requestBodyHints.${key}`);
+      return { model: '{{model}}', prompt: '{{prompt}}', aspectRatio: parameter('aspectRatio'),
+        ...(edit ? { urls: '{{images}}' } : {}), webHook: '-1', shutProgress: false, ...defaults };
+    }
     if (media === 'image' && /\/responses$/.test(basePath)) {
-      body.model = '{{model}}'; body.input = '{{prompt}}'; body.tools ??= [{ type: 'image_generation' }];
+      body.model = '{{model}}'; body.input = '{{prompt}}'; body.tools = [{ type: 'image_generation' }];
+      body.aspect_ratio = parameter('aspectRatio');
+      if (config.supportsWebSearch) body.web_search = parameter('web_search');
+      if (kind === 'openai-responses' && extra.providerConfigVersion === 'new-v1') {
+        body.tools = [{ type: 'image_generation', model: parameter('image_generation_model', 'gpt-image-2'), size: parameter('size') }];
+        body.tool_choice = { type: 'image_generation' };
+      }
       return body;
     }
     if (media === 'image' && /\/chat\/completions$/.test(basePath)) {
-      body.model = '{{model}}'; body.messages = [{ role: 'user', content: '{{prompt}}' }];
-      body.modalities = ['image', 'text']; body.n = parameter('n', 1); body.size = parameter('size');
+      body.model = '{{model}}'; body.messages = [{ role: 'user', content: '{{openaiImageContent}}' }];
+      body.modalities = ['image', 'text']; body.n = 1; body.size = parameter('size');
+      body.aspect_ratio = parameter('aspectRatio');
+      if (config.supportsWebSearch) body.web_search = parameter('web_search');
       return body;
     }
     body.model = '{{model}}'; body.prompt = '{{prompt}}'; body.size = parameter('size');
-    if (media === 'video') body.seconds ??= parameter('seconds');
-    else if (config.apiStyle === 'openai-compatible') body.n ??= parameter('n', 1);
+    if (config.apiStyle === 'openai-compatible') body.n = 1;
     const mapping: [string, string, JsonValue][] = [
       ['modelField', 'model', '{{model}}'], ['promptField', 'prompt', '{{prompt}}'],
       ['sizeField', 'size', parameter('size')], ['ratioField', 'aspect_ratio', parameter('aspectRatio')],
@@ -544,14 +672,19 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
     const edit = operation === 'image.edit';
     const source = variantSource ?? 'extraParams';
     const mode = variant?.bodyMode ?? bodyMode;
-    if (edit && !variant && (kind === 'google-gemini' || /\/chat\/completions$/.test(basePath))) {
-      report('endpointPath', config.endpointPath, '旧多模态消息数组需要逐图转换，不能由 v2 静态模板忠实表达；图片编辑操作未迁移。');
+    if (edit && !variant && /\/responses$/.test(basePath)) {
+      report('endpointPath', config.endpointPath, '旧 Responses 图像生成请求未携带参考图；迁移不虚构图像编辑支持。');
       return;
     }
-    if (mode === 'form-urlencoded') { report(variant ? `${source}.bodyMode` : 'extraParams.requestBodyMode', mode, 'v2 不支持 form-urlencoded；操作未迁移。'); return; }
     const pathRaw = variant?.endpointPath ?? (string(extra[edit ? 'imageEditEndpointPath' : 'imageGenerationEndpointPath']) || basePath);
-    const path = endpoint(pathRaw, variant ? `${source}.endpointPath` : 'endpointPath', variant?.query);
+    let path = endpoint(pathRaw, variant ? `${source}.endpointPath` : 'endpointPath', variant?.query);
     if (!path) return;
+    if (media === 'chat' && kind === 'google-gemini') {
+      if (/:generateContent(?:\?|$)/.test(path)) {
+        path = path.replace(':generateContent', ':{{chatPayload.action}}');
+        path += `${path.includes('?') ? '&' : '?'}alt={{chatPayload.alt}}`;
+      } else report('endpointPath', config.endpointPath, '自定义 Gemini 路径不能推断流式 action；保留原路径，仅同步可用。');
+    }
     const method = variant?.method ?? config.httpMethod ?? 'POST';
     let body: Template | undefined = variant?.bodyTemplate === undefined ? buildBody(edit)
       : template(variant.bodyTemplate, `${source}.bodyTemplate`);
@@ -567,7 +700,7 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
     const asyncRaw = variant ? variant.asyncTask : extra.asyncTask;
     const reply = response(asyncRaw, responsePaths, variant ? `${source}.asyncTask` : 'extraParams.asyncTask');
     if (!reply) return;
-    const spec: OperationSpec = { method, path, body: method === 'GET' ? 'none' : mode === 'multipart' ? 'multipart' : 'json', response: reply };
+    const spec: OperationSpec = { method, path, body: method === 'GET' ? 'none' : mode === 'multipart' ? 'multipart' : mode === 'form-urlencoded' ? 'form-urlencoded' : 'json', response: reply };
     if (method === 'GET') {
       if (!body || typeof body !== 'object' || Array.isArray(body)) {
         report(variant ? `${source}.bodyTemplate` : 'httpMethod', variant?.bodyTemplate ?? method, 'GET 查询模板必须为对象。');
@@ -598,7 +731,7 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
       delete body.image; delete body.images; delete body.reference_images;
       for (const field of variant.imageFields) if (!put(body, field.name, field.mode === 'single' ? '{{image}}' : '{{images}}', `${source}.imageFields`)) return;
       take(`${source}.imageFields`);
-    } else if (edit && string(hints.referenceImageField) === 'urls') spec.imageEncoding = 'base64';
+    } else if (edit && (string(hints.referenceImageField) === 'urls' || /\/v1\/draw\/completions\/?$/.test(basePath) || /grsai/i.test(config.baseUrl))) spec.imageEncoding = 'base64';
     if (string(record(asyncRaw).errorPath)) { spec.errorPath = string(record(asyncRaw).errorPath); take(`${variant ? source + '.asyncTask' : 'extraParams.asyncTask'}.errorPath`); }
     profile.operations[operation] = spec;
     take('httpMethod');
@@ -638,13 +771,24 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
   const ids = new Set<string>();
   config.models.forEach((id, index) => {
     if (!id.trim() || containsSecret(id) || /{{/.test(id) || ids.has(id)) {
-      report(`models[${index}]`, id, '空白、重复或含密钥/模板的模型 ID 无法迁移。'); return;
+      report(`models[${index}]`, id, '空白、重复或含密钥/模板的模型 ID 无法迁移。', 'dropped'); return;
     }
     ids.add(id);
     const editOp = profile.operations['image.edit'];
     const imageRefs = editOp?.files?.cardinality === 'single' || (!editOp?.files && JSON.stringify(editOp?.template ?? null).includes('{{image}}')) ? 1 : Number.MAX_SAFE_INTEGER;
-    profile.models.push({ id, operations: [...operations], params: [...params.values()].map((param) => ({ ...param })),
-      ...(operations.includes('image.edit') || operations.includes('video.generate') ? { refs: { image: imageRefs } } : {}) });
+    const modelParams = [...params.values()].map((param): ParamSpec => {
+      if (kind === 'agnes-images' && id === 'agnes-image-2.1-flash' && param.key === 'aspectRatio' && !ratioOptions.length) {
+        return { ...param, options: param.options?.map((option) => ({ ...option,
+          value: typeof option.value === 'string' ? { ratio: option.value } : option.value })),
+          ...(typeof param.default === 'string' ? { default: { ratio: param.default } } : {}) };
+      }
+      return { ...param };
+    });
+    profile.models.push({ id, operations: [...operations], params: modelParams,
+      ...(operations.includes('image.edit') || operations.includes('video.generate') ? { refs: { image: imageRefs,
+        ...(media === 'video' && /{{videos?}}/.test(JSON.stringify(profile.operations['video.generate']?.template ?? null)) ? { video: Number.MAX_SAFE_INTEGER } : {}),
+        ...(media === 'video' && /{{audios?}}/.test(JSON.stringify(profile.operations['video.generate']?.template ?? null)) ? { audio: Number.MAX_SAFE_INTEGER } : {}),
+      } } : {}) });
   });
   take('models');
   if (notes.length) profile.notes = notes;
@@ -656,7 +800,7 @@ export function migrateLegacyConfig(config: CustomProviderConfig): LegacyConfigM
     if (descendants && value && typeof value === 'object' && !Array.isArray(value)) {
       for (const [key, child] of Object.entries(value)) remaining(child, path ? `${path}.${key}` : key);
     } else if (value !== undefined && !(value && typeof value === 'object' && !Object.keys(value).length)) {
-      report(path, value, 'v2 无对应字段，未参与请求；请人工审阅。');
+      report(path, value, 'v2 无对应字段，未参与请求；请人工审阅。', 'dropped');
     }
   };
   for (const [key, value] of Object.entries(config)) remaining(value, key);

@@ -1,3 +1,21 @@
+export type ComfyUIAuthConfig = { mode: 'none' | 'bearer' } | { mode: 'header' | 'query'; name: string };
+
+/** Resolve persisted auth once; an empty credential never changes the selected mode. */
+export function resolveComfyUIProviderAuth(provider: { apiKey?: string; extraParams?: Record<string, unknown> }): {
+  config: ComfyUIAuthConfig; prefix: string; value: string;
+} {
+  const extra = provider.extraParams ?? {};
+  const raw = extra.auth && typeof extra.auth === 'object' && !Array.isArray(extra.auth)
+    ? extra.auth as Record<string, unknown> : {};
+  const mode = String(raw.mode ?? raw.type ?? extra.authMode ?? 'bearer').trim().toLowerCase();
+  const config: ComfyUIAuthConfig = mode === 'header' || mode === 'query'
+    ? { mode, name: String(raw.name ?? extra.authName ?? (mode === 'query' ? 'key' : 'x-api-key')).trim() }
+    : { mode: mode === 'none' ? 'none' : 'bearer' };
+  const prefix = String(raw.prefix ?? extra.authPrefix ?? '').trim();
+  const key = provider.apiKey?.trim() ?? '';
+  return { config, prefix, value: key && prefix ? `${prefix} ${key}` : key };
+}
+
 export type ComfyUIAuth =
   | { mode: 'none' }
   | { mode: 'bearer'; value: string }
@@ -27,7 +45,12 @@ export function resolveComfyUIUrls(input: string): ComfyUIResolvedUrls {
   const value = sanitizeProviderUrlInput(input);
   if (!value) throw new Error('请填写 ComfyUI 地址。');
   const explicit = /^[a-z][a-z\d+.-]*:\/\//i.test(value);
-  const url = new URL(explicit ? value : `http://${value.replace(/^\/\//, '')}`);
+  let url: URL;
+  try {
+    url = new URL(explicit ? value : `http://${value.replace(/^\/\//, '')}`);
+  } catch {
+    throw new Error('ComfyUI 地址无效，请填写可访问的主机地址和端口，例如 http://127.0.0.1:8188。');
+  }
   if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) {
     throw new Error('ComfyUI 地址必须使用 http 或 https，且不能包含用户名或密码。');
   }
@@ -63,14 +86,14 @@ export function comfyUIWebSocketUrl(urls: ComfyUIResolvedUrls, clientId: string)
   return url.toString();
 }
 
-/** Authentication mode is honored even when its configured value is empty. */
+/** Preserve the configured mode, but never send an empty bearer credential. */
 export function applyComfyUIAuth(url: string, auth: ComfyUIAuth): { url: string; headers: Record<string, string> } {
   const headers: Record<string, string> = {};
   if (auth.mode === 'bearer' && /[\r\n]/.test(auth.value)) throw new Error('ComfyUI 鉴权头无效。');
-  if (auth.mode === 'bearer') headers.Authorization = `Bearer ${auth.value}`;
+  if (auth.mode === 'bearer' && auth.value.trim()) headers.Authorization = `Bearer ${auth.value}`;
   if (auth.mode === 'header') {
     if (!/^[!#$%&'*+.^_`|~\w-]+$/.test(auth.name) || /[\r\n]/.test(auth.value)) throw new Error('ComfyUI 鉴权头无效。');
-    headers[auth.name] = auth.value;
+    if (auth.name.toLowerCase() !== 'authorization' || auth.value.trim()) headers[auth.name] = auth.value;
   }
   if (auth.mode === 'query') {
     if (!auth.name.trim()) throw new Error('ComfyUI 鉴权查询参数名不能为空。');

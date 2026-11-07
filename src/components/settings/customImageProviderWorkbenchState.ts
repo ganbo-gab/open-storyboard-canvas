@@ -6,6 +6,7 @@ import type { GenerateRequest } from '@/commands/ai';
 import type { CustomProviderConfig } from '@/stores/customProvidersStore';
 import { createComfyUIWorkflowTemplate, getComfyUIReferenceRequirements, getComfyUIVideoCapabilities, parseComfyUIConfig } from '@/features/canvas/infrastructure/comfyuiGateway';
 import type { ImageFieldDescriptorV1, ImageRequestVariantV1, JsonTemplateValue } from '@/features/canvas/application/customImageProviderContract';
+import { resolveComfyUIWorkflow } from '@/features/channels/application/comfyWorkflows';
 
 export type CustomImageProviderCreationRoute = 'ai' | 'manual' | 'comfyui';
 
@@ -114,10 +115,10 @@ export function createWorkbenchPreviewRequest(config: CustomProviderConfig, mode
     prompt: 'preview prompt', model: `custom:${config.id}:${model}`, size: '1024x1024', aspect_ratio: '1:1',
   };
   if (config.apiStyle !== 'comfyui') return sample;
-  const comfy = parseComfyUIConfig(config);
+  const comfy = parseComfyUIConfig(config, model);
   const references = getComfyUIReferenceRequirements(comfy);
   sample.reference_images = Array.from({ length: references.min }, () => 'data:image/png;base64,AAAA');
-  if (config.mediaType === 'video') {
+  if (resolveComfyUIWorkflow(config, model).mediaType === 'video') {
     const capabilities = getComfyUIVideoCapabilities(comfy);
     sample.size = capabilities.supportedResolutions[0];
     sample.aspect_ratio = capabilities.supportedAspectRatios[0];

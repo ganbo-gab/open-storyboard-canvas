@@ -1,3 +1,8 @@
+import type { AgentTurnSafetySnapshot } from './agentTurnSafety';
+import { createAgentCompressedStorage } from '../infrastructure/agentCompressedStorage';
+import type { SkillRoutingContext } from './agentSkills';
+import { agentGenerationPreferencesSchema, type AgentGenerationPreferences } from './agentGenerationPreferences';
+import type { CanvasAgentExecutionMode } from './agentAutoApprovalPolicy';
 import { redactSensitiveValue } from './agentRedaction';
 import { assertAgentSerializedRunStateSafe } from '../infrastructure/agentSessionRepository';
 import {
@@ -110,6 +115,12 @@ export interface AgentRunRecovery {
   agentDefinitionVersion: number;
   commandSchemaVersion: number;
   serializedState: string;
+  turnSafety?: AgentTurnSafetySnapshot;
+  skillRoutingContext?: SkillRoutingContext;
+  allowedToolNames?: readonly string[];
+  modelRef?: string;
+  generationPreferences?: AgentGenerationPreferences;
+  executionMode?: CanvasAgentExecutionMode;
   createdAt: number;
 }
 
@@ -254,9 +265,12 @@ function isAgentRunRecovery(value: unknown): value is AgentRunRecovery {
     || !Number.isSafeInteger(value.agentDefinitionVersion)
     || !Number.isSafeInteger(value.commandSchemaVersion)
     || typeof value.serializedState !== 'string'
-    || !isTimestamp(value.createdAt)) return false;
+    || !isTimestamp(value.createdAt)
+    || (value.executionMode !== undefined && !['manual', 'auto', 'full'].includes(String(value.executionMode)))
+    || (value.generationPreferences !== undefined && !agentGenerationPreferencesSchema.safeParse(value.generationPreferences).success)) return false;
   try {
     assertAgentSerializedRunStateSafe(value.serializedState);
+    assertAgentSerializedRunStateSafe(JSON.stringify({ generationPreferences: value.generationPreferences }));
     return true;
   } catch {
     return false;
@@ -375,7 +389,7 @@ interface AgentApprovalEnvelopeV1 {
 function defaultStorage(): StorageLike | null {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return null;
-    return window.localStorage;
+    return createAgentCompressedStorage(window.localStorage);
   } catch {
     return null;
   }

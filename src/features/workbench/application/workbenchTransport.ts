@@ -1,10 +1,15 @@
+import { t } from 'i18next';
 import { tauriAiGateway } from '@/features/canvas/infrastructure/tauriAiGateway';
-import { submitCustomChatCompletion, recoverCustomProviderJob } from '@/features/canvas/infrastructure/customProviderGateway';
-import { generateAudio } from '@/features/canvas/infrastructure/localAudioGateway';
+import { submitCustomChatCompletion } from '@/features/channels/runtime/channelChat';
+import { recoverCustomProviderJob } from '@/features/canvas/infrastructure/providerGateway';
 import { useSettingsStore } from '@/stores/settingsStore';
 import type { GenerationJobPollStatus } from '@/features/canvas/application/ports';
 import type { WorkbenchMessage, WorkbenchResult, WorkbenchSubmitInput, WorkbenchTask } from '../domain/types';
 import { getAssetPortableSource } from '@/features/assets/application/assetMediaStorage';
+import { withWorkbenchChannelDefaults } from './nativeChannelInput';
+import { resolveNativeChannelModel } from '@/features/channels/application/channelService';
+import { channelJobFromRequest, getChannelJobAsync, isChannelJobId, submitChannelJob } from '@/features/channels/runtime/channelExecution';
+import { channelRequestOptions } from '@/features/channels/runtime/requestReferences';
 
 export interface WorkbenchTransport {
   submit(input: WorkbenchSubmitInput, history: WorkbenchMessage[]): Promise<{ jobId?: string; results?: WorkbenchResult[] }>;
@@ -13,8 +18,14 @@ export interface WorkbenchTransport {
 }
 export const workbenchTransport: WorkbenchTransport = {
   async submit(input, history) {
+    input = withWorkbenchChannelDefaults(input);
+    const native = resolveNativeChannelModel(input.model);
+    if (input.kind === 'audio' && !native) throw new Error(t('node.aiAudio.unavailableModel'));
     const refs = await Promise.all((input.references ?? []).map(async (reference) => ({ ...reference, source: await getAssetPortableSource(reference.source) })));
     const config = input.config ?? {};
+    const referenceSlots = input.referenceSlots === undefined ? undefined : Object.fromEntries(await Promise.all(
+      Object.entries(input.referenceSlots).map(async ([slot, sources]) => [slot, await Promise.all(sources.map(getAssetPortableSource))]),
+    ));
     const prompt = [input.prompt, ...refs.filter((ref) => ref.kind === 'text').map((ref) => ref.source)].join('\n\n');
     if (input.kind === 'chat') {
       const content: Array<Record<string, unknown>> = [{ type: 'text', text: input.prompt }];
@@ -25,22 +36,22 @@ export const workbenchTransport: WorkbenchTransport = {
       }
       const response = await submitCustomChatCompletion(input.model, {
         ...config.extraParams,
+        ...(native?.model.modes ? { channel_mode_id: input.channelModeId } : {}),
         model: input.model,
         messages: [...history.map((item) => ({ role: item.role, content: item.text })), { role: 'user', content }],
       });
       return { results: [{ kind: 'text', source: response.text }] };
     }
     if (input.kind === 'audio') {
-      if (refs.some((ref) => ref.kind === 'image' || ref.kind === 'video') || refs.filter((ref) => ref.kind === 'audio').length > 1) throw new Error('音频生成仅支持一个音频参考和文本参考');
-      const settings = useSettingsStore.getState().audioGenerationSettings;
-      const model = settings.models.find((item) => item.id === input.model && item.enabled);
-      if (!model) throw new Error('未找到已启用的音频模型配置');
-      const audio = refs.find((ref) => ref.kind === 'audio');
-      const response = await generateAudio({ model, text: prompt,
-        fallbackBaseUrl: settings.apiBaseUrl, voiceId: typeof config.extraParams?.voiceId === 'string' ? config.extraParams.voiceId : model.defaultVoiceId || settings.selectedVoiceId,
-        outputMode: model.outputMode, timeoutMs: model.timeoutMs,
-        referenceAudioUrl: audio?.source, referenceAudioTitle: audio?.name, extraParams: config.extraParams });
-      return { results: [{ kind: 'audio', source: response.audioUrl }] };
+      if (native) {
+        const request = { model: input.model, prompt, size: '', aspect_ratio: '', channel_mode_id: input.channelModeId,
+          reference_slots: referenceSlots, reference_images: refs.filter((ref) => ref.kind === 'image').map((ref) => ref.source),
+          reference_videos: refs.filter((ref) => ref.kind === 'video').map((ref) => ref.source),
+          reference_audios: refs.filter((ref) => ref.kind === 'audio').map((ref) => ref.source), extra_params: config.extraParams };
+        return { jobId: await submitChannelJob(native.profile, channelJobFromRequest(native.profile, native.model.id, request, 'audio',
+          channelRequestOptions(native.profile, native.model.id, request))) };
+      }
+      throw new Error(t('node.aiAudio.unavailableModel'));
     }
     if (input.kind === 'image') {
       if (refs.some((ref) => ref.kind === 'video' || ref.kind === 'audio')) throw new Error('图片生成不支持视频或音频引用');
@@ -50,12 +61,14 @@ export const workbenchTransport: WorkbenchTransport = {
         }
       }
       const jobId = await tauriAiGateway.submitGenerateImageJob({ prompt, model: input.model,
-        size: config.size ?? '1K', aspectRatio: config.aspectRatio ?? 'auto',
+        size: config.size ?? (native ? '' : '1K'), aspectRatio: config.aspectRatio ?? (native ? '' : 'auto'),
+        channelModeId: input.channelModeId, referenceSlots,
         referenceImages: refs.filter((ref) => ref.kind === 'image').map((ref) => ref.source), extraParams: config.extraParams });
       return { jobId };
     }
     const jobId = await tauriAiGateway.submitGenerateVideoJob({ prompt, model: input.model,
-      size: config.size ?? '720p', aspectRatio: config.aspectRatio ?? 'auto', seconds: config.seconds,
+      size: config.size ?? (native ? '' : '720p'), aspectRatio: config.aspectRatio ?? (native ? '' : 'auto'), seconds: config.seconds,
+      channelModeId: input.channelModeId, referenceSlots,
       referenceImages: refs.filter((ref) => ref.kind === 'image').map((ref) => ref.source),
       referenceVideos: refs.filter((ref) => ref.kind === 'video').map((ref) => ref.source),
       referenceAudios: refs.filter((ref) => ref.kind === 'audio').map((ref) => ref.source), extraParams: config.extraParams });
@@ -63,6 +76,7 @@ export const workbenchTransport: WorkbenchTransport = {
   },
   async poll(task) {
     if (!task.jobId) throw new Error('没有上游任务编号；不会重新提交生成请求');
+    if (isChannelJobId(task.jobId)) return await getChannelJobAsync(task.jobId);
     return task.input.kind === 'video' ? await tauriAiGateway.getGenerateVideoJob(task.jobId) : await tauriAiGateway.getGenerateImageJob(task.jobId);
   },
   async recover(task) {

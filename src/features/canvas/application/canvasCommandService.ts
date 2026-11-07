@@ -35,7 +35,7 @@ const canvasCommandStore = {
   },
 };
 
-export const canvasGenerationFacade = new CanvasGenerationFacade(canvasEventBus);
+export const canvasGenerationFacade = new CanvasGenerationFacade();
 export const canvasToolWorkflowFacade = new CanvasToolWorkflowFacade({
   getNodes: () => useCanvasStore.getState().nodes,
   addDerivedExportNode: (...args) => useCanvasStore.getState().addDerivedExportNode(...args),

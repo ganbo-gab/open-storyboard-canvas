@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { useReactFlow, useStoreApi } from '@xyflow/react';
 
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -11,6 +11,10 @@ import {
   type Viewport,
 } from './viewportMath';
 import { getNodeIdFromTarget, isEditableTarget, isOverlayTarget, readSelectedText } from './domTargets';
+import { clearAlignmentSession, setAlignmentSnapDisabled } from './alignment';
+import { IS_MAC } from './shortcuts';
+import { createCanvasViewportGesture, type CanvasViewportGesture } from './canvasViewportGesture';
+import { registerCanvasViewportFlush } from '../application/canvasViewportCommit';
 
 const DRAG_THRESHOLD_PX = 4;
 
@@ -56,28 +60,37 @@ function canScrollNatively(target: EventTarget | null, root: HTMLElement, dx: nu
  * - a right *click* (no drag) opens the context menu on release, so it never fights panning;
  * - Space toggles the temporary hand cursor (React Flow pans via panActivationKeyCode).
  */
-export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>) {
+const noViewportCommit = (_viewport: Viewport) => {};
+const noViewportStart = () => {};
+
+export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>, {
+  onViewportCommit = noViewportCommit,
+  onViewportStart = noViewportStart,
+}: { onViewportCommit?: (viewport: Viewport) => void; onViewportStart?: () => void } = {}) {
   const reactFlow = useReactFlow();
   const flowStore = useStoreApi();
+  const viewportGestureRef = useRef<CanvasViewportGesture | null>(null);
+  const onMoveStart = useCallback(() => viewportGestureRef.current?.onMoveStart(), []);
+  const onMoveEnd = useCallback((viewport: Viewport) => viewportGestureRef.current?.onMoveEnd(viewport), []);
 
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
 
     const classifier = createWheelClassifier();
-    let pending: Viewport | null = null;
-    let frame = 0;
-
-    const currentViewport = (): Viewport => pending ?? reactFlow.getViewport();
-    const scheduleViewport = (next: Viewport) => {
-      pending = next;
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        if (pending) void reactFlow.setViewport(pending);
-        pending = null;
-      });
-    };
+    const viewportGesture = createCanvasViewportGesture({
+      readViewport: reactFlow.getViewport,
+      applyViewport: (viewport) => { void reactFlow.setViewport(viewport); },
+      onStart: () => { wrapper.dataset.viewportTransform = ''; onViewportStart(); },
+      onCommit: (viewport) => { delete wrapper.dataset.viewportTransform; onViewportCommit(viewport); },
+      requestFrame: (callback) => requestAnimationFrame(callback),
+      cancelFrame: cancelAnimationFrame,
+      setTimer: (callback, delay) => window.setTimeout(callback, delay),
+      clearTimer: (handle) => window.clearTimeout(handle),
+    });
+    viewportGestureRef.current = viewportGesture;
+    const unregisterViewportFlush = registerCanvasViewportFlush(viewportGesture.finish, viewportGesture.isActive, () => flowStore.getState().paneDragging);
+    const currentViewport = viewportGesture.currentViewport;
 
     const handleWheel = (event: WheelEvent) => {
       const marker = event.target instanceof Element
@@ -113,7 +126,7 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>) 
 
       if (intent.kind === 'pan') {
         if (intent.dx === 0 && intent.dy === 0) return;
-        scheduleViewport({ ...viewport, x: viewport.x + intent.dx, y: viewport.y + intent.dy });
+        viewportGesture.schedule({ ...viewport, x: viewport.x + intent.dx, y: viewport.y + intent.dy }, true);
         return;
       }
       const rect = wrapper.getBoundingClientRect();
@@ -126,17 +139,29 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>) 
         minZoom,
         maxZoom
       );
-      if (next !== viewport) scheduleViewport(next);
+      if (next !== viewport) viewportGesture.schedule(next, true);
     };
 
     let gesture: PanGesture | null = null;
+    let primaryPointer: number | null = null;
+
+    const finishPrimaryTransform = (event?: PointerEvent) => {
+      if (primaryPointer === null || (event && event.pointerId !== primaryPointer)) return;
+      if (event?.type === 'pointercancel') clearAlignmentSession();
+      primaryPointer = null;
+      window.removeEventListener('pointerup', finishPrimaryTransform, true);
+      window.removeEventListener('pointercancel', finishPrimaryTransform, true);
+      if (!gesture) delete wrapper.dataset.pointerTransform;
+    };
 
     const endGesture = () => {
+      viewportGesture.finish();
       window.removeEventListener('pointermove', handlePointerMove, true);
       window.removeEventListener('pointerup', handlePointerUp, true);
       window.removeEventListener('pointercancel', handlePointerCancel, true);
       delete wrapper.dataset.panning;
       gesture = null;
+      if (primaryPointer === null) delete wrapper.dataset.pointerTransform;
     };
 
     const openContextMenuAt = (clientX: number, clientY: number, target: EventTarget | null) => {
@@ -169,7 +194,7 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>) 
       gesture.lastX = event.clientX;
       gesture.lastY = event.clientY;
       const viewport = currentViewport();
-      scheduleViewport({ ...viewport, x: viewport.x + dx, y: viewport.y + dy });
+      viewportGesture.schedule({ ...viewport, x: viewport.x + dx, y: viewport.y + dy });
     }
 
     function handlePointerUp(event: PointerEvent) {
@@ -186,10 +211,25 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>) 
     }
 
     const handlePointerDown = (event: PointerEvent) => {
+      viewportGesture.finish();
+      setAlignmentSnapDisabled(IS_MAC ? event.metaKey : event.ctrlKey);
+      if (event.button === 0) {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target || isOverlayTarget(target) || isEditableTarget(target)
+          || target.closest('.nodrag, .react-flow__handle, button, input, textarea, select, a')) return;
+        if (!target.closest('.react-flow__node, .react-flow__nodesselection-rect')
+          && !target.matches('.react-flow__pane')) return;
+        primaryPointer = event.pointerId;
+        wrapper.dataset.pointerTransform = '';
+        window.addEventListener('pointerup', finishPrimaryTransform, true);
+        window.addEventListener('pointercancel', finishPrimaryTransform, true);
+        return;
+      }
       if (event.button !== 1 && event.button !== 2) return;
       if (isOverlayTarget(event.target)) return;
       if (event.button === 2 && isEditableTarget(event.target)) return;
       if (event.button === 1) event.preventDefault(); // no autoscroll / paste
+      wrapper.dataset.pointerTransform = '';
       gesture = {
         pointerId: event.pointerId,
         button: event.button,
@@ -215,19 +255,50 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>) 
       if (event.button === 1) event.preventDefault();
     };
 
+    const finishPointerInteraction = () => {
+      clearAlignmentSession();
+      setAlignmentSnapDisabled(false);
+      endGesture();
+      finishPrimaryTransform();
+      delete wrapper.dataset.viewportTransform;
+    };
+
+    // Flush a pending wheel frame before another control/keyboard action can navigate or fit-view.
+    const flushBeforeAction = () => { if (!gesture) viewportGesture.finish(); };
+
+    const handleAlignmentModifier = (event: PointerEvent | KeyboardEvent) => setAlignmentSnapDisabled(IS_MAC ? event.metaKey : event.ctrlKey);
+    window.addEventListener('pointermove', handleAlignmentModifier, true);
+    window.addEventListener('keydown', handleAlignmentModifier, true);
+    window.addEventListener('keyup', handleAlignmentModifier, true);
+    window.addEventListener('pointerdown', flushBeforeAction, true);
+    window.addEventListener('keydown', flushBeforeAction, true);
+    window.addEventListener('pagehide', finishPointerInteraction);
     wrapper.addEventListener('wheel', handleWheel, { capture: true, passive: false });
     wrapper.addEventListener('pointerdown', handlePointerDown, true);
     wrapper.addEventListener('contextmenu', handleContextMenu, true);
     wrapper.addEventListener('auxclick', handleAuxClick, true);
+    window.addEventListener('blur', finishPointerInteraction);
     return () => {
-      if (frame) cancelAnimationFrame(frame);
       endGesture();
+      unregisterViewportFlush();
+      viewportGesture.dispose();
+      delete wrapper.dataset.viewportTransform;
+      if (viewportGestureRef.current === viewportGesture) viewportGestureRef.current = null;
+      finishPrimaryTransform();
       wrapper.removeEventListener('wheel', handleWheel, true);
       wrapper.removeEventListener('pointerdown', handlePointerDown, true);
       wrapper.removeEventListener('contextmenu', handleContextMenu, true);
       wrapper.removeEventListener('auxclick', handleAuxClick, true);
+      window.removeEventListener('blur', finishPointerInteraction);
+      clearAlignmentSession();
+      window.removeEventListener('pointermove', handleAlignmentModifier, true);
+      window.removeEventListener('keydown', handleAlignmentModifier, true);
+      window.removeEventListener('keyup', handleAlignmentModifier, true);
+      window.removeEventListener('pointerdown', flushBeforeAction, true);
+      window.removeEventListener('keydown', flushBeforeAction, true);
+      window.removeEventListener('pagehide', finishPointerInteraction);
     };
-  }, [flowStore, reactFlow, wrapperRef]);
+  }, [flowStore, onViewportCommit, onViewportStart, reactFlow, wrapperRef]);
 
   // Space = temporary hand. React Flow performs the pan; we only reflect it in the cursor.
   useEffect(() => {
@@ -249,4 +320,6 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>) 
       window.removeEventListener('blur', handleBlur);
     };
   }, []);
+
+  return { onMoveStart, onMoveEnd };
 }

@@ -61,9 +61,11 @@ export function guessWheelDevice(sample: WheelSample): WheelDevice {
   if (sample.deltaX !== 0 && !sample.shiftKey) return 'trackpad';
   const legacy = sample.wheelDeltaY;
   if (legacy !== 0 && Number.isFinite(legacy)) {
-    const trackpadSignature = Math.abs(legacy + 3 * sample.deltaY) < 0.5;
-    return Math.abs(legacy) >= 120 && legacy % 120 === 0 && !trackpadSignature ? 'mouse' : 'trackpad';
+    if (Math.abs(legacy + 3 * sample.deltaY) < 0.5) return 'trackpad';
+    if (Math.abs(legacy) >= 120 && legacy % 120 === 0) return 'mouse';
   }
+  // Display scaling (e.g. Windows 125%) shrinks a notch to 96 px: still one large integer step,
+  // while a trackpad burst opens with small or fractional deltas.
   return Number.isInteger(sample.deltaY) && Math.abs(sample.deltaY) >= 50 ? 'mouse' : 'trackpad';
 }
 
@@ -131,4 +133,13 @@ export function zoomAround(
 export function resolveInverseZoom(zoom: number): number {
   if (!Number.isFinite(zoom) || zoom <= 0) return 1;
   return Math.min(3, Math.max(0.6, 1 / zoom));
+}
+
+/**
+ * Resize handles must stay grabbable at the minimum zoom (0.1): fully screen-constant up to 10×.
+ * Text chrome keeps the tighter `resolveInverseZoom` bound so labels do not dominate far-out views.
+ */
+export function resolveHandleScale(zoom: number): number {
+  if (!Number.isFinite(zoom) || zoom <= 0) return 1;
+  return Math.min(10, Math.max(0.6, 1 / zoom));
 }

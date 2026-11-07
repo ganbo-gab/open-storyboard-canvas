@@ -1,0 +1,46 @@
+{
+  "gifFiles": [
+    {
+      "file": "docs/imgs/readme/current/channels-models.gif",
+      "frames": 128,
+      "seconds": 12.8,
+      "width": 1200,
+      "height": 870,
+      "loop": 0,
+      "bytes": 732668,
+      "sha256": "094988a17f5bee70b101226d82bf3ed2f925160204cbfd95026deb5ae997bfeb"
+    },
+    {
+      "file": "docs/imgs/readme/current/workbench-trace.gif",
+      "frames": 124,
+      "seconds": 12.4,
+      "width": 1200,
+      "height": 870,
+      "loop": 0,
+      "bytes": 717144,
+      "sha256": "3684cac625e51ae63492b708dd4ef6933a6eb7061402c9fa4fdbfd35255b3a74"
+    },
+    {
+      "file": "docs/imgs/readme/current/agent-approval.gif",
+      "frames": 95,
+      "seconds": 9.5,
+      "width": 1200,
+      "height": 870,
+      "loop": 0,
+      "bytes": 119749,
+      "sha256": "4a458584aac7626051ce03ddb2f948913a2aa3a1143aa1a3994e81a93da7181e"
+    },
+    {
+      "file": "docs/imgs/readme/current/stage-canvas.gif",
+      "frames": 176,
+      "seconds": 17.6,
+      "width": 1200,
+      "height": 870,
+      "loop": 0,
+      "bytes": 1613595,
+      "sha256": "9d2a9081b8f516aa0333a841cd1929f0032f547e712436a1a5ba17825b5bce90"
+    }
+  ],
+  "totalBytes": 3183156,
+  "localLinksValid": true
+}

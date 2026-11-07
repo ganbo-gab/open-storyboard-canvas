@@ -4,6 +4,9 @@ export type DirectorStudioModelCategoryId =
   | 'basic'
   | 'people'
   | 'props'
+  | 'architecture'
+  | 'street'
+  | 'nature'
   | 'scenes'
   | 'vehicles'
   | 'mine';
@@ -47,6 +50,9 @@ export const DIRECTOR_STUDIO_MODEL_CATEGORIES: readonly DirectorStudioModelCateg
   { id: 'basic', labelKey: 'directorStudio.modelLibrary.categories.basic' },
   { id: 'people', labelKey: 'directorStudio.modelLibrary.categories.people' },
   { id: 'props', labelKey: 'directorStudio.modelLibrary.categories.props' },
+  { id: 'architecture', labelKey: 'directorStudio.modelLibrary.categories.architecture' },
+  { id: 'street', labelKey: 'directorStudio.modelLibrary.categories.street' },
+  { id: 'nature', labelKey: 'directorStudio.modelLibrary.categories.nature' },
   { id: 'scenes', labelKey: 'directorStudio.modelLibrary.categories.scenes' },
   { id: 'vehicles', labelKey: 'directorStudio.modelLibrary.categories.vehicles' },
   { id: 'mine', labelKey: 'directorStudio.modelLibrary.categories.mine' },
@@ -116,6 +122,50 @@ const propModels = [
   ['cup', '水杯', 'cup', '#f8fafc', 'tool', 'prop-cup'],
   ['suitcase', '行李箱', 'suitcase', '#0f766e', 'furniture', 'prop-suitcase'],
   ['monitor-tv', '电视/监视器', 'monitor-tv', '#0f172a', 'furniture', 'prop-monitor-tv'],
+  ['book', '书本', 'book', '#2563eb', 'tool', 'prop-book'],
+  ['bottle', '瓶子', 'bottle', '#7dd3fc', 'tool', 'prop-bottle'],
+  ['backpack', '背包', 'backpack', '#0f766e', 'tool', 'prop-backpack'],
+  ['umbrella', '雨伞', 'umbrella', '#e11d48', 'tool', 'prop-umbrella'],
+  ['guitar', '吉他', 'guitar', '#d97706', 'tool', 'prop-guitar'],
+  ['camera-tripod', '三脚架摄影机', 'camera-tripod', '#334155', 'tool', 'prop-camera-tripod'],
+  ['crate-stack', '木箱堆', 'crate-stack', '#a16207', 'furniture', 'prop-crate-stack'],
+  ['knife', '道具刀', 'knife', '#cbd5e1', 'tool', 'prop-knife'],
+  ['sword', '道具剑', 'sword', '#cbd5e1', 'tool', 'prop-sword'],
+  ['pistol-prop', '手枪形道具', 'pistol-prop', '#475569', 'tool', 'prop-pistol-prop'],
+  ['food-plate', '餐盘与食物', 'food-plate', '#f8fafc', 'tool', 'prop-food-plate'],
+] as const;
+
+const architectureModels = [
+  ['wall-segment', '墙体', '#cbd5e1'],
+  ['wall-doorway', '带门洞墙体', '#cbd5e1'],
+  ['wall-window', '带窗墙体', '#cbd5e1'],
+  ['floor-slab', '楼板', '#94a3b8'],
+  ['stairs', '楼梯', '#94a3b8'],
+  ['column', '立柱', '#e2e8f0'],
+  ['railing', '栏杆/围栏', '#475569'],
+  ['archway', '拱门', '#d6d3d1'],
+] as const;
+
+const streetModels = [
+  ['road-segment', '道路', '#475569'],
+  ['crosswalk', '人行横道', '#475569'],
+  ['street-lamp', '路灯', '#475569'],
+  ['traffic-light', '交通信号灯', '#475569'],
+  ['bench', '长椅', '#92400e'],
+  ['bus-stop', '公交站亭', '#0ea5e9'],
+  ['trash-bin', '垃圾桶', '#0f766e'],
+  ['fire-hydrant', '消防栓', '#dc2626'],
+  ['road-sign', '道路标志', '#2563eb'],
+] as const;
+
+const natureModels = [
+  ['tree-deciduous', '阔叶树', '#4d7c0f'],
+  ['tree-pine', '松树', '#166534'],
+  ['bush', '灌木', '#4d7c0f'],
+  ['rock', '岩石', '#78716c'],
+  ['grass-patch', '草地', '#65a30d'],
+  ['pond', '池塘/水面', '#38bdf8'],
+  ['hill', '山丘', '#65a30d'],
 ] as const;
 
 const sceneModels = [
@@ -133,6 +183,8 @@ const sceneModels = [
   ['warehouse', '仓库', '#a3a3a3', 'scene-warehouse'],
   ['house-exterior', '住宅外立面', '#7dd3fc', 'scene-house-exterior'],
   ['apartment-exterior', '公寓外立面', '#93c5fd', 'scene-apartment-exterior'],
+  ['ground', '地面场景', '#65a30d', 'ground-scene'],
+  ['aerial', '空中场景', '#e2e8f0', 'aerial-scene'],
 ] as const;
 
 const vehicleModels = [
@@ -148,6 +200,10 @@ const vehicleModels = [
   ['ambulance', '救护车', '#f8fafc'],
   ['police-car', '警车', '#1d4ed8'],
   ['subway-car', '地铁/列车车厢', '#e2e8f0'],
+  ['helicopter', '直升机', '#f97316'],
+  ['boat', '小船', '#0ea5e9'],
+  ['yacht', '游艇', '#f8fafc'],
+  ['airplane', '小型飞机', '#f8fafc'],
 ] as const;
 
 export const DIRECTOR_STUDIO_MODEL_CATALOG: readonly DirectorStudioModelCatalogItem[] = [
@@ -185,13 +241,28 @@ export const DIRECTOR_STUDIO_MODEL_CATALOG: readonly DirectorStudioModelCatalogI
     thumbnailKind,
     visualId,
   })),
+  ...architectureModels.map(([presetId, displayName, color]) => ({
+    id: `architecture-${presetId}`, categoryId: 'architecture' as const,
+    displayName, labelBase: displayName, itemCategory: 'object' as const,
+    presetId, color, thumbnailKind: 'building' as const,
+  })),
+  ...streetModels.map(([presetId, displayName, color]) => ({
+    id: `street-${presetId}`, categoryId: 'street' as const,
+    displayName, labelBase: displayName, itemCategory: 'object' as const,
+    presetId, color, thumbnailKind: 'furniture' as const,
+  })),
+  ...natureModels.map(([presetId, displayName, color]) => ({
+    id: `nature-${presetId}`, categoryId: 'nature' as const,
+    displayName, labelBase: displayName, itemCategory: 'object' as const,
+    presetId, color, thumbnailKind: 'terrain' as const,
+  })),
   ...sceneModels.map(([id, displayName, color, visualId]) => ({
     id: `scenes-${id}`,
     categoryId: 'scenes' as const,
     displayName,
     labelBase: displayName,
     itemCategory: 'scene' as const,
-    presetId: `scene-${id}`,
+    presetId: visualId,
     color,
     thumbnailKind: 'building' as const,
     visualId,
@@ -255,4 +326,9 @@ export const DIRECTOR_STUDIO_MODEL_LABELS: Record<string, string> = Object.fromE
     ...Object.entries(LEGACY_DIRECTOR_STUDIO_MODEL_LABELS),
     ...DIRECTOR_STUDIO_MODEL_CATALOG.map((item) => [item.presetId, item.displayName] as const),
   ],
+);
+
+/** Ids kept only so old saves stay labeled/renderable; never offered for new placement. */
+export const LEGACY_ONLY_DIRECTOR_STUDIO_PRESET_IDS: ReadonlySet<string> = new Set(
+  Object.keys(LEGACY_DIRECTOR_STUDIO_MODEL_LABELS).filter((id) => !DIRECTOR_STUDIO_MODEL_CATALOG.some((item) => item.presetId === id)),
 );

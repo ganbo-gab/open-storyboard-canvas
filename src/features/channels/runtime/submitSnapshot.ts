@@ -1,10 +1,10 @@
-import { templateVariables, type ChannelProfileV2, type OperationKind } from '../domain/profile';
+import { templateVariables, type ChannelProfileV2, type OperationKind, type OperationSpec } from '../domain/profile';
 
 /** Retain only primitive leaves explicitly referenced by poll/result templates.
  * Never cache or persist the upstream response object, auth headers, or input media.
  */
-export function captureSubmitSnapshot(profile: ChannelProfileV2, operation: OperationKind, payload: unknown, credential: string): Record<string, unknown> {
-  const op = profile.operations[operation];
+export function captureSubmitSnapshot(profile: ChannelProfileV2, operation: OperationKind, payload: unknown, credential: string, operationSpec?: OperationSpec): Record<string, unknown> {
+  const op = operationSpec ?? profile.operations[operation];
   if (op?.response.mode !== 'async') return {};
   const poll = op.response.poll;
   const variables = [...new Set([poll.path, poll.template, poll.resultRequest?.path, poll.resultRequest?.template,

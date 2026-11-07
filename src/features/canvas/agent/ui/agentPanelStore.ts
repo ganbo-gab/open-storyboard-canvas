@@ -14,17 +14,13 @@ export const CANVAS_AGENT_PANEL_MIN_WIDTH = 340;
 export const CANVAS_AGENT_PANEL_MAX_WIDTH = 620;
 
 export type CanvasAgentView = 'conversation' | 'history' | 'tasks';
-export type AgentExecutionMode = 'manual' | 'auto';
 
 export interface AgentGenerationPreferences {
   imageModelId: string | null;
   videoModelId: string | null;
 }
 
-/**
- * Compatibility-only input for the retired in-panel external runtime hook.
- * It is deliberately not part of the persisted panel state.
- */
+/** Explicit per-turn external runtime context, never persisted with credentials or CLI configuration. */
 export interface AgentProjectContext {
   brief: string;
   pinnedNodeIds: string[];
@@ -38,17 +34,14 @@ export type AgentFeedItem =
   | { id: string; kind: 'approval'; runId: string; approvalId: string; runtimeId?: ExternalAgentRuntimeId; toolName: string; summary: string; arguments: unknown; impact: AgentImpactSummary; expiresAt: number; status: 'pending' | 'approving' | 'rejecting' | 'approved' | 'rejected' | 'failed' | 'expired'; createdAt: number }
   | { id: string; kind: 'plan'; plan: AgentPlanDraft; createdAt: number }
   | { id: string; kind: 'skill'; skillIds: string[]; reason: string; estimatedTokens: number; toolCount: number; mode: 'minimal' | 'local-router' | 'tool-search'; deferredToolCount: number; createdAt: number }
-  | { id: string; kind: 'status'; status: 'running' | 'completed' | 'cancelled' | 'error'; text: string; retryMessage?: string; diagnosticMessage?: string; createdAt: number };
+  | { id: string; kind: 'status'; status: 'running' | 'completed' | 'cancelled' | 'error'; text: string; errorDetail?: string; retryMessage?: string; diagnosticMessage?: string; runId?: string; withdrawnAt?: number; createdAt: number };
 
 interface CanvasAgentPanelState {
   isOpen: boolean;
   projectId: string | null;
   activeView: CanvasAgentView;
-  selectedModelId: string | null;
   selectedImageModelId: string | null;
   selectedVideoModelId: string | null;
-  executionMode: AgentExecutionMode;
-  autoModeAcknowledged: boolean;
   showCompletedTools: boolean;
   panelWidth: number;
   activeSessionId: string | null;
@@ -58,11 +51,8 @@ interface CanvasAgentPanelState {
   setOpen: (open: boolean) => void;
   setProject: (projectId: string) => void;
   setActiveView: (view: CanvasAgentView) => void;
-  setSelectedModelId: (id: string | null) => void;
   setSelectedImageModelId: (id: string | null) => void;
   setSelectedVideoModelId: (id: string | null) => void;
-  setExecutionMode: (mode: AgentExecutionMode) => void;
-  acknowledgeAutoMode: () => void;
   setShowCompletedTools: (show: boolean) => void;
   setPanelWidth: (width: number) => void;
   resetPanelWidth: () => void;
@@ -128,11 +118,8 @@ function persistableFeed(feed: AgentFeedItem[]): AgentFeedItem[] {
 type PersistedPanelState = Partial<Pick<CanvasAgentPanelState,
   | 'projectId'
   | 'activeView'
-  | 'selectedModelId'
   | 'selectedImageModelId'
   | 'selectedVideoModelId'
-  | 'executionMode'
-  | 'autoModeAcknowledged'
   | 'showCompletedTools'
   | 'panelWidth'
   | 'activeSessionId'
@@ -142,17 +129,13 @@ type PersistedPanelState = Partial<Pick<CanvasAgentPanelState,
 export function migrateCanvasAgentPanelState(value: unknown): PersistedPanelState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const legacy = value as PersistedPanelState;
-  const autoModeAcknowledged = legacy.autoModeAcknowledged === true;
   return {
     projectId: typeof legacy.projectId === 'string' ? legacy.projectId : null,
     activeView: legacy.activeView === 'history' || legacy.activeView === 'tasks'
       ? legacy.activeView
       : 'conversation',
-    selectedModelId: typeof legacy.selectedModelId === 'string' ? legacy.selectedModelId : null,
     selectedImageModelId: typeof legacy.selectedImageModelId === 'string' ? legacy.selectedImageModelId : null,
     selectedVideoModelId: typeof legacy.selectedVideoModelId === 'string' ? legacy.selectedVideoModelId : null,
-    executionMode: legacy.executionMode === 'auto' && autoModeAcknowledged ? 'auto' : 'manual',
-    autoModeAcknowledged,
     showCompletedTools: legacy.showCompletedTools === true,
     panelWidth: clampCanvasAgentPanelWidth(Number(legacy.panelWidth ?? CANVAS_AGENT_PANEL_DEFAULT_WIDTH)),
     activeSessionId: typeof legacy.activeSessionId === 'string' ? legacy.activeSessionId : null,
@@ -164,11 +147,8 @@ export const useCanvasAgentPanelStore = create<CanvasAgentPanelState>()(persist(
   isOpen: false,
   projectId: null,
   activeView: 'conversation',
-  selectedModelId: null,
   selectedImageModelId: null,
   selectedVideoModelId: null,
-  executionMode: 'manual',
-  autoModeAcknowledged: false,
   showCompletedTools: false,
   panelWidth: CANVAS_AGENT_PANEL_DEFAULT_WIDTH,
   activeSessionId: null,
@@ -184,13 +164,8 @@ export const useCanvasAgentPanelStore = create<CanvasAgentPanelState>()(persist(
     unread: 0,
   }),
   setActiveView: (activeView) => set({ activeView }),
-  setSelectedModelId: (selectedModelId) => set({ selectedModelId }),
   setSelectedImageModelId: (selectedImageModelId) => set({ selectedImageModelId }),
   setSelectedVideoModelId: (selectedVideoModelId) => set({ selectedVideoModelId }),
-  setExecutionMode: (executionMode) => set((state) => executionMode === 'manual'
-    ? { executionMode, autoModeAcknowledged: false }
-    : state.autoModeAcknowledged ? { executionMode } : state),
-  acknowledgeAutoMode: () => set({ autoModeAcknowledged: true, executionMode: 'auto' }),
   setShowCompletedTools: (showCompletedTools) => set({ showCompletedTools }),
   setPanelWidth: (panelWidth) => set({ panelWidth: clampCanvasAgentPanelWidth(panelWidth) }),
   resetPanelWidth: () => set({ panelWidth: CANVAS_AGENT_PANEL_DEFAULT_WIDTH }),
@@ -232,11 +207,8 @@ export const useCanvasAgentPanelStore = create<CanvasAgentPanelState>()(persist(
   partialize: (state) => ({
     projectId: state.projectId,
     activeView: state.activeView,
-    selectedModelId: state.selectedModelId,
     selectedImageModelId: state.selectedImageModelId,
     selectedVideoModelId: state.selectedVideoModelId,
-    executionMode: state.executionMode,
-    autoModeAcknowledged: state.autoModeAcknowledged,
     showCompletedTools: state.showCompletedTools,
     panelWidth: state.panelWidth,
     activeSessionId: state.activeSessionId,

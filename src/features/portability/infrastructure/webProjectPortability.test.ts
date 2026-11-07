@@ -6,6 +6,7 @@ import {
   upsertProjectRecord,
   type ProjectRecord,
 } from '@/commands/projectState';
+import { secretToken } from '@/features/secrets/secretStore';
 import {
   PROJECT_BUNDLE_MAX_JSON_BYTES,
   WEB_PROJECT_BUNDLE_MAX_BYTES,
@@ -54,6 +55,55 @@ describe('web project portability', () => {
     expect(restored?.name).toBe('Portable Project (Imported)');
     expect(restored?.nodesJson).toBe(source.nodesJson);
     expect(restored?.imagePoolJson).toContain('data:image/png;base64');
+  });
+
+  it('redacts old project snapshots on export and import without resolving their refs', async () => {
+    const credentialRef = { namespace: 'agent-model' as const, id: 'portable-agent-model' };
+    const source = fixtureRecord();
+    source.id = 'portability-secret-fixture';
+    source.nodesJson = JSON.stringify([{ id: 'node', data: {
+      apiKey: 'sentinel-project-provider', credentialRef,
+      legacySettings: {
+        providers: [{ apiKey: 'sentinel-legacy-provider', extraHeaders: { Authorization: 'Bearer sentinel-legacy-header' } }],
+        comfyui: { comfyOrgKey: 'sentinel-comfy-key' },
+        imageHost: { password: 'sentinel-image-password', token: 'sentinel-image-token' },
+        agentModels: [{ apiKey: 'sentinel-agent-key', credentialRef }],
+        encodedBackup: '{"nested":{"apiKey":"sentinel-encoded-backup"}}',
+      },
+      request: { auth: { type: 'query', name: 'vendor_auth' },
+        url: 'https://sentinel-user:sentinel-userinfo@example.com/run?vendor_auth=sentinel-url-secret&mode=portable' },
+      imageUrl: 'https://example.com/image.png?access_token=sentinel-media-url',
+    } }]);
+    source.historyJson = JSON.stringify({ past: [{ nodes: [{
+      data: { apiKey: 'sentinel-history-key', credentialRef, request: { headers: [{ name: 'Authorization', value: 'sentinel-history-header' }] } },
+    }] }], future: [], snapshot: '{"password":"sentinel-history-backup"}' });
+    source.imagePoolJson = '[]';
+    createdIds.push(source.id);
+    await upsertProjectRecord(source);
+    const exported = await exportWebProjectBundle(source.id);
+    const files = unzipSync(exported.bytes);
+    for (const bytes of Object.values(files)) expect(strFromU8(bytes)).not.toContain('sentinel-');
+    const payload = JSON.parse(strFromU8(files['project.json'])) as { record: ProjectRecord };
+    expect(payload.record.nodesJson).toContain(JSON.stringify(credentialRef));
+    expect(payload.record.historyJson).toContain(JSON.stringify(credentialRef));
+    expect(payload.record.nodesJson).toContain('mode=portable');
+    expect((await getProjectRecord(source.id))?.nodesJson).toContain('sentinel-project-provider');
+
+    // Simulate a pre-vault archive whose nested JSON still contains plaintext credentials.
+    payload.record.nodesJson = JSON.stringify([{ id: 'node', data: {
+      apiKey: 'sentinel-import-key', credentialRef, token: secretToken(credentialRef),
+      oldBackup: '{"provider":{"password":"sentinel-import-backup"}}',
+      url: 'https://example.com/image?api_key=sentinel-import-url',
+    } }]);
+    files['project.json'] = strToU8(JSON.stringify(payload));
+    const inspected = await inspectWebProjectBundle(zipSync(files));
+    expect(JSON.stringify(inspected.payload.record)).not.toContain('sentinel-');
+    const imported = await importWebProjectBundle(inspected, { kind: 'new' }, ' (Imported)');
+    createdIds.push(imported.project.id);
+    const restored = await getProjectRecord(imported.project.id);
+    expect(JSON.stringify(restored)).not.toContain('sentinel-');
+    expect(restored?.nodesJson).toContain(JSON.stringify(credentialRef));
+    expect(restored?.nodesJson).toContain(secretToken(credentialRef));
   });
 
   it('rejects traversal, undeclared files, and checksum corruption', async () => {

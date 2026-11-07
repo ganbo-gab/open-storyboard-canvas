@@ -1,6 +1,5 @@
 {
   "minimaxH3": {
-    "requestStructureHelp": "此预设按 MiniMax 官方 V2 格式自动构建请求，无需配置字段映射或请求体模板。请选择 MiniMax-H3，设置支持的时长、分辨率和比例；图片输入模式在视频节点参数中选择。",
     "hint": "MiniMax H3 官方 · 文生视频、首尾帧、多模态参考",
     "note": "MiniMax H3 V2：4–15 秒、768P / 2K，默认 5 秒 / 768P。视频节点参数中可选参考、首帧、尾帧或首尾帧。帧模式不能混入参考视频或音频。纯文本需选择明确比例。使用 MiniMax API Key，与 ComfyUI 的凭证分开配置。",
     "errors": {
@@ -32,8 +31,7 @@
     "hint": "帧模式按连接顺序使用图片，输出比例由图片决定。参考模式可组合图片、视频和音频。"
   },
   "app": {
-    "title": "开源画布",
-    "subtitle": "Open Storyboard Canvas"
+    "title": "开源画布"
   },
   "canvasAgent": {
     "title": "画布 Agent",
@@ -44,7 +42,12 @@
       "description": "从你自己打开的 Codex 或 Claude Code 连接当前画布。Storyboard Copilot 必须保持打开。",
       "refresh": "刷新连接状态",
       "statusLabel": "状态",
-      "status": { "disconnected": "未连接", "ready": "等待外部 Agent", "connected": "已连接", "expired": "已过期" },
+      "status": {
+        "disconnected": "未连接",
+        "ready": "等待外部 Agent",
+        "connected": "已连接",
+        "expired": "已过期"
+      },
       "project": "当前项目",
       "noProject": "未打开项目",
       "scope": "工具范围",
@@ -86,13 +89,19 @@
       "installGuide": "打开官方安装说明",
       "requiresDesktop": "Codex 和 Claude Code 仅在桌面应用中可用",
       "unavailableHint": "当前运行方式尚未就绪，请重新检测或切换运行方式",
+      "noTurnAuthority": "外部 Agent 的工具请求不属于当前进行中的回合，已拒绝执行。",
       "status": {
         "ready": "已连接，可以使用",
         "not-installed": "本机尚未安装",
         "login-required": "需要先在终端完成登录",
         "incompatible": "当前版本不兼容",
         "unavailable": "当前不可用"
-      }
+      },
+      "plan": "外部运行时计划",
+      "composerHint": "{{runtime}} 使用自己的登录与模型配置；每次画布工具调用仍需应用内审批，费用以 CLI 实际使用为准。各运行时的对话历史不互传。",
+      "historyBuiltinOnly": "这里是内置 Agent 的对话历史；请切回「内置」查看。",
+      "changed": "已切换到 {{runtime}}；本轮只使用该运行时自己的会话上下文。",
+      "eventError": "无法连接外部运行时事件：{{error}}"
     },
     "newConversation": "新建对话",
     "showCompletedTools": "显示已完成的工具调用",
@@ -132,8 +141,10 @@
       "expiredApproval": "这张确认卡已处理或过期，不会重复执行。可让 Agent 根据当前画布状态重新规划。",
       "stateChanged": "画布或项目状态在确认后发生了变化，旧操作已安全停止。可让 Agent 重新读取当前状态后继续。",
       "localStorageFull": "应用的本地存储空间已满。Agent 不会把它当成模型配额继续重试；当前页面仍会尽量保留本次对话，关闭或刷新前请先保存重要内容。",
-      "providerQuotaExceeded": "当前 Agent 文本模型的账号配额已用尽。此次没有继续调用画布工具；请充值或更换账号，或在下方模型菜单切换其他可用文本模型。",
-      "providerRateLimited": "当前 Agent 文本模型正在限流。此次没有继续调用画布工具；请稍后重试，或在下方模型菜单切换其他可用文本模型。"
+      "providerQuotaExceeded": "服务商报告了账户额度或账单限制。请核对当前 API Key 所属账户、项目及用量限制；这不一定代表渠道总余额为零。已完成的操作保留。",
+      "providerRateLimited": "服务商限制了当前请求频率、并发或用量。本回合已暂停，已完成结果保留；可稍后继续，或切换其他可用文本模型。这不等于余额不足。",
+      "toolCallLimitReached": "本回合已达到 {{count}} 次工具调用上限，已安全停止。请检查已完成结果后继续剩余步骤；不会自动重新提交生成任务。",
+      "turnDeadlineExceeded": "本回合已达到 {{minutes}} 分钟总时限，已安全停止并撤销待处理审批。已提交的生成任务不会因此取消，请在任务面板查询原任务。"
     },
     "locate": "定位到画布",
     "locateGenerationInput": "定位生成框",
@@ -165,23 +176,40 @@
     "textModels": "文本模型",
     "imageModels": "图片模型",
     "videoModels": "视频模型",
-    "modelTabs": { "text": "文本", "image": "图片", "video": "视频" },
+    "modelTabs": {
+      "text": "文本",
+      "image": "图片",
+      "video": "视频"
+    },
     "noTextModels": "没有可用文本模型",
     "noImageModels": "没有可用图片模型",
     "noVideoModels": "没有可用视频模型",
     "manageModels": "管理模型",
     "executionMode": "执行模式",
     "executionModes": {
-      "manual": { "title": "手动确认", "description": "执行画布修改和生成前显示确认卡。", "short": "手动" },
-      "auto": { "title": "自动执行", "description": "读取、配置、画布操作、生成与安全恢复直接执行；只有删除节点需要确认。", "short": "自动" }
+      "manual": {
+        "title": "请求确认",
+        "short": "确认",
+        "description": "读取直接执行；编辑、生成、配置和删除前显示确认卡。"
+      },
+      "auto": {
+        "title": "辅助执行",
+        "short": "辅助",
+        "description": "自动完成读取和普通编辑；生成、外部提交、配置与删除仍请你确认。"
+      },
+      "full": {
+        "title": "完全执行",
+        "short": "完全执行",
+        "description": "授权助手直接使用应用内工具，包括可能计费的生成、配置和删除。仍遵守预算，不重复提交状态不明的任务；不开放任意系统文件或命令。"
+      }
     },
     "contextUsage": "上下文",
     "contextEstimate": "约 {{used}} / {{limit}} tokens",
     "contextEstimateUnknownLimit": "约已用 {{used}} tokens / 模型上限未知",
     "contextIncludes": "包含当前对话、附件引用、画布查询结果与按需加载的技能。",
     "contextEstimateNotice": "这是本地估算，不是模型供应商的精确计数。",
-    "autoModeConfirmTitle": "启用自动执行？",
-    "autoModeConfirmDescription": "内置 Agent 将直接执行读取、配置、画布修改、新生成提交和安全结果恢复；只有删除画布节点需要确认。它不会自动重复提交结果不明的付费生成请求；外接 Codex/Claude Code 始终保持手动审批。",
+    "autoModeConfirmTitle": "启用完全执行？",
+    "autoModeConfirmDescription": "授权助手直接使用应用内工具，包括可能计费的生成、配置和删除。仍遵守预算，不重复提交状态不明的任务；不开放任意系统文件或命令。",
     "enableAutoMode": "启用自动执行",
     "noImageOnSelection": "请先选中包含图片的画布节点",
     "enterHint": "Enter 发送，Shift + Enter 换行",
@@ -217,24 +245,6 @@
     "cancelPlan": "取消计划",
     "planApproved": "计划已确认；每个工具调用仍会单独请求批准。",
     "planCancelled": "计划已取消。",
-    "projectContext": "当前项目上下文",
-    "projectBrief": "项目简报",
-    "projectBriefReady": "项目简报已启用",
-    "projectBriefEmpty": "添加项目简报或固定参考",
-    "projectBriefPlaceholder": "记录风格、人物一致性、交付限制或本项目必须遵守的约束...",
-    "pinnedReferences": "固定参考",
-    "pinnedCount": "{{count}} 个固定参考",
-    "pinReference": "固定参考：{{name}}",
-    "unpinReference": "取消固定：{{name}}",
-    "selectNodeToPin": "先在画布选中一个节点",
-    "pinSelected": "固定当前节点",
-    "unpinSelected": "取消固定当前节点",
-    "clearProjectContext": "清空项目简报和固定参考",
-    "projectBudget": "本项目 Agent 预算（credits）",
-    "projectBudgetUnlimited": "不设置上限",
-    "resetBudgetUsage": "重置用量",
-    "budgetUsage": "已记账 {{spent}}，预留 {{reserved}} / 上限 {{limit}} credits",
-    "budgetUsageUnlimited": "已记账 {{spent}}，预留 {{reserved}} credits；未设置上限",
     "budgetBlocked": "预计需要 {{cost}} credits，但本项目只剩 {{remaining}} credits。",
     "adjustBudget": "调整本项目 Agent 预算",
     "newBudgetLimit": "新的预算上限",
@@ -258,6 +268,7 @@
       "tool-search": "Responses 工具搜索"
     },
     "toolStatus": {
+      "awaiting-approval": "等待确认",
       "executing": "执行中",
       "succeeded": "已完成",
       "failed": "失败",
@@ -278,7 +289,46 @@
       "rejected": "已拒绝",
       "failed": "审批未能执行",
       "expired": "审批已过期，请重新发起"
-    }
+    },
+    "withdrawTurn": "撤回本回合",
+    "withdrawnTurn": "已撤回本回合",
+    "withdrawTurnHint": "一次撤回本回合 Agent 对画布的全部修改；已提交的生成任务不会取消。普通 ⌘Z 仍按单步撤销。",
+    "withdrawTurnSuccess": "已撤回本回合的 {{count}} 处画布修改；已提交的生成任务仍保留。",
+    "withdrawTurnLive": "本回合仍在运行或有待处理的审批，请先停止或处理后再撤回。",
+    "withdrawTurnRefused": {
+      "not-latest": "此后存在其他画布修改，无法安全撤回本回合。",
+      "no-changes": "本回合没有可撤回的画布修改。",
+      "project-changed": "请先打开本回合所属项目。"
+    },
+    "mergedApprovalTitle": "{{count}} 个同类操作待审批",
+    "mergedApprovalHint": "同一回合的 {{count}} 个同类操作，逐项执行，任一失败不影响其余项的结果显示。",
+    "approveGroup": "全部批准（{{count}}）",
+    "rejectGroup": "全部拒绝（{{count}}）",
+    "skillsLoadedNoEstimate": "已按需加载 {{count}} 项技能：{{skills}}",
+    "question": {
+      "title": "需要补充信息",
+      "answered": "询问已处理",
+      "custom": "补充说明或其他选择",
+      "invalid": "请补充有效答案",
+      "cancel": "暂不继续",
+      "continue": "确认并继续",
+      "continuing": "正在继续",
+      "cancelled": "已取消此次询问",
+      "expired": "此询问已失效，请重新发起"
+    },
+    "context": {
+      "lastInput": "上次输入已用",
+      "system": "系统提示与技能",
+      "tools": "工具定义",
+      "conversation": "对话与工具结果",
+      "media": "图片与附件",
+      "empty": "发送后显示实际请求的上下文占用，包含系统提示、工具和对话。",
+      "providerNote": "总量来自供应商上次请求用量；分项按请求结构估算。尚未包含之后的新回复和草稿。",
+      "estimateNote": "供应商尚未返回用量；根据实际请求内容估算，图片占用随模型与分辨率变化。",
+      "draft": "待发送内容另约 {{tokens}} tokens",
+      "cache": "其中缓存命中 {{tokens}} tokens（{{percent}}%）"
+    },
+    "fullModeEnable": "启用完全执行"
   },
   "generationJob": {
     "status": {
@@ -341,20 +391,20 @@
     "recoveryConfirm": "只会查询已有上游任务、下载结果并保存到本机；不会提交新的生成请求，也不会主动产生新的生成费用。",
     "confirmRecovery": "取回结果",
     "recoveryRunning": "正在取回已有结果...",
-    "recoverySucceeded": "结果已保存到本机并更新到画布。"
-    ,"logDrawerTitle": "运行日志"
-    ,"logDrawerDescription": "用易懂摘要查看问题，必要时再展开技术原文"
-    ,"showRaw": "查看原文"
-    ,"hideRaw": "收起原文"
-    ,"filterOption": {
+    "recoverySucceeded": "结果已保存到本机并更新到画布。",
+    "logDrawerTitle": "运行日志",
+    "logDrawerDescription": "用易懂摘要查看问题，必要时再展开技术原文",
+    "showRaw": "查看原文",
+    "hideRaw": "收起原文",
+    "filterOption": {
       "error": "错误",
       "warning": "警告",
       "info": "信息",
       "debug": "调试",
       "generation": "生成任务",
       "application": "应用"
-    }
-    ,"summary": {
+    },
+    "summary": {
       "generationFailed": "生成结果获取失败",
       "generationRecovered": "已重新获取生成结果",
       "generationRunning": "生成任务状态已更新",
@@ -398,11 +448,23 @@
   },
   "titleBar": {
     "back": "返回",
-    "switchToEnglish": "English",
-    "switchToChinese": "中文",
     "minimize": "最小化",
     "maximize": "最大化",
-    "close": "关闭"
+    "close": "关闭",
+    "backHint": "返回首页",
+    "renameHint": "点击重命名项目",
+    "settingsHint": "设置：渠道与模型、密钥、存储、快捷键",
+    "toEnglishHint": "界面语言：切换为 English",
+    "toChineseHint": "界面语言：切换为中文",
+    "toLightHint": "切换为浅色主题",
+    "toDarkHint": "切换为深色主题",
+    "restore": "还原窗口",
+    "enterFullscreenHint": "进入全屏（Option 点击最大化）",
+    "exitFullscreenHint": "退出全屏（Option 点击切换窗口大小）",
+    "resizeFailed": "窗口状态切换失败，请重试。",
+    "minimizeFailed": "无法最小化窗口，请重试。",
+    "closeFailed": "无法关闭窗口，请重试。",
+    "dragFailed": "无法拖动窗口，请重试。"
   },
   "canvas": {
     "addImage": "添加图片",
@@ -427,6 +489,29 @@
       "fitView": "适应视图",
       "lock": "锁定画布",
       "unlock": "解锁画布"
+    },
+    "connection": {
+      "reject": {
+        "targetIsMaterial": "素材与媒体结果只能作为上游参考",
+        "kindMismatch": "此节点接受{{expected}}参考，不接受{{actual}}参考",
+        "cycle": "此连接会形成循环",
+        "duplicate": "这两个节点已经连接",
+        "missingSource": "源节点不存在",
+        "missingTarget": "目标节点不存在",
+        "selfConnection": "节点不能连接到自身",
+        "sourceNotConnectable": "此节点不能作为连线起点",
+        "targetNotConnectable": "此节点不接受输入连接",
+        "invalidHandle": "请从右侧输出连接到左侧输入",
+        "tagSourceConflict": "此标签已有上游来源",
+        "tagGroupTarget": "标签组只能连接到支持的生成节点"
+      },
+      "kind": {
+        "image": "图片",
+        "video": "视频",
+        "audio": "音频",
+        "text": "文本",
+        "stage": "舞台"
+      }
     }
   },
   "tool": {
@@ -682,7 +767,13 @@
   },
   "directorStudio": {
     "title": "导演台",
-    "studioMode": { "label": "工作模式", "director": "导演台", "previs": "预演台" },
+    "studioMode": {
+      "label": "工作模式",
+      "director": "导演台",
+      "previs": "预演台",
+      "directorHelp": "导演台：摆放人物、道具与镜头，截取静帧构图",
+      "previsHelp": "预演台：给人物和摄影机加路径与动作，预演一段镜头"
+    },
     "open": "打开",
     "openFullscreen": "打开全屏导演台",
     "saveProject": "保存工程",
@@ -742,7 +833,7 @@
       "scaleTitle": "缩放：拖拽三轴缩放手柄",
       "cancel": "取消变换",
       "cancelTitle": "Esc 取消当前变换模式",
-      "help": "1 移动 · 2 旋转 · 3 缩放 · Esc 取消"
+      "help": "G 移动 · R 旋转 · T 缩放 · V 选择 · Esc 取消"
     },
     "clearPanorama": "清除全景",
     "assetFallbackName": "图片 {{count}}",
@@ -834,7 +925,7 @@
     "previs": {
       "tools": "预演工具",
       "select": "选择",
-      "selectHelp": "点击人物或物体选中；拖动空白处环绕场景",
+      "selectHelp": "点击选中；拖空白处框选；Alt 拖动旋转视角",
       "move": "移动",
       "moveHelp": "拖动场景中的红绿蓝坐标轴，改变选中对象的位置",
       "rotate": "旋转",
@@ -845,7 +936,7 @@
       "draw": "绘制",
       "drawHelp": "为 {{name}} 绘制路径：按住鼠标在地面拖动，松开后生成时间轴片段",
       "points": "标记",
-      "pointsHelp": "为 {{name}} 标记路径：在地面依次点击，再点完成轨迹",
+      "pointsHelp": "为 {{name}} 逐点标记路径：在地面依次点击，回车或双击结束",
       "routePersonOnly": "请选中人物，或选择摄影机后再绘制路径",
       "person": "人物",
       "personHelp": "在场景中添加一个人物，再为它绘制路径和添加动作",
@@ -863,12 +954,12 @@
       "shotViewHelp": "从摄影机视角检查最终构图和运镜",
       "followHelp": "先选择一个已有路径的人物",
       "drawingFor": "正在为 {{name}} 绘制路径",
-      "navigationHint": "拖动空白处环绕 · 右键拖动平移 · 滚轮缩放",
+      "navigationHint": "拖空白处框选 · Shift / ⌘ 加选 · Alt 拖动旋转 · 右键平移 · 滚轮缩放",
       "currentTarget": "当前：{{name}}",
       "helpTitle": "从人物到一段预演",
-      "helpStep1": "点击左侧“人物”添加角色，或从右侧场景图层选择已有角色。",
+      "helpStep1": "点左侧“添加 → 人物”放置角色，或在右侧图层里选中已有角色。",
       "helpStep2": "点击“绘制路径”在地面拖动，或用“标记路径”逐点点击。完成后，底部会出现路径片段。",
-      "helpStep3": "拖动片段改开始时间、拖两端改时长。点编号关键帧后，在右侧调整位置和时间；用动作库添加动作。",
+      "helpStep3": "拖动片段改开始时间、拖两端改时长。点菱形关键帧后，在右侧调整位置和时间；用动作库添加动作。",
       "helpStep4": "选择摄影机绘制镜头路径或应用运镜模板。点击播放检查运动，切到“看成片”检查构图，再录制预演视频。",
       "undo": "撤销",
       "record": "录制",
@@ -894,14 +985,20 @@
         "startHandleHelp": "拖动左侧把手调整开始时间，按比例压缩或拉长整条路线。",
         "endHelp": "拖动右侧把手调整结束时间，按比例压缩或拉长整条路线。",
         "actionHelp": "{{name}}：拖动动作条调整开始时间；动作持续到下一动作或项目结尾。",
-        "keyframeHelp": "拖动调整时间；左右方向键移动 1 帧，Shift 加方向键移动 10 帧。",
-        "emptyTrack": "点击左侧 + 记录关键帧，或在场景中绘制路线",
-        "emptyAction": "点击左侧 + 记录动作，或从左侧动作库中选择",
+        "keyframeHelp": "拖动调整时间；⌘ 拖动复制；Shift 点击或在轨道上 Shift 拖框多选；右键改插值、看向或删除；K 在当前轨道打帧，Delete 删除。",
+        "emptyTrack": "点右侧 ◇ 记录关键帧，或在场景中画路径",
+        "emptyAction": "点右侧 ◇ 记录动作，或打开动作库",
         "speed": "预览速度",
         "speedHelp": "改变预览播放速度；导出视频仍按项目原始时长播放。",
-        "keyframeCount": "{{count}} 帧 · 放大",
+        "keyframeCount": "{{count}} 个关键帧",
         "keyframeCountAria": "放大查看“{{name}}”的 {{count}} 个关键帧",
-        "keyframeCountHelp": "放大并定位到轨道开头，便于逐个选择关键帧。密集标记只在选中、悬停或聚焦时显示编号；最高放大 16 倍，也可从右侧列表选择。"
+        "keyframeCountHelp": "放大并定位到这条轨道的关键帧；也可按住 Cmd/Ctrl 滚动滚轮缩放时间轴。",
+        "durationShort": "时长",
+        "multiLabel": "关键帧多选",
+        "multiCount": "已选 {{count}} 个关键帧",
+        "multiLookAt": "统一看向…",
+        "multiLookAtHelp": "让选中的机位关键帧都对准同一对象（定点跟拍）。",
+        "multiClear": "取消多选"
       },
       "sceneAndProperties": "场景与属性",
       "sceneObjects": "场景对象",
@@ -925,7 +1022,49 @@
       "followObject": "跟随 {{name}}",
       "duplicateFrameHelp": "复制选中的关键帧，可继续调整时间和属性。",
       "toggleSidebar": "场景与属性",
-      "toggleSidebarHelp": "收起或展开右侧面板，腾出更多场景空间"
+      "toggleSidebarHelp": "收起或展开右侧面板，腾出更多场景空间",
+      "recordHelp": "按摄影机路径录制预演视频",
+      "previewSource": "预览视角",
+      "presetSubject": "对准：{{name}}",
+      "propKeyEmpty": "道具没有路径工具：把时间拖到目标时刻，移动道具后点时间轴该行的 ◇ 记录关键帧。",
+      "pip": {
+        "show": "显示机位画中画",
+        "hide": "隐藏机位画中画",
+        "open": "切到成片视角",
+        "openHelp": "画中画是当前时间机位实际拍到的画面；点击切到「看成片」。",
+        "empty": "还没有机位关键帧：在时间轴摄影机轨按 ◇ 或 K 记录。"
+      },
+      "rig": {
+        "title": "相对跟随 / 特写跟踪",
+        "help": "机位跟着对象走：之后改路线，镜头自动跟上。拖参数时画中画实时变化。",
+        "subject": "跟踪对象",
+        "addFollow": "相对位置跟随",
+        "addCloseup": "新建特写跟踪",
+        "followHelp": "从当前时间到对象路线结束，机位保持在对象身后一定距离跟随。",
+        "closeupHelp": "从当前时间开始，近距离对准对象头部，适合说话、反应镜头。",
+        "noSubjects": "先在场景中添加人物或物体。",
+        "follow": "跟随",
+        "closeup": "特写",
+        "missingSubject": "对象已删除",
+        "start": "始",
+        "end": "终",
+        "bodyPart": "对准部位",
+        "distance": "距离",
+        "height": "高度",
+        "azimuth": "水平角",
+        "pitch": "俯仰",
+        "fov": "视场角",
+        "damping": "阻尼",
+        "relative": "随对象朝向转动",
+        "relativeHelp": "开：机位相对对象朝向保持角度（始终在身后）；关：机位保持世界方向。",
+        "lockHorizon": "锁定高度",
+        "lockHorizonHelp": "机位高度不随对象上下起伏。",
+        "bake": "转为关键帧",
+        "bakeHelp": "把跟踪结果转成普通机位关键帧（每秒 4 帧），之后可逐帧手调；跟踪本身会被移除。",
+        "delete": "删除"
+      },
+      "line": "直线",
+      "lineHelp": "为 {{name}} 画直线路径：点起点、再点终点；按住 Shift 走正交方向"
     },
     "motion": {
       "guide": {
@@ -941,70 +1080,230 @@
         "emptyTracks": "添加或选中人物后，这里会出现人物轨道和动作轨道。可先用上方按钮绘制镜头路线。"
       },
       "timeline": {
-        "title": "时间轴", "camera": "摄影机", "actionTrack": "{{name}} · 动作", "tracks": "轨道",
-        "play": "播放", "pause": "暂停", "goToStart": "回到开头", "loop": "循环播放",
-        "currentTime": "当前时间", "duration": "总时长", "routePreview": "看路线", "shotPreview": "看成片",
-        "showRoutes": "显示运动路线", "hideRoutes": "隐藏运动路线", "addKeyframe": "添加关键帧",
-        "routeClip": "路径 {{start}}–{{end}} 秒", "routeClipAria": "{{name}} 的路径，{{start}} 到 {{end}} 秒",
+        "title": "时间轴",
+        "camera": "摄影机",
+        "actionTrack": "{{name}} · 动作",
+        "tracks": "轨道",
+        "play": "播放",
+        "pause": "暂停",
+        "goToStart": "回到开头",
+        "loop": "循环播放",
+        "currentTime": "当前时间",
+        "duration": "总时长",
+        "routePreview": "看路线",
+        "shotPreview": "看成片",
+        "showRoutes": "显示运动路线",
+        "hideRoutes": "隐藏运动路线",
+        "addKeyframe": "添加关键帧",
+        "routeClip": "路径 {{start}}–{{end}} 秒",
+        "routeClipAria": "{{name}} 的路径，{{start}} 到 {{end}} 秒",
         "routeClipHelp": "拖动路径片段可调整开始时间；拖动两端可调整时长",
-        "trimStart": "调整路径起点", "trimEnd": "调整路径终点",
-        "keyframeAria": "{{name}} 第 {{index}} 个关键帧，{{time}} 秒", "actionClip": "动作",
+        "trimStart": "调整路径起点",
+        "trimEnd": "调整路径终点",
+        "keyframeAria": "{{name}} 第 {{index}} 个关键帧，{{time}} 秒",
+        "actionClip": "动作",
         "scrubHelp": "拖动刻度尺定位时间；方向键逐帧移动，Shift 加方向键移动 10 帧",
         "resize": "拖动调整时间轴高度"
       },
       "route": {
-        "point": "逐点绘制轨迹", "draw": "手绘轨迹", "finish": "完成轨迹", "cancel": "取消绘制",
-        "hintPoints": "在地面上依次点击，添加轨迹点；完成后可拖动关键帧调整。",
-        "hintDraw": "按住鼠标在地面上绘制轨迹；完成后可在时间轴中微调。"
+        "point": "逐点绘制轨迹",
+        "draw": "手绘轨迹",
+        "finish": "完成轨迹",
+        "cancel": "取消绘制",
+        "hintPoints": "在地面上依次点击添加轨迹点，回车或双击结束；完成后可拖动关键帧调整。",
+        "hintDraw": "按住鼠标在地面上绘制轨迹；完成后可在时间轴中微调。",
+        "hintLine": "点击地面放起点，再点终点；按住 Shift 走正交方向。",
+        "lineStart": "点击地面放起点 · Esc 取消",
+        "lineEnd": "点击终点完成 · 按住 Shift 正交 · Esc 取消",
+        "pointsStart": "点击地面放第 1 个点 · Esc 取消",
+        "pointsCount": "已 {{count}} 点 · 回车结束 · Esc 取消"
       },
       "inspector": {
-        "title": "运动参数", "empty": "选中关键帧后可编辑。", "time": "时间", "easing": "插值",
-        "linear": "线性", "smooth": "平滑", "fov": "视场角", "orientToPath": "面向行进方向",
-        "duplicate": "复制", "delete": "删除关键帧", "position": "位置", "yaw": "朝向",
-        "targetMode": "镜头看向", "fixedTarget": "固定目标", "targetBodyPart": "跟随部位",
-        "head": "头部", "torso": "躯干", "feet": "脚部",
-        "trackSummary": "{{count}} 个关键帧", "keyframes": "关键帧列表", "keyframeNumber": "关键帧 {{index}}",
+        "title": "运动参数",
+        "empty": "选中关键帧后可编辑。",
+        "time": "时间",
+        "easing": "插值",
+        "linear": "线性",
+        "smooth": "平滑",
+        "fov": "视场角",
+        "orientToPath": "面向行进方向",
+        "duplicate": "复制",
+        "delete": "删除关键帧",
+        "position": "位置",
+        "yaw": "朝向",
+        "targetMode": "镜头看向",
+        "fixedTarget": "固定目标",
+        "targetBodyPart": "跟随部位",
+        "head": "头部",
+        "torso": "躯干",
+        "feet": "脚部",
+        "trackSummary": "{{count}} 个关键帧",
+        "keyframes": "关键帧列表",
+        "keyframeNumber": "关键帧 {{index}}",
         "emptyTrack": "在时间轴上绘制路径或添加关键帧后，即可在这里调整。",
-        "clipStart": "片段开始", "clipEnd": "片段结束",
-        "clipHelp": "也可直接拖动时间轴上的路径片段和两端把手。"
+        "clipStart": "片段开始",
+        "clipEnd": "片段结束",
+        "clipHelp": "也可直接拖动时间轴上的路径片段和两端把手。",
+        "hold": "定格",
+        "lookAt": "镜头朝向",
+        "lookTarget": "跟对象",
+        "lookPoint": "看定点",
+        "lookFree": "自由",
+        "lookTargetHelp": "镜头始终对准所选对象的部位，对象移动时自动跟拍。",
+        "lookPointHelp": "镜头看向场景中的一个固定点，适合定点摇镜。",
+        "lookFreeHelp": "直接设定镜头旋转角度（X 俯仰 · Y 水平 · Z 翻滚），不受目标约束。",
+        "rotationDeg": "旋转（度）"
       },
       "library": {
-        "title": "动作库", "poses": "静态姿势", "actions": "可播放动作", "clips": "自定义动作",
-        "custom": "自定义", "selectPerson": "请先选择一个人物。", "clipNamePlaceholder": "动作名称",
-        "saveClip": "轨道存为动作", "noClips": "暂无自定义动作", "keyframes": "个关键帧",
-        "apply": "应用动作", "rename": "重命名", "duplicate": "复制动作", "loop": "循环动作",
-        "delete": "删除动作", "timeAt": "应用到 {{time}}秒", "untitledClip": "未命名动作"
+        "title": "动作库",
+        "poses": "静态姿势",
+        "actions": "可播放动作",
+        "clips": "自定义动作",
+        "custom": "自定义",
+        "selectPerson": "请先选择一个人物。",
+        "clipNamePlaceholder": "动作名称",
+        "saveClip": "轨道存为动作",
+        "noClips": "暂无自定义动作",
+        "keyframes": "个关键帧",
+        "apply": "应用动作",
+        "rename": "重命名",
+        "duplicate": "复制动作",
+        "loop": "循环动作",
+        "delete": "删除动作",
+        "timeAt": "应用到 {{time}}秒",
+        "untitledClip": "未命名动作"
       },
       "pilot": {
-        "enter": "自由运镜", "exit": "退出自由运镜", "active": "自由运镜中", "noTarget": "未锁定目标",
+        "enter": "自由运镜",
+        "exit": "退出自由运镜",
+        "active": "自由运镜中",
+        "noTarget": "未锁定目标",
         "help": "像摄影师一样移动镜头；按 Enter 将当前镜头位置记入时间轴。",
         "controls": "WASD 移动 · 鼠标转向 · Enter 记录镜头 · F 锁定人物 · Esc 退出"
       },
       "cameraPresets": {
-        "title": "运镜模板", "cinematicPush": "电影慢推", "characterFollow": "人物跟拍",
-        "fastChase": "快速追拍", "productOrbit": "产品环绕", "craneRise": "摇臂升起", "lateralDolly": "横向移镜",
+        "title": "运镜模板",
+        "cinematicPush": "电影慢推",
+        "characterFollow": "人物跟拍",
+        "fastChase": "快速追拍",
+        "productOrbit": "产品环绕",
+        "craneRise": "摇臂升起",
+        "lateralDolly": "横向移镜",
         "followActorRoute": "沿人物路线跟拍"
       },
       "export": {
-        "title": "导出预演视频", "needsCamera": "至少添加两个摄影机关键帧才能导出。",
-        "resolution": "分辨率", "fps": "帧率", "duration": "时长", "format": "格式", "unsupported": "不可用",
-        "recording": "正在录制纯净场景", "remaining": "预计剩余 {{seconds}}秒", "complete": "{{format}} 录制完成",
-        "start": "开始录制", "cancel": "取消录制", "save": "保存到磁盘", "addToCanvas": "添加到画布",
-        "failed": "参考视频录制失败。", "sceneUnavailable": "3D 场景尚未准备好。",
-        "canvasNodeName": "导演台参考视频", "addToCanvasFailed": "录制视频添加到画布失败。"
+        "title": "导出预演视频",
+        "needsCamera": "至少添加两个摄影机关键帧才能导出。",
+        "resolution": "分辨率",
+        "fps": "帧率",
+        "duration": "时长",
+        "format": "格式",
+        "unsupported": "不可用",
+        "recording": "正在录制纯净场景",
+        "remaining": "预计剩余 {{seconds}}秒",
+        "complete": "{{format}} 录制完成",
+        "start": "开始录制",
+        "cancel": "取消录制",
+        "save": "保存到磁盘",
+        "addToCanvas": "添加到画布",
+        "failed": "参考视频录制失败。",
+        "sceneUnavailable": "3D 场景尚未准备好。",
+        "canvasNodeName": "导演台参考视频",
+        "addToCanvasFailed": "录制视频添加到画布失败。"
       },
       "actions": {
-        "walk": "行走", "run": "奔跑", "squatRise": "蹲起", "stepOver": "跨步", "jump": "跳跃", "wave": "挥手",
-        "idleBreath": "站立呼吸", "turnLook": "转身张望", "clap": "鼓掌", "phone": "接电话",
-        "walkBack": "后退行走", "sideStep": "侧步移动", "bow": "鞠躬"
+        "walk": "行走",
+        "run": "奔跑",
+        "squatRise": "蹲起",
+        "stepOver": "跨步",
+        "jump": "跳跃",
+        "wave": "挥手",
+        "idleBreath": "站立呼吸",
+        "turnLook": "转身张望",
+        "clap": "鼓掌",
+        "phone": "接电话",
+        "walkBack": "后退行走",
+        "sideStep": "侧步移动",
+        "bow": "鞠躬",
+        "sneak": "潜行",
+        "talk": "说话手势",
+        "nod": "点头",
+        "shakeHead": "摇头",
+        "typing": "打字",
+        "sitDown": "坐下",
+        "standUp": "起身",
+        "pickUp": "拾取",
+        "punch": "出拳",
+        "kick": "踢腿",
+        "fallDown": "摔倒"
       },
       "poses": {
-        "standNeutral": "自然站立", "standAttention": "立正", "leanForward": "身体前倾", "leanBack": "身体后仰",
-        "handsOnHips": "双手叉腰", "armsCrossed": "双臂交叉", "sitUpright": "端坐", "sitRelaxed": "放松坐姿",
-        "squatLow": "低蹲", "kneelOne": "单膝跪地", "kneelTwo": "双膝跪地", "lieBack": "仰躺",
-        "walkStride": "行走跨步", "runStride": "奔跑跨步", "pointForward": "向前指", "reachUp": "向上伸手",
-        "wave": "挥手", "lookUp": "抬头", "lookDown": "低头", "lookLeft": "看向左侧", "lookRight": "看向右侧",
-        "talkGesture": "对话手势", "observe": "观察", "jumpApex": "跳跃顶点"
+        "standNeutral": "自然站立",
+        "standAttention": "立正",
+        "leanForward": "身体前倾",
+        "leanBack": "身体后仰",
+        "handsOnHips": "双手叉腰",
+        "armsCrossed": "双臂交叉",
+        "sitUpright": "端坐",
+        "sitRelaxed": "放松坐姿",
+        "squatLow": "低蹲",
+        "kneelOne": "单膝跪地",
+        "kneelTwo": "双膝跪地",
+        "lieBack": "仰躺",
+        "walkStride": "行走跨步",
+        "runStride": "奔跑跨步",
+        "pointForward": "向前指",
+        "reachUp": "向上伸手",
+        "wave": "挥手",
+        "lookUp": "抬头",
+        "lookDown": "低头",
+        "lookLeft": "看向左侧",
+        "lookRight": "看向右侧",
+        "talkGesture": "对话手势",
+        "observe": "观察",
+        "jumpApex": "跳跃顶点",
+        "standRelaxed": "放松站立",
+        "handsBehindBack": "背手",
+        "handsInPockets": "插兜",
+        "thinking": "思考",
+        "shrug": "耸肩",
+        "cheer": "欢呼",
+        "handsOnHead": "抱头",
+        "reachForward": "双手前伸",
+        "phoneCall": "打电话",
+        "salute": "敬礼",
+        "pray": "合十",
+        "holdObject": "手持物品",
+        "sitForward": "前倾坐",
+        "sitCrossLegged": "盘腿坐",
+        "sitKneesUp": "抱膝坐",
+        "crouchHide": "蹲伏躲藏",
+        "lieSide": "侧躺",
+        "lieFront": "趴下",
+        "crawl": "爬行",
+        "fallBack": "后仰倒地",
+        "fightStance": "格斗架势",
+        "punch": "出拳",
+        "kick": "踢腿",
+        "aimPistol": "持枪瞄准",
+        "push": "推",
+        "pull": "拉",
+        "carryBox": "搬箱子",
+        "pickUp": "弯腰拾取",
+        "bow": "鞠躬",
+        "lookBack": "回头"
+      },
+      "categories": {
+        "all": "全部",
+        "stand": "站姿",
+        "gesture": "手势",
+        "sit": "坐姿",
+        "ground": "地面",
+        "move": "移动",
+        "action": "动作",
+        "look": "视线",
+        "locomotion": "行进",
+        "body": "身体"
       }
     },
     "prompt": {
@@ -1024,7 +1323,7 @@
     "scene": {
       "positionHint": "点击地面即可将选中对象移动到该位置（点 ✗ 取消）",
       "moveHint": "WASD/箭头键=移动 · QE=升降 · 左键拖=环绕 · 右键/Shift拖=平移 · 滚轮=缩放",
-      "orbitHint": "左键拖=环绕视角 · 右键/Shift拖=平移 · 滚轮=缩放 · 点击 3D 对象=选中",
+      "orbitHint": "点击对象选中 · 拖空白处框选 · Shift / ⌘ 加选 · Alt 拖动旋转 · 右键平移 · 滚轮缩放",
       "reset": "重置",
       "resetView": "重置视角",
       "fitAll": "框选全部",
@@ -1101,7 +1400,6 @@
       "action": "动作",
       "actionPlaceholder": "输入自定义动作或姿态描述",
       "saveActionPreset": "保存为预设",
-      "editCustomActionPose": "编辑自定义动作姿态",
       "customActionDefaultName": "自定义动作",
       "deleteActionPreset": "删除动作预设「{{name}}」",
       "confirmDeleteActionPreset": "确定删除动作预设「{{name}}」吗？",
@@ -1120,7 +1418,11 @@
       "armSpread": "手臂外展",
       "legLength": "腿部长度",
       "legThickness": "腿部粗细",
-      "legSpread": "腿部外展"
+      "legSpread": "腿部外展",
+      "transform": "变换",
+      "scrubHint": "左右拖动字母可微调数值，按住 Shift 更精细",
+      "notes": "关系与备注",
+      "motion": "运动"
     },
     "actionPresets": {
       "stand": "站立",
@@ -1150,90 +1452,493 @@
     "modelLibrary": {
       "title": "选择模型",
       "uploadModel": "上传模型",
-      "uploadDeferred": "我的模型上传将在后续版本启用",
       "myModelsEmpty": "我的模型暂无内容",
-      "myModelsHint": "上传模型功能已预留，本轮先使用内置程序化模型占位。",
+      "myModelsHint": "点「上传模型」导入 GLB / glTF（内嵌资源，≤100 MB）。模型按原始米制尺寸落地居中，放入场景后可缩放。",
       "categories": {
         "basic": "基础模型",
         "people": "基础人物",
         "props": "日常道具",
+        "architecture": "建筑模块",
+        "street": "街道设施",
+        "nature": "自然环境",
         "scenes": "日常场景",
         "vehicles": "常见交通",
         "mine": "我的模型"
       },
       "models": {
-        "basic-female": { "name": "女", "labelBase": "女人" },
-        "basic-male": { "name": "男", "labelBase": "男人" },
-        "basic-terrain": { "name": "地形", "labelBase": "地形" },
-        "basic-pipe": { "name": "管道", "labelBase": "管道" },
-        "basic-cube": { "name": "立方体", "labelBase": "立方体" },
-        "basic-sphere": { "name": "球体", "labelBase": "球体" },
-        "basic-ramp": { "name": "斜坡", "labelBase": "斜坡" },
-        "basic-torus": { "name": "圆环体", "labelBase": "圆环体" },
-        "basic-cylinder": { "name": "圆柱体", "labelBase": "圆柱体" },
-        "basic-cone": { "name": "圆锥体", "labelBase": "圆锥体" },
-        "basic-plane": { "name": "平面", "labelBase": "平面" },
-        "basic-disc": { "name": "圆盘", "labelBase": "圆盘" },
-        "people-adult-male-average": { "name": "成年-男性", "labelBase": "成年-男性" },
-        "people-adult-female-average": { "name": "成年-女性", "labelBase": "成年-女性" },
-        "people-adult-male-slim": { "name": "瘦-成年-男性", "labelBase": "瘦-成年-男性" },
-        "people-adult-female-slim": { "name": "瘦-成年-女性", "labelBase": "瘦-成年-女性" },
-        "people-adult-male-strong": { "name": "壮-成年-男性", "labelBase": "壮-成年-男性" },
-        "people-adult-female-strong": { "name": "壮-成年-女性", "labelBase": "壮-成年-女性" },
-        "people-adult-male-heavy": { "name": "胖-成年-男性", "labelBase": "胖-成年-男性" },
-        "people-adult-female-heavy": { "name": "胖-成年-女性", "labelBase": "胖-成年-女性" },
-        "people-elder-male": { "name": "老年-男性", "labelBase": "老年-男性" },
-        "people-elder-female": { "name": "老年-女性", "labelBase": "老年-女性" },
-        "people-child-boy": { "name": "儿童-男", "labelBase": "儿童-男" },
-        "people-child-girl": { "name": "儿童-女", "labelBase": "儿童-女" },
-        "people-teen-male": { "name": "青少年-男", "labelBase": "青少年-男" },
-        "people-teen-female": { "name": "青少年-女", "labelBase": "青少年-女" },
-        "props-chair": { "name": "椅子", "labelBase": "椅子" },
-        "props-office-chair": { "name": "办公椅", "labelBase": "办公椅" },
-        "props-stool": { "name": "凳子", "labelBase": "凳子" },
-        "props-table": { "name": "桌子", "labelBase": "桌子" },
-        "props-desk": { "name": "书桌", "labelBase": "书桌" },
-        "props-sofa": { "name": "沙发", "labelBase": "沙发" },
-        "props-bed": { "name": "床", "labelBase": "床" },
-        "props-cabinet": { "name": "柜子", "labelBase": "柜子" },
-        "props-bookshelf": { "name": "书架", "labelBase": "书架" },
-        "props-door": { "name": "门", "labelBase": "门" },
-        "props-window": { "name": "窗", "labelBase": "窗" },
-        "props-floor-lamp": { "name": "落地灯", "labelBase": "落地灯" },
-        "props-table-lamp": { "name": "台灯", "labelBase": "台灯" },
-        "props-plant": { "name": "绿植", "labelBase": "绿植" },
-        "props-laptop": { "name": "笔记本电脑", "labelBase": "笔记本电脑" },
-        "props-phone": { "name": "手机", "labelBase": "手机" },
-        "props-cup": { "name": "水杯", "labelBase": "水杯" },
-        "props-suitcase": { "name": "行李箱", "labelBase": "行李箱" },
-        "props-monitor-tv": { "name": "电视/监视器", "labelBase": "电视/监视器" },
-        "scenes-living-room": { "name": "客厅", "labelBase": "客厅" },
-        "scenes-kitchen": { "name": "厨房", "labelBase": "厨房" },
-        "scenes-bedroom": { "name": "卧室", "labelBase": "卧室" },
-        "scenes-office": { "name": "办公室", "labelBase": "办公室" },
-        "scenes-classroom": { "name": "教室", "labelBase": "教室" },
-        "scenes-hospital-room": { "name": "病房", "labelBase": "病房" },
-        "scenes-shop-cafe": { "name": "店铺/咖啡店", "labelBase": "店铺/咖啡店" },
-        "scenes-restaurant": { "name": "餐厅", "labelBase": "餐厅" },
-        "scenes-street-corner": { "name": "街角", "labelBase": "街角" },
-        "scenes-parking-lot": { "name": "停车场", "labelBase": "停车场" },
-        "scenes-park-path": { "name": "公园小路", "labelBase": "公园小路" },
-        "scenes-warehouse": { "name": "仓库", "labelBase": "仓库" },
-        "scenes-house-exterior": { "name": "住宅外立面", "labelBase": "住宅外立面" },
-        "scenes-apartment-exterior": { "name": "公寓外立面", "labelBase": "公寓外立面" },
-        "vehicles-sedan": { "name": "轿车", "labelBase": "轿车" },
-        "vehicles-suv": { "name": "SUV", "labelBase": "SUV" },
-        "vehicles-taxi": { "name": "出租车", "labelBase": "出租车" },
-        "vehicles-van": { "name": "面包车", "labelBase": "面包车" },
-        "vehicles-bus": { "name": "公交车", "labelBase": "公交车" },
-        "vehicles-truck": { "name": "货车", "labelBase": "货车" },
-        "vehicles-motorcycle": { "name": "摩托车", "labelBase": "摩托车" },
-        "vehicles-bicycle": { "name": "自行车", "labelBase": "自行车" },
-        "vehicles-e-scooter": { "name": "电动车/踏板车", "labelBase": "电动车/踏板车" },
-        "vehicles-ambulance": { "name": "救护车", "labelBase": "救护车" },
-        "vehicles-police-car": { "name": "警车", "labelBase": "警车" },
-        "vehicles-subway-car": { "name": "地铁/列车车厢", "labelBase": "地铁/列车车厢" }
-      }
+        "people-construction-worker": {
+          "name": "建筑工人",
+          "labelBase": "建筑工人"
+        },
+        "people-medical-worker": {
+          "name": "医护人员",
+          "labelBase": "医护人员"
+        },
+        "people-security-officer": {
+          "name": "安保人员",
+          "labelBase": "安保人员"
+        },
+        "people-stage-performer": {
+          "name": "舞台表演者",
+          "labelBase": "舞台表演者"
+        },
+        "people-raincoat": {
+          "name": "雨衣人物",
+          "labelBase": "雨衣人物"
+        },
+        "architecture-wall-segment": {
+          "name": "墙体",
+          "labelBase": "墙体"
+        },
+        "architecture-wall-doorway": {
+          "name": "带门洞墙体",
+          "labelBase": "带门洞墙体"
+        },
+        "architecture-wall-window": {
+          "name": "带窗墙体",
+          "labelBase": "带窗墙体"
+        },
+        "architecture-floor-slab": {
+          "name": "楼板",
+          "labelBase": "楼板"
+        },
+        "architecture-stairs": {
+          "name": "楼梯",
+          "labelBase": "楼梯"
+        },
+        "architecture-column": {
+          "name": "立柱",
+          "labelBase": "立柱"
+        },
+        "architecture-railing": {
+          "name": "栏杆/围栏",
+          "labelBase": "栏杆/围栏"
+        },
+        "architecture-archway": {
+          "name": "拱门",
+          "labelBase": "拱门"
+        },
+        "street-road-segment": {
+          "name": "道路",
+          "labelBase": "道路"
+        },
+        "street-crosswalk": {
+          "name": "人行横道",
+          "labelBase": "人行横道"
+        },
+        "street-street-lamp": {
+          "name": "路灯",
+          "labelBase": "路灯"
+        },
+        "street-traffic-light": {
+          "name": "交通信号灯",
+          "labelBase": "交通信号灯"
+        },
+        "street-bench": {
+          "name": "长椅",
+          "labelBase": "长椅"
+        },
+        "street-bus-stop": {
+          "name": "公交站亭",
+          "labelBase": "公交站亭"
+        },
+        "street-trash-bin": {
+          "name": "垃圾桶",
+          "labelBase": "垃圾桶"
+        },
+        "street-fire-hydrant": {
+          "name": "消防栓",
+          "labelBase": "消防栓"
+        },
+        "street-road-sign": {
+          "name": "道路标志",
+          "labelBase": "道路标志"
+        },
+        "nature-tree-deciduous": {
+          "name": "阔叶树",
+          "labelBase": "阔叶树"
+        },
+        "nature-tree-pine": {
+          "name": "松树",
+          "labelBase": "松树"
+        },
+        "nature-bush": {
+          "name": "灌木",
+          "labelBase": "灌木"
+        },
+        "nature-rock": {
+          "name": "岩石",
+          "labelBase": "岩石"
+        },
+        "nature-grass-patch": {
+          "name": "草地",
+          "labelBase": "草地"
+        },
+        "nature-pond": {
+          "name": "池塘/水面",
+          "labelBase": "池塘/水面"
+        },
+        "nature-hill": {
+          "name": "山丘",
+          "labelBase": "山丘"
+        },
+        "props-book": {
+          "name": "书本",
+          "labelBase": "书本"
+        },
+        "props-bottle": {
+          "name": "瓶子",
+          "labelBase": "瓶子"
+        },
+        "props-backpack": {
+          "name": "背包",
+          "labelBase": "背包"
+        },
+        "props-umbrella": {
+          "name": "雨伞",
+          "labelBase": "雨伞"
+        },
+        "props-guitar": {
+          "name": "吉他",
+          "labelBase": "吉他"
+        },
+        "props-camera-tripod": {
+          "name": "三脚架摄影机",
+          "labelBase": "三脚架摄影机"
+        },
+        "props-crate-stack": {
+          "name": "木箱堆",
+          "labelBase": "木箱堆"
+        },
+        "props-knife": {
+          "name": "道具刀",
+          "labelBase": "道具刀"
+        },
+        "props-sword": {
+          "name": "道具剑",
+          "labelBase": "道具剑"
+        },
+        "props-pistol-prop": {
+          "name": "手枪形道具",
+          "labelBase": "手枪形道具"
+        },
+        "props-food-plate": {
+          "name": "餐盘与食物",
+          "labelBase": "餐盘与食物"
+        },
+        "vehicles-helicopter": {
+          "name": "直升机",
+          "labelBase": "直升机"
+        },
+        "vehicles-boat": {
+          "name": "小船",
+          "labelBase": "小船"
+        },
+        "vehicles-yacht": {
+          "name": "游艇",
+          "labelBase": "游艇"
+        },
+        "vehicles-airplane": {
+          "name": "小型飞机",
+          "labelBase": "小型飞机"
+        },
+        "scenes-ground": {
+          "name": "地面场景",
+          "labelBase": "地面场景"
+        },
+        "scenes-aerial": {
+          "name": "空中场景",
+          "labelBase": "空中场景"
+        },
+        "basic-female": {
+          "name": "女",
+          "labelBase": "女人"
+        },
+        "basic-male": {
+          "name": "男",
+          "labelBase": "男人"
+        },
+        "basic-terrain": {
+          "name": "地形",
+          "labelBase": "地形"
+        },
+        "basic-pipe": {
+          "name": "管道",
+          "labelBase": "管道"
+        },
+        "basic-cube": {
+          "name": "立方体",
+          "labelBase": "立方体"
+        },
+        "basic-sphere": {
+          "name": "球体",
+          "labelBase": "球体"
+        },
+        "basic-ramp": {
+          "name": "斜坡",
+          "labelBase": "斜坡"
+        },
+        "basic-torus": {
+          "name": "圆环体",
+          "labelBase": "圆环体"
+        },
+        "basic-cylinder": {
+          "name": "圆柱体",
+          "labelBase": "圆柱体"
+        },
+        "basic-cone": {
+          "name": "圆锥体",
+          "labelBase": "圆锥体"
+        },
+        "basic-plane": {
+          "name": "平面",
+          "labelBase": "平面"
+        },
+        "basic-disc": {
+          "name": "圆盘",
+          "labelBase": "圆盘"
+        },
+        "people-adult-male-average": {
+          "name": "成年-男性",
+          "labelBase": "成年-男性"
+        },
+        "people-adult-female-average": {
+          "name": "成年-女性",
+          "labelBase": "成年-女性"
+        },
+        "people-adult-male-slim": {
+          "name": "瘦-成年-男性",
+          "labelBase": "瘦-成年-男性"
+        },
+        "people-adult-female-slim": {
+          "name": "瘦-成年-女性",
+          "labelBase": "瘦-成年-女性"
+        },
+        "people-adult-male-strong": {
+          "name": "壮-成年-男性",
+          "labelBase": "壮-成年-男性"
+        },
+        "people-adult-female-strong": {
+          "name": "壮-成年-女性",
+          "labelBase": "壮-成年-女性"
+        },
+        "people-adult-male-heavy": {
+          "name": "胖-成年-男性",
+          "labelBase": "胖-成年-男性"
+        },
+        "people-adult-female-heavy": {
+          "name": "胖-成年-女性",
+          "labelBase": "胖-成年-女性"
+        },
+        "people-elder-male": {
+          "name": "老年-男性",
+          "labelBase": "老年-男性"
+        },
+        "people-elder-female": {
+          "name": "老年-女性",
+          "labelBase": "老年-女性"
+        },
+        "people-child-boy": {
+          "name": "儿童-男",
+          "labelBase": "儿童-男"
+        },
+        "people-child-girl": {
+          "name": "儿童-女",
+          "labelBase": "儿童-女"
+        },
+        "people-teen-male": {
+          "name": "青少年-男",
+          "labelBase": "青少年-男"
+        },
+        "people-teen-female": {
+          "name": "青少年-女",
+          "labelBase": "青少年-女"
+        },
+        "props-chair": {
+          "name": "椅子",
+          "labelBase": "椅子"
+        },
+        "props-office-chair": {
+          "name": "办公椅",
+          "labelBase": "办公椅"
+        },
+        "props-stool": {
+          "name": "凳子",
+          "labelBase": "凳子"
+        },
+        "props-table": {
+          "name": "桌子",
+          "labelBase": "桌子"
+        },
+        "props-desk": {
+          "name": "书桌",
+          "labelBase": "书桌"
+        },
+        "props-sofa": {
+          "name": "沙发",
+          "labelBase": "沙发"
+        },
+        "props-bed": {
+          "name": "床",
+          "labelBase": "床"
+        },
+        "props-cabinet": {
+          "name": "柜子",
+          "labelBase": "柜子"
+        },
+        "props-bookshelf": {
+          "name": "书架",
+          "labelBase": "书架"
+        },
+        "props-door": {
+          "name": "门",
+          "labelBase": "门"
+        },
+        "props-window": {
+          "name": "窗",
+          "labelBase": "窗"
+        },
+        "props-floor-lamp": {
+          "name": "落地灯",
+          "labelBase": "落地灯"
+        },
+        "props-table-lamp": {
+          "name": "台灯",
+          "labelBase": "台灯"
+        },
+        "props-plant": {
+          "name": "绿植",
+          "labelBase": "绿植"
+        },
+        "props-laptop": {
+          "name": "笔记本电脑",
+          "labelBase": "笔记本电脑"
+        },
+        "props-phone": {
+          "name": "手机",
+          "labelBase": "手机"
+        },
+        "props-cup": {
+          "name": "水杯",
+          "labelBase": "水杯"
+        },
+        "props-suitcase": {
+          "name": "行李箱",
+          "labelBase": "行李箱"
+        },
+        "props-monitor-tv": {
+          "name": "电视/监视器",
+          "labelBase": "电视/监视器"
+        },
+        "scenes-living-room": {
+          "name": "客厅",
+          "labelBase": "客厅"
+        },
+        "scenes-kitchen": {
+          "name": "厨房",
+          "labelBase": "厨房"
+        },
+        "scenes-bedroom": {
+          "name": "卧室",
+          "labelBase": "卧室"
+        },
+        "scenes-office": {
+          "name": "办公室",
+          "labelBase": "办公室"
+        },
+        "scenes-classroom": {
+          "name": "教室",
+          "labelBase": "教室"
+        },
+        "scenes-hospital-room": {
+          "name": "病房",
+          "labelBase": "病房"
+        },
+        "scenes-shop-cafe": {
+          "name": "店铺/咖啡店",
+          "labelBase": "店铺/咖啡店"
+        },
+        "scenes-restaurant": {
+          "name": "餐厅",
+          "labelBase": "餐厅"
+        },
+        "scenes-street-corner": {
+          "name": "街角",
+          "labelBase": "街角"
+        },
+        "scenes-parking-lot": {
+          "name": "停车场",
+          "labelBase": "停车场"
+        },
+        "scenes-park-path": {
+          "name": "公园小路",
+          "labelBase": "公园小路"
+        },
+        "scenes-warehouse": {
+          "name": "仓库",
+          "labelBase": "仓库"
+        },
+        "scenes-house-exterior": {
+          "name": "住宅外立面",
+          "labelBase": "住宅外立面"
+        },
+        "scenes-apartment-exterior": {
+          "name": "公寓外立面",
+          "labelBase": "公寓外立面"
+        },
+        "vehicles-sedan": {
+          "name": "轿车",
+          "labelBase": "轿车"
+        },
+        "vehicles-suv": {
+          "name": "SUV",
+          "labelBase": "SUV"
+        },
+        "vehicles-taxi": {
+          "name": "出租车",
+          "labelBase": "出租车"
+        },
+        "vehicles-van": {
+          "name": "面包车",
+          "labelBase": "面包车"
+        },
+        "vehicles-bus": {
+          "name": "公交车",
+          "labelBase": "公交车"
+        },
+        "vehicles-truck": {
+          "name": "货车",
+          "labelBase": "货车"
+        },
+        "vehicles-motorcycle": {
+          "name": "摩托车",
+          "labelBase": "摩托车"
+        },
+        "vehicles-bicycle": {
+          "name": "自行车",
+          "labelBase": "自行车"
+        },
+        "vehicles-e-scooter": {
+          "name": "电动车/踏板车",
+          "labelBase": "电动车/踏板车"
+        },
+        "vehicles-ambulance": {
+          "name": "救护车",
+          "labelBase": "救护车"
+        },
+        "vehicles-police-car": {
+          "name": "警车",
+          "labelBase": "警车"
+        },
+        "vehicles-subway-car": {
+          "name": "地铁/列车车厢",
+          "labelBase": "地铁/列车车厢"
+        }
+      },
+      "uploadHint": "导入 GLB / glTF 2.0 模型（内嵌贴图与缓冲，≤100 MB）",
+      "myModelMeta": "高 {{height}} m · {{size}}",
+      "deleteMine": "从我的模型库删除「{{name}}」",
+      "confirmDeleteMine": "从我的模型库删除「{{name}}」？已放入场景的副本会在下次打开时无法加载。"
     },
     "pedestrians": {
       "title": "添加路人",
@@ -1322,7 +2027,7 @@
         "transformMove": "变换工具：移动",
         "transformRotate": "变换工具：旋转",
         "transformScale": "变换工具：缩放",
-        "escape": "取消变换、关闭弹窗或退出导演台",
+        "escape": "逐层取消：路径绘制、弹窗、姿态、选择、变换",
         "delete": "删除选中元素",
         "copyPaste": "复制 / 粘贴选中元素",
         "copy": "复制选中元素",
@@ -1337,8 +2042,11 @@
         "grid": "打开网格面板",
         "prompt": "打开提示词面板",
         "shortcuts": "打开快捷键面板",
-        "advancedPedestrianTags": "显示或隐藏路人序号和短编号"
-      }
+        "advancedPedestrianTags": "显示或隐藏路人序号和短编号",
+        "poseEdit": "姿态编辑（摆姿势）"
+      },
+      "editHint": "点击右侧按键后按下新组合即可改键",
+      "clickToEdit": "点击后按下新按键"
     },
     "category": {
       "person": "人物",
@@ -1362,6 +2070,173 @@
       "resolution": "分辨率",
       "screenshot": "截屏",
       "shortcuts": "快捷键"
+    },
+    "pose": {
+      "title": "姿态编辑",
+      "enter": "摆姿势",
+      "exit": "退出姿态编辑",
+      "viewportHint": "姿态模式：点人物身体或黄点选关节，拖彩环旋转；拖粉色手脚控制点摆动整条肢体；Esc 退出",
+      "targetItem": "修改人物默认姿态",
+      "targetKeyframe": "记录到 {{time}}s 动作关键帧",
+      "noJoint": "在视口点人物身体或下方按钮选择一个关节。",
+      "resetJoint": "复位",
+      "resetAll": "清除修改",
+      "mirror": "左右镜像",
+      "copyArmLeftToRight": "左臂 → 右臂",
+      "copyArmRightToLeft": "右臂 → 左臂",
+      "copyLegLeftToRight": "左腿 → 右腿",
+      "copyLegRightToLeft": "右腿 → 左腿",
+      "hands": "手型",
+      "hand": {
+        "left": "左手",
+        "right": "右手"
+      },
+      "handShapes": {
+        "relaxed": "放松",
+        "open": "张开",
+        "fist": "握拳",
+        "point": "指",
+        "grip": "握持",
+        "pinch": "捏"
+      },
+      "save": "存为姿态",
+      "savePlaceholder": "姿态名称（存入动作预设）",
+      "regions": {
+        "core": "躯干",
+        "head": "头颈",
+        "leftArm": "左臂",
+        "rightArm": "右臂",
+        "leftLeg": "左腿",
+        "rightLeg": "右腿"
+      },
+      "jointShort": {
+        "spine": "腰",
+        "chest": "胸",
+        "neck": "颈",
+        "head": "头",
+        "clavicle": "锁骨",
+        "upperArm": "上臂",
+        "forearm": "肘",
+        "wrist": "腕",
+        "thigh": "大腿",
+        "shin": "膝",
+        "foot": "踝",
+        "toes": "趾"
+      },
+      "joints": {
+        "spine": "腰椎",
+        "chest": "胸椎",
+        "neck": "颈",
+        "head": "头",
+        "leftClavicle": "左锁骨",
+        "rightClavicle": "右锁骨",
+        "leftUpperArm": "左上臂",
+        "rightUpperArm": "右上臂",
+        "leftForearm": "左肘",
+        "rightForearm": "右肘",
+        "leftWrist": "左手腕",
+        "rightWrist": "右手腕",
+        "leftThigh": "左大腿",
+        "rightThigh": "右大腿",
+        "leftShin": "左膝",
+        "rightShin": "右膝",
+        "leftFoot": "左脚踝",
+        "rightFoot": "右脚踝",
+        "leftToes": "左脚趾",
+        "rightToes": "右脚趾"
+      },
+      "axes": {
+        "core": {
+          "x": "前屈 / 后仰",
+          "y": "左右转",
+          "z": "左右侧倾"
+        },
+        "clavicle": {
+          "x": "耸肩",
+          "y": "肩前扣"
+        },
+        "limb": {
+          "x": "前后摆",
+          "y": "内外旋",
+          "z": "侧抬"
+        },
+        "elbow": {
+          "x": "屈肘"
+        },
+        "knee": {
+          "x": "屈膝"
+        },
+        "wrist": {
+          "x": "掌屈 / 背伸",
+          "y": "翻腕",
+          "z": "桡偏 / 尺偏"
+        },
+        "foot": {
+          "x": "绷脚 / 勾脚",
+          "y": "脚尖内外转",
+          "z": "内翻 / 外翻"
+        },
+        "toes": {
+          "x": "翘趾"
+        }
+      },
+      "editing": "正在摆姿态：{{name}}",
+      "jointSelected": "已选关节：{{joint}}，拖动旋转环调整",
+      "done": "完成"
+    },
+    "redo": "重做",
+    "captureHelp": "截取取景框内画面，存入截图",
+    "captured": "已截图",
+    "viewSnapshots": "查看截图",
+    "frameHelp": "画幅：切换取景框比例",
+    "dock": {
+      "toggle": "显示/隐藏右侧面板",
+      "label": "右侧面板",
+      "layers": "图层",
+      "shots": "截图",
+      "scene": "场景",
+      "sceneHelp": "提示词、网格、背景与视图设置",
+      "sceneCounts": "{{person}} 人物 · {{object}} 道具 · {{scene}} 场景",
+      "background": "背景全景图",
+      "noSnapshots": "还没有截图",
+      "noSnapshotsHint": "构好图后按 {{keys}} 或点顶部“截图”"
+    },
+    "projectsHint": "双击名称重命名；悬停卡片可设封面或删除",
+    "newProjectShort": "新建",
+    "openProjectNamed": "打开工程 {{name}}",
+    "currentProject": "当前",
+    "renameProject": "重命名工程",
+    "rail": {
+      "label": "舞台工具",
+      "add": "添加",
+      "addHelp": "添加人物、群演、模型库或我的模型",
+      "addPerson": "人物",
+      "addCrowdHelp": "按阵列或随机范围一次添加多人",
+      "myModels": "我的模型",
+      "lens": "镜头",
+      "lensHelp": "焦距、机位距离与镜头预设",
+      "help": "快捷键与教程",
+      "helpHint": "查看全部快捷键，点击按键可自定义"
+    },
+    "selection": {
+      "label": "当前选择",
+      "duplicate": "复制一份",
+      "clear": "取消选择"
+    },
+    "view": {
+      "focus": "聚焦并跟随",
+      "stopFollow": "停止跟随"
+    },
+    "guide": {
+      "title": "上手三步",
+      "done": "都完成了",
+      "close": "关闭引导",
+      "person": "放人物",
+      "personHint": "从左侧「添加」放一个人物到场景",
+      "route": "画路线",
+      "routeHint": "选中人物，按住鼠标在地面画出走位",
+      "play": "播放",
+      "playHint": "按空格播放，看人物沿路线走"
     }
   },
   "node": {
@@ -1517,7 +2392,7 @@
     "aiAudio": {
       "promptPlaceholder": "输入要文生音频的文字；也可以连接文本节点作为输入",
       "textRequired": "请输入要生成音频的文字，或连接一个文本节点",
-      "noModel": "请先在设置中配置并启用音频模型",
+      "noModel": "请先在渠道中添加支持音频生成的模型",
       "noVoice": "未同步音色",
       "generated": "已生成音频结果",
       "generateFailed": "音频生成失败",
@@ -1527,7 +2402,9 @@
       "staleResult": "输入已变化，结果可能已过期",
       "payloadDebug": "预览将发送的音频请求内容",
       "payloadDebugTitle": "音频 Payload 预览",
-      "payloadDebugHint": "这里展示由音频网关 payload 组装出的真实供应商请求。VoxCPM 会按 Gradio data[] 下标列出字段；data URL 音频会被摘要，并标记实际生成前是否会先上传。"
+      "payloadDebugHint": "这里展示当前音频渠道按声明组装的请求预览；密钥和内嵌素材会脱敏。",
+      "voice": "音色",
+      "unavailableModel": "当前音频模型已不可用，请在渠道中重新选择。已有素材与历史记录会保留。"
     },
     "audioNode": {
       "waitingResult": "等待音频生成结果",
@@ -1658,8 +2535,6 @@
       "settingsBackupExcludes": "不包含项目、画布节点、连线和项目媒体；凭据默认排除。",
       "exportTitle": "导出设置",
       "exportDescription": "默认不包含 API Key、令牌、密码、Dreamina 会话和本机绝对路径。",
-      "includeCredentials": "包含凭据",
-      "credentialsPlaintextHint": "凭据将以未加密明文写入文件。",
       "exportAction": "导出设置",
       "exportSuccess": "设置已导出",
       "importTitle": "导入设置",
@@ -1667,31 +2542,21 @@
       "importAction": "选择设置文件",
       "importSuccess": "所选设置已导入",
       "fileTooLarge": "设置文件不能超过 16 MB。",
-      "credentialsWarningTitle": "导出未加密凭据",
-      "credentialsWarningDescription": "此文件将包含 API Key、供应商密钥和图床登录凭据。任何能读取文件的人都可直接使用这些凭据。",
-      "exportUnencrypted": "仍然导出",
       "previewTitle": "设置覆盖预览",
       "applySelected": "应用所选类别",
       "appVersion": "应用版本",
       "schemaVersion": "格式版本",
-      "importCredentialsWarning": "文件包含未加密凭据。凭据类别默认未选择，仅在你显式勾选后导入。",
-      "importCredentialsConfirmTitle": "确认导入未加密凭据",
-      "importCredentialsConfirmDescription": "所选凭据将覆盖当前内置 API Key、Agnes 密钥、自定义供应商密钥和图床登录凭据。",
-      "importCredentialsConfirmAction": "导入并覆盖凭据",
       "noChanges": "无变化",
       "toggleCategory": "包含{{category}}",
       "before": "导入前",
       "after": "导入后",
-      "credentialConfigured": "已配置字段：{{count}}",
-      "credentialMissing": "未配置",
       "categories": {
         "general": "通用与交互",
         "appearance": "外观",
         "prompts": "提示词与文本 Agent",
         "models": "模型与音频参数",
         "providers": "自定义供应商",
-        "imageHosting": "图床设置",
-        "credentials": "未加密凭据"
+        "imageHosting": "图床设置"
       },
       "status": {
         "add": "新增",
@@ -1951,18 +2816,6 @@
       "preset": "图片模型预设配置",
       "fullCustom": "图片模型全自定义配置"
     },
-    "addProviders": {
-      "title": "添加供应商",
-      "description": "按生成类型选择配置入口。预设配置负责常见协议，全自定义配置用于搭建任意声明式图片请求。",
-      "tabs": {
-        "imagePreset": "主流 Images、Gemini、Fal 等常见协议",
-        "imageCustom": "自定义路由、字段、图片、比例与轮询",
-        "videoLabel": "视频生成",
-        "chatLabel": "文本对话",
-        "video": "OpenAI Videos API 兼容供应商配置",
-        "chat": "Responses、Chat Completions、Anthropic、Gemini"
-      }
-    },
     "comfyui": {
       "description": "选用常见工作流模板，或导入自己的 API 格式工作流；本机和云端服务都可以连接。",
       "newConnection": "新建连接",
@@ -1973,10 +2826,22 @@
       "connectionDescription": "选模板后填写地址。模板只用 ComfyUI 内置节点；自定义工作流可导入图片或视频流程。",
       "chooseWorkflow": "选择工作流",
       "templates": {
-        "text-to-image": { "title": "基础文生图", "description": "提示词、尺寸和种子自动写入工作流。" },
-        "image-to-image": { "title": "参考图重绘", "description": "上传一张参考图，再按提示词重新生成。" },
-        "minimax-h3-local": {"title": "MiniMax H3 本地视频", "description": "导入已在服务器跑通的 H3 API 工作流，自动映射时长与画幅。"},
-        "custom": { "title": "自定义工作流", "description": "导入 API 格式 JSON，可选择图片或视频输出。" }
+        "text-to-image": {
+          "title": "基础文生图",
+          "description": "提示词、尺寸和种子自动写入工作流。"
+        },
+        "image-to-image": {
+          "title": "参考图重绘",
+          "description": "上传一张参考图，再按提示词重新生成。"
+        },
+        "minimax-h3-local": {
+          "title": "MiniMax H3 本地视频",
+          "description": "导入已在服务器跑通的 H3 API 工作流，自动映射时长与画幅。"
+        },
+        "custom": {
+          "title": "自定义工作流",
+          "description": "导入 API 格式 JSON，可选择图片或视频输出。"
+        }
       },
       "h3LocalHelp": "先在 ComfyUI 安装 H3 本地模型及节点，并确认工作流可生成视频，再导入 API JSON。需包含 MiniMaxH3ImageToVideo 或 MiniMaxH3ReferenceToVideo 和视频保存节点。5–15 秒按 24fps 对齐；无需 MiniMax API Key。此入口不支持 Comfy Partner 计费节点，请使用官方直连渠道。",
       "h3WorkflowRequired": "请导入包含本地 MiniMax H3 节点的 API 工作流；Comfy Partner/API 节点不适用于此入口。",
@@ -1992,7 +2857,11 @@
       "displayTitle": "画布中如何显示",
       "displayDescription": "给这条工作流起一个容易辨认的名字，之后可从画布模型列表中选择。",
       "canvasName": "工作流名称",
-      "steps": { "connection": "工作流与连接", "capabilities": "画布显示", "review": "检查并保存" }
+      "steps": {
+        "connection": "工作流与连接",
+        "capabilities": "画布显示",
+        "review": "检查并保存"
+      }
     },
     "customProviders": {
       "assistant": {
@@ -2200,49 +3069,37 @@
     "keybindings": "键位设置",
     "keybindingsDesc": "配置鼠标操作、画布平移和 WASD 移动习惯",
     "imageHosting": {
-      "title": "图床配置",
-      "desc": "配置 PiXhost 或私域图床；只有勾选启用后才会使用图床。",
-      "enable": "启用图床",
-      "enableDesc": "关闭时会保留配置，但不会在上传或保存流程中使用图床。",
-      "provider": "图床服务",
-      "providerDesc": "选择当前启用时要使用的图床。",
-      "providers": {
-        "pixhost": "PiXhost",
-        "seedvault": "私域图床"
-      },
-      "apiBaseUrl": "API 根地址 / 域名",
-      "restoreDefaults": "恢复默认",
-      "pixhost": {
-        "title": "PiXhost",
-        "desc": "PiXhost 域名变动时可在这里改 API 根地址。",
-        "contentType": "内容类型",
-        "contentTypes": {
-          "family": "普通内容",
-          "adult": "成人内容"
-        },
-        "maxThumbnailSize": "最大缩略图尺寸"
-      },
-      "seedvault": {
-        "title": "私域图床",
-        "desc": "保存时会通过 /tokens 使用邮箱和密码获取 token，并覆盖当前 token。",
-        "email": "账号邮箱",
-        "password": "密码",
-        "strategyId": "上传策略 ID",
-        "strategyIdPlaceholder": "留空使用默认策略",
-        "token": "Token",
-        "tokenPlaceholder": "保存账号密码后自动生成，也可手动粘贴",
-        "tokenHint": "重新填写账号或密码后，保存时会刷新 token。",
-        "tokenWillRefresh": "账号或密码已修改，保存时将重新生成 token。"
+      "title": "自定义图床",
+      "desc": "接入你自己的图片上传接口。默认关闭；上传参考图前会单独确认。",
+      "uploadUrl": "上传地址（POST）",
+      "uploadUrlPlaceholder": "填写服务提供的完整上传 URL",
+      "uploadHelp": "使用 multipart/form-data 上传图片，不会自动拼接路径或登录账号。",
+      "fileField": "图片文件字段",
+      "responseUrlPath": "返回图片 URL 的字段",
+      "responseHelp": "例如返回 {\"data\":{\"url\":\"https://…\"}}，填写 data.url。数组可填写 data.images[0].url。",
+      "headers": "请求头与凭据（可选）",
+      "addHeader": "添加请求头",
+      "headerName": "名称",
+      "headerValue": "值 / 凭据",
+      "removeHeader": "删除请求头",
+      "headersHelp": "按服务文档填写，例如 Authorization → Bearer 你的令牌。请求头的值保存在凭据保险库；无需填写 Content-Type。",
+      "enable": "启用我配置的上传接口",
+      "enableDesc": "保存配置不会上传图片。只有在参考图操作中明确确认后，才会把图片发送到此地址。",
+      "previousEndpoint": "以前的接口：",
+      "migration": {
+        "retired-provider": "原内置图床已停用。旧素材仍保留；如需上传，请填写自己的接口后启用。",
+        "custom-endpoint": "旧自定义地址已保留为关闭的草稿。请核对完整上传地址、字段及凭据，再明确启用。旧账号密码不会自动登录。",
+        "imported": "导入的图床配置保持关闭。请核对地址并补齐本机凭据后，再明确启用。"
       },
       "errors": {
-        "missingSeedvaultCredentials": "请先填写私域图床账号邮箱和密码。",
-        "tokenRequestFailed": "私域图床 token 获取失败，请检查账号、密码和 API 根地址。",
-        "invalidTokenResponse": "私域图床返回的数据中没有可用 token。",
+        "uploadUrl": "请填写完整的 HTTP(S) 上传地址，不要包含账号密码或 # 片段。",
+        "fileField": "请填写有效的图片文件字段名。",
+        "responsePath": "请填写返回 URL 的 JSON 字段路径，例如 data.url 或 data.images[0].url。",
+        "headers": "请求头名称或值无效；Content-Type、Content-Length 和 Host 由上传器处理。",
+        "duplicateHeader": "请求头名称不能重复。",
+        "disabled": "请先在设置中配置并明确启用自定义图床。",
         "saveFailed": "保存图床配置失败。"
       }
-    },
-    "audioModels": {
-      "title": "音频模型"
     },
     "canvasInteraction": {
       "title": "画布操作习惯",
@@ -2630,5 +3487,195 @@
         "desc": "回溯5秒前的场景"
       }
     }
+  },
+  "channelModes": {
+    "mode": "生成模式",
+    "addToSlot": "添加到「{{slot}}」",
+    "removeFromSlot": "从「{{slot}}」移除",
+    "wrongKind": "「{{slot}}」只接受对应类型的素材",
+    "noFreeSlot": "「{{mode}}」模式没有可放这类素材的空槽位",
+    "advanced": "高级参数",
+    "on": "开",
+    "off": "关",
+    "connectForSlot": "把素材节点连到这里，再选作「{{slot}}」",
+    "editor": {
+      "hint": "每个模式只发送它声明的参数和槽位；端点覆盖请在 JSON 里编辑，保存前看请求预览。",
+      "legacy": "当前是单一模式（沿用模型的操作和参考数量）。添加模式后可拆成文生 / 首帧 / 首尾帧 / 多参考等。",
+      "addMode": "添加模式",
+      "newMode": "模式{{index}}",
+      "count": "{{count}} 个模式",
+      "single": "单一模式",
+      "label": "名称",
+      "id": "模式 ID",
+      "operation": "操作",
+      "description": "说明",
+      "slots": "参考槽位",
+      "addSlot": "添加槽位",
+      "slotKey": "槽位键",
+      "kindLabel": "素材类型",
+      "kind": {
+        "image": "图片",
+        "video": "视频",
+        "audio": "音频"
+      },
+      "min": "最少",
+      "max": "最多",
+      "step": "步长",
+      "params": "参数",
+      "addParam": "添加参数",
+      "newParam": "新参数",
+      "paramKey": "参数键",
+      "type": "类型",
+      "types": {
+        "enum": "选项",
+        "number": "数字",
+        "boolean": "开关",
+        "text": "文本"
+      },
+      "group": "分组",
+      "basic": "基础",
+      "default": "默认值",
+      "options": "选项",
+      "optionsHint": "每行一个：标签=值，例如 720p=\"720p\" 或 5 秒=5"
+    }
+  },
+  "secrets": {
+    "state": {
+      "missing": "未配置",
+      "present": "已安全保存",
+      "locked": "保险库已锁定或不可用",
+      "error": "保险库操作失败"
+    },
+    "reveal": "显示密钥",
+    "hide": "隐藏密钥",
+    "delete": "删除已保存密钥",
+    "migrationError": "密钥迁移失败，原数据已保留",
+    "desktopRequired": "密钥保险库需要桌面应用",
+    "exportRefsOnly": "导出不包含任何密钥；在其他设备上需要重新填写。",
+    "deleteDraftNotice": "保存后将从系统保险库删除该密钥；取消或不保存则保持原样。"
+  },
+  "reference": {
+    "needsPublicUrl": "槽位 {{slotKey}} 需要上游可访问的 HTTP(S) URL；本地素材不会自动上传。",
+    "uploadConfirmTitle": "确认上传参考图片",
+    "uploadConfirmDescription": "将槽位 {{slotKey}} 的 {{count}} 张图片上传到你配置的图床，用公网地址替换本地素材后重新提交。请确认素材不含敏感信息。",
+    "uploadNotConfirmed": "上传参考图片需要明确确认。",
+    "publicUrlRequiredForMedia": "当前图床仅支持图片；请为视频或音频提供可访问的 HTTP(S) URL。",
+    "invalidHostedUrl": "图床未返回安全有效的 HTTP(S) URL。",
+    "uploadAndRetry": "上传到图床并重试",
+    "configureHost": "设置图床",
+    "uploadConfirm": "上传并重试",
+    "retryUnavailable": "找不到该槽位的参考素材，无法重试。"
+  },
+  "mediaEdit": {
+    "errors": {
+      "aborted": "已取消媒体编辑",
+      "invalid-operation": "不支持的媒体编辑操作",
+      "invalid-range": "编辑范围无效或超出媒体时长",
+      "wrong-node-kind": "此节点不支持该媒体操作",
+      "missing-node": "源节点已不存在",
+      "missing-source": "没有可编辑的媒体",
+      "stale-source": "源媒体或项目已改变，请重新操作",
+      "no-webcodecs": "当前环境缺少所需的本地媒体编解码能力",
+      "no-video-encoder": "当前环境没有可用的目标视频编码器",
+      "no-video-decoder": "当前环境无法解码此视频",
+      "no-audio-decoder": "当前环境无法解码此音频",
+      "no-audio-track": "视频没有音轨",
+      "no-video-track": "媒体没有视频轨",
+      "unsupported-container": "不支持此媒体格式或轨道组合",
+      "no-canvas": "当前环境不支持图像处理",
+      "read-failed": "无法读取源媒体",
+      "processing-failed": "本地媒体处理失败",
+      "persistence-failed": "无法保存编辑后的媒体"
+    },
+    "ratePitchNotice": "变速会同时改变音高",
+    "rotate": "向右旋转 90°",
+    "flipX": "水平镜像",
+    "flipY": "垂直镜像",
+    "done": "已生成 {{count}} 个编辑结果节点（可撤销）",
+    "audioSliced": "已生成裁剪音频",
+    "videoTitle": "视频编辑",
+    "audioTitle": "音频编辑",
+    "apply": "生成新节点",
+    "useCurrentTime": "取当前时间",
+    "addCurrentTime": "加入当前时间",
+    "tools": {
+      "captureFrame": "截帧",
+      "trim": "裁剪时长",
+      "crop": "裁切画面",
+      "separateAudio": "分离音频",
+      "slice": "截取",
+      "split": "分割",
+      "rate": "变速"
+    },
+    "duration": "时长 {{seconds}} 秒",
+    "time": "时间（秒）",
+    "start": "开始（秒）",
+    "end": "结束（秒）",
+    "splitPoints": "分割点（秒）",
+    "splitHint": "用逗号分隔，按顺序生成多段音频",
+    "rate": "倍速",
+    "crop": {
+      "x": "左（px）",
+      "y": "上（px）",
+      "width": "宽（px）",
+      "height": "高（px）"
+    },
+    "separateHint": "生成一个无声视频节点和一个音频节点，原节点保持不变。",
+    "unsupported": "当前环境不支持这项本地处理"
+  },
+  "characters": {
+    "title": "人物库",
+    "subtitle": "保存人物主图、参考图与音色，在 @ 引用或画布创作中重复使用。人物资料独立于项目。",
+    "create": "从图片创建",
+    "upload": "上传图片创建",
+    "search": "搜索人物或标签",
+    "all": "全部",
+    "noMatches": "没有匹配的人物",
+    "empty": "还没有人物",
+    "emptyHint": "从一张人物图片开始。建立后可添加更多角度、标签与音色，并在创作助手中使用 @ 引用。",
+    "editTitle": "编辑人物",
+    "name": "名字",
+    "description": "人物说明",
+    "images": "参考图片",
+    "addImages": "添加图片",
+    "imagesHint": "星标是主图。图片、排序与主图调整即时保存；下方名字、标签和音色点击「保存」后生效。",
+    "setMain": "设为主图",
+    "moveEarlier": "向前移动",
+    "moveLater": "向后移动",
+    "removeImage": "移除图片引用",
+    "tags": "标签",
+    "tagsHint": "使用逗号分隔，如：主角、短发、现代",
+    "voice": "音色",
+    "voiceNone": "不关联音色",
+    "voiceSample": "关联音频样本",
+    "voiceProvider": "关联供应商音色",
+    "chooseSample": "选择音频样本",
+    "providerId": "供应商 ID",
+    "voiceId": "音色 ID",
+    "voiceCloneUnavailable": "暂未配置声音复刻适配器。这里仅保存音频样本或已有供应商音色的引用，不会执行复刻或产生费用。",
+    "noImage": "尚无主图",
+    "apply": "应用到画布",
+    "sendMain": "发送主图到画布",
+    "applied": "已将「{{name}}」应用到画布",
+    "imageCount": "{{count}} 张参考图片",
+    "deleteNamed": "删除人物「{{name}}」",
+    "deleteTitle": "删除人物？",
+    "deleteDescription": "仅删除「{{name}}」的人物资料，不删除原图片、音频或画布节点。",
+    "storageWarning": "人物库当前仅保存在内存中，刷新可能丢失更改：{{reason}}",
+    "migrationIssues": "迁移时修复或忽略了 {{count}} 项数据",
+    "errors": {
+      "invalidInput": "人物资料不完整或格式不正确。",
+      "notFound": "人物已不存在。",
+      "assetNotFound": "引用的素材已不存在，请重新选择。",
+      "imageRequired": "请选择图片素材。",
+      "audioRequired": "请选择音频素材。",
+      "invalidImageOrder": "图片顺序已变化，请重新排序。",
+      "mainImageRequired": "请先设置主图。",
+      "mediaNotDurable": "素材尚未完成本地保存，请重新导入。",
+      "storage": "人物库保存失败，请检查存储后重试。",
+      "unknown": "人物操作失败，请重试。"
+    },
+    "createTitle": "从图片创建人物",
+    "createConfirm": "创建人物"
   }
 }

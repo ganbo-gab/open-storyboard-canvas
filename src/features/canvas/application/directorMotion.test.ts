@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import type { BlueprintItem, DirectorMotionProjectV1 } from '@/features/canvas/domain/canvasNodes';
+import type { BlueprintActionPose, BlueprintItem, DirectorActionClip, DirectorCameraRig, DirectorMotionProjectV1 } from '@/features/canvas/domain/canvasNodes';
 import {
-  DIRECTOR_PROCEDURAL_ACTIONS,
-  DIRECTOR_STATIC_POSES,
+  DIRECTOR_CAMERA_RIG_DEFAULTS,
   createDirectorCameraPresetTrack,
   createDirectorCameraRouteTrack,
   createDirectorObjectRouteTrack,
@@ -12,7 +11,7 @@ import {
   normalizeDirectorMotionProject,
   retimeDirectorTrack,
   sampleDirectorMotion,
-  sampleDirectorProceduralAction,
+  splitDirectorMotionClip,
   timeDirectorRoutePoints,
 } from './directorMotion';
 
@@ -41,6 +40,7 @@ describe('director motion schema', () => {
       objectTracks: {},
       actionTracks: {},
       customClips: [],
+      cameraRigs: [],
     });
   });
 
@@ -50,7 +50,7 @@ describe('director motion schema', () => {
       durationSeconds: 500,
       objectTracks: {
         item: [
-          { id: 'late', time: 40, easing: 'smooth', position: { x: 5, y: 0, z: 0 } },
+          { id: 'late', time: 140, easing: 'smooth', position: { x: 5, y: 0, z: 0 } },
           { id: 'first-equal', time: 2, position: { x: 1, y: 0, z: 0 } },
           { id: 'second-equal', time: 2, position: { x: 2, y: 0, z: 0 } },
         ],
@@ -58,14 +58,53 @@ describe('director motion schema', () => {
     });
 
     expect(project.schemaVersion).toBe(1);
-    expect(project.durationSeconds).toBe(30);
+    expect(project.durationSeconds).toBe(120);
     expect(project.objectTracks.item.map((keyframe) => keyframe.id)).toEqual([
       'first-equal',
       'second-equal',
       'late',
     ]);
-    expect(project.objectTracks.item[2].time).toBe(30);
+    expect(project.objectTracks.item[2].time).toBe(120);
     expect(project.objectTracks.item[0].scale).toEqual({ x: 1, y: 1, z: 1 });
+  });
+
+  it('retains long project and clip timing with anatomical and legacy poses', () => {
+    const anatomical: BlueprintActionPose = {
+      spine: { x: 0.2, y: -0.3, z: 0.1 }, chest: { x: 0.1 }, neck: { z: 0.2 },
+      leftClavicle: { x: 0.1, y: 0.2 }, rightUpperArm: { x: 1.2, y: 0.3, z: 0.4 },
+      leftForearm: { x: 1.1 }, rightWrist: { x: 0.2, y: -0.3, z: 0.1 },
+      leftFingers: { curl: 0.7, index: 0.1, thumb: 0.4, spread: 0.3 },
+      leftThigh: { x: 0.5, y: 0.2, z: 0.1 }, rightShin: { x: 1.3 },
+      leftFoot: { x: 0.2, y: 0.1, z: -0.2 }, rightToes: { x: 0.3 },
+      scaleY: 1.1, groupY: 0.2, groupRotX: -0.4, groupRotZ: 0.3,
+    };
+    const legacy = {
+      torso: { x: -0.2 }, leftShoulder: { x: -1, z: -0.4 }, rightElbow: { x: -0.5 },
+      leftHip: { x: -0.8, y: 0.1, z: -0.2 }, leftKnee: { x: 1.2 },
+    };
+    const raw = {
+      durationSeconds: 110,
+      actionTracks: { actor: [{ id: 'pose', time: 95, pose: anatomical }] },
+      customClips: [{
+        id: 'long', name: 'Long clip', durationSeconds: 105, loop: false,
+        keyframes: [{ id: 'old', time: 90, actionOffsetSeconds: 2.5, pose: legacy }],
+      }],
+    };
+    const project = normalizeDirectorMotionProject(raw);
+
+    expect(project.durationSeconds).toBe(110);
+    expect(project.actionTracks.actor[0].time).toBe(95);
+    expect(project.actionTracks.actor[0].pose).toEqual(anatomical);
+    expect(project.customClips[0].durationSeconds).toBe(105);
+    expect(project.customClips[0].keyframes[0]).toMatchObject({
+      time: 90, actionOffsetSeconds: 2.5,
+      pose: {
+        spine: { x: 0.2 }, rightUpperArm: { x: 1, z: 0.4 }, leftForearm: { x: 0.5 },
+        rightThigh: { x: 0.8, y: 0.1, z: 0.2 }, rightShin: { x: 1.2 },
+      },
+    });
+    expect(raw.customClips[0].keyframes[0].pose).toEqual(legacy);
+    expect(normalizeDirectorMotionProject(project)).toEqual(project);
   });
 });
 
@@ -109,14 +148,7 @@ describe('director motion sampling', () => {
     expect(sampleDirectorMotion(project, 2).objects.item.position.x).toBe(4);
   });
 
-  it('samples distinct procedural actions and a looping custom clip', () => {
-    expect(DIRECTOR_PROCEDURAL_ACTIONS.length).toBeGreaterThanOrEqual(13);
-    DIRECTOR_PROCEDURAL_ACTIONS.forEach((action) => {
-      expect(sampleDirectorProceduralAction(action.id, action.durationSeconds / 3)).toBeTruthy();
-    });
-    expect(sampleDirectorProceduralAction('clap', 0.55)).not.toEqual(sampleDirectorProceduralAction('walk-back', 0.55));
-    expect(DIRECTOR_STATIC_POSES.length).toBeGreaterThanOrEqual(20);
-
+  it('samples pose-only keyframes inside a looping custom clip', () => {
     const project: DirectorMotionProjectV1 = {
       ...createEmptyDirectorMotionProject(8),
       customClips: [{
@@ -132,6 +164,164 @@ describe('director motion sampling', () => {
     };
 
     expect(sampleDirectorMotion(project, 1.5).actions.actor.pose?.head?.y).toBeCloseTo(0.5);
+  });
+
+  it('interpolates pose-only anatomical joints, fingers and whole-body channels', () => {
+    const project: DirectorMotionProjectV1 = {
+      ...createEmptyDirectorMotionProject(4),
+      actionTracks: { actor: [
+        { id: 'a', time: 0, easing: 'linear', pose: {
+          spine: { x: 0.2 }, chest: { y: -0.2 }, neck: { z: -0.1 }, leftClavicle: { x: 0.1 },
+          leftUpperArm: { x: 0.2, z: 0.4 }, leftForearm: { x: 0.4 }, leftWrist: { y: -0.2 },
+          leftFingers: { curl: 0.2, index: 0.1, thumb: 0.2, spread: 0.4 },
+          rightThigh: { x: 0.2 }, rightShin: { x: 0.4 }, rightFoot: { z: 0.1 }, rightToes: { x: 0.2 },
+          groupY: 0.1, groupRotX: -0.2, groupRotZ: -0.4, scaleY: 0.8,
+        } },
+        { id: 'b', time: 4, easing: 'linear', pose: {
+          spine: { x: 0.6 }, chest: { y: 0.2 }, neck: { z: 0.3 }, leftClavicle: { x: 0.3 },
+          leftUpperArm: { x: 1, z: 0.8 }, leftForearm: { x: 1.2 }, leftWrist: { y: 0.6 },
+          leftFingers: { curl: 0.8, index: 0.9, thumb: 0.6, spread: 0.8 },
+          rightThigh: { x: 1 }, rightShin: { x: 1.2 }, rightFoot: { z: 0.3 }, rightToes: { x: 0.6 },
+          groupY: 0.5, groupRotX: 0.6, groupRotZ: 0.8, scaleY: 1.2,
+        } },
+      ] },
+    };
+
+    const pose = sampleDirectorMotion(project, 2).actions.actor.pose!;
+    expect(pose.spine?.x).toBeCloseTo(0.4);
+    expect(pose.neck?.z).toBeCloseTo(0.1);
+    expect(pose.leftClavicle?.x).toBeCloseTo(0.2);
+    expect(pose.leftUpperArm?.x).toBeCloseTo(0.6);
+    expect(pose.leftUpperArm?.z).toBeCloseTo(0.6);
+    expect(pose.leftForearm?.x).toBeCloseTo(0.8);
+    expect(pose.leftWrist?.y).toBeCloseTo(0.2);
+    expect(pose.leftFingers?.curl).toBeCloseTo(0.5);
+    expect(pose.leftFingers?.index).toBeCloseTo(0.5);
+    expect(pose.leftFingers?.thumb).toBeCloseTo(0.4);
+    expect(pose.leftFingers?.spread).toBeCloseTo(0.6);
+    expect(pose.rightThigh?.x).toBeCloseTo(0.6);
+    expect(pose.rightShin?.x).toBeCloseTo(0.8);
+    expect(pose.rightFoot?.z).toBeCloseTo(0.2);
+    expect(pose.rightToes?.x).toBeCloseTo(0.4);
+    expect(pose.groupY).toBeCloseTo(0.3);
+    expect(pose.groupRotX).toBeCloseTo(0.2);
+    expect(pose.groupRotZ).toBeCloseTo(0.2);
+    expect(pose.scaleY).toBeCloseTo(1);
+    expect(sampleDirectorMotion(project, 4).actions.actor.pose).toEqual(project.actionTracks.actor[1].pose);
+  });
+
+  it('layers explicit anatomical edits on a procedural action without losing its moving limbs', () => {
+    const project: DirectorMotionProjectV1 = {
+      ...createEmptyDirectorMotionProject(4),
+      actionTracks: { actor: [{ id: 'walk', time: 0, easing: 'linear', actionId: 'walk', pose: {
+        head: { x: 0.3 }, leftFingers: { curl: 0.8, index: 0.1 }, groupRotZ: 0.2,
+      } }] },
+    };
+    const pose = sampleDirectorMotion(project, 0.275).actions.actor.pose!;
+
+    expect(pose.head).toEqual({ x: 0.3 });
+    expect(pose.leftFingers).toEqual({ curl: 0.8, index: 0.1 });
+    expect(pose.groupRotZ).toBe(0.2);
+    expect(pose.leftThigh?.x).toBeCloseTo(24 * Math.PI / 180);
+    expect(pose.rightThigh?.x).toBeCloseTo(-24 * Math.PI / 180);
+    expect(pose.rightUpperArm?.x).toBeCloseTo(18 * Math.PI / 180);
+    expect(sampleDirectorMotion(project, 0.825).actions.actor.pose?.leftThigh?.x).toBeCloseTo(-24 * Math.PI / 180);
+  });
+
+  it('layers a pose-only edit on a named static pose', () => {
+    const project: DirectorMotionProjectV1 = {
+      ...createEmptyDirectorMotionProject(),
+      actionTracks: { actor: [{ id: 'point', time: 0, easing: 'linear', poseId: 'point-forward', pose: { head: { x: 0.2 } } }] },
+    };
+    const pose = sampleDirectorMotion(project, 2).actions.actor.pose!;
+    expect(pose.head).toEqual({ x: 0.2 });
+    expect(pose.rightUpperArm?.x).toBeCloseTo(88 * Math.PI / 180);
+    expect(pose.rightFingers?.index).toBe(0);
+    expect(pose.rightFingers?.curl).toBe(1);
+  });
+
+  it('plays one-shot actions once and holds their final pose', () => {
+    const project: DirectorMotionProjectV1 = {
+      ...createEmptyDirectorMotionProject(8),
+      actionTracks: { actor: [{ id: 'sit', time: 1, easing: 'linear', actionId: 'sit-down' }] },
+    };
+    const halfway = sampleDirectorMotion(project, 1.7).actions.actor.pose!;
+    const finished = sampleDirectorMotion(project, 2.4).actions.actor.pose!;
+
+    expect(finished.leftThigh?.x).toBeCloseTo(Math.PI / 2);
+    expect(finished.leftShin?.x).toBeCloseTo(Math.PI / 2);
+    expect(halfway.leftThigh?.x).not.toBeCloseTo(finished.leftThigh!.x!);
+    expect(sampleDirectorMotion(project, 4.5).actions.actor.pose).toEqual(finished);
+    expect(sampleDirectorMotion(project, 8).actions.actor.pose).toEqual(finished);
+  });
+
+  it('restores the item pose when its action track is empty or removed', () => {
+    const pose: BlueprintActionPose = { chest: { y: 0.3 }, rightWrist: { x: -0.2 }, leftFingers: { curl: 0.7 }, groupRotZ: 0.1 };
+    const actor = { id: 'actor', label: 'Actor', color: '#fff', x: 0, y: 0, category: 'person', pose } as BlueprintItem;
+    const project: DirectorMotionProjectV1 = {
+      ...createEmptyDirectorMotionProject(4),
+      actionTracks: { actor: [{ id: 'override', time: 0, easing: 'linear', pose: { head: { x: 0.3 } } }] },
+    };
+
+    expect(sampleDirectorMotion(project, 1, [actor]).actions.actor.pose).toEqual({ head: { x: 0.3 } });
+    project.actionTracks.actor = [];
+    expect(sampleDirectorMotion(project, 1, [actor]).actions.actor.pose).toEqual(pose);
+    delete project.actionTracks.actor;
+    expect(sampleDirectorMotion(project, 1, [actor]).actions.actor.pose).toEqual(pose);
+    expect(actor.pose).toEqual(pose);
+  });
+
+  it('limits scene action crossfades to the final quarter second and respects hold or restricted easing', () => {
+    const project: DirectorMotionProjectV1 = {
+      ...createEmptyDirectorMotionProject(4),
+      actionTracks: { actor: [
+        { id: 'walk', time: 0, easing: 'linear', actionId: 'walk', pose: { head: { x: 0.2 } } },
+        { id: 'end', time: 2, easing: 'smooth', pose: { head: { x: 0.8 } } },
+      ] },
+    };
+
+    expect(sampleDirectorMotion(project, 1.75).actions.actor.pose?.head?.x).toBeCloseTo(0.2);
+    expect(sampleDirectorMotion(project, 1.875).actions.actor.pose?.head?.x).toBeCloseTo(0.5);
+    expect(sampleDirectorMotion(project, 1.999).actions.actor.pose?.head?.x).toBeCloseTo(0.8, 3);
+    expect(sampleDirectorMotion(project, 2).actions.actor.pose?.head?.x).toBeCloseTo(0.8);
+    project.actionTracks.actor[1].easing = 'hold';
+    expect(sampleDirectorMotion(project, 1.99).actions.actor.pose?.head?.x).toBeCloseTo(0.2);
+    project.actionTracks.actor[1].easing = 'smooth';
+    project.actionTracks.actor[1].easingRange = [0.2, 0.8];
+    expect(sampleDirectorMotion(project, 1.99).actions.actor.pose?.head?.x).toBeCloseTo(0.2);
+  });
+
+  it('retains procedural phase and authored overlays when a placed clip is split', () => {
+    const clip: DirectorActionClip = {
+      id: 'walk', name: 'Walk', durationSeconds: 4, loop: false,
+      keyframes: [
+        { id: 'a', time: 0, easing: 'linear', actionId: 'walk', actionOffsetSeconds: 0.13, pose: { head: { x: 0.3 }, leftFingers: { index: 0.1 } } },
+        { id: 'b', time: 4, easing: 'smooth', pose: { head: { x: -0.2 } } },
+      ],
+    };
+    const project: DirectorMotionProjectV1 = {
+      ...createEmptyDirectorMotionProject(8), customClips: [clip],
+      actionTracks: { actor: [{ id: 'placed', time: 1, easing: 'linear', clipId: clip.id, pose: { rightFingers: { curl: 0.8 } } }] },
+    };
+    const split = splitDirectorMotionClip(project, clip.id, 2).project;
+
+    for (const time of [1, 1.5, 2.99, 3, 3.01, 3.4, 4.8, 5]) {
+      const actual = sampleDirectorMotion(split, time).actions.actor.pose!;
+      const expected = sampleDirectorMotion(project, time).actions.actor.pose!;
+      expect(Object.keys(actual).sort()).toEqual(Object.keys(expected).sort());
+      for (const key of Object.keys(expected) as Array<keyof BlueprintActionPose>) {
+        const value = expected[key];
+        if (typeof value === 'number') expect(actual[key]).toBeCloseTo(value, 10);
+        else for (const [channel, amount] of Object.entries(value!)) {
+          expect((actual[key] as Record<string, number>)[channel]).toBeCloseTo(amount, 10);
+        }
+      }
+    }
+    const pose = sampleDirectorMotion(split, 3.4).actions.actor.pose!;
+    expect(pose.head).toEqual({ x: 0.3 });
+    expect(pose.leftFingers).toEqual({ index: 0.1 });
+    expect(pose.rightFingers).toEqual({ curl: 0.8 });
+    expect(sampleDirectorMotion(split, 3.7).actions.actor.pose?.leftThigh?.x).not.toBeCloseTo(pose.leftThigh!.x!);
   });
 
   it('includes the persisted base transform for an action-only track', () => {
@@ -160,7 +350,6 @@ describe('director motion sampling', () => {
       rotation: actor.rotation3d,
       scale: actor.scale3d,
     });
-    expect(frame.actions.actor.pose).toBeTruthy();
   });
 
   it('restores the persisted base transform after the final transform keyframe is removed', () => {
@@ -296,6 +485,59 @@ describe('director motion sampling', () => {
     expect(frame.camera?.position.z).toBeCloseTo(-2.2);
     expect(frame.camera?.target).toEqual({ x: 0, y: 1.05, z: 2 });
     expect(frame.camera?.trackTargetId).toBe('actor');
+  });
+
+  describe('camera rigs', () => {
+    const actor = { id: 'actor', label: 'Actor', color: '#fff', x: 0, y: 0, category: 'person' } as BlueprintItem;
+    const route = createDirectorObjectRouteTrack([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 8 }], actor, 0, 8);
+    const rig = (patch: Partial<DirectorCameraRig> = {}): DirectorCameraRig => ({
+      id: 'rig', kind: 'follow', targetId: 'actor', start: 2, end: 6, ...DIRECTOR_CAMERA_RIG_DEFAULTS.follow, damping: 0, ...patch,
+    });
+    const fixed = createDirectorCameraRouteTrack([{ x: 9, y: 3, z: 0 }, { x: 9, y: 3, z: 1 }], { target: { x: 0, y: 1, z: 0 }, fov: 50 }, 0, 8);
+    const project = (rigs: DirectorCameraRig[]): DirectorMotionProjectV1 => ({
+      ...createEmptyDirectorMotionProject(8), cameraTrack: fixed, objectTracks: { actor: route }, cameraRigs: rigs,
+    });
+
+    it('rides behind the subject inside its interval and yields to keyframes outside it', () => {
+      const sampled = sampleDirectorMotion(project([rig()]), 4, [actor]);
+      // Walking +Z at z=4: behind is -Z by the rig distance, aimed at the torso.
+      expect(sampled.camera?.position.x).toBeCloseTo(0);
+      expect(sampled.camera?.position.z).toBeCloseTo(4 - DIRECTOR_CAMERA_RIG_DEFAULTS.follow.distance);
+      expect(sampled.camera?.target).toEqual({ x: expect.closeTo(0), y: expect.closeTo(1.05), z: expect.closeTo(4) });
+      expect(sampled.camera?.rigId).toBe('rig');
+      expect(sampleDirectorMotion(project([rig()]), 7, [actor]).camera?.position.x).toBeCloseTo(9);
+    });
+
+    it('follows later route edits without re-authoring the camera', () => {
+      const edited = { ...project([rig()]), objectTracks: { actor: createDirectorObjectRouteTrack([{ x: 5, y: 0, z: 0 }, { x: 5, y: 0, z: 8 }], actor, 0, 8) } };
+      expect(sampleDirectorMotion(edited, 4, [actor]).camera?.target.x).toBeCloseTo(5);
+    });
+
+    it('lags the subject with damping and stays put once the subject stops', () => {
+      const rigid = sampleDirectorMotion(project([rig()]), 4, [actor]).camera!.position.z;
+      const damped = sampleDirectorMotion(project([rig({ damping: 0.8 })]), 4, [actor]).camera!.position.z;
+      expect(damped).toBeLessThan(rigid - 0.1);
+      // Subject stops at z=8 when its route ends at 4 s; well past the lag window the camera has caught up.
+      const shortRoute = createDirectorObjectRouteTrack([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 8 }], actor, 0, 4);
+      const stopped = { ...project([rig({ damping: 0.8, end: 8 })]), objectTracks: { actor: shortRoute } };
+      const late = sampleDirectorMotion(stopped, 8, [actor]).camera!.position.z;
+      expect(late).toBeCloseTo(8 - DIRECTOR_CAMERA_RIG_DEFAULTS.follow.distance, 2);
+    });
+
+    it('places a close-up in front of the face at its own distance', () => {
+      const sampled = sampleDirectorMotion(project([rig({ kind: 'closeup', ...DIRECTOR_CAMERA_RIG_DEFAULTS.closeup, damping: 0 })]), 4, [actor]);
+      expect(sampled.camera?.position.z).toBeCloseTo(4 + DIRECTOR_CAMERA_RIG_DEFAULTS.closeup.distance);
+      expect(sampled.camera?.target.y).toBeCloseTo(1.6);
+    });
+
+    it('drops rigs without a subject and clamps parameters when loading', () => {
+      const loaded = normalizeDirectorMotionProject({ durationSeconds: 8, cameraRigs: [
+        { id: 'a', kind: 'closeup', targetId: 'actor', start: 7.9, end: 99, distance: -3, fov: 500, damping: 2 },
+        { id: 'b', kind: 'follow' },
+      ] });
+      expect(loaded.cameraRigs).toHaveLength(1);
+      expect(loaded.cameraRigs[0]).toMatchObject({ kind: 'closeup', start: 7.8, end: 8, distance: 0.3, fov: 120, damping: 0.95, bodyPart: 'head' });
+    });
   });
 
   it('orbits outside an actor at a route reversal instead of crossing through them', () => {

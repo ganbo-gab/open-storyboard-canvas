@@ -5,6 +5,7 @@ import {
   encodeProject,
   type Project,
 } from './projectStore';
+import { applyCanvasHistoryEntry, createCanvasHistoryEntry } from './canvasHistory';
 
 describe('project persistence media codec', () => {
   it('round-trips image/video/audio and nested Director Studio refs without pooling retry blobs', () => {
@@ -39,7 +40,7 @@ describe('project persistence media codec', () => {
       nodes,
       edges: [],
       viewport: { x: 0, y: 0, zoom: 1 },
-      history: { past: [{ nodes, edges: [] }], future: [] },
+      history: { past: [createCanvasHistoryEntry({ nodes: [], edges: [] }, { nodes, edges: [] })!], future: [] },
     };
 
     const encoded = encodeProject(project);
@@ -63,6 +64,26 @@ describe('project persistence media codec', () => {
     expect(JSON.stringify(decoded.nodes)).toContain('/tmp/panorama.jpg');
     expect(JSON.stringify(decoded.nodes)).toContain('/tmp/reference.png');
     expect(JSON.stringify(decoded.history)).toContain('/tmp/video.mp4');
+  });
+
+  it('replaces a dead blob: image or preview with the surviving copy, keeping blob-only nodes for recovery', () => {
+    const node = (id: string, data: Record<string, unknown>) => ({ id, type: 'exportImageNode', position: { x: 0, y: 0 }, data });
+    const nodes = [
+      node('preview-dead', { imageUrl: 'data:image/png;base64,aW1hZ2U=', previewImageUrl: 'blob:http://app/dead-preview' }),
+      node('image-dead', { imageUrl: 'blob:http://app/dead-image', previewImageUrl: 'data:image/png;base64,cHJldmlldw==' }),
+      node('blob-only', { imageUrl: 'blob:http://app/dead-image-2', previewImageUrl: 'blob:http://app/dead-preview-2' }),
+      node('remote', { imageUrl: 'https://cdn.example/a.png', previewImageUrl: 'https://cdn.example/a-small.png' }),
+    ] as unknown as CanvasNode[];
+    const decoded = decodeProject(encodeProject({
+      id: 'p', name: 'p', createdAt: 1, updatedAt: 1, nodeCount: 4, nodes, edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 }, history: { past: [], future: [] },
+    }));
+    expect(decoded.nodes.map((item) => [item.data.imageUrl, item.data.previewImageUrl])).toEqual([
+      ['data:image/png;base64,aW1hZ2U=', 'data:image/png;base64,aW1hZ2U='],
+      ['data:image/png;base64,cHJldmlldw==', 'data:image/png;base64,cHJldmlldw=='],
+      ['blob:http://app/dead-image-2', 'blob:http://app/dead-preview-2'],
+      ['https://cdn.example/a.png', 'https://cdn.example/a-small.png'],
+    ]);
   });
 
   it('round-trips retired text Agent associations without exposing them in new UI', () => {
@@ -100,7 +121,7 @@ describe('project persistence media codec', () => {
       nodes,
       edges: [{ id: 'legacy-edge', source: 'legacy-text-node', target: 'legacy-result-node' }],
       viewport: { x: 0, y: 0, zoom: 1 },
-      history: { past: [{ nodes, edges: [] }], future: [] },
+      history: { past: [createCanvasHistoryEntry({ nodes: [], edges: [] }, { nodes, edges: [] })!], future: [] },
     };
 
     const decoded = decodeProject(encodeProject(project));
@@ -114,6 +135,7 @@ describe('project persistence media codec', () => {
       rawContent: '{"shot":1}',
       parsedJson: { shot: 1 },
     });
-    expect(decoded.history.past[0].nodes[0].data.agentId).toBe('legacy-agent-a');
+    const restored = applyCanvasHistoryEntry({ nodes: [], edges: [] }, decoded.history.past[0], 'redo');
+    expect(restored.nodes[0].data.agentId).toBe('legacy-agent-a');
   });
 });

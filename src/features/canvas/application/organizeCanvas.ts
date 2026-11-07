@@ -17,13 +17,13 @@ function sizeOf(node: CanvasNode): { width: number; height: number } {
 export function planOrganizeCanvas(nodes: CanvasNode[], edges: CanvasEdge[]): Array<{ nodeId: string; position: { x: number; y: number } }> {
   const blockOf = new Map<string, string>();
   for (const node of nodes) {
-    if (!isTagGroupNode(node)) continue;
+    if (node.hidden || !isTagGroupNode(node)) continue;
     for (const memberId of node.data.memberNodeIds) blockOf.set(memberId, node.id);
   }
 
   // Top-level only: group children are parent-relative and travel with their group.
   const layoutNodes: LayoutNode[] = nodes
-    .filter((node) => !node.parentId && !blockOf.has(node.id))
+    .filter((node) => !node.hidden && !node.parentId && !blockOf.has(node.id))
     .map((node) => ({ id: node.id, x: node.position.x, y: node.position.y, ...sizeOf(node) }));
   if (layoutNodes.length < 2) return [];
 
@@ -45,7 +45,7 @@ export function planOrganizeCanvas(nodes: CanvasNode[], edges: CanvasEdge[]): Ar
     if (!isTagGroupNode(node)) continue;
     for (const memberId of node.data.memberNodeIds) {
       const member = nodeById.get(memberId);
-      if (member && !member.parentId) {
+      if (member && !member.hidden && !member.parentId) {
         moves.push({ nodeId: memberId, position: { x: member.position.x + dx, y: member.position.y + dy } });
       }
     }

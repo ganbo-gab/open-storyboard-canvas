@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { UiButton, UiModal, UiSelect, UiTextArea } from '@/components/ui';
+import { UiBadge, UiButton, UiField, UiModal, UiSegmented, UiSelect, UiTextArea } from '@/components/ui';
 import {
   PROMPT_TEMPLATE_DEFINITIONS,
   getPromptTemplateDefaultText,
@@ -59,6 +59,7 @@ function PromptTemplateEditor({
   const resetPromptTemplate = useSettingsStore((state) => state.resetPromptTemplate);
   const [draftTemplate, setDraftTemplate] = useState('');
   const [draftLanguage, setDraftLanguage] = useState<PromptTemplateLanguagePreference>('inherit');
+  const templateInputId = useId();
 
   const templateId = definition ? getTemplateId(definition) : null;
   const settingsSnapshot = useMemo(
@@ -113,15 +114,14 @@ function PromptTemplateEditor({
       widthClassName="w-[min(92vw,760px)]"
       footer={
         <>
-          <UiButton type="button" variant="ghost" size="sm" onClick={handleReset}>
-            <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+          <UiButton variant="ghost" size="sm" icon={<RotateCcw />} onClick={handleReset}>
             {t('settings.promptManagement.restoreDefault')}
           </UiButton>
           <div className="ml-auto flex gap-2">
-            <UiButton type="button" variant="muted" size="sm" onClick={onClose}>
+            <UiButton variant="secondary" size="sm" onClick={onClose}>
               {t('common.close')}
             </UiButton>
-            <UiButton type="button" variant="primary" size="sm" onClick={handleSave}>
+            <UiButton variant="primary" size="sm" onClick={handleSave}>
               {t('settings.promptManagement.saveAndClose')}
             </UiButton>
           </div>
@@ -129,20 +129,20 @@ function PromptTemplateEditor({
       }
     >
       <div className="space-y-4">
-        <div className="rounded-lg border border-border-dark bg-bg-dark p-3">
-          <div className="text-sm font-medium text-text-dark">{t(definition.titleKey)}</div>
-          <p className="mt-1 text-xs leading-5 text-text-muted">{t(definition.descriptionKey)}</p>
+        <div className="rounded-xl border border-[var(--line)] bg-surface p-3">
+          <div className="text-[13px] font-medium text-text-dark">{t(definition.titleKey)}</div>
+          <p className="mt-1 text-[12px] leading-5 text-text-muted">{t(definition.descriptionKey)}</p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-[220px_1fr]">
-          <label className="text-xs font-medium text-text-muted">
+          <label className="text-[12px] font-medium text-text-muted">
             {t('settings.promptManagement.templateLanguage')}
             <UiSelect
               value={draftLanguage}
               onChange={(event) =>
                 setDraftLanguage(event.target.value as PromptTemplateLanguagePreference)
               }
-              className="mt-2 h-9 text-sm"
+              className="mt-2"
             >
               <option value="inherit">
                 {t('settings.promptManagement.languageInherit', {
@@ -154,11 +154,11 @@ function PromptTemplateEditor({
             </UiSelect>
           </label>
 
-          <div className="rounded-lg border border-border-dark bg-bg-dark p-3">
-            <div className="text-xs font-medium text-text-muted">
+          <div className="rounded-xl border border-[var(--line)] bg-surface p-3">
+            <div className="text-[12px] font-medium text-text-muted">
               {t('settings.promptManagement.dynamicFields')}
             </div>
-            <p className="mt-1 text-xs leading-5 text-text-muted">
+            <p className="mt-1 text-[12px] leading-5 text-text-muted">
               {definition.dynamicDescriptionKey
                 ? t(definition.dynamicDescriptionKey)
                 : t('settings.promptManagement.dynamicNotes.none')}
@@ -168,34 +168,34 @@ function PromptTemplateEditor({
                 {placeholders.map((placeholder) => (
                   <span
                     key={placeholder}
-                    className="rounded-sm bg-surface-dark px-2 py-1 font-mono text-[11px] text-text-dark"
+                    className="rounded-md bg-[var(--press)] px-2 py-1 font-mono text-[11px] text-text-dark"
                   >
                     {placeholder}
                   </span>
                 ))}
               </div>
             ) : (
-              <div className="mt-2 text-[11px] text-text-muted">
+              <div className="mt-2 text-[12px] text-text-subtle">
                 {t('settings.promptManagement.noPlaceholders')}
               </div>
             )}
           </div>
         </div>
 
-        <label className="block text-xs font-medium text-text-muted">
-          {t('settings.promptManagement.editableTemplate')}
+        <UiField label={t('settings.promptManagement.editableTemplate')} htmlFor={templateInputId}>
           <UiTextArea
+            id={templateInputId}
             value={draftTemplate}
             onChange={(event) => setDraftTemplate(event.target.value)}
-            className="mt-2 h-56 font-mono text-xs leading-5"
+            className="h-56 font-mono text-[12px] leading-5"
           />
-        </label>
+        </UiField>
 
-        <div className="rounded-lg border border-border-dark bg-bg-dark p-3">
-          <div className="text-xs font-medium text-text-muted">
+        <div className="rounded-xl border border-[var(--line)] bg-surface p-3">
+          <div className="text-[12px] font-medium text-text-muted">
             {t('settings.promptManagement.defaultTemplatePreview')}
           </div>
-          <div className="ui-scrollbar mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-sm bg-surface-dark p-2 font-mono text-[11px] leading-5 text-text-muted">
+          <div className="ui-scrollbar mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg bg-[var(--field-bg)] p-2 font-mono text-[11px] leading-5 text-text-muted">
             {defaultTemplate}
           </div>
         </div>
@@ -237,35 +237,38 @@ export function PromptManagementSection() {
   }, []);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-start justify-between gap-4 border-b border-border-dark px-6 py-5">
-        <div>
-          <h2 className="text-lg font-semibold text-text-dark">
+    <>
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--line)] px-6 py-5">
+        <div className="min-w-0">
+          <h2 className="text-[15px] font-semibold text-text-dark">
             {t('settings.promptManagement.title')}
           </h2>
-          <p className="mt-1 text-sm text-text-muted">
+          <p className="mt-1 text-[13px] text-text-muted">
             {t('settings.promptManagement.desc')}
           </p>
         </div>
-        <label className="w-44 shrink-0 text-xs font-medium text-text-muted">
-          {t('settings.promptManagement.globalLanguage')}
-          <UiSelect
+        <div className="flex shrink-0 flex-col gap-2">
+          <span className="text-[12px] font-medium text-text-muted">
+            {t('settings.promptManagement.globalLanguage')}
+          </span>
+          <UiSegmented<PromptLanguage>
             value={promptDefaultLanguage}
-            onChange={(event) => setPromptDefaultLanguage(event.target.value as PromptLanguage)}
-            className="mt-2 h-9 text-sm"
-          >
-            <option value="zh">{t('settings.promptManagement.languages.zh')}</option>
-            <option value="en">{t('settings.promptManagement.languages.en')}</option>
-          </UiSelect>
-        </label>
+            onChange={(value) => setPromptDefaultLanguage(value)}
+            aria-label={t('settings.promptManagement.globalLanguage')}
+            options={[
+              { value: 'zh', label: t('settings.promptManagement.languages.zh') },
+              { value: 'en', label: t('settings.promptManagement.languages.en') },
+            ]}
+          />
+        </div>
       </div>
 
-      <div className="ui-scrollbar flex-1 space-y-6 overflow-y-auto p-6">
+      <div className="ui-scrollbar flex-1 space-y-4 overflow-y-auto p-6">
         {groupedDefinitions.map((group) => (
           <section key={group.scope} className="space-y-3">
             <div className="flex items-center gap-2">
               <SlidersHorizontal className="h-4 w-4 text-accent" />
-              <h3 className="text-sm font-semibold text-text-dark">
+              <h3 className="text-[13px] font-semibold text-text-dark">
                 {t(SCOPE_LABEL_KEYS[group.scope])}
               </h3>
             </div>
@@ -282,24 +285,24 @@ export function PromptManagementSection() {
                 return (
                   <div
                     key={definition.id}
-                    className="rounded-lg border border-border-dark bg-bg-dark p-4"
+                    className="rounded-xl border border-[var(--line)] bg-surface p-4"
                   >
                     <div className="flex flex-col gap-3 md:flex-row md:items-start">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h4 className="text-sm font-medium text-text-dark">
+                          <h4 className="text-[13px] font-medium text-text-dark">
                             {t(definition.titleKey)}
                           </h4>
-                          <span className="rounded-sm bg-surface-dark px-2 py-0.5 text-[11px] text-text-muted">
+                          <UiBadge>
                             {t(`settings.promptManagement.languages.${effectiveLanguage}`)}
-                          </span>
+                          </UiBadge>
                           {hasTemplateOverride || hasLanguageOverride ? (
-                            <span className="rounded-sm bg-accent/15 px-2 py-0.5 text-[11px] text-accent">
+                            <UiBadge tone="accent">
                               {t('settings.promptManagement.customized')}
-                            </span>
+                            </UiBadge>
                           ) : null}
                         </div>
-                        <p className="mt-1 text-xs leading-5 text-text-muted">
+                        <p className="mt-1 text-[12px] leading-5 text-text-muted">
                           {t(definition.descriptionKey)}
                         </p>
                       </div>
@@ -313,7 +316,7 @@ export function PromptManagementSection() {
                               event.target.value as PromptTemplateLanguagePreference
                             )
                           }
-                          className="h-9 min-w-[150px] text-xs"
+                          className="min-w-[150px]"
                           aria-label={t('settings.promptManagement.templateLanguage')}
                         >
                           <option value="inherit">
@@ -323,8 +326,7 @@ export function PromptManagementSection() {
                           <option value="en">{t('settings.promptManagement.languages.en')}</option>
                         </UiSelect>
                         <UiButton
-                          type="button"
-                          variant="muted"
+                          variant="secondary"
                           size="sm"
                           onClick={() => setEditingDefinition(definition)}
                         >
@@ -345,6 +347,6 @@ export function PromptManagementSection() {
         promptDefaultLanguage={promptDefaultLanguage}
         onClose={() => setEditingDefinition(null)}
       />
-    </div>
+    </>
   );
 }

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const textExtensions = new Set([
@@ -13,13 +13,17 @@ const trackedFiles = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' 
   .split('\0')
   .filter(Boolean);
 const invalidFiles = [];
+let checkedTextFiles = 0;
 
 for (const file of trackedFiles) {
+  // Deleted tracked files remain in the index until the user stages the change.
+  if (!existsSync(file)) continue;
   const basename = path.basename(file);
   const extension = basename.startsWith('.') ? basename : path.extname(basename).toLowerCase();
   if (!textBasenames.has(basename) && !textExtensions.has(extension)) continue;
 
   const bytes = readFileSync(file);
+  checkedTextFiles++;
   if (bytes.includes(0x00)) {
     invalidFiles.push(`${file}: contains NUL/UTF-16 bytes`);
     continue;
@@ -32,5 +36,5 @@ if (invalidFiles.length) {
   for (const issue of invalidFiles) console.error(`- ${issue}`);
   process.exitCode = 1;
 } else {
-  console.log(`Checked ${trackedFiles.length} tracked files: text line endings are LF-only.`);
+  console.log(`Checked ${checkedTextFiles} existing tracked text files: line endings are LF-only.`);
 }

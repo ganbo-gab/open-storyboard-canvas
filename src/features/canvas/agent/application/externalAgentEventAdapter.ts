@@ -3,14 +3,12 @@ import {
   type ExternalAgentEventV1 as RawExternalAgentEventV1,
   type ExternalAgentRuntimeDiagnostic as RawRuntimeDiagnostic,
 } from '@/commands/externalAgent';
-import { CANVAS_REGISTERED_COMMAND_TYPES } from '@/features/canvas/application/canvasCommandRegistry';
-import { CANVAS_COMMAND_VERSION } from '@/features/canvas/domain/canvasCommands';
+import { normalizeExternalAgentToolRequest } from './externalAgentToolRequest';
 import { redactSensitiveValue } from './agentRedaction';
 import {
   EXTERNAL_AGENT_EVENT_VERSION,
   type ExternalAgentEventV1,
   type ExternalAgentRuntimeDiagnostic,
-  type ExternalAgentToolRequest,
 } from '../domain/agentModel';
 
 export function projectExternalAgentRuntimeDiagnostic(
@@ -91,32 +89,22 @@ export function normalizeExternalAgentEvent(
     case 'toolRequested': {
       if (!turnId || !raw.toolCall) throw new Error('External Agent toolRequested event is incomplete.');
       const toolCall = raw.toolCall;
-      const commandType = CANVAS_REGISTERED_COMMAND_TYPES.find((type) => type === toolCall.name);
-      let toolName: ExternalAgentToolRequest['toolName'];
-      if (commandType) {
-        toolName = 'canvas_command';
-      } else if (toolCall.name === 'diagnostics' || toolCall.name === 'config_patch' || toolCall.name === 'asset_read') {
-        toolName = toolCall.name;
-      } else {
-        throw new Error(`External Agent requested unknown tool ${toolCall.name}.`);
-      }
+      if (toolCall.name === 'canvas_command') throw new Error('External Agent requested unknown tool canvas_command.');
       return {
         version: 1,
         kind: 'tool_requested',
         runtime,
         sessionId,
         turnId,
-        request: {
+        request: normalizeExternalAgentToolRequest({
           version: 1,
           runtime,
           sessionId,
           turnId,
           callId: toolCall.callId,
-          toolName,
-          arguments: redactSensitiveValue(commandType
-            ? { type: commandType, version: CANVAS_COMMAND_VERSION, input: toolCall.input }
-            : toolCall.input),
-        },
+          toolName: toolCall.name,
+          arguments: redactSensitiveValue(toolCall.input),
+        }),
       };
     }
     case 'toolResolved': {

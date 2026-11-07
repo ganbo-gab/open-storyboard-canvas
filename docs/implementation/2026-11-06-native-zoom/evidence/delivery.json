@@ -1,0 +1,7 @@
+{
+  "dmg": "/path/to/storyboard-workspace/验收包-2026-11-07-Mac画布连线优化版/Open Storyboard Canvas_0.2.0-next.1_aarch64.dmg",
+  "sha256": "64bfc3681b88f2ab19c35d97abdba109d30319f7f9f3b6938adf34767a6d35f2",
+  "codesign": "strict passed; adhoc",
+  "hdiutil": "VALID",
+  "installed": false
+}

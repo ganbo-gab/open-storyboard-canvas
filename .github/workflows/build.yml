@@ -3,6 +3,12 @@ name: Build Open Storyboard Canvas
 permissions:
   contents: read
 
+env:
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_INCREMENTAL: 0
+  RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag }}
+
 on:
   push:
     tags:
@@ -21,7 +27,12 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
+      - name: Force LF checkout policy
+        shell: bash
+        run: git config --global core.autocrlf false
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -50,8 +61,8 @@ jobs:
         run: |
           if ($env:GITHUB_REF -like 'refs/tags/v*') {
             $VERSION = $env:GITHUB_REF -replace 'refs/tags/v', ''
-          } elseif ("${{ github.event.inputs.release_tag }}" -like 'v*') {
-            $VERSION = "${{ github.event.inputs.release_tag }}" -replace '^v', ''
+          } elseif ("$env:RELEASE_TAG_INPUT" -like 'v*') {
+            $VERSION = "$env:RELEASE_TAG_INPUT" -replace '^v', ''
           } else {
             throw "Invalid release_tag. Use format like v0.1.0"
           }
@@ -86,7 +97,7 @@ jobs:
         run: cargo check --locked
 
       - name: Build application
-        run: npx tauri build --ci
+        run: npx tauri build --ci --bundles nsis
 
       - name: Verify lockfiles and generated sources stayed clean
         shell: bash
@@ -98,8 +109,8 @@ jobs:
           $RELEASE_APP_NAME = "open-storyboard-canvas"
           if ($env:GITHUB_REF -like 'refs/tags/v*') {
             $VERSION = $env:GITHUB_REF -replace 'refs/tags/v', ''
-          } elseif ("${{ github.event.inputs.release_tag }}" -like 'v*') {
-            $VERSION = "${{ github.event.inputs.release_tag }}" -replace '^v', ''
+          } elseif ("$env:RELEASE_TAG_INPUT" -like 'v*') {
+            $VERSION = "$env:RELEASE_TAG_INPUT" -replace '^v', ''
           } else {
             $VERSION = (Get-Content package.json | ConvertFrom-Json).version
           }
@@ -123,7 +134,12 @@ jobs:
 
   build-macos:
     runs-on: macos-latest
+    timeout-minutes: 90
     steps:
+      - name: Force LF checkout policy
+        shell: bash
+        run: git config --global core.autocrlf false
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -148,8 +164,8 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
-          elif [[ "${{ github.event.inputs.release_tag }}" == v* ]]; then
-            VERSION=${{ github.event.inputs.release_tag }}
+          elif [[ "$RELEASE_TAG_INPUT" == v* ]]; then
+            VERSION="$RELEASE_TAG_INPUT"
             VERSION=${VERSION#v}
           else
             echo "Invalid release_tag. Use format like v0.1.0"
@@ -188,7 +204,8 @@ jobs:
         env:
           CC: ""
           CXX: ""
-        run: npx tauri build --target universal-apple-darwin --ci
+          APPLE_SIGNING_IDENTITY: "-"
+        run: npx tauri build --target universal-apple-darwin --bundles dmg --ci
 
       - name: Verify lockfiles and generated sources stayed clean
         run: git diff --exit-code
@@ -198,8 +215,8 @@ jobs:
           RELEASE_APP_NAME="open-storyboard-canvas"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
-          elif [[ "${{ github.event.inputs.release_tag }}" == v* ]]; then
-            VERSION=${{ github.event.inputs.release_tag }}
+          elif [[ "$RELEASE_TAG_INPUT" == v* ]]; then
+            VERSION="$RELEASE_TAG_INPUT"
             VERSION=${VERSION#v}
           else
             VERSION=$(node -p "require('./package.json').version")
@@ -221,12 +238,6 @@ jobs:
           path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
-      - name: Upload macOS App Bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: open-storyboard-canvas-macos-app
-          path: src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app
-          if-no-files-found: warn
 
   release:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
@@ -243,46 +254,29 @@ jobs:
 
       - name: Resolve release metadata
         id: resolve_release
+        env:
+          INPUT_TAG: ${{ github.event.inputs.release_tag }}
+          INPUT_NOTES: ${{ github.event.inputs.release_notes }}
         shell: bash
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
           else
-            TAG="${{ github.event.inputs.release_tag }}"
+            TAG="$INPUT_TAG"
           fi
-          if [[ -z "$TAG" || "$TAG" != v* ]]; then
-            echo "Invalid release tag: $TAG"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag"
             exit 1
           fi
-
-          NOTES_INPUT="${{ github.event.inputs.release_notes }}"
-          if [[ -n "$NOTES_INPUT" ]]; then
-            BODY="$NOTES_INPUT"
+          if [[ -n "$INPUT_NOTES" ]]; then
+            printf '%s\n' "$INPUT_NOTES" > release-notes.md
+          elif [[ -f "docs/releases/$TAG.md" ]]; then
+            cp "docs/releases/$TAG.md" release-notes.md
           else
-            # Prefer annotated tag message so npm release notes show up in GitHub Releases.
-            git fetch --force --tags >/dev/null 2>&1 || true
-            TAG_TYPE="$(git cat-file -t "$TAG" 2>/dev/null || true)"
-            if [[ "$TAG_TYPE" == "tag" ]]; then
-              BODY="$(git cat-file -p "$TAG" | sed '1,/^$/d' | sed '/^[[:space:]]*$/d')"
-            else
-              BODY=""
-            fi
+            git for-each-ref "refs/tags/$TAG" --format='%(contents)' > release-notes.md
           fi
-
-          if [[ -z "$BODY" ]]; then
-            BODY="$(git for-each-ref "refs/tags/$TAG" --format='%(contents)' | sed '/^[[:space:]]*$/d')"
-          fi
-
-          if [[ -z "$BODY" ]]; then
-            BODY="Release $TAG"
-          fi
-
+          test -s release-notes.md
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          {
-            echo "body<<EOF"
-            echo "$BODY"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Download Windows installer
         uses: actions/download-artifact@v4
@@ -296,16 +290,18 @@ jobs:
           name: open-storyboard-canvas-macos-dmg
           path: artifacts/macos
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.resolve_release.outputs.tag }}
-          name: Open Storyboard Canvas ${{ steps.resolve_release.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          body: ${{ steps.resolve_release.outputs.body }}
-          files: |
-            artifacts/windows/*.exe
-            artifacts/macos/*.dmg
-          draft: false
-          prerelease: false
-          generate_release_notes: false
+      - name: Publish verified installers with Chinese release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.resolve_release.outputs.tag }}
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp artifacts/windows/*.exe artifacts/macos/*.dmg release-assets/
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 2
+          (cd release-assets && sha256sum *.exe *.dmg > SHA256SUMS.txt)
+          gh release create "$TAG" release-assets/* --verify-tag --draft \
+            --title "Open Storyboard Canvas $TAG · 全面重构与创作工作流升级" \
+            --notes-file release-notes.md
+          gh release edit "$TAG" --draft=false --latest

@@ -11,23 +11,8 @@ import {
   presetToCameraControl,
 } from '@/features/canvas/application/cameraPresetStore';
 import type { CameraControlOptions } from '@/features/canvas/domain/canvasNodes';
-import { UiPanel, UiButton, UiInput, UiModal } from '@/components/ui';
-
-const CAMERA_LABELS: Record<string, string> = {
-  panavision_dxl2: 'Panavision DXL2',
-  arri_alexa_mini_lf: 'ARRI Alexa Mini LF',
-  red_weapon_8k: 'RED Weapon 8K',
-  sony_venice: 'Sony Venice',
-  blackmagic_ursa: 'Blackmagic URSA',
-};
-
-const LENS_LABELS: Record<string, string> = {
-  arri_signature_prime: 'ARRI Signature Prime',
-  cooke_s7i: 'Cooke S7/i',
-  zeiss_supreme_prime: 'Zeiss Supreme Prime',
-  canon_cne: 'Canon CN-E',
-  anamorphic: 'Anamorphic',
-};
+import { CAMERA_PROFILES, LENS_PROFILES } from '@/features/canvas/application/cameraPromptLibrary';
+import { UiButton, UiIconButton, UiInput, UiModal } from '@/components/ui';
 
 interface CameraPresetsPanelProps {
   isOpen: boolean;
@@ -46,18 +31,20 @@ interface SavePresetDialogProps {
 const SavePresetDialog = memo(({ isOpen, onClose, onSave }: SavePresetDialogProps) => {
   const { t } = useTranslation();
   const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setName('');
+      setError(null);
     }
   }, [isOpen]);
 
   const handleSave = useCallback(() => {
     const trimmed = name.trim();
     if (trimmed) {
-      onSave(trimmed);
-      onClose();
+      try { onSave(trimmed); onClose(); }
+      catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     }
   }, [name, onSave, onClose]);
 
@@ -68,7 +55,7 @@ const SavePresetDialog = memo(({ isOpen, onClose, onSave }: SavePresetDialogProp
       onClose={onClose}
       footer={
         <>
-          <UiButton variant="muted" size="sm" onClick={onClose}>
+          <UiButton variant="secondary" size="sm" onClick={onClose}>
             {t('common.cancel')}
           </UiButton>
           <UiButton variant="primary" size="sm" onClick={handleSave} disabled={!name.trim()}>
@@ -88,6 +75,7 @@ const SavePresetDialog = memo(({ isOpen, onClose, onSave }: SavePresetDialogProp
         }}
         autoFocus
       />
+      {error && <p role="alert" className="mt-3 text-xs text-danger">{error}</p>}
     </UiModal>
   );
 });
@@ -104,18 +92,20 @@ interface EditPresetDialogProps {
 const EditPresetDialog = memo(({ isOpen, preset, onClose, onSave }: EditPresetDialogProps) => {
   const { t } = useTranslation();
   const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && preset) {
       setName(preset.name);
+      setError(null);
     }
   }, [isOpen, preset]);
 
   const handleSave = useCallback(() => {
     const trimmed = name.trim();
     if (trimmed && preset) {
-      onSave(preset.id, trimmed);
-      onClose();
+      try { onSave(preset.id, trimmed); onClose(); }
+      catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     }
   }, [name, preset, onSave, onClose]);
 
@@ -126,7 +116,7 @@ const EditPresetDialog = memo(({ isOpen, preset, onClose, onSave }: EditPresetDi
       onClose={onClose}
       footer={
         <>
-          <UiButton variant="muted" size="sm" onClick={onClose}>
+          <UiButton variant="secondary" size="sm" onClick={onClose}>
             {t('common.cancel')}
           </UiButton>
           <UiButton variant="primary" size="sm" onClick={handleSave} disabled={!name.trim()}>
@@ -146,6 +136,7 @@ const EditPresetDialog = memo(({ isOpen, preset, onClose, onSave }: EditPresetDi
         }}
         autoFocus
       />
+      {error && <p role="alert" className="mt-3 text-xs text-danger">{error}</p>}
     </UiModal>
   );
 });
@@ -162,6 +153,8 @@ interface DeleteConfirmDialogProps {
 const DeleteConfirmDialog = memo(
   ({ isOpen, presetName, onClose, onConfirm }: DeleteConfirmDialogProps) => {
     const { t } = useTranslation();
+    const [error, setError] = useState<string | null>(null);
+    useEffect(() => { if (isOpen) setError(null); }, [isOpen]);
 
     return (
       <UiModal
@@ -170,15 +163,15 @@ const DeleteConfirmDialog = memo(
         onClose={onClose}
         footer={
           <>
-            <UiButton variant="muted" size="sm" onClick={onClose}>
+            <UiButton variant="secondary" size="sm" onClick={onClose}>
               {t('common.cancel')}
             </UiButton>
             <UiButton
-              variant="primary"
+              variant="destructive"
               size="sm"
               onClick={() => {
-                onConfirm();
-                onClose();
+                try { onConfirm(); onClose(); }
+                catch (error) { setError(error instanceof Error ? error.message : String(error)); }
               }}
             >
               {t('common.delete')}
@@ -189,6 +182,7 @@ const DeleteConfirmDialog = memo(
         <p className="text-sm text-text-dark">
           {t('cameraControl.preset.deleteConfirm', { name: presetName })}
         </p>
+        {error && <p role="alert" className="mt-3 text-xs text-danger">{error}</p>}
       </UiModal>
     );
   }
@@ -206,32 +200,36 @@ interface PresetItemProps {
 const PresetItem = memo(({ preset, onEdit, onDelete, onApply }: PresetItemProps) => {
   const { t } = useTranslation();
 
-  const cameraLabel = CAMERA_LABELS[preset.camera] ?? preset.camera;
-  const lensLabel = LENS_LABELS[preset.lens] ?? preset.lens;
+  const cameraLabel = CAMERA_PROFILES.find((profile) => profile.id === preset.camera)?.label ?? preset.camera;
+  const lensLabel = LENS_PROFILES.find((profile) => profile.id === preset.lens)?.label ?? preset.lens;
 
   return (
-    <div className="group flex items-center gap-3 rounded-lg border border-white/10 bg-bg-dark/45 px-3 py-2 hover:border-white/20 transition-colors">
+    <div className="group flex items-center gap-3 rounded-lg border border-[var(--line)] bg-[var(--field-bg)] px-3 py-2 hover:border-[var(--line-strong)] transition-colors duration-[var(--dur-1)]">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-semibold text-text-dark">{preset.name}</span>
-          <div className="hidden group-hover:flex gap-0.5">
-            <button
+          <div className="flex gap-0.5 opacity-0 transition-opacity duration-[var(--dur-1)] group-hover:opacity-100 group-focus-within:opacity-100">
+            <UiIconButton
+              size="sm"
               onClick={() => onEdit(preset)}
-              className="rounded-sm p-0.5 text-text-muted hover:bg-white/10 hover:text-text-dark"
+              className="h-6 w-6"
               title={t('common.edit')}
+              aria-label={t('common.edit')}
             >
               <Pencil className="h-3 w-3" />
-            </button>
-            <button
+            </UiIconButton>
+            <UiIconButton
+              size="sm"
               onClick={() => onDelete(preset)}
-              className="rounded-sm p-0.5 text-text-muted hover:bg-red-500/20 hover:text-red-400"
+              className="h-6 w-6 hover:bg-danger/12 hover:text-danger"
               title={t('common.delete')}
+              aria-label={t('common.delete')}
             >
               <Trash2 className="h-3 w-3" />
-            </button>
+            </UiIconButton>
           </div>
         </div>
-        <div className="mt-0.5 flex flex-wrap gap-1 text-[10px] text-white/60">
+        <div className="mt-0.5 flex flex-wrap gap-1 text-[10px] text-text-muted">
           <span>{cameraLabel}</span>
           <span>·</span>
           <span>{lensLabel}</span>
@@ -241,8 +239,13 @@ const PresetItem = memo(({ preset, onEdit, onDelete, onApply }: PresetItemProps)
           <span>f/{preset.aperture}</span>
         </div>
       </div>
-      <UiButton variant="primary" size="sm" className="shrink-0" onClick={() => onApply(preset)}>
-        <Check className="mr-1 h-3 w-3" />
+      <UiButton
+        variant="primary"
+        size="sm"
+        className="shrink-0"
+        icon={<Check className="h-3.5 w-3.5" />}
+        onClick={() => onApply(preset)}
+      >
         {t('cameraControl.preset.apply')}
       </UiButton>
     </div>
@@ -265,20 +268,24 @@ export const CameraPresetsPanel = memo(
     const [editingPreset, setEditingPreset] = useState<CameraPreset | null>(null);
     const [deletingPreset, setDeletingPreset] = useState<CameraPreset | null>(null);
     const [page, setPage] = useState(0);
+    const [error, setError] = useState<string | null>(null);
 
     const PAGE_SIZE = 3;
 
     const loadPresets = useCallback(() => {
-      setPresets(getAllPresets());
+      try { setPresets(getAllPresets()); setError(null); }
+      catch (error) { setPresets([]); setError(error instanceof Error ? error.message : String(error)); }
     }, []);
 
     useEffect(() => {
       if (isOpen) {
         loadPresets();
         setPage(0);
-        if (openWithSaveDialog) {
-          setShowSaveDialog(true);
-        }
+        setShowSaveDialog(openWithSaveDialog);
+      } else {
+        setShowSaveDialog(false);
+        setEditingPreset(null);
+        setDeletingPreset(null);
       }
     }, [isOpen, loadPresets, openWithSaveDialog]);
 
@@ -330,31 +337,13 @@ export const CameraPresetsPanel = memo(
 
     return (
       <>
-        <div
-          className="fixed inset-0 z-100 flex items-center justify-center bg-black/50"
-          onClick={onClose}
-        >
-          <UiPanel
-            className="w-[640px] max-h-[82vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-5 py-3.5">
-              <h2 className="text-base font-semibold text-text-dark">
-                {t('cameraControl.preset.myPresets')} <span className="ml-2 text-xs text-text-muted">({presets.length})</span>
-              </h2>
-              <button
-                onClick={onClose}
-                className="rounded-md p-1 text-text-muted hover:bg-bg-dark hover:text-text-dark transition-colors"
-              >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
+        <UiModal isOpen={isOpen} title={t('cameraControl.preset.myPresets')} onClose={onClose} widthClassName="w-[640px]"
+          description={`共 ${presets.length} 个预设，保存在本机；载入后可继续调整，点击摄像机面板的应用才更新生成设置。`}
+          footer={<><UiButton variant="ghost" size="sm" onClick={onClose}>{t('common.close')}</UiButton>
+            <UiButton variant="primary" size="sm" icon={<Save className="h-3.5 w-3.5" />} onClick={() => setShowSaveDialog(true)} disabled={!currentCameraControl}>{t('cameraControl.preset.saveAs')}</UiButton></>}>
             {/* Content — paginated, PAGE_SIZE cards per page */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+            {error && <p role="alert" className="mb-3 text-xs text-danger">{error}</p>}
+            <div className="space-y-3 py-1">
               {presets.length === 0 ? (
                 <div className="py-16 text-center text-sm text-text-muted">
                   {t('cameraControl.preset.empty')}
@@ -374,46 +363,28 @@ export const CameraPresetsPanel = memo(
 
             {/* Pagination footer */}
             {presets.length > PAGE_SIZE && (
-              <div className="shrink-0 flex items-center justify-center gap-3 border-t border-white/10 px-5 py-2.5">
-                <button
-                  type="button"
+              <div className="shrink-0 flex items-center justify-center gap-3 border-t border-[var(--line)] px-5 py-2.5">
+                <UiIconButton
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                   disabled={currentPage === 0}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:bg-white/10 hover:text-text-dark disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                   aria-label="上一页"
                 >
                   <ChevronLeft className="h-4 w-4" />
-                </button>
+                </UiIconButton>
                 <span className="text-xs text-text-muted tabular-nums">
                   {currentPage + 1} / {totalPages}
                 </span>
-                <button
-                  type="button"
+                <UiIconButton
                   onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                   disabled={currentPage >= totalPages - 1}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:bg-white/10 hover:text-text-dark disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                   aria-label="下一页"
                 >
                   <ChevronRight className="h-4 w-4" />
-                </button>
+                </UiIconButton>
               </div>
             )}
 
-            {/* Footer */}
-            <div className="shrink-0 flex justify-between items-center border-t border-white/10 px-5 py-3">
-              <span className="text-[11px] text-text-muted">摄像机配置会保存在本机</span>
-              <UiButton
-                variant="primary"
-                size="sm"
-                onClick={() => setShowSaveDialog(true)}
-                disabled={!currentCameraControl}
-              >
-                <Save className="mr-1.5 h-3.5 w-3.5" />
-                {t('cameraControl.preset.saveAs')}
-              </UiButton>
-            </div>
-          </UiPanel>
-        </div>
+        </UiModal>
 
         <SavePresetDialog
           isOpen={showSaveDialog}

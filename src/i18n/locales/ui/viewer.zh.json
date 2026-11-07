@@ -1,0 +1,15 @@
+{
+  "title": "查看素材",
+  "position": "第 {{index}} 项，共 {{count}} 项",
+  "previous": "上一项",
+  "next": "下一项",
+  "zoomOut": "缩小",
+  "zoomIn": "放大",
+  "fit": "适应窗口",
+  "prompt": "提示词",
+  "actions": "使用这份素材",
+  "keys": "← → 切换素材 · 双击放大 · Esc 返回",
+  "model": "模型",
+  "status": "状态",
+  "mediaMissing": "这份素材暂时无法读取。可返回任务，选择“取回原结果”。"
+}

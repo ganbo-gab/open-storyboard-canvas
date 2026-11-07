@@ -1,14 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { CANVAS_NODE_TYPES, type CanvasNode } from '../domain/canvasNodes';
-import type { CanvasEventBus } from './ports';
 import { CanvasGenerationFacade } from './canvasGenerationFacade';
 
 function facade(): CanvasGenerationFacade {
-  return new CanvasGenerationFacade({
-    publish: vi.fn(),
-    subscribe: vi.fn(() => () => undefined),
-  } as unknown as CanvasEventBus);
+  return new CanvasGenerationFacade();
 }
 
 describe('CanvasGenerationFacade job states', () => {

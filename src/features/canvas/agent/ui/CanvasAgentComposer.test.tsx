@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { createRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import en from '@/i18n/locales/en.json';
@@ -10,11 +10,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-import {
-  CanvasAgentComposer,
-  formatCanvasAgentContextEstimate,
-  shouldSubmitCanvasAgentComposerEnter,
-} from './CanvasAgentComposer';
+import { CanvasAgentComposer, formatCanvasAgentContextEstimate } from './CanvasAgentComposer';
 
 const noop = () => {};
 const textModel = { id: 'text-model', providerLabel: 'Provider', modelLabel: 'Text Model', supportsMultimodal: true };
@@ -57,6 +53,7 @@ function render(overrides: Record<string, unknown> = {}) {
     onSend: noop,
     onCancel: noop,
     onSettings: noop,
+    textareaRef: createRef<HTMLTextAreaElement>(),
     ...overrides,
   }));
 }
@@ -78,25 +75,19 @@ describe('CanvasAgentComposer', () => {
     expect(markup).toContain('canvasAgent.removeNamedAttachment:Hero');
   });
 
-  it('uses compact non-native controls for attachments, models, mode, and context', () => {
-    const markup = render();
-    expect(markup).not.toContain('<select');
-    expect(markup).toContain('canvasAgent.addAttachment');
-    expect(markup).toContain('canvasAgent.modelMenuTitle');
-    expect(markup).toContain('canvasAgent.executionMode');
-    expect(markup).toContain('canvasAgent.contextUsage');
-    expect(markup).toContain('canvasAgent.send');
+  it('names the model and channel the next turn actually uses', () => {
+    expect(render()).toContain('Provider · Text Model');
   });
 
-  it('shows configuration guidance when no built-in text model is available', () => {
-    expect(render({ selectedTextModel: null })).toContain('canvasAgent.configureModel');
+  it('shows configuration guidance when no runnable text model exists', () => {
+    expect(render({ selectedTextModel: null, textModels: [], modelIssue: 'unset' })).toContain('canvasAgent.configureModel');
   });
 
-  it('declares quick model category labels for the grouped picker', () => {
-    const source = String(CanvasAgentComposer);
-    expect(source).toContain('canvasAgent.modelTabs.text');
-    expect(source).toContain('canvasAgent.modelTabs.image');
-    expect(source).toContain('canvasAgent.modelTabs.video');
+  it('asks for a new choice instead of substituting another model when the saved one is gone', () => {
+    const markup = render({ selectedTextModel: null, modelIssue: 'missing' });
+    expect(markup).toContain('rework.agent.selection.issue.missing');
+    expect(markup).not.toContain('Provider · Text Model');
+    expect(markup).toMatch(/aria-label="canvasAgent\.send"[^>]*disabled=""|disabled=""[^>]*aria-label="canvasAgent\.send"/);
   });
 
   it('formats estimated context usage against the selected model limit', () => {
@@ -113,19 +104,11 @@ describe('CanvasAgentComposer', () => {
       expect(`${known}${unknown}`).not.toMatch(/\{\{(?:used|limit)\}\}/);
     }
   });
-
-  it('does not submit the Enter key that commits an IME composition', () => {
-    expect(shouldSubmitCanvasAgentComposerEnter({
-      key: 'Enter', shiftKey: false, nativeIsComposing: true,
-      trackedIsComposing: true, compositionEndedAgoMs: 0,
-    })).toBe(false);
-    expect(shouldSubmitCanvasAgentComposerEnter({
-      key: 'Enter', shiftKey: false, nativeIsComposing: false,
-      trackedIsComposing: false, compositionEndedAgoMs: 20,
-    })).toBe(false);
-    expect(shouldSubmitCanvasAgentComposerEnter({
-      key: 'Enter', shiftKey: false, nativeIsComposing: false,
-      trackedIsComposing: false, compositionEndedAgoMs: 120,
-    })).toBe(true);
+  it('does not show an old percentage when the next turn uses a different text model', () => {
+    const usage = { requestId: 'old-request', modelId: 'text-model', measuredAt: 1, usedTokens: 12000,
+      breakdown: { system: 2000, tools: 5000, conversation: 5000, media: 0 }, basis: 'provider', cachedTokens: 0, outputTokens: 100, images: 0 };
+    expect(render({ contextUsage: usage, contextEstimateTokens: 12000, contextWindow: 100000 })).toContain('12%');
+    const changed = { ...textModel, id: 'other-text-model' };
+    expect(render({ contextUsage: usage, contextEstimateTokens: 0, contextWindow: 100000, selectedTextModel: changed, textModels: [changed] })).not.toContain('12%');
   });
 });

@@ -10,12 +10,13 @@ use tracing::info;
 
 use crate::ai::error::AIError;
 use crate::ai::AIProvider;
+use crate::commands::secrets::{credential_ref_from_token, resolve_provider_credential, SecretRef};
 
 use registry::PPIOModelRegistry;
 
 pub struct PPIOProvider {
     client: Client,
-    api_key: Arc<RwLock<Option<String>>>,
+    credential_ref: Arc<RwLock<Option<SecretRef>>>,
     base_url: String,
     model_registry: PPIOModelRegistry,
 }
@@ -29,20 +30,10 @@ impl PPIOProvider {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
-            api_key: Arc::new(RwLock::new(None)),
+            credential_ref: Arc::new(RwLock::new(None)),
             base_url: "https://api.ppio.com".to_string(),
             model_registry: PPIOModelRegistry::new(),
         }
-    }
-
-    pub async fn set_api_key(&self, api_key: String) {
-        let mut key = self.api_key.write().await;
-        *key = Some(api_key);
-    }
-
-    pub async fn get_api_key(&self) -> Option<String> {
-        let key = self.api_key.read().await;
-        key.clone()
     }
 }
 
@@ -67,22 +58,38 @@ impl AIProvider for PPIOProvider {
     }
 
     async fn set_api_key(&self, api_key: String) -> Result<(), AIError> {
-        PPIOProvider::set_api_key(self, api_key).await;
+        let reference = credential_ref_from_token(&api_key)
+            .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
+        *self.credential_ref.write().await = Some(reference);
         Ok(())
     }
 
+    async fn credential_ref(&self) -> Option<SecretRef> {
+        self.credential_ref.read().await.clone()
+    }
+
     async fn generate(&self, request: crate::ai::GenerateRequest) -> Result<String, AIError> {
-        let key = self.api_key.read().await;
-        let api_key = key
-            .as_ref()
-            .ok_or_else(|| AIError::InvalidRequest("API key not set".to_string()))?;
+        let reference = self.credential_ref().await;
+        let mut credential = resolve_provider_credential(
+            reference.as_ref(),
+            request
+                .extra_params
+                .as_ref()
+                .and_then(|params| params.get("credential_ref")),
+        )
+        .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
+        let api_key = credential.value.as_str();
 
         let adapter = self
             .model_registry
             .resolve(&request.model)
             .ok_or_else(|| AIError::ModelNotSupported(request.model.clone()))?;
 
-        let prepared = adapter.build_request(&request, &self.base_url)?;
+        let mut prepared = adapter.build_request(&request, &self.base_url)?;
+        credential
+            .redactor
+            .resolve_json(&mut prepared.body)
+            .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
 
         info!("[PPIO Request] {}", prepared.summary);
         info!("[PPIO API] URL: {}", prepared.endpoint);
@@ -94,18 +101,27 @@ impl AIProvider for PPIOProvider {
             .header("Content-Type", "application/json")
             .json(&prepared.body)
             .send()
-            .await?;
+            .await
+            .map_err(|error| AIError::Network(error.without_url()))?;
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = credential
+                .redactor
+                .redact_owned(response.text().await.unwrap_or_default());
             return Err(AIError::Provider(format!(
                 "API error {}: {}",
                 status, error_text
             )));
         }
 
-        let result: ImageResponse = response.json().await?;
+        let raw = credential.redactor.redact_owned(
+            response
+                .text()
+                .await
+                .map_err(|error| AIError::Network(error.without_url()))?,
+        );
+        let result: ImageResponse = serde_json::from_str(&raw)?;
 
         if let Some(image_url) = result.image_urls.first() {
             info!("Generated image: {}", image_url);

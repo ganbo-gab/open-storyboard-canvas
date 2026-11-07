@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 
+import { UiBadge, UiButton, UiChipButton, UiIconButton, UiInput, UiSegmented, UiTextArea } from '@/components/ui';
 import { ModelConfigPicker } from './ModelConfigPicker';
 import {
   type PanoramaGenerateConfig,
@@ -24,6 +25,7 @@ import {
 import { buildPanoramaPrompt } from '@/features/canvas/application/panoramaPrompt';
 import { isExportImageNode, isImageEditNode, isUploadNode } from '@/features/canvas/domain/canvasNodes';
 import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
+import { AssetMedia } from '@/features/assets/ui/AssetMedia';
 import {
   insertReferenceToken,
   removeTextRange,
@@ -256,64 +258,54 @@ export const PanoramaSetupForm = memo(({
   };
 
   const projectionButtons = (
-    <div className="grid grid-cols-2 gap-2">
-      <button
-        type="button"
-        onClick={() => setProjection('spherical')}
-        className={`flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs ${projection === 'spherical' ? 'border-accent bg-accent text-white' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)'}`}
-      >
-        <Globe className="h-3 w-3" /> 720°球体
-      </button>
-      <button
-        type="button"
-        onClick={() => setProjection('cylindrical')}
-        className={`flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs ${projection === 'cylindrical' ? 'border-accent bg-accent text-white' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)'}`}
-      >
-        <Compass className="h-3 w-3" /> 360°环绕
-      </button>
-    </div>
+    <UiSegmented
+      value={projection}
+      onChange={setProjection}
+      options={[
+        { value: 'spherical', label: '720°球体', icon: <Globe className="h-3.5 w-3.5" /> },
+        { value: 'cylindrical', label: '360°环绕', icon: <Compass className="h-3.5 w-3.5" /> },
+      ]}
+      size="sm"
+      className="w-full"
+      aria-label="投影方式"
+    />
   );
 
   const modeButtons = (
-    <div className="grid grid-cols-2 gap-2">
-      <button
-        type="button"
-        onClick={() => setSourceMode('ai')}
-        className={`flex h-10 items-center justify-center gap-1 rounded-md border px-2 text-xs ${sourceMode !== 'image' ? 'border-accent bg-accent text-white' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)'}`}
-      >
-        <Type className="h-3 w-3" /> AI生成全景图
-      </button>
-      <button
-        type="button"
-        onClick={() => setSourceMode('image')}
-        className={`flex h-10 items-center justify-center gap-1 rounded-md border px-2 text-xs ${sourceMode === 'image' ? 'border-accent bg-accent text-white' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)'}`}
-      >
-        <ImageIcon className="h-3 w-3" /> 图生全景图
-      </button>
-    </div>
+    <UiSegmented
+      value={sourceMode === 'image' ? 'image' : 'ai'}
+      onChange={setSourceMode}
+      options={[
+        { value: 'ai', label: 'AI生成全景图', icon: <Type className="h-3.5 w-3.5" /> },
+        { value: 'image', label: '图生全景图', icon: <ImageIcon className="h-3.5 w-3.5" /> },
+      ]}
+      size="sm"
+      className="w-full"
+      aria-label="生成方式"
+    />
   );
 
   const smartControl = (
     <div className="relative flex items-center gap-1.5">
-      <button
-        type="button"
+      <UiChipButton
+        active={smartBase}
+        aria-pressed={smartBase}
         onClick={() => setSmartBase((current) => !current)}
-        className={`inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-md border px-2.5 text-xs transition-colors ${
-          smartBase ? 'border-accent/60 bg-accent/15 text-accent' : 'border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)'
-        }`}
+        className="h-8 gap-1 whitespace-nowrap rounded-md text-xs"
       >
         {smartBase && <CheckCircle2 className="h-3 w-3" />}
         智能比例合成
-      </button>
-      <button
-        type="button"
+      </UiChipButton>
+      <UiIconButton
         onClick={() => setShowSmartHelp((current) => !current)}
-        className="flex h-8 w-8 items-center justify-center rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) text-text-muted hover:bg-(--canvas-node-menu-hover) hover:text-text-dark"
+        variant="secondary"
+        aria-label="智能比例合成说明"
+        aria-expanded={showSmartHelp}
       >
         <HelpCircle className="h-3.5 w-3.5" />
-      </button>
+      </UiIconButton>
       {showSmartHelp && (
-        <div className="absolute bottom-full right-0 z-30 mb-2 w-[340px] rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-3 text-[11px] leading-5 text-text-muted shadow-2xl">
+        <div className="absolute bottom-full right-0 z-30 mb-2 w-[340px] rounded-lg border border-[var(--line)] bg-elevated p-3 text-[11px] leading-5 text-text-muted shadow-[var(--shadow-pop)]">
           AI生成全景图会优先提交目标比例；如果供应商没有 2:1 / 4:1，会选择最接近的宽比例生成，再裁切、羽化并归一化。
         </div>
       )}
@@ -336,40 +328,42 @@ export const PanoramaSetupForm = memo(({
             {selectedReferences.map((image, index) => (
               <div key={image.id} className="rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-bg-strong) p-1.5">
                 <div className="aspect-video overflow-hidden rounded-sm bg-(--canvas-node-media-bg)">
-                  <img src={image.url} alt={image.label} className="h-full w-full object-cover" draggable={false} />
+                  <AssetMedia kind="image" source={image.url} alt={image.label} className="h-full w-full object-cover" draggable={false} />
                 </div>
                 <div className="mt-1 flex items-center gap-1">
                   <span className="h-2.5 w-2.5 rounded-xs" style={{ backgroundColor: image.color }} />
                   <div className="min-w-0 flex-1 truncate text-[10px] text-text-dark">{sourceMode === 'image' ? '源图' : `图${index + 1}`} · {image.label}</div>
-                  <button
-                    type="button"
+                  <UiIconButton
+                    size="sm"
                     onClick={() => setSelectedIds((current) => current.filter((id) => id !== image.id))}
-                    className="rounded-sm px-1 text-[10px] text-text-muted hover:bg-(--canvas-node-menu-hover) hover:text-text-dark"
+                    className="h-5 w-5"
+                    aria-label={`移除${image.label}`}
                   >
-                    ×
-                  </button>
+                    <X className="h-3 w-3" />
+                  </UiIconButton>
                 </div>
               </div>
             ))}
             {(sourceMode !== 'image' || selectedReferences.length === 0) && (
-              <button
-                type="button"
+              <UiButton
+                variant="secondary"
                 onClick={openAssetPicker}
-                className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-(--canvas-node-border) bg-(--canvas-node-field-bg) text-text-muted hover:border-(--canvas-node-border-hover) hover:text-text-dark"
+                className="aspect-video h-auto w-full rounded-lg border border-dashed border-[var(--line-strong)]"
                 title={sourceMode === 'image' ? '选择全景源图' : '从资产加入图片'}
+                aria-label={sourceMode === 'image' ? '选择全景源图' : '从资产加入图片'}
               >
                 <Plus className="h-6 w-6" />
-              </button>
+              </UiButton>
             )}
             {sourceMode === 'image' && selectedReferences.length > 0 && (
-              <button
-                type="button"
+              <UiButton
+                size="sm"
                 onClick={openAssetPicker}
-                className="w-full rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-2 text-[11px] text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)"
+                className="w-full"
                 title="替换源图"
               >
                 替换源图
-              </button>
+              </UiButton>
             )}
           </div>
         </div>
@@ -377,7 +371,7 @@ export const PanoramaSetupForm = memo(({
 
       <main className="flex min-w-0 flex-col gap-4 p-6">
         <div className="relative">
-          <textarea
+          <UiTextArea
             ref={promptRef}
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
@@ -385,25 +379,25 @@ export const PanoramaSetupForm = memo(({
             placeholder={sourceMode === 'image'
               ? '可选备注：使用现成图片作为全景源，不会提交给 AI'
               : '输入全景场景描述；按 @ 可插入图1/图2引用，文字+图片+内置全景提示词会一起提交'}
-            className="nodrag nowheel h-40 w-full resize-none rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-4 py-3 text-sm leading-6 text-text-dark outline-hidden placeholder:text-text-muted/70 focus:border-accent"
+            className="nodrag nowheel h-40 w-full resize-none px-4 py-3 text-sm leading-6"
           />
           {showReferencePicker && selectedReferences.length > 0 && (
-            <div className="absolute left-3 top-11 z-30 w-[180px] overflow-hidden rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-2xl">
+            <div className="absolute left-3 top-11 z-30 w-[180px] overflow-hidden rounded-xl border border-[var(--line)] bg-elevated shadow-[var(--shadow-pop)]">
               <div className="ui-scrollbar max-h-[220px] overflow-y-auto p-1.5">
                 {selectedReferences.map((image, index) => (
-                  <button
+                  <UiButton
                     key={`${image.id}-mention-${index}`}
-                    type="button"
+                    variant="ghost"
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => insertPanoramaReference(index)}
                     onMouseEnter={() => setReferencePickerIndex(index)}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors ${
-                      referencePickerIndex === index ? 'bg-(--canvas-node-menu-active) text-text-dark' : 'text-text-muted hover:bg-(--canvas-node-menu-hover)'
+                    className={`h-auto w-full justify-start rounded-lg px-2 py-2 text-left text-xs ${
+                      referencePickerIndex === index ? 'bg-[var(--press)] text-text-dark' : ''
                     }`}
                   >
-                    <img src={image.url} alt={image.label} className="h-8 w-8 rounded-sm object-cover" draggable={false} />
+                    <AssetMedia kind="image" source={image.url} alt={image.label} className="h-8 w-8 rounded-sm object-cover" draggable={false} />
                     <span className="min-w-0 flex-1 truncate">@图{index + 1}</span>
-                  </button>
+                  </UiButton>
                 ))}
               </div>
             </div>
@@ -436,15 +430,16 @@ export const PanoramaSetupForm = memo(({
             </div>
           )}
           <div className="flex items-center gap-2">
-            <button
-              type="button"
+            <UiButton
+              variant="primary"
+              size="sm"
               onClick={handleSubmit}
               disabled={sourceMode === 'image' && !directReference}
-              className="flex h-8 items-center gap-1 whitespace-nowrap rounded-md bg-accent px-3 text-xs text-white hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+              className="whitespace-nowrap"
+              icon={sourceMode === 'image' ? <ImageIcon className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
             >
-              {sourceMode === 'image' ? <ImageIcon className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
               {sourceMode === 'image' ? '创建全景图' : '生成全景图'}
-            </button>
+            </UiButton>
           </div>
         </div>
       </main>
@@ -459,7 +454,7 @@ export const PanoramaSetupForm = memo(({
           {projectionButtons}
         </section>
         {projection === 'cylindrical' && (
-          <div className="rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-5 text-amber-200/85">
+          <div className="rounded-md border border-warning/25 bg-warning/10 px-2.5 py-1.5 text-[11px] leading-5 text-warning">
             360° 环绕更适合横向街景/长廊；普通全景建议使用 720° 球体。
           </div>
         )}
@@ -476,14 +471,14 @@ export const PanoramaSetupForm = memo(({
           {sourceMode !== 'image' && (
             <div className="flex flex-col gap-2 pt-1">
               {smartControl}
-              <button
-                type="button"
+              <UiButton
+                size="sm"
                 onClick={() => onCopyPrompt?.(composed)}
-                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-3 text-xs text-(--canvas-node-button-text) transition-colors hover:bg-(--canvas-node-menu-hover)"
+                icon={<Copy className="h-3.5 w-3.5" />}
                 title="复制完整提示词到剪贴板"
               >
-                <Copy className="h-3 w-3" /> 复制提示词
-              </button>
+                复制提示词
+              </UiButton>
             </div>
           )}
         </section>
@@ -499,8 +494,8 @@ export const PanoramaSetupForm = memo(({
     <>
       {body}
       {isAssetPickerOpen && (
-        <div className="absolute inset-0 z-260 flex items-center justify-center bg-black/35 backdrop-blur-xs">
-          <div className="w-[560px] max-w-[calc(100%-32px)] rounded-xl border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) shadow-2xl">
+        <div className="absolute inset-0 z-260 flex items-center justify-center bg-[var(--scrim)] backdrop-blur-xs">
+          <div className="w-[560px] max-w-[calc(100%-32px)] rounded-xl border border-[var(--line)] bg-elevated shadow-[var(--shadow-pop)]">
             <div className="flex items-center justify-between border-b border-(--canvas-node-divider) px-4 py-3">
               <div>
                 <div className="text-sm font-semibold text-text-dark">{sourceMode === 'image' ? '选择要转换的全景源图' : '选择全景参考图'}</div>
@@ -510,18 +505,19 @@ export const PanoramaSetupForm = memo(({
                     : 'AI生成全景图支持多选，可作为风格 / 主体 / 元素参考'}
                 </div>
               </div>
-              <button type="button" onClick={() => setIsAssetPickerOpen(false)} className="rounded-md p-1 text-text-muted hover:bg-(--canvas-node-menu-hover) hover:text-text-dark">
+              <UiIconButton onClick={() => setIsAssetPickerOpen(false)} aria-label="关闭">
                 <X className="h-4 w-4" />
-              </button>
+              </UiIconButton>
             </div>
             <div className="border-b border-(--canvas-node-divider) px-4 py-2">
-              <label className="flex h-8 items-center gap-2 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-2">
-                <Search className="h-3.5 w-3.5 text-text-muted" />
-                <input
+              <label className="relative block">
+                <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted" />
+                <UiInput
                   value={assetQuery}
                   onChange={(event) => setAssetQuery(event.target.value)}
                   placeholder="搜索图片名称"
-                  className="min-w-0 flex-1 bg-transparent text-xs text-text-dark outline-hidden placeholder:text-text-muted/70"
+                  aria-label="搜索图片名称"
+                  className="h-8 w-full pl-8 text-xs"
                 />
               </label>
             </div>
@@ -535,39 +531,39 @@ export const PanoramaSetupForm = memo(({
                   {filteredReferences.map((image) => {
                     const selected = draftSelectedIds.includes(image.id);
                     return (
-                      <button
+                      <UiButton
                         key={image.id}
-                        type="button"
+                        aria-pressed={selected}
                         onClick={() => toggleDraftReference(image.id)}
-                        className={`relative overflow-hidden rounded-lg border bg-(--canvas-node-bg-strong) text-left transition-colors ${
-                          selected ? 'border-accent/80 ring-1 ring-accent/50' : 'border-(--canvas-node-field-border) hover:border-(--canvas-node-border-hover)'
+                        className={`relative h-auto flex-col items-stretch gap-0 overflow-hidden rounded-lg p-0 text-left ${
+                          selected ? 'ring-1 ring-accent/50' : ''
                         }`}
                       >
                         <div className="aspect-square bg-(--canvas-node-media-bg)">
-                          <img src={image.url} alt={image.label} className="h-full w-full object-cover" draggable={false} />
+                          <AssetMedia kind="image" source={image.url} alt={image.label} className="h-full w-full object-cover" draggable={false} />
                         </div>
                         <div className="truncate px-1.5 py-1 text-[10px] text-text-dark">{image.label}</div>
-                        {selected && <span className="absolute right-1 top-1 rounded-sm bg-accent px-1 py-0.5 text-[9px] text-white">已选</span>}
-                      </button>
+                        {selected && <UiBadge tone="accent" className="absolute right-1 top-1 text-[9px]">已选</UiBadge>}
+                      </UiButton>
                     );
                   })}
                 </div>
               )}
             </div>
             <div className="flex justify-end gap-2 border-t border-(--canvas-node-divider) px-4 py-3">
-              <button type="button" onClick={() => setIsAssetPickerOpen(false)} className="rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-3 py-1.5 text-xs text-(--canvas-node-button-text) hover:bg-(--canvas-node-menu-hover)">
+              <UiButton size="sm" onClick={() => setIsAssetPickerOpen(false)}>
                 取消
-              </button>
-              <button
-                type="button"
+              </UiButton>
+              <UiButton
+                variant="primary"
+                size="sm"
                 onClick={confirmAssetPicker}
                 disabled={sourceMode === 'image' && draftSelectedIds.length === 0}
-                className="rounded-md bg-accent px-3 py-1.5 text-xs text-white hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {sourceMode === 'image'
                   ? (draftSelectedIds.length > 0 ? '使用此图' : '请选择一张源图')
                   : `加入 ${draftSelectedIds.length} 张`}
-              </button>
+              </UiButton>
             </div>
           </div>
         </div>

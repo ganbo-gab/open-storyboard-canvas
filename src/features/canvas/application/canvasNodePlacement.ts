@@ -27,8 +27,9 @@ export interface RelatedCanvasPlacementInput {
 }
 
 const DEFAULT_NODE_HEIGHT = 200;
-const COLLISION_MARGIN = 18;
-const RELATION_GAP = 32;
+/** Clear space between nodes; covers the title bar that floats above every card. */
+const COLLISION_MARGIN = 36;
+const RELATION_GAP = 48;
 
 function nodeRect(node: CanvasNode): Rect {
   const style = node.style as { width?: unknown; height?: unknown } | undefined;
@@ -51,6 +52,10 @@ function overlaps(left: Rect, right: Rect, margin = COLLISION_MARGIN): boolean {
     && left.x + left.width + margin > right.x
     && left.y < right.y + right.height + margin
     && left.y + left.height + margin > right.y;
+}
+
+export function collidesWithNodes(rect: Rect, nodes: readonly CanvasNode[]): boolean {
+  return nodes.some((node) => overlaps(rect, nodeRect(node)));
 }
 
 function rectDistance(left: Rect, right: Rect): number {

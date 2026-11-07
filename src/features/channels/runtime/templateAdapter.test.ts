@@ -11,6 +11,23 @@ function profile(): ChannelProfileV2 {
     models: [{ id: 'm', operations: ['image.edit'], params: [] }] };
 }
 describe('TemplateAdapter submission safety', () => {
+  it('reports a denied credential read as pre-submit failure, never unknown or retryable', async () => {
+    const http = vi.fn().mockRejectedValue('{"state":"locked","code":"storage_locked"}');
+    const adapter = new TemplateAdapter({ profile: profile(), apiKey: 'opaque-ref', http, resolveRef: async () => '' });
+    expect(await adapter.submit(job)).toMatchObject({ state: 'failed', error: { category: 'credential', retryable: false } });
+    expect(http).toHaveBeenCalledOnce();
+  });
+  it('keeps reference-download authorization failures recoverable without sending the paid submission', async () => {
+    const http = vi.fn();
+    const resolveRef = vi.fn().mockRejectedValue('{"state":"locked","code":"storage_locked"}');
+    const config = profile();
+    config.models[0].refs = { image: 1 };
+    config.operations['image.edit']!.template = { model: '{{model}}', prompt: '{{prompt}}', image: '{{image}}' };
+    const adapter = new TemplateAdapter({ profile: config, apiKey: 'opaque-ref', http, resolveRef });
+    const result = await adapter.submit({ ...job, refs: [{ kind: 'image', assetId: 'reference', path: 'https://fixture.test/reference.png', mime: 'image/png' }] });
+    expect(result).toMatchObject({ state: 'failed', error: { category: 'credential', retryable: false } });
+    expect(resolveRef).toHaveBeenCalledOnce(); expect(http).not.toHaveBeenCalled();
+  });
   it('#9 missing model blocks images/edits before HTTP', async () => {
     const http = vi.fn(); const adapter = new TemplateAdapter({ profile: profile(), apiKey: 'secret', http, resolveRef: async () => '' });
     expect(await adapter.submit({ ...job, modelId: '' })).toMatchObject({ state: 'failed', error: { category: 'validation', retryable: false } });
@@ -37,10 +54,11 @@ describe('TemplateAdapter submission safety', () => {
     expect(await adapter.submit(job)).toMatchObject({ state: 'failed', error: { category: 'network', retryable: true } });
     expect(http).toHaveBeenCalledTimes(1);
   });
-  it('normalizes explicit HTTP failures and preserves errorPath original', async () => {
-    const http = vi.fn().mockResolvedValue({ status: 401, headers: {}, bodyText: '{"error":{"message":"invalid key 原文"}}' });
+  it('normalizes explicit HTTP failures and keeps the verbatim provider response', async () => {
+    const body = '{"error":{"message":"invalid key 原文"}}';
+    const http = vi.fn().mockResolvedValue({ status: 401, headers: {}, bodyText: body });
     const adapter = new TemplateAdapter({ profile: profile(), apiKey: 'secret', http, resolveRef: async () => '' });
-    expect(await adapter.submit(job)).toMatchObject({ state: 'failed', error: { category: 'auth', upstreamMessage: 'invalid key 原文' } });
+    expect(await adapter.submit(job)).toMatchObject({ state: 'failed', error: { category: 'auth', status: 401, upstreamMessage: body } });
   });
   it('returns successful sync outputs from byte responses', async () => {
     const http = vi.fn().mockResolvedValue({ status: 200, headers: {}, bodyBytes: new TextEncoder().encode('{"data":[{"url":"https://assets.example/a.png"}]}') });
@@ -55,6 +73,13 @@ describe('TemplateAdapter submission safety', () => {
   });
 });
 describe('TemplateAdapter polling and auxiliary operations', () => {
+  it('stops polling on vault rejection instead of treating it as transient network trouble', async () => {
+    const p = profile(); p.operations['image.edit']!.response = { mode: 'async', taskIdPath: 'id', poll: { method: 'GET', path: '/jobs/{{taskId}}', intervalSec: 2, timeoutMin: 2, statusPath: 'status', success: ['done'], failure: ['failed'], outputs: [] } };
+    const http = vi.fn().mockRejectedValue(new Error('{"state":"error","code":"storage_failed"}'));
+    const adapter = new TemplateAdapter({ profile: p, apiKey: 'opaque-ref', http, resolveRef: async () => '' });
+    expect(await adapter.poll(job, 'accepted-task')).toMatchObject({ state: 'failed', error: { category: 'credential', retryable: false } });
+    expect(http).toHaveBeenCalledOnce();
+  });
   it('submits once then follows submit status/result URLs and Key auth', async () => {
     const p = profile(); p.auth = { type: 'header', name: 'Authorization', prefix: 'Key ' };
     p.operations['image.edit']!.response = { mode: 'async', taskIdPath: 'id', poll: { method: 'GET', path: '{{submit.status_url}}', resultRequest: { method: 'GET', path: '{{submit.response_url}}' }, intervalSec: 1, timeoutMin: 1, statusPath: 'status', success: ['COMPLETED'], failure: ['FAILED'], outputs: [{ path: 'images[*].url', as: 'url' }] } };
@@ -63,6 +88,31 @@ describe('TemplateAdapter polling and auxiliary operations', () => {
     expect(await adapter.submit(job)).toEqual({ state: 'submitted', taskId: 't1' });
     expect(await adapter.poll(job, 't1')).toEqual({ state: 'done', outputs: [{ kind: 'image', source: { type: 'url', url: 'https://asset/a.png' } }] });
     expect(http.mock.calls.map(([request]) => [request.method, request.url, request.headers.Authorization])).toEqual([['POST', 'https://api.example.com/v1/images/edits', 'Key secret'], ['GET', 'https://api.example.com/status/t1', 'Key secret'], ['GET', 'https://api.example.com/result/t1', 'Key secret']]);
+  });
+  it('restores a poll-result file handle and retrieves it with GET only, without substituting the task ID', async () => {
+    const p = profile();
+    p.operations['image.edit']!.response = { mode: 'async', taskIdPath: 'task_id', poll: {
+      method: 'GET', path: '/query?task_id={{taskId}}', intervalSec: 1, timeoutMin: 1, statusPath: 'status', success: ['Success'], failure: ['Fail'],
+      resultRequest: { method: 'GET', path: '/v1/files/retrieve?file_id={{poll.file_id}}' }, outputs: [{ path: 'file.download_url', as: 'url', kind: 'video' }],
+    } };
+    const http = vi.fn().mockResolvedValueOnce({ status: 200, headers: {}, bodyText: '{"status":"Success","file_id":"176844028768320"}' })
+      .mockResolvedValueOnce({ status: 200, headers: {}, bodyText: '{"file":{"download_url":"https://assets.example/real.mp4"}}' });
+    const adapter = new TemplateAdapter({ profile: p, apiKey: 'secret', http, resolveRef: async () => '' });
+    expect(await adapter.poll(job, 'different-task-id')).toMatchObject({ state: 'done', outputs: [{ kind: 'video', source: { url: 'https://assets.example/real.mp4' } }] });
+    expect(http.mock.calls.map(([request]) => [request.method, request.url])).toEqual([
+      ['GET', 'https://api.example.com/query?task_id=different-task-id'], ['GET', 'https://api.example.com/v1/files/retrieve?file_id=176844028768320'],
+    ]);
+  });
+  it('blocks missing poll result handles before retrieving or issuing a second submit', async () => {
+    const p = profile();
+    p.operations['image.edit']!.response = { mode: 'async', taskIdPath: 'id', poll: {
+      method: 'GET', path: '/query/{{taskId}}', intervalSec: 1, timeoutMin: 1, statusPath: 'status', success: ['Success'], failure: ['Fail'],
+      resultRequest: { method: 'GET', path: '/retrieve?file_id={{poll.file_id}}' }, outputs: [],
+    } };
+    const http = vi.fn().mockResolvedValue({ status: 200, headers: {}, bodyText: '{"status":"Success"}' });
+    const adapter = new TemplateAdapter({ profile: p, apiKey: 'secret', http, resolveRef: async () => '' });
+    expect(await adapter.poll(job, 'task')).toMatchObject({ state: 'failed', error: { category: 'validation', message: '缺少必填值：poll.file_id' } });
+    expect(http).toHaveBeenCalledTimes(1);
   });
   it('emits authenticated content URLs only after completion, including restored polling', async () => {
     const p = profile(); p.operations['image.edit']!.response = { mode: 'async', taskIdPath: 'id', poll: { method: 'GET', path: '/v1/videos/{{taskId}}', intervalSec: 1, timeoutMin: 1, statusPath: 'status', success: ['completed'], failure: ['failed'], outputs: [{ url: '/v1/videos/{{taskId}}/content', kind: 'video', auth: true }] } };

@@ -1,0 +1,10 @@
+{
+  "purpose": "final native candidate",
+  "sourceHashes": {
+    "src/features/canvas/canvas.css": "004f04ae26523fcf51a31a8264e806027e166c75e5f4d611fcd54272f6cb1eac",
+    "src/features/canvas/engine/canvasZoomRendering.ts": "734c957e8d5c7cd3ba4c1d9e64d89b1e6293ba0a22031932da9e9354fbd50f0e",
+    "src/features/canvas/engine/useCanvasBridges.ts": "12cb87a9e561f69ae9b360c5935438b68fdce1ec1849feb25ecf0602068e03c5"
+  },
+  "appPath": "src-tauri/target/release/bundle/macos/Storyboard Mac Performance QA.app",
+  "binarySha256": "90ad717362c3b31cd02fd6d9772a6f48304e5ba983a7f8b38685d81e2d62cdbc"
+}

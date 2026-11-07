@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Image, LocateFixed, Type, Video } from 'lucide-react';
 
-import { UiButton, UiCheckbox, UiModal, UiSelect } from '@/components/ui';
+import { UiButton, UiCheckbox, UiIconButton, UiModal, UiSelect } from '@/components/ui';
 import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
 import {
   CANVAS_COMMAND_VERSION,
@@ -21,7 +21,7 @@ import {
   nodeHasTargetHandle,
 } from '@/features/canvas/domain/nodeRegistry';
 import { useCanvasStore } from '@/stores/canvasStore';
-import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
+import { AssetMedia } from '@/features/assets/ui/AssetMedia';
 import { canvasNavigationFacade } from '@/features/canvas/application/canvasNavigationFacade';
 
 type TagRelationsDialogProps = {
@@ -263,7 +263,7 @@ export function TagRelationsDialog({
             <span>{t('node.tag.selectedCount', { count: selectedNodeIds.size })}</span>
           </div>
           {variant === 'members' && missingMemberCount > 0 ? (
-            <p className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+            <p className="mb-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
               {t('node.tag.missingMembersWillBeRemoved', { count: missingMemberCount })}
             </p>
           ) : null}
@@ -277,7 +277,7 @@ export function TagRelationsDialog({
               return (
                 <div
                   key={node.id}
-                  className="flex cursor-pointer items-center gap-3 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-subtle-bg) px-3 py-2 text-sm text-text-dark hover:border-accent/45"
+                  className="flex cursor-pointer items-center gap-3 rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-subtle-bg) px-3 py-2 text-sm text-text-dark transition-colors hover:border-accent/45 active:bg-(--press)"
                   title={label}
                   onClick={() => toggleSelected(node.id)}
                 >
@@ -288,7 +288,7 @@ export function TagRelationsDialog({
                     onCheckedChange={() => toggleSelected(node.id)}
                   />
                   {preview?.source ? (
-                    <img src={resolveImageDisplayUrl(preview.source)} alt="" className="h-11 w-14 shrink-0 rounded-sm object-cover" />
+                    <AssetMedia kind="image" source={preview.source} className="h-11 w-14 shrink-0 rounded-sm object-cover" />
                   ) : preview ? (
                     <span className="flex h-11 w-14 shrink-0 items-center justify-center rounded-sm bg-(--canvas-node-bg) text-text-muted"><KindIcon className="h-4 w-4" /></span>
                   ) : null}
@@ -297,16 +297,14 @@ export function TagRelationsDialog({
                     {preview ? <span className="mt-0.5 block truncate text-[10px] text-text-muted">{preview.text || t(`node.tag.memberTypes.${preview.kind}`)}</span> : null}
                   </span>
                   {variant === 'members' ? (
-                    <button
-                      type="button"
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-text-muted hover:bg-accent/10 hover:text-accent"
+                    <UiIconButton
                       aria-label={t('node.tag.locateMember')}
                       title={t('node.tag.locateMember')}
                       onClick={(event) => {
                         event.stopPropagation();
                         void canvasNavigationFacade.focusNodeIds([node.id], { select: true, padding: 0.24 });
                       }}
-                    ><LocateFixed className="h-4 w-4" /></button>
+                    ><LocateFixed className="h-4 w-4" /></UiIconButton>
                   ) : null}
                 </div>
               );
@@ -314,7 +312,7 @@ export function TagRelationsDialog({
           </div>
         </section>
         {error ? (
-          <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-500">
+          <p role="alert" className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
             {error}
           </p>
         ) : null}

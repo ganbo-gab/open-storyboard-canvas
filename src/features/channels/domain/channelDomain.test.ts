@@ -13,6 +13,17 @@ export function testProfile(): ChannelProfileV2 {
 export function testJob(): JobInput {
   return { jobId: 'j1', channelId: 'test', modelId: 'image-model', operation: 'image.generate', prompt: '猫', params: {}, refs: [], count: 1 };
 }
+it('renders a restored object enum with reordered fields as the same declared JSON value', async () => {
+  const profile = testProfile();
+  profile.auth = { type: 'none' };
+  profile.models[0].params = [{ key: 'output', label: '时长与分辨率', type: 'enum', options: [{ label: '10 秒 · 768P', value: { duration: 10, resolution: '768P' } }] }];
+  profile.operations['image.generate']!.template = { model: '{{model}}', prompt: '{{prompt}}', duration: '{{param.output.duration}}', resolution: '{{param.output.resolution}}' };
+  const job = { ...testJob(), params: { output: { resolution: '768P', duration: 10 } } };
+  const result = await renderRequest(profile, job, '', async () => 'unused');
+  expect(result.request.body).toEqual({ mode: 'json', json: { model: 'image-model', prompt: '猫', duration: 10, resolution: '768P' } });
+  expect(result.preview).toEqual(renderPreview(profile, job));
+  await expect(renderRequest(profile, { ...job, params: { output: { resolution: '768P', duration: '10' } } }, '', async () => 'unused')).rejects.toThrow(/不符合声明/);
+});
 describe('strict profile validation', () => {
   it('accepts exact shapes and rejects unknown fields at every nested layer', () => {
     expect(channelProfileSchema.safeParse(testProfile()).success).toBe(true);
@@ -36,6 +47,17 @@ describe('strict profile validation', () => {
   });
   it('reports Chinese field errors', () => {
     expect(validateProfile({ version: 1 })).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'version', message: expect.stringContaining('配置值无效') })]));
+  });
+  it('permits poll response variables only in the final result request', () => {
+    const p = testProfile(); const op = p.operations['image.generate']!;
+    op.response = { mode: 'async', taskIdPath: 'id', poll: { method: 'GET', path: '/tasks/{{taskId}}', intervalSec: 1, timeoutMin: 1,
+      success: ['done'], failure: [], resultRequest: { method: 'GET', path: '/files?file_id={{poll.file_id}}', template: { file: '{{poll.file_id}}' } }, outputs: [] } };
+    expect(validateProfile(p)).toEqual([]);
+    op.template = { invalid: '{{poll.file_id}}' };
+    expect(validateProfile(p)).toContainEqual({ path: 'operations.image.generate.template', message: '未声明的模板变量 poll.file_id' });
+    op.template = {};
+    op.response.poll.path = '/tasks/{{poll.file_id}}';
+    expect(validateProfile(p)).toContainEqual({ path: 'operations.image.generate.response.poll.path', message: '未声明的模板变量 poll.file_id' });
   });
 });
 describe('typed template rendering', () => {

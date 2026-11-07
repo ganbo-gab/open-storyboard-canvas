@@ -1,0 +1,43 @@
+/* Channel onboarding: capability-first template catalog and channel details. Uses only semantic tokens from src/index.css. */
+@layer components {
+  .channel-template-card { display: flex; min-height: 170px; flex-direction: column; align-items: flex-start; gap: 12px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: rgb(var(--surface-rgb)); text-align: left; transition: border-color 160ms, background 160ms; }
+  .channel-template-card:hover { border-color: rgb(var(--accent-rgb) / .55); background: rgb(var(--elevated-rgb)); }
+  .channel-template-card:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 3px; }
+}
+
+@layer components {
+  .channel-market { display: flex; flex-direction: column; gap: 22px; }
+  .channel-market__header, .channel-model-editor > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+  .channel-market__filters { display: flex; flex-direction: column; gap: 14px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+  .channel-market__search-row { display: flex; align-items: center; gap: 10px; }
+  .channel-market__search-row > .ui-select { max-width: 180px; }
+  .channel-market__search { display: flex; flex: 1; min-width: 120px; align-items: center; gap: 9px; padding: 0 12px; min-height: 38px; border: 1px solid var(--line); border-radius: 9px; background: rgb(var(--raised-rgb)); color: rgb(var(--text-subtle-rgb)); }
+  .channel-market__search:focus-within { outline: 2px solid rgb(var(--accent-rgb) / .4); }
+  .channel-market__search input { width: 100%; min-width: 0; padding-block: 8px; background: transparent; outline: none; color: rgb(var(--text-rgb)); font-size: 13px; }
+  .channel-market__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 16px; }
+  .channel-market__rows { display: flex; flex-direction: column; gap: 10px; }
+  .channel-market__channel, .channel-market__model { display: flex; min-width: 0; flex-direction: column; gap: 14px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: rgb(var(--surface-rgb)); transition: border-color 150ms ease; }
+  .channel-market__channel:hover, .channel-market__model:hover { border-color: rgb(var(--accent-rgb) / .4); }
+  .channel-market__channel-main, .channel-market__model-main { display: flex; align-items: center; gap: 12px; min-width: 0; width: 100%; text-align: left; }
+  .channel-market__mark { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border-radius: 11px; background: rgb(var(--raised-rgb)); color: rgb(var(--text-muted-rgb)); }
+  .channel-market__mark svg { width: 20px; height: 20px; }
+  .channel-market__model-preview { min-height: 36px; color: rgb(var(--text-subtle-rgb)); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+  .channel-market__channel footer, .channel-market__model footer { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
+  .channel-market__channel footer > button:first-child { display: inline-flex; flex: 1; align-items: center; gap: 6px; }
+  .channel-market__model footer > :first-child { margin-right: auto; }
+  .channel-market__detail-header { display: flex; flex-direction: column; align-items: stretch; gap: 18px; }
+  .channel-market__detail-header > button { align-self: flex-start; }
+  .channel-market__table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+  .channel-market__table th { padding: 12px 16px; background: rgb(var(--raised-rgb)); color: rgb(var(--text-muted-rgb)); font-weight: 500; }
+  .channel-market__table td { padding: 15px 16px; border-top: 1px solid var(--line); }
+  .channel-market__table td small { display: block; margin-top: 5px; color: rgb(var(--text-subtle-rgb)); font-size: 11px; }
+  .channel-market__table td strong { font-weight: 500; }
+  .channel-market__empty { display: flex; grid-column: 1 / -1; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 250px; padding: 28px; color: rgb(var(--text-muted-rgb)); text-align: center; }
+  .channel-market__empty h3 { color: rgb(var(--text-rgb)); font-size: 16px; font-weight: 600; }
+  .channel-market__empty p, .channel-market__footnote { font-size: 12px; line-height: 1.7; color: rgb(var(--text-subtle-rgb)); }
+  .channel-model-editor { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; border-top: 1px solid var(--line); }
+  .channel-model-editor > header { flex-wrap: wrap; }
+  .channel-model-editor__item { min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: rgb(var(--surface-rgb)); }
+  .channel-model-editor__item > header { display: flex; align-items: center; gap: 8px; padding: 12px; }
+  @media (prefers-reduced-motion: reduce) { .channel-market__channel, .channel-market__model { transition: none; } }
+}

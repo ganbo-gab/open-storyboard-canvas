@@ -53,7 +53,7 @@ const reference: AgentModelReference = {
 };
 
 describe('Storyboard Agent top-level tool normalization', () => {
-  it('wraps CanvasCommand names in canvas_command and drops truly unknown top-level tools', () => {
+  it('wraps CanvasCommand names while retaining unknown calls for an explicit SDK error result', () => {
     const calls = normalizeStoryboardAgentToolCalls([
       { callId: 'status', name: 'generation.status', arguments: '{"nodeId":"node-1"}' },
       { callId: 'asset', name: 'asset.list', arguments: '{}' },
@@ -62,6 +62,7 @@ describe('Storyboard Agent top-level tool normalization', () => {
     expect(calls).toEqual([
       { callId: 'status', name: 'canvas_command', arguments: JSON.stringify({ type: 'generation.status', input: { nodeId: 'node-1' } }) },
       { callId: 'asset', name: 'canvas_command', arguments: JSON.stringify({ type: 'asset.list', input: {} }) },
+      { callId: 'unknown', name: 'generation.magic', arguments: '{}' },
     ]);
   });
 
@@ -340,7 +341,7 @@ describe('OpenAI Agents SDK runtime adapter', () => {
     })).toMatchObject({ suggested: false, replaySafety: 'unsafe' });
     expect(model.getRetryAdvice({
       request: modelRequest(),
-      error: new AgentModelGatewayError('The quota has been exceeded.', 429, true, false),
+      error: new AgentModelGatewayError('insufficient_quota', 429, true, false),
       stream: true,
       attempt: 1,
     })).toMatchObject({
@@ -377,7 +378,7 @@ describe('OpenAI Agents SDK runtime adapter', () => {
     expect(runtime.runner.config).toMatchObject({
       tracingDisabled: true,
       traceIncludeSensitiveData: false,
-      modelSettings: { retry: { maxRetries: 1 } },
+      modelSettings: { retry: { maxRetries: 3 } },
     });
   });
 
@@ -410,7 +411,7 @@ describe('OpenAI Agents SDK runtime adapter', () => {
     expect(captured).not.toBeNull();
     const body = buildAgentProviderBody(captured!, false);
     const serialized = JSON.stringify(body);
-    expect(captured!.tools).toEqual([]);
+    expect(captured!.tools.map((candidate) => candidate.name)).toEqual(['request_user_input']);
     expect(serialized.length).toBeLessThan(8_000);
   });
 
@@ -990,7 +991,7 @@ describe('OpenAI Agents SDK runtime adapter', () => {
       skillContext: { text: '帮我诊断 429 错误' },
     });
     await runtime.runner.run(diagnosticAgent, '帮我诊断 429 错误', { context: diagnosticContext });
-    expect(requests[0].tools.map((candidate) => candidate.name)).toEqual(['diagnostics']);
+    expect(requests[0].tools.map((candidate) => candidate.name)).toEqual(['diagnostics', 'request_user_input']);
 
     const minimalContext: CanvasAgentContext = { projectId: 'project-1', runId: 'skills-minimal-run' };
     const minimalAgent = createCanvasAgent({
@@ -1001,7 +1002,7 @@ describe('OpenAI Agents SDK runtime adapter', () => {
       skillContext: { text: '你好' },
     });
     await runtime.runner.run(minimalAgent, '你好', { context: minimalContext });
-    expect(requests[1].tools.map((candidate) => candidate.name)).toEqual([]);
+    expect(requests[1].tools.map((candidate) => candidate.name)).toEqual(['request_user_input']);
   });
 
   it('marks deferred namespaced tools only for a compatible Responses model', async () => {
@@ -1041,11 +1042,11 @@ describe('OpenAI Agents SDK runtime adapter', () => {
     });
     await responsesRuntime.runner.run(responsesAgent, '帮我诊断 429 错误', { context: responsesContext });
     expect(requests[0]).toMatchObject({
-      tools: [{
+      tools: expect.arrayContaining([expect.objectContaining({
         name: 'diagnostics',
         namespace: 'storyboard_canvas',
         deferLoading: true,
-      }],
+      })]),
       toolPolicy: {
         mode: 'responses-tool-search',
         deferredToolNames: ['storyboard_canvas.diagnostics'],
@@ -1071,7 +1072,7 @@ describe('OpenAI Agents SDK runtime adapter', () => {
     });
     await chatRuntime.runner.run(chatAgent, '帮我诊断 429 错误', { context: chatContext });
     expect(requests[1]).toMatchObject({
-      tools: [{ name: 'diagnostics', deferLoading: false }],
+      tools: expect.arrayContaining([expect.objectContaining({ name: 'diagnostics', deferLoading: false })]),
       toolPolicy: {
         mode: 'local-pruned',
         deferredToolNames: [],

@@ -82,6 +82,12 @@ async function commitAssetMedia(source: string, remote: boolean, kind?: 'image' 
     });
     return blob.type.startsWith('image/') ? await persistImageSource(dataUrl) : await persistVideoSource(dataUrl);
   }
+  return await persistAssetBlob(blob);
+}
+
+/** Binary asset boundary shared by uploaded models and existing image/audio/video media. */
+export async function persistAssetBlob(blob: Blob): Promise<string> {
+  if (!blob.size) throw new Error('Cannot persist empty media');
   const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
   const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
   const reference = `asset-media:${encodeURIComponent(blob.type)}:${hash}`;
@@ -138,6 +144,10 @@ export async function externalizeAssetMedia<T>(value: T, tolerateStaleBlob = fal
     const local = isTask || isAsset ? { found: false } : stale;
     const output: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(record)) {
+      if (key === 'referenceSlots' && child && typeof child === 'object' && !Array.isArray(child)) {
+        output[key] = Object.fromEntries(await Promise.all(Object.entries(child).map(async ([slot, sources]) => [slot, await migrate(sources, true, local)])));
+        continue;
+      }
       const sourceField = /^(source|previewUrl|imageUrl|previewImageUrl|videoUrl|localVideoUrl|audioUrl|localAudioUrl|thumbnailUrl|referenceImages|referenceVideos|referenceAudios)$/.test(key)
         || (key === 'result' && typeof record.job_id === 'string');
       output[key] = await migrate(child, sourceField && record.kind !== 'text', local);

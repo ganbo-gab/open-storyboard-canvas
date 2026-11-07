@@ -275,10 +275,7 @@ pub(crate) async fn handle_broker_connection(
     Ok(())
 }
 
-async fn broker_request(
-    source: &ChildBrokerSource,
-    action: Value,
-) -> Result<Value, String> {
+async fn broker_request(source: &ChildBrokerSource, action: Value) -> Result<Value, String> {
     let credentials = source.resolve()?;
     let address: SocketAddr = credentials
         .address
@@ -578,7 +575,8 @@ mod tests {
                 session_id: format!("session-{generation}"),
                 connection: None,
             };
-            super::super::connection::write_connection_descriptor(root.path(), &descriptor).unwrap();
+            super::super::connection::write_connection_descriptor(root.path(), &descriptor)
+                .unwrap();
             let expected_token = descriptor.capability_token;
             let expected_session = descriptor.session_id;
             let server = tokio::spawn(async move {
@@ -589,9 +587,18 @@ mod tests {
                 assert_eq!(request["token"], expected_token);
                 assert_eq!(request["sessionId"], expected_session);
                 assert_eq!(request["action"], "listTools");
-                reader.get_mut().write_all(b"{\"ok\":true,\"result\":{\"tools\":[]}}\n").await.unwrap();
+                reader
+                    .get_mut()
+                    .write_all(b"{\"ok\":true,\"result\":{\"tools\":[]}}\n")
+                    .await
+                    .unwrap();
             });
-            assert_eq!(broker_request(&source, json!({"action": "listTools"})).await.unwrap(), json!({"tools": []}));
+            assert_eq!(
+                broker_request(&source, json!({"action": "listTools"}))
+                    .await
+                    .unwrap(),
+                json!({"tools": []})
+            );
             server.await.unwrap();
         }
     }
@@ -600,35 +607,61 @@ mod tests {
     async fn stopped_app_and_missing_descriptor_report_actionable_error() {
         let root = tempfile::tempdir().unwrap();
         let source = ChildBrokerSource::Descriptor(root.path().join("osc.json"));
-        assert_eq!(broker_request(&source, json!({"action": "callTool"})).await.unwrap_err(), "请先打开 Open Storyboard Canvas");
+        assert_eq!(
+            broker_request(&source, json!({"action": "callTool"}))
+                .await
+                .unwrap_err(),
+            "请先打开 Open Storyboard Canvas"
+        );
         let listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         drop(listener);
-        super::super::connection::write_connection_descriptor(root.path(), &ExternalAgentConnectionDescriptor {
-            schema_version: 1,
-            broker_address: address.to_string(),
-            capability_token: "stale-process-token".to_string(),
-            session_id: "stale-process-session".to_string(),
-            connection: None,
-        }).unwrap();
-        assert_eq!(broker_request(&source, json!({"action": "callTool"})).await.unwrap_err(), "请先打开 Open Storyboard Canvas");
+        super::super::connection::write_connection_descriptor(
+            root.path(),
+            &ExternalAgentConnectionDescriptor {
+                schema_version: 1,
+                broker_address: address.to_string(),
+                capability_token: "stale-process-token".to_string(),
+                session_id: "stale-process-session".to_string(),
+                connection: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            broker_request(&source, json!({"action": "callTool"}))
+                .await
+                .unwrap_err(),
+            "请先打开 Open Storyboard Canvas"
+        );
     }
 
     #[test]
     fn descriptor_rejects_non_loopback_addresses_and_accepts_legacy_expiry() {
         let root = tempfile::tempdir().unwrap();
-        let path = super::super::connection::write_connection_descriptor(root.path(), &ExternalAgentConnectionDescriptor {
-            schema_version: 1,
-            broker_address: "203.0.113.1:1234".to_string(),
-            capability_token: "token".to_string(),
-            session_id: "session".to_string(),
-            connection: None,
-        }).unwrap();
-        assert!(ChildBrokerCredentials::from_descriptor(&path).err().unwrap().contains("not loopback"));
-        std::fs::write(&path, serde_json::to_vec(&json!({
-            "schemaVersion": 1, "brokerAddress": "127.0.0.1:1234", "capabilityToken": "token",
-            "sessionId": "session", "expiresAt": 1,
-        })).unwrap()).unwrap();
+        let path = super::super::connection::write_connection_descriptor(
+            root.path(),
+            &ExternalAgentConnectionDescriptor {
+                schema_version: 1,
+                broker_address: "203.0.113.1:1234".to_string(),
+                capability_token: "token".to_string(),
+                session_id: "session".to_string(),
+                connection: None,
+            },
+        )
+        .unwrap();
+        assert!(ChildBrokerCredentials::from_descriptor(&path)
+            .err()
+            .unwrap()
+            .contains("not loopback"));
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "schemaVersion": 1, "brokerAddress": "127.0.0.1:1234", "capabilityToken": "token",
+                "sessionId": "session", "expiresAt": 1,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
         assert!(ChildBrokerCredentials::from_descriptor(&path).is_ok());
     }
 

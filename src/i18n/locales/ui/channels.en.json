@@ -1,0 +1,300 @@
+{
+  "sizeGuide": {
+    "title": "Choose frame controls",
+    "hint": "Choose a display style; the options below update to match. Enable the sizes you need, then choose a default.",
+    "pixels": "Pixel dimensions",
+    "pixelsExample": "For example, 1024 × 1024 in one selector",
+    "ratio-resolution": "Ratio + resolution",
+    "ratio-resolutionExample": "For example, 1:1 + 1K in two selectors",
+    "exactValues": "Display preferences preserve exact API values and show only declared combinations. Special options such as auto remain available.",
+    "mapping": "Edit ratio and resolution labels",
+    "mappingHint": "Initial labels use the exact pixel ratio and longest edge: 1K / 2K / 4K mean 1024 / 2048 / 4096 here. Providers may define tiers differently; edit labels without changing dimensions.",
+    "ratio": "Ratio",
+    "resolution": "Resolution",
+    "actualSize": "Actual dimensions: {{size}}",
+    "nativePair": "This API already declares “{{ratio}}” and “{{resolution}}” separately. Use the existing options below; pixel dimensions are not guessed without an explicit mapping.",
+    "next": "Keep template choices and select defaults for quick setup. Expand parameters to customize them. New wire fields also need bindings in the advanced request template; inspect the request preview."
+  },
+  "cap": {
+    "chat": {
+      "short": "Language",
+      "long": "Language models"
+    },
+    "image": {
+      "short": "Image",
+      "long": "Image models"
+    },
+    "video": {
+      "short": "Video",
+      "long": "Video models"
+    },
+    "audio": {
+      "short": "Audio",
+      "long": "Audio models"
+    },
+    "model": {
+      "short": "3D",
+      "long": "3D models"
+    }
+  },
+  "catalog": {
+    "back": "Back to templates",
+    "use": "Use this template",
+    "docs": "Official documentation",
+    "hint": "Choose what you want to create, inspect supported models and inputs, then enter your endpoint and key.",
+    "all": "All",
+    "search": "Search channels or models",
+    "details": "Explore models and capabilities",
+    "localTitle": "Local workflows",
+    "localHint": "Connect your ComfyUI instance and run existing workflows.",
+    "localOpen": "Connect ComfyUI",
+    "supports": "Supports {{capabilities}} with {{count}} model configurations."
+  },
+  "detail": {
+    "noModels": "No models declared",
+    "capabilityTabs": "Model capabilities"
+  },
+  "operation": {
+    "chat": "Chat",
+    "imageGenerate": "Text to image",
+    "imageEdit": "Image editing",
+    "videoGenerate": "Video generation",
+    "audioGenerate": "Audio generation",
+    "modelGenerate": "3D generation",
+    "modelsList": "Model discovery"
+  },
+  "model": {
+    "ref": {
+      "image": "Up to {{count}} images",
+      "video": "Up to {{count}} videos",
+      "audio": "Up to {{count}} audio clips"
+    },
+    "unlimited": "unlimited",
+    "ways": "Modes",
+    "inputs": "Reference inputs",
+    "textOnly": "Text",
+    "keyParams": "Parameters",
+    "hideDetails": "Hide details",
+    "showDetails": "Modes and parameters",
+    "sharedParams": "Shared parameters",
+    "slotUnlimited": "{{min}} or more",
+    "default": "Default {{value}}"
+  },
+  "status": {
+    "method": {
+      "models": "Model connection test",
+      "smoke": "Generation test"
+    },
+    "untestedHint": "A saved key does not verify connectivity. Test the connection first.",
+    "untested": "Not tested",
+    "passed": "Connection tested",
+    "failed": "Test failed",
+    "keyReady": "Key configured",
+    "noKey": "Key required",
+    "keyNotRequired": "No key required"
+  },
+  "market": {
+    "nav": "Channels & models",
+    "title": "Channels & models",
+    "subtitle": "{{channels}} channels · {{models}} models, all creation capabilities in one place.",
+    "add": "Connect a channel",
+    "view": "Browse by",
+    "channels": "My channels",
+    "models": "Model catalog",
+    "back": "Back to channels & models",
+    "search": "Search channels, models or addresses",
+    "filterChannel": "Filter channel",
+    "allChannels": "All channels",
+    "filterStatus": "Filter configuration status",
+    "grid": "Card view",
+    "table": "List view",
+    "configure": "Configure",
+    "configureChannel": "Channel settings",
+    "configureModel": "Configure model",
+    "tryModel": "Try model",
+    "details": "View details",
+    "defaultMode": "Uses declared channel contract",
+    "browseModels": "Browse {{count}} models",
+    "showingModels": "{{count}} models found",
+    "shape": {
+      "single": "Single model",
+      "multiple": "Multiple models",
+      "mixed": "Multiple categories"
+    },
+    "shapeHint": {
+      "single": "This channel provides one model with its own declared inputs and parameters.",
+      "multiple": "This connection provides {{count}} models in the same category.",
+      "mixed": "This channel provides {{count}} models across {{categories}} categories, each with its own operation and parameters."
+    },
+    "status": {
+      "all": "All statuses",
+      "ready": "Configured",
+      "missing": "Needs setup",
+      "failed": "Test failed"
+    },
+    "columns": {
+      "model": "Model",
+      "channel": "Channel",
+      "capability": "Output",
+      "availability": "Configuration"
+    },
+    "emptyTitle": "Connect your first channel",
+    "emptyHint": "Connect a dedicated model or a relay with models across multiple categories.",
+    "noMatches": "No matching results",
+    "filterHint": "Try changing the category, channel or status filter.",
+    "reset": "Clear filters",
+    "testHint": "Configured means the address and credentials are set. Test results are separate. Models and categories come from saved declarations, not live upstream availability.",
+    "useInStage": "Choose 3D models in the stage image-to-3D workflow.",
+    "create": "Create {{kind}}",
+    "replaceDraft": "Start with this model",
+    "replaceDraftHint": "The workbench has an unsent draft or references. Confirm to clear them and use this model.",
+    "setupHint": "Choose a protocol or provide API documentation, then confirm each model, category and mode. Saving never starts generation."
+  },
+  "manage": {
+    "title": "Models",
+    "hint": "Models declare their capabilities and modes, sharing this channel's address and credentials.",
+    "search": "Search this channel's models",
+    "importModels": "Add discovered models ({{count}})",
+    "importTitle": "Select models to connect",
+    "edit": "Edit model",
+    "modelId": "Upstream model name",
+    "modelIdHint": "Use the exact name accepted by the API.",
+    "label": "Display name",
+    "duplicate": "Copy as another model",
+    "remove": "Remove model",
+    "minimum": "Keep at least one model in the channel",
+    "copyFrom": "Reuse model configuration",
+    "copyHint": "Copies capabilities, modes, parameters and input slots. Capabilities are never inferred from the new name.",
+    "discoveryHint": "Discovery usually returns only names. Select models using the same API contract; add different categories in separate groups.",
+    "addSelected": "Add {{count}} models",
+    "selected": "{{count}} selected",
+    "duplicateId": "This model name already exists.",
+    "operations": "Output operations",
+    "operationHint": "Enable only operations the model supports and this channel has configured.",
+    "fromChannel": "Current channel model",
+    "fromTemplate": "Other category / API template",
+    "templateHint": "Use this only if the current channel supports this API contract. It copies the model request configuration without changing the channel address or key. Check the request preview before saving.",
+    "headersIncompatible": "This API requires dedicated headers missing from the current channel. Connect it as a separate channel to preserve the existing models.",
+    "endpointBound": "This mode has its own request and output contract. Choose a matching template to change its category, or edit and validate the full contract in advanced JSON."
+  },
+  "setup": {
+    "chooseModels": "Choose models to connect",
+    "chooseHint": "Select one for a dedicated model, or models from multiple categories for one channel. You can add more later.",
+    "selectAll": "Select all",
+    "clear": "Clear selection"
+  },
+  "templates": {
+    "generic-audio-json": {
+      "title": "Custom audio · JSON",
+      "vendor": "Custom API",
+      "summary": "Configure the audio model and result URL field from your API documentation."
+    }
+  },
+  "templateHelp": {
+    "open": "Connection guide",
+    "openFor": "{{name}} connection guide",
+    "title": "{{name}} · Connection guide",
+    "intro": "Templates provide a request format. Connect your service, choose its actual models, then review parameters. The examples here do not add models to your channel.",
+    "connectTitle": "Enter the address and key",
+    "connectBody": "Use the API base URL and API key supplied by your provider. The paths below are appended to that URL; check that the API version prefix is not duplicated.",
+    "modelsTitle": "Fetch and choose your models",
+    "modelsBody": "Fetch the model list or enter model IDs, then select the models to connect. You can change the suggested category; also choose a request contract your service supports.",
+    "modelList": "Model-list endpoint in this template: {{path}}. Enter IDs manually if your provider does not expose a list.",
+    "manualModels": "This template does not declare a model-list endpoint. Enter model IDs manually or configure the list path from your provider’s documentation.",
+    "reviewTitle": "Review parameters and requests, then save",
+    "reviewBody": "Check each model and mode’s inputs, options, defaults, and capabilities. Keep settings supported by your provider, then inspect the actual payload in the request preview.",
+    "routesTitle": "Request paths in this template",
+    "routesHint": "These paths come from the template and its mode configuration. Model and task placeholders are replaced when requesting. Different modes may use different paths.",
+    "body": "Request body: {{format}}",
+    "poll": "Query the original task: {{path}}",
+    "sizeTimeTitle": "Image size and video duration",
+    "pixels": "Options for {{fields}} use width × height pixels, such as 1024x1024. The UI can show aspect ratio and resolution while sending the original option value. Do not replace a pixel value with 1:1 or 1K.",
+    "nativeSize": "{{fields}} send aspect ratios or resolution tiers as declared. Values such as 1K and 2K do not imply a fixed width and height. Use the model’s declared options without calculating pixels.",
+    "time": "Video APIs may use seconds, duration, or nested fields. Check the mappings below, value types, and units in parameter descriptions. The string “4” and number 4 may also differ; changing a label does not change the contract.",
+    "parametersTitle": "View parameters and API values",
+    "parametersHint": "These are template references for the named models or modes. Display labels are customizable; values after “=” are sent to the API. Options do not guarantee support across every model.",
+    "appliesTo": "Example scope: {{contexts}}",
+    "valueType": {
+      "enum": "Choose a declared option",
+      "number": "Number",
+      "boolean": "On / off",
+      "text": "Text"
+    },
+    "customize": "If your service differs slightly, edit paths, field mappings, allowed values, or response parsing in advanced JSON on the next step, then inspect the request preview. Follow your provider’s documentation. Previewing does not generate content.",
+    "notesTitle": "Additional template notes"
+  },
+  "frameOptions": {
+    "selectionHint": "Check the choices to offer in the workbench. {{count}} enabled. Removing the default selects the first remaining choice.",
+    "special": "Automatic and other options",
+    "default": "Default choice",
+    "noDefault": "No default",
+    "more": "Add common choices",
+    "candidatesHint": "These are common candidates, not confirmed model capabilities. Enable only values supported by your channel. Pixel choices retain their exact dimensions; other combinations are not added automatically.",
+    "custom": "Add a custom choice",
+    "wireValue": "API value",
+    "valueExample": "e.g. 16:9, 2K or 1920x1080",
+    "label": "Display label (optional)",
+    "add": "Add choice",
+    "advanced": "Advanced: fields, labels and raw options",
+    "keepOne": "Keep at least one choice, or remove this parameter in the advanced editor.",
+    "empty": "Add at least one choice, or remove this parameter in the advanced editor."
+  },
+  "combinations": {
+    "hint": "Select resolution tiers and aspect ratios independently. Apply the combinations to use both selectors in the workbench.",
+    "custom": "Add a ratio or resolution tier",
+    "customTier": "Custom resolution tier",
+    "customRatio": "Custom ratio",
+    "addTier": "Add tier",
+    "addRatio": "Add ratio",
+    "mapping": "Review / edit actual sizes for {{count}} combinations",
+    "mappingHint": "Existing API values are preserved. New sizes use a long edge of 1024 / 2048 / 4096 for 1K / 2K / 4K with a rounded short edge. Check provider dimension and step limits before applying. Custom tiers require explicit API sizes.",
+    "suggested": "Calculated — review needed",
+    "existing": "Existing configured value",
+    "enterSize": "Enter a supported API size",
+    "reviewHint": "{{tiers}} resolution tiers × {{ratios}} ratios = {{count}} combinations. Confirm provider support before applying; this does not generate anything.",
+    "missing": "Some combinations need an API size. Expand the mapping to complete them.",
+    "conflict": "Different combinations cannot share one API value. Check the size mapping.",
+    "apply": "Apply {{count}} combinations",
+    "applied": "Updated. Save the channel to keep these changes.",
+    "enabled": "{{count}} size combinations enabled. After changing the selections, click Apply to update them."
+  },
+  "batch": {
+    "title": "Batch configure",
+    "hint": "Reuse configured workbench parameters across models or modes in this channel. Each remains independently editable.",
+    "source": "Source model and mode",
+    "parameters": "Parameters to reuse",
+    "parameter": "Reuse parameter",
+    "noParameters": "Configure parameters on the source first.",
+    "copyDefaults": "Also copy the source defaults",
+    "defaultHint": "Keep valid target defaults by default; otherwise use the source default or first available option.",
+    "targets": "Target models / modes",
+    "target": "Target",
+    "search": "Search target models or modes",
+    "selectCompatible": "Select applicable targets",
+    "clear": "Clear selection",
+    "noTargets": "No other image or video models to apply to.",
+    "review": "Review {{count}} changes",
+    "apply": "Apply to {{count}} targets",
+    "back": "Back to selection",
+    "reviewSummary": "Source: {{source}}. Apply {{params}} parameters to {{count}} models / modes.",
+    "preserved": "Keep {{count}} other parameters, requests and reference slots.",
+    "supportHint": "Compatibility checks cover configuration structure. Confirm model option support in your channel documentation. Changes update this draft; save the channel to keep them.",
+    "before": "Before",
+    "after": "After",
+    "notDeclared": "Not declared — will be added",
+    "unset": "Not set",
+    "defaultValue": "Default: {{value}}",
+    "failed": "Could not apply. Check the configuration.",
+    "stale": "The channel changed during review. Go back and review the current configuration.",
+    "applied": "Applied to the draft. Save the channel to keep it. Future edits do not automatically change other models.",
+    "undo": "Undo this application",
+    "undoChanged": "Later edits exist; undo is disabled to preserve them."
+  },
+  "autoImage": {
+    "auto": "Auto detect",
+    "hint": "Generate from text without images; use a compatible image-editing mode when reference images are added. You can also select a mode manually.",
+    "edit": "Image editing",
+    "generate": "Text to image",
+    "choose": "Choose a mode"
+  }
+}

@@ -88,7 +88,7 @@ export function AddNodeMenu({ menu, materialImport, scheduleCanvasPersist, onPic
     <>
       {connection ? <ConnectionPreview from={connection.fromClient} to={{ x: menu.clientX, y: menu.clientY }} /> : null}
       <MenuSurface
-        anchor={{ x: menu.clientX, y: menu.clientY }}
+        anchor={menu.anchor ?? { x: menu.clientX, y: menu.clientY }}
         onClose={closeMenus}
         width={272}
         label={connection ? t('rework.canvas.addMenu.fromConnection') : t('rework.canvas.add')}

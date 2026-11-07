@@ -3,6 +3,7 @@ import { resolveImageOutputGeometry } from '@/features/canvas/application/imageO
 import type { VideoInputSchema } from '@/features/canvas/application/videoInputSchema';
 import type { CustomProviderConfig } from '@/stores/customProvidersStore';
 import { asRecord, cloneWorkflow, historyError, nodeInputs, nonemptyString, outputFile, safeKey, setInput, uploadedImageName, type ComfyOutputFile } from '@/features/channels/adapters/comfyui/workflow';
+import { resolveComfyUIWorkflow } from '@/features/channels/application/comfyWorkflows';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -154,9 +155,9 @@ export function isComfyUIProvider(cfg: Pick<CustomProviderConfig, 'apiStyle'>): 
   return cfg.apiStyle === 'comfyui';
 }
 
-export function parseComfyUIConfig(cfg: CustomProviderConfig): ComfyUIConfig {
-  const raw = asRecord(cfg.extraParams?.comfyui);
-  if (!raw) throw new Error('ComfyUI 配置缺少 API 工作流。');
+export function parseComfyUIConfig(cfg: CustomProviderConfig, modelId?: string): ComfyUIConfig {
+  const selected = resolveComfyUIWorkflow(cfg, modelId);
+  const raw = selected.config;
   const outputNodeIds = raw.outputNodeIds === undefined ? [] : raw.outputNodeIds;
   if (!Array.isArray(outputNodeIds) || outputNodeIds.some((item) => !safeKey(nonemptyString(item)))) {
     throw new Error('ComfyUI 输出节点 ID 必须是有效字符串数组。');
@@ -169,7 +170,7 @@ export function parseComfyUIConfig(cfg: CustomProviderConfig): ComfyUIConfig {
   }
   return {
     workflow,
-    mediaType: cfg.mediaType === 'video' ? 'video' : 'image',
+    mediaType: selected.mediaType,
     bindings: parseBindings(raw.bindings),
     outputNodeIds: outputNodeIds as string[],
     pollIntervalMs: boundedNumber(raw.pollIntervalMs, 1500, 500, 10000),
@@ -476,7 +477,13 @@ export async function pollComfyUIWorkflow(
 export async function checkComfyUIConnection(transport: ComfyUITransport): Promise<void> {
   try {
     await transport.json('/system_stats', 'GET');
-  } catch {
-    await transport.json('/queue', 'GET');
+  } catch (statsError) {
+    try {
+      await transport.json('/queue', 'GET');
+    } catch (queueError) {
+      const statsDetail = statsError instanceof Error ? statsError.message : String(statsError);
+      const queueDetail = queueError instanceof Error ? queueError.message : String(queueError);
+      throw new Error(`ComfyUI 连接检查失败：/system_stats: ${statsDetail}；/queue: ${queueDetail}`);
+    }
   }
 }

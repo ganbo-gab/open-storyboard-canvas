@@ -5,9 +5,10 @@ import {
   submitGenerateImageJob,
 } from '@/commands/ai';
 import { imageUrlToDataUrl, persistImageLocally } from '@/features/canvas/application/imageData';
-import { uploadImageToConfiguredHost } from '@/features/canvas/application/imageHosting';
-import { useSettingsStore } from '@/stores/settingsStore';
+import { isPublicReferenceUrl, ReferenceNeedsPublicUrlError } from '@/features/channels/domain/referenceErrors';
 import { normalizeVideoInputSchema } from '../application/videoInputSchema';
+import { mapChannelGenerationParameters, mapImageChannelGenerationParameters } from '../application/generation/channelParameters';
+import { resolveNativeChannelModel } from '@/features/channels/application/channelService';
 
 import type { AiGateway, GenerateImagePayload } from '../application/ports';
 import { submitDreaminaJob, submitDreaminaVideoJob, getDreaminaJob, retryDreaminaJob } from './dreaminaGateway';
@@ -19,7 +20,7 @@ import {
   buildCustomProviderRequestDebugPreview,
   buildCustomVideoProviderRequestDebugPreview,
   type CustomProviderRequestDebugPreview,
-} from './customProviderGateway';
+} from './providerGateway';
 import type { GenerateVideoPayload } from '../application/ports';
 
 function isDreaminaModel(id: string): boolean { return id.startsWith('dreamina:'); }
@@ -36,6 +37,8 @@ export interface GenerateImageDebugPreview {
     size: string;
     aspectRatio: string;
     referenceImages?: unknown[];
+    channelModeId?: string;
+    referenceSlots?: unknown;
     extraParams?: unknown;
   };
   providerRequest?: CustomProviderRequestDebugPreview;
@@ -51,12 +54,16 @@ export interface GenerateVideoDebugPreview {
     referenceImages?: unknown[];
     referenceVideos?: unknown[];
     referenceAudios?: unknown[];
+    channelModeId?: string;
+    referenceSlots?: unknown;
     extraParams?: unknown;
   };
   providerRequest?: CustomProviderRequestDebugPreview;
 }
 
 async function normalizeReferenceImages(payload: GenerateImagePayload): Promise<string[] | undefined> {
+  // Channel templates own URL/base64/file encoding; do not erase URL references before rendering.
+  if (isCustomModel(payload.model) || isAgnesModel(payload.model)) return payload.referenceImages;
   const isKieModel = payload.model.startsWith('kie/');
   const isFalModel = payload.model.startsWith('fal/');
   const isCustomOrDreamina = isDreaminaModel(payload.model) || isCustomModel(payload.model) || isAgnesModel(payload.model);
@@ -72,24 +79,25 @@ async function normalizeReferenceImages(payload: GenerateImagePayload): Promise<
 }
 
 async function normalizeVideoReferenceImages(payload: GenerateVideoPayload): Promise<string[] | undefined> {
+  if (payload.referenceSlots !== undefined && (isCustomModel(payload.model) || isAgnesModel(payload.model))) return undefined;
   const sources = [
     ...(payload.inputReference ? [payload.inputReference] : []),
     ...(payload.referenceImages ?? []),
   ];
   if (sources.length === 0) return undefined;
+  if (resolveNativeChannelModel(payload.model)) return sources;
   const inputSchema = normalizeVideoInputSchema(payload.extraParams?.videoInputSchema);
   const limitedSources = inputSchema.images.enabled
     ? sources.slice(0, inputSchema.images.max)
     : [];
   if (limitedSources.length === 0) return undefined;
   if (inputSchema.images.requireImageHost) {
-    const imageHostSettings = useSettingsStore.getState().imageHostSettings;
-    return await Promise.all(
-      limitedSources.map(async (imageUrl, index) =>
-        await uploadImageToConfiguredHost(imageUrl, index, imageHostSettings)
-      )
-    );
+    if (limitedSources.some((source) => !isPublicReferenceUrl(source))) {
+      throw new ReferenceNeedsPublicUrlError({ slot: 'images', kind: 'image' });
+    }
+    return limitedSources;
   }
+  if (isCustomModel(payload.model) || isAgnesModel(payload.model)) return limitedSources;
   return await Promise.all(limitedSources.map(async (imageUrl) => await imageUrlToDataUrl(imageUrl)));
 }
 
@@ -141,12 +149,15 @@ export async function buildGenerateImageDebugPreview(
   payload: GenerateImagePayload,
 ): Promise<GenerateImageDebugPreview> {
   const normalizedReferenceImages = await normalizeReferenceImages(payload);
+  payload = mapImageChannelGenerationParameters(payload);
   const request = {
     prompt: payload.prompt,
     model: payload.model,
     size: payload.size,
     aspect_ratio: payload.aspectRatio,
     reference_images: normalizedReferenceImages,
+    channel_mode_id: payload.channelModeId,
+    reference_slots: payload.referenceSlots,
     extra_params: payload.extraParams,
   };
   const route = resolveImageRoute(payload.model);
@@ -158,6 +169,8 @@ export async function buildGenerateImageDebugPreview(
       size: payload.size,
       aspectRatio: payload.aspectRatio,
       referenceImages: normalizedReferenceImages?.map((image) => summarizeDebugString(image)),
+      channelModeId: payload.channelModeId,
+      referenceSlots: summarizeDebugValue(payload.referenceSlots),
       extraParams: summarizeDebugValue(payload.extraParams),
     },
     providerRequest:
@@ -174,14 +187,17 @@ export async function buildGenerateVideoDebugPreview(
     throw new Error('视频生成当前仅支持自定义视频服务商配置或即梦 CLI');
   }
   const normalizedReferenceImages = await normalizeVideoReferenceImages(payload);
+  payload = mapChannelGenerationParameters(payload);
   const request = {
     prompt: payload.prompt,
     model: payload.model,
     size: payload.size,
-    aspect_ratio: payload.aspectRatio ?? 'auto',
+    aspect_ratio: payload.aspectRatio ?? (isDreaminaModel(payload.model) ? 'auto' : ''),
     reference_images: normalizedReferenceImages,
     reference_videos: payload.referenceVideos,
     reference_audios: payload.referenceAudios,
+    channel_mode_id: payload.channelModeId,
+    reference_slots: payload.referenceSlots,
     extra_params: {
       ...(payload.extraParams ?? {}),
       ...(typeof payload.seconds === 'number' ? { seconds: payload.seconds } : {}),
@@ -194,10 +210,12 @@ export async function buildGenerateVideoDebugPreview(
       prompt: summarizeDebugString(payload.prompt),
       model: payload.model,
       size: payload.size,
-      aspectRatio: payload.aspectRatio ?? 'auto',
+      aspectRatio: payload.aspectRatio ?? (isDreaminaModel(payload.model) ? 'auto' : ''),
       referenceImages: normalizedReferenceImages?.map((image) => summarizeDebugString(image)),
       referenceVideos: payload.referenceVideos,
       referenceAudios: payload.referenceAudios,
+      channelModeId: payload.channelModeId,
+      referenceSlots: summarizeDebugValue(payload.referenceSlots),
       extraParams: summarizeDebugValue(request.extra_params),
     },
     providerRequest: route === 'dreamina'
@@ -210,18 +228,33 @@ export const tauriAiGateway: AiGateway = {
   setApiKey,
   generateImage: async (payload: GenerateImagePayload) => {
     const normalizedReferenceImages = await normalizeReferenceImages(payload);
+    payload = mapImageChannelGenerationParameters(payload);
 
+    if (isCustomModel(payload.model) || isAgnesModel(payload.model) || isDreaminaModel(payload.model)) {
+      const request = { prompt: payload.prompt, model: payload.model, size: payload.size, aspect_ratio: payload.aspectRatio,
+        reference_images: normalizedReferenceImages, channel_mode_id: payload.channelModeId, reference_slots: payload.referenceSlots, extra_params: payload.extraParams };
+      const id = isDreaminaModel(payload.model) ? await submitDreaminaJob(request) : await submitCustomProviderJob(request);
+      for (;;) {
+        const job = isDreaminaJob(id) ? await getDreaminaJob(id) : await getCustomProviderJobAsync(id);
+        if (job.status === 'succeeded' && job.result) return job.result;
+        if (['failed', 'unknown', 'recoverable_wait', 'canceled', 'not_found'].includes(job.status)) throw new Error(job.error || '生成结果尚未确认；不会自动重新提交');
+        await new Promise<void>((resolve) => setTimeout(resolve, 500));
+      }
+    }
     return await generateImage({
       prompt: payload.prompt,
       model: payload.model,
       size: payload.size,
       aspect_ratio: payload.aspectRatio,
       reference_images: normalizedReferenceImages,
+      channel_mode_id: payload.channelModeId,
+      reference_slots: payload.referenceSlots,
       extra_params: payload.extraParams,
     });
   },
   submitGenerateImageJob: async (payload: GenerateImagePayload) => {
     const normalizedReferenceImages = await normalizeReferenceImages(payload);
+    payload = mapImageChannelGenerationParameters(payload);
     // Route by model prefix: the built-in Rust gateway only knows about the
     // static built-in models (grsai/fal/kie/ppio); dreamina:* and custom:*
     // entries fan out to their own TS-side adapters.
@@ -231,6 +264,8 @@ export const tauriAiGateway: AiGateway = {
       size: payload.size,
       aspect_ratio: payload.aspectRatio,
       reference_images: normalizedReferenceImages,
+      channel_mode_id: payload.channelModeId,
+      reference_slots: payload.referenceSlots,
       extra_params: payload.extraParams,
     };
     if (isDreaminaModel(payload.model)) return await submitDreaminaJob(request);
@@ -247,6 +282,7 @@ export const tauriAiGateway: AiGateway = {
       throw new Error('视频生成当前仅支持自定义视频服务商配置或即梦 CLI');
     }
     const normalizedReferenceImages = await normalizeVideoReferenceImages(payload);
+    payload = mapChannelGenerationParameters(payload);
     if (isDreaminaModel(payload.model)) {
       return await submitDreaminaVideoJob({
         ...payload,
@@ -257,10 +293,12 @@ export const tauriAiGateway: AiGateway = {
       prompt: payload.prompt,
       model: payload.model,
       size: payload.size,
-      aspect_ratio: payload.aspectRatio ?? 'auto',
+      aspect_ratio: payload.aspectRatio ?? '',
       reference_images: normalizedReferenceImages,
       reference_videos: payload.referenceVideos,
       reference_audios: payload.referenceAudios,
+      channel_mode_id: payload.channelModeId,
+      reference_slots: payload.referenceSlots,
       extra_params: {
         ...(payload.extraParams ?? {}),
         ...(typeof payload.seconds === 'number' ? { seconds: payload.seconds } : {}),

@@ -1,4 +1,5 @@
 import type { XYPosition } from '@xyflow/react';
+import type { MediaEditOperation } from '../application/media';
 
 import type {
   BlueprintActionPose,
@@ -35,8 +36,13 @@ export const CANVAS_COMMAND_TYPES = [
   'node.layout',
   'node.setEnabled',
   'node.duplicate',
+  'batch.setPrimary',
+  'batch.setCollapsed',
+  'batch.split',
+  'node.media.edit',
   'node.tool.run',
   'storyboard.update',
+  'storyboard.merge',
   'panorama.update',
   'director.update',
   'director.open',
@@ -46,6 +52,7 @@ export const CANVAS_COMMAND_TYPES = [
   'tagGroup.setAppearance',
   'edge.connect',
   'edge.disconnect',
+  'selection.connect',
   'group.create',
   'group.ungroup',
   'selection.set',
@@ -62,6 +69,11 @@ export type CanvasCommandType = (typeof CANVAS_COMMAND_TYPES)[number];
 export type CanvasCommandEffect = 'read' | 'graph' | 'navigation' | 'generation';
 export type CanvasCommandOrigin = 'ui' | 'agent' | 'system';
 
+export interface CanvasCommandExecutionOptions {
+  /** Cancels local media editing only; accepted provider work is not interrupted. */
+  signal?: AbortSignal;
+}
+
 export interface CanvasCommandBase<TType extends CanvasCommandType, TInput> {
   type: TType;
   version: typeof CANVAS_COMMAND_VERSION;
@@ -70,6 +82,8 @@ export interface CanvasCommandBase<TType extends CanvasCommandType, TInput> {
 
 export interface CanvasNodeCreateConfiguration {
   displayName?: string;
+  /** Durable source for image/upload nodes; never a temporary blob URL. */
+  imageUrl?: string;
   prompt?: string;
   content?: string;
   modelId?: string;
@@ -78,8 +92,12 @@ export interface CanvasNodeCreateConfiguration {
   resolution?: string;
   duration?: string;
   extraParams?: Record<string, unknown>;
+  modeId?: string;
+  referenceSlots?: Record<string, string[]>;
   openDirectorStudio?: boolean;
   directorStudioMode?: 'flat' | 'panorama';
+  /** Workspace the studio opens in when `openDirectorStudio` is set; default director. */
+  directorStudioWorkspace?: 'director' | 'previs';
   enabled?: boolean;
   tagColor?: TagColor;
   memberNodeIds?: string[];
@@ -123,6 +141,8 @@ export type SetNodeModelConfigCommand = CanvasCommandBase<'node.setModelConfig',
   resolution?: string;
   duration?: string;
   extraParams?: Record<string, unknown>;
+  modeId?: string;
+  referenceSlots?: Record<string, string[]>;
 }>;
 
 export type MoveNodeCommand = CanvasCommandBase<'node.move', {
@@ -141,6 +161,11 @@ export type SetNodeEnabledCommand = CanvasCommandBase<'node.setEnabled', {
   nodeIds: string[];
   enabled: boolean;
 }>;
+
+export type SetBatchPrimaryCommand = CanvasCommandBase<'batch.setPrimary', { batchId: string; nodeId: string }>;
+export type SetBatchCollapsedCommand = CanvasCommandBase<'batch.setCollapsed', { batchId: string; collapsed: boolean }>;
+export type SplitBatchCommand = CanvasCommandBase<'batch.split', { batchId: string }>;
+export type EditNodeMediaCommand = CanvasCommandBase<'node.media.edit', { nodeId: string; operation: MediaEditOperation }>;
 
 export interface DuplicateNodeInput {
   sourceNodeId: string;
@@ -166,6 +191,14 @@ export type UpdateStoryboardCommand = CanvasCommandBase<'storyboard.update', {
     order?: number;
   }>;
   exportOptions?: Partial<StoryboardExportOptions>;
+}>;
+
+/** Creates a storyboard in explicit nodeIds order without removing or reparenting the sources. */
+export type MergeStoryboardCommand = CanvasCommandBase<'storyboard.merge', {
+  nodeIds: string[];
+  nodeId?: string;
+  displayName?: string;
+  columns?: number;
 }>;
 
 export type UpdatePanoramaCommand = CanvasCommandBase<'panorama.update', {
@@ -244,6 +277,12 @@ export type DisconnectEdgeCommand = CanvasCommandBase<'edge.disconnect', {
   edgeIds: string[];
 }>;
 
+/** Connects every explicit source to one target, or leaves the entire graph unchanged. */
+export type ConnectSelectionCommand = CanvasCommandBase<'selection.connect', {
+  sourceNodeIds: string[];
+  targetNodeId: string;
+}>;
+
 export type CreateGroupCommand = CanvasCommandBase<'group.create', {
   nodeIds: string[];
   groupId?: string;
@@ -310,8 +349,13 @@ export type CanvasCommand =
   | LayoutNodeCommand
   | SetNodeEnabledCommand
   | DuplicateNodeCommand
+  | SetBatchPrimaryCommand
+  | SetBatchCollapsedCommand
+  | SplitBatchCommand
+  | EditNodeMediaCommand
   | RunNodeToolCommand
   | UpdateStoryboardCommand
+  | MergeStoryboardCommand
   | UpdatePanoramaCommand
   | UpdateDirectorCommand
   | OpenDirectorCommand
@@ -321,6 +365,7 @@ export type CanvasCommand =
   | SetTagGroupAppearanceCommand
   | ConnectEdgeCommand
   | DisconnectEdgeCommand
+  | ConnectSelectionCommand
   | CreateGroupCommand
   | UngroupCommand
   | SetSelectionCommand
@@ -340,11 +385,15 @@ export type CanvasCommandOfType<TType extends CanvasCommandType> = Extract<
 export interface CanvasJsonSchemaProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   description: string;
-  enum?: readonly string[];
+  enum?: readonly (string | number)[];
   properties?: Record<string, CanvasJsonSchemaProperty>;
   required?: string[];
   additionalProperties?: boolean;
   items?: CanvasJsonSchemaProperty;
+  oneOf?: CanvasJsonSchemaProperty[];
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
 }
 
 export interface CanvasJsonSchema {

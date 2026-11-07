@@ -6,6 +6,9 @@ import type {
   BlueprintItem,
   DirectorActionClip,
   DirectorActionClipKeyframe,
+  DirectorCameraRig,
+  DirectorCameraRigBodyPart,
+  DirectorCameraRigKind,
   DirectorActionKeyframe,
   DirectorActionState,
   DirectorCameraKeyframe,
@@ -15,11 +18,17 @@ import type {
   DirectorObjectKeyframe,
 } from '@/features/canvas/domain/canvasNodes';
 import { ensurePos3d } from '@/features/canvas/ui/blueprintCoordinates';
+import {
+  interpolatePersonPose,
+  normalizePersonPose,
+  overlayPersonPose,
+} from '@/features/canvas/domain/personPose';
+import { PERSON_POSE_MAP, resolvePersonActionPose, samplePersonAction } from './personMotionLibrary';
 
 export const DIRECTOR_MOTION_SCHEMA_VERSION = 1 as const;
 export const DIRECTOR_MOTION_DEFAULT_DURATION_SECONDS = 8;
 export const DIRECTOR_MOTION_MIN_DURATION_SECONDS = 0.5;
-export const DIRECTOR_MOTION_MAX_DURATION_SECONDS = 30;
+export const DIRECTOR_MOTION_MAX_DURATION_SECONDS = 120;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -40,6 +49,8 @@ export interface SampledDirectorCameraState {
   trackTargetId?: string | null;
   trackTargetBodyPart?: string | null;
   freeRotation?: DirectorMotionVector3;
+  /** Set when a live rig, not keyframes, produced this camera. */
+  rigId?: string;
 }
 
 export interface SampledDirectorMotionFrame {
@@ -47,18 +58,6 @@ export interface SampledDirectorMotionFrame {
   camera: SampledDirectorCameraState | null;
   objects: Record<string, SampledDirectorObjectState>;
   actions: Record<string, SampledDirectorActionState>;
-}
-
-export interface DirectorStaticPoseDefinition {
-  id: string;
-  labelKey: string;
-  pose: BlueprintActionPose;
-}
-
-export interface DirectorProceduralActionDefinition {
-  id: string;
-  labelKey: string;
-  durationSeconds: number;
 }
 
 export interface DirectorCameraPresetDefinition {
@@ -75,55 +74,6 @@ export type DirectorCameraPresetId =
   | 'lateral-dolly'
   | 'follow-actor-route';
 
-const EMPTY_POSE: BlueprintActionPose = {};
-
-export const DIRECTOR_STATIC_POSES: readonly DirectorStaticPoseDefinition[] = [
-  { id: 'stand-neutral', labelKey: 'directorStudio.motion.poses.standNeutral', pose: {} },
-  { id: 'stand-attention', labelKey: 'directorStudio.motion.poses.standAttention', pose: { leftShoulder: { z: -0.06 }, rightShoulder: { z: 0.06 } } },
-  { id: 'lean-forward', labelKey: 'directorStudio.motion.poses.leanForward', pose: { torso: { x: -0.35 }, head: { x: 0.16 } } },
-  { id: 'lean-back', labelKey: 'directorStudio.motion.poses.leanBack', pose: { torso: { x: 0.3 }, head: { x: -0.12 } } },
-  { id: 'hands-on-hips', labelKey: 'directorStudio.motion.poses.handsOnHips', pose: { leftShoulder: { z: -0.8 }, rightShoulder: { z: 0.8 }, leftElbow: { x: -1.15 }, rightElbow: { x: -1.15 } } },
-  { id: 'arms-crossed', labelKey: 'directorStudio.motion.poses.armsCrossed', pose: { leftShoulder: { x: -1.0, z: -0.45 }, rightShoulder: { x: -1.0, z: 0.45 }, leftElbow: { x: -1.2 }, rightElbow: { x: -1.2 } } },
-  { id: 'sit-upright', labelKey: 'directorStudio.motion.poses.sitUpright', pose: { leftHip: { x: -1.5 }, rightHip: { x: -1.5 }, leftKnee: { x: 1.5 }, rightKnee: { x: 1.5 }, groupY: -0.42 } },
-  { id: 'sit-relaxed', labelKey: 'directorStudio.motion.poses.sitRelaxed', pose: { leftHip: { x: -1.45 }, rightHip: { x: -1.2 }, leftKnee: { x: 1.4 }, rightKnee: { x: 1.05 }, torso: { x: 0.18 }, groupY: -0.4 } },
-  { id: 'squat-low', labelKey: 'directorStudio.motion.poses.squatLow', pose: { leftHip: { x: -1.75 }, rightHip: { x: -1.75 }, leftKnee: { x: 1.75 }, rightKnee: { x: 1.75 }, torso: { x: -0.35 }, groupY: -0.55 } },
-  { id: 'kneel-one', labelKey: 'directorStudio.motion.poses.kneelOne', pose: { leftHip: { x: -1.15 }, leftKnee: { x: 1.7 }, rightHip: { x: 0.25 }, rightKnee: { x: 1.45 }, groupY: -0.48 } },
-  { id: 'kneel-two', labelKey: 'directorStudio.motion.poses.kneelTwo', pose: { leftHip: { x: 0.45 }, rightHip: { x: 0.45 }, leftKnee: { x: 1.65 }, rightKnee: { x: 1.65 }, groupY: -0.5 } },
-  { id: 'lie-back', labelKey: 'directorStudio.motion.poses.lieBack', pose: { groupRotX: -Math.PI / 2, groupY: 0.18 } },
-  { id: 'walk-stride', labelKey: 'directorStudio.motion.poses.walkStride', pose: { leftHip: { x: -0.55 }, rightHip: { x: 0.3 }, leftKnee: { x: 0.55 }, rightShoulder: { x: -0.45 }, leftShoulder: { x: 0.4 } } },
-  { id: 'run-stride', labelKey: 'directorStudio.motion.poses.runStride', pose: { leftHip: { x: -1 }, rightHip: { x: 0.6 }, leftKnee: { x: 1.5 }, rightShoulder: { x: -0.9 }, leftShoulder: { x: 0.7 }, torso: { x: -0.25 } } },
-  { id: 'point-forward', labelKey: 'directorStudio.motion.poses.pointForward', pose: { rightShoulder: { x: -Math.PI / 2 }, rightElbow: { x: -0.1 } } },
-  { id: 'reach-up', labelKey: 'directorStudio.motion.poses.reachUp', pose: { rightShoulder: { x: -2.65 }, rightElbow: { x: 0.08 }, head: { x: -0.15 } } },
-  { id: 'wave', labelKey: 'directorStudio.motion.poses.wave', pose: { rightShoulder: { x: -1.8, z: 0.18 }, rightElbow: { x: -1.1 } } },
-  { id: 'look-up', labelKey: 'directorStudio.motion.poses.lookUp', pose: { head: { x: -0.45 } } },
-  { id: 'look-down', labelKey: 'directorStudio.motion.poses.lookDown', pose: { head: { x: 0.45 } } },
-  { id: 'look-left', labelKey: 'directorStudio.motion.poses.lookLeft', pose: { head: { y: 0.75 }, torso: { x: -0.04 } } },
-  { id: 'look-right', labelKey: 'directorStudio.motion.poses.lookRight', pose: { head: { y: -0.75 }, torso: { x: -0.04 } } },
-  { id: 'talk-gesture', labelKey: 'directorStudio.motion.poses.talkGesture', pose: { rightShoulder: { x: -0.5, z: -0.2 }, rightElbow: { x: -1.3 }, head: { y: 0.25 } } },
-  { id: 'observe', labelKey: 'directorStudio.motion.poses.observe', pose: { rightShoulder: { x: -1.7, z: 0.3 }, rightElbow: { x: -0.5 }, head: { x: -0.18 } } },
-  { id: 'jump-apex', labelKey: 'directorStudio.motion.poses.jumpApex', pose: { leftHip: { x: -0.5 }, rightHip: { x: -0.5 }, leftKnee: { x: 1 }, rightKnee: { x: 1 }, leftShoulder: { x: -2.4 }, rightShoulder: { x: -2.4 }, groupY: 0.4 } },
-] as const;
-
-export const DIRECTOR_STATIC_POSE_MAP: Readonly<Record<string, BlueprintActionPose>> = Object.fromEntries(
-  DIRECTOR_STATIC_POSES.map((definition) => [definition.id, definition.pose]),
-);
-
-export const DIRECTOR_PROCEDURAL_ACTIONS: readonly DirectorProceduralActionDefinition[] = [
-  { id: 'walk', labelKey: 'directorStudio.motion.actions.walk', durationSeconds: 1.1 },
-  { id: 'run', labelKey: 'directorStudio.motion.actions.run', durationSeconds: 0.72 },
-  { id: 'squat-rise', labelKey: 'directorStudio.motion.actions.squatRise', durationSeconds: 1.8 },
-  { id: 'step-over', labelKey: 'directorStudio.motion.actions.stepOver', durationSeconds: 1.5 },
-  { id: 'jump', labelKey: 'directorStudio.motion.actions.jump', durationSeconds: 1.25 },
-  { id: 'wave', labelKey: 'directorStudio.motion.actions.wave', durationSeconds: 1.4 },
-  { id: 'idle-breath', labelKey: 'directorStudio.motion.actions.idleBreath', durationSeconds: 2.6 },
-  { id: 'turn-look', labelKey: 'directorStudio.motion.actions.turnLook', durationSeconds: 2.2 },
-  { id: 'clap', labelKey: 'directorStudio.motion.actions.clap', durationSeconds: 1.1 },
-  { id: 'phone', labelKey: 'directorStudio.motion.actions.phone', durationSeconds: 2.1 },
-  { id: 'walk-back', labelKey: 'directorStudio.motion.actions.walkBack', durationSeconds: 1.2 },
-  { id: 'side-step', labelKey: 'directorStudio.motion.actions.sideStep', durationSeconds: 1.3 },
-  { id: 'bow', labelKey: 'directorStudio.motion.actions.bow', durationSeconds: 2.4 },
-] as const;
-
 export const DIRECTOR_CAMERA_PRESETS: readonly DirectorCameraPresetDefinition[] = [
   { id: 'cinematic-push', labelKey: 'directorStudio.motion.cameraPresets.cinematicPush' },
   { id: 'character-follow', labelKey: 'directorStudio.motion.cameraPresets.characterFollow' },
@@ -133,6 +83,31 @@ export const DIRECTOR_CAMERA_PRESETS: readonly DirectorCameraPresetDefinition[] 
   { id: 'lateral-dolly', labelKey: 'directorStudio.motion.cameraPresets.lateralDolly' },
   { id: 'follow-actor-route', labelKey: 'directorStudio.motion.cameraPresets.followActorRoute' },
 ] as const;
+
+type DirectorCameraRigParams = Omit<DirectorCameraRig, 'id' | 'kind' | 'targetId' | 'start' | 'end'>;
+
+/** Starting framings: over-the-shoulder follow, and a frontal head close-up. */
+export const DIRECTOR_CAMERA_RIG_DEFAULTS: Readonly<Record<DirectorCameraRigKind, DirectorCameraRigParams>> = {
+  follow: { bodyPart: 'torso', distance: 4.2, height: 1.05, azimuthDeg: 0, pitchDeg: 0, fov: 42, damping: 0.35, relative: true, lockHorizon: false },
+  closeup: { bodyPart: 'head', distance: 1.3, height: 0.05, azimuthDeg: 180, pitchDeg: 0, fov: 28, damping: 0.2, relative: true, lockHorizon: false },
+};
+
+export const DIRECTOR_CAMERA_RIG_LIMITS = {
+  distance: [0.3, 30],
+  height: [-5, 15],
+  azimuthDeg: [-180, 180],
+  pitchDeg: [-60, 60],
+  fov: [8, 120],
+  damping: [0, 0.95],
+} as const satisfies Record<string, readonly [number, number]>;
+
+const RIG_BODY_PARTS: readonly DirectorCameraRigBodyPart[] = ['head', 'torso', 'feet'];
+/** Lag window: 24 samples at 15 Hz ≈ 1.6 s of subject history. */
+const RIG_LAG_STEP_SECONDS = 1 / 15;
+const RIG_LAG_SAMPLES = 24;
+/** Shortest clip the timeline allows (spec 05 §4.5), so a dragged-in trim never collapses an interval. */
+export const DIRECTOR_TIMELINE_MIN_CLIP_SECONDS = 0.2;
+export const DIRECTOR_CAMERA_RIG_MIN_SECONDS = DIRECTOR_TIMELINE_MIN_CLIP_SECONDS;
 
 function asRecord(value: unknown): UnknownRecord | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : null;
@@ -178,41 +153,6 @@ function sortKeyframes<T extends { time: number }>(frames: T[]): T[] {
     .map(({ frame }) => frame);
 }
 
-function normalizePose(value: unknown): BlueprintActionPose | undefined {
-  const record = asRecord(value);
-  if (!record) return undefined;
-  const rotation = (entry: unknown) => {
-    const source = asRecord(entry);
-    if (!source) return undefined;
-    const result = {
-      ...(typeof source.x === 'number' && Number.isFinite(source.x) ? { x: source.x } : {}),
-      ...(typeof source.y === 'number' && Number.isFinite(source.y) ? { y: source.y } : {}),
-      ...(typeof source.z === 'number' && Number.isFinite(source.z) ? { z: source.z } : {}),
-    };
-    return Object.keys(result).length > 0 ? result : undefined;
-  };
-  const hinge = (entry: unknown) => {
-    const source = asRecord(entry);
-    return source && typeof source.x === 'number' && Number.isFinite(source.x) ? { x: source.x } : undefined;
-  };
-  const pose: BlueprintActionPose = {
-    leftShoulder: rotation(record.leftShoulder),
-    rightShoulder: rotation(record.rightShoulder),
-    leftElbow: hinge(record.leftElbow),
-    rightElbow: hinge(record.rightElbow),
-    leftHip: rotation(record.leftHip),
-    rightHip: rotation(record.rightHip),
-    leftKnee: hinge(record.leftKnee),
-    rightKnee: hinge(record.rightKnee),
-    head: rotation(record.head),
-    torso: hinge(record.torso),
-    ...(typeof record.scaleY === 'number' && Number.isFinite(record.scaleY) ? { scaleY: record.scaleY } : {}),
-    ...(typeof record.groupY === 'number' && Number.isFinite(record.groupY) ? { groupY: record.groupY } : {}),
-    ...(typeof record.groupRotX === 'number' && Number.isFinite(record.groupRotX) ? { groupRotX: record.groupRotX } : {}),
-  };
-  return pose;
-}
-
 function normalizeBodyControls(value: unknown): BlueprintBodyControls | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
@@ -244,9 +184,44 @@ function normalizeActionState(record: UnknownRecord): DirectorActionState {
     clipId: stringOrNull(record.clipId),
     ...(typeof record.actionOffsetSeconds === 'number' && Number.isFinite(record.actionOffsetSeconds)
       ? { actionOffsetSeconds: record.actionOffsetSeconds } : {}),
-    pose: normalizePose(record.pose),
+    pose: normalizePersonPose(record.pose),
     bodyControls: normalizeBodyControls(record.bodyControls),
   };
+}
+
+function normalizeCameraRigs(value: unknown, duration: number): DirectorCameraRig[] {
+  if (!Array.isArray(value)) return [];
+  const limit = (key: keyof typeof DIRECTOR_CAMERA_RIG_LIMITS, raw: unknown, fallback: number) => {
+    const [min, max] = DIRECTOR_CAMERA_RIG_LIMITS[key];
+    return clamp(finiteNumber(raw, fallback), min, max);
+  };
+  return value.flatMap((entry, index) => {
+    const record = asRecord(entry);
+    const targetId = typeof record?.targetId === 'string' && record.targetId.trim() ? record.targetId : null;
+    if (!record || !targetId) return [];
+    const kind: DirectorCameraRigKind = record.kind === 'closeup' ? 'closeup' : 'follow';
+    const defaults = DIRECTOR_CAMERA_RIG_DEFAULTS[kind];
+    const start = clamp(finiteNumber(record.start, 0), 0, Math.max(0, duration - DIRECTOR_CAMERA_RIG_MIN_SECONDS));
+    const end = clamp(finiteNumber(record.end, duration), start + DIRECTOR_CAMERA_RIG_MIN_SECONDS, duration);
+    const priority = typeof record.priority === 'number' && Number.isFinite(record.priority) ? Math.max(0, Math.round(record.priority)) : 0;
+    return [{
+      id: normalizeId(record.id, `rig-${index}`),
+      kind,
+      targetId,
+      bodyPart: RIG_BODY_PARTS.find((part) => part === record.bodyPart) ?? defaults.bodyPart,
+      start,
+      end,
+      distance: limit('distance', record.distance, defaults.distance),
+      height: limit('height', record.height, defaults.height),
+      azimuthDeg: limit('azimuthDeg', record.azimuthDeg, defaults.azimuthDeg),
+      pitchDeg: limit('pitchDeg', record.pitchDeg, defaults.pitchDeg),
+      fov: limit('fov', record.fov, defaults.fov),
+      damping: limit('damping', record.damping, defaults.damping),
+      relative: typeof record.relative === 'boolean' ? record.relative : defaults.relative,
+      lockHorizon: record.lockHorizon === true,
+      ...(priority > 0 ? { priority } : {}),
+    }];
+  });
 }
 
 function normalizeCameraTrack(value: unknown, duration: number): DirectorCameraKeyframe[] {
@@ -348,6 +323,7 @@ export function createEmptyDirectorMotionProject(
     objectTracks: {},
     actionTracks: {},
     customClips: [],
+    cameraRigs: [],
   };
 }
 
@@ -380,6 +356,7 @@ export function normalizeDirectorMotionProject(value: unknown): DirectorMotionPr
           .map(normalizeClip)
           .filter((clip): clip is DirectorActionClip => Boolean(clip))
       : [],
+    cameraRigs: normalizeCameraRigs(record?.cameraRigs, durationSeconds),
   };
 }
 
@@ -453,118 +430,6 @@ function findSegment<T extends { time: number; easing: DirectorMotionEasing; eas
   };
 }
 
-function numericPoseValue(value: number | undefined, fallback = 0): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-function interpolatePose(from: BlueprintActionPose | undefined, to: BlueprintActionPose | undefined, amount: number): BlueprintActionPose | undefined {
-  if (!from && !to) return undefined;
-  const start = from ?? EMPTY_POSE;
-  const end = to ?? EMPTY_POSE;
-  const rotation = (
-    left: { x?: number; y?: number; z?: number } | undefined,
-    right: { x?: number; y?: number; z?: number } | undefined,
-  ) => ({
-    x: lerpNumber(numericPoseValue(left?.x), numericPoseValue(right?.x), amount),
-    y: lerpNumber(numericPoseValue(left?.y), numericPoseValue(right?.y), amount),
-    z: lerpNumber(numericPoseValue(left?.z), numericPoseValue(right?.z), amount),
-  });
-  const hinge = (left: { x?: number } | undefined, right: { x?: number } | undefined) => ({
-    x: lerpNumber(numericPoseValue(left?.x), numericPoseValue(right?.x), amount),
-  });
-  return {
-    leftShoulder: rotation(start.leftShoulder, end.leftShoulder),
-    rightShoulder: rotation(start.rightShoulder, end.rightShoulder),
-    leftElbow: hinge(start.leftElbow, end.leftElbow),
-    rightElbow: hinge(start.rightElbow, end.rightElbow),
-    leftHip: rotation(start.leftHip, end.leftHip),
-    rightHip: rotation(start.rightHip, end.rightHip),
-    leftKnee: hinge(start.leftKnee, end.leftKnee),
-    rightKnee: hinge(start.rightKnee, end.rightKnee),
-    head: rotation(start.head, end.head),
-    torso: hinge(start.torso, end.torso),
-    scaleY: lerpNumber(numericPoseValue(start.scaleY, 1), numericPoseValue(end.scaleY, 1), amount),
-    groupY: lerpNumber(numericPoseValue(start.groupY), numericPoseValue(end.groupY), amount),
-    groupRotX: lerpNumber(numericPoseValue(start.groupRotX), numericPoseValue(end.groupRotX), amount),
-  };
-}
-
-export function sampleDirectorProceduralAction(actionId: string, timeSeconds: number): BlueprintActionPose {
-  const definition = DIRECTOR_PROCEDURAL_ACTIONS.find((action) => action.id === actionId);
-  const duration = definition?.durationSeconds ?? 1;
-  const phase = ((timeSeconds % duration) + duration) % duration / duration;
-  const wave = Math.sin(phase * Math.PI * 2);
-  const positiveWave = (1 - Math.cos(phase * Math.PI * 2)) / 2;
-  switch (actionId) {
-    case 'walk':
-      return {
-        leftHip: { x: wave * 0.62 }, rightHip: { x: -wave * 0.62 },
-        leftKnee: { x: Math.max(0, -wave) * 0.72 }, rightKnee: { x: Math.max(0, wave) * 0.72 },
-        leftShoulder: { x: -wave * 0.5 }, rightShoulder: { x: wave * 0.5 },
-        groupY: Math.abs(wave) * 0.025,
-      };
-    case 'run':
-      return {
-        leftHip: { x: wave * 1.05 }, rightHip: { x: -wave * 1.05 },
-        leftKnee: { x: Math.max(0, -wave) * 1.45 }, rightKnee: { x: Math.max(0, wave) * 1.45 },
-        leftShoulder: { x: -wave * 0.9 }, rightShoulder: { x: wave * 0.9 },
-        leftElbow: { x: -0.8 }, rightElbow: { x: -0.8 }, torso: { x: -0.22 },
-        groupY: Math.abs(wave) * 0.08,
-      };
-    case 'squat-rise': {
-      const bend = positiveWave * 1.72;
-      return {
-        leftHip: { x: -bend }, rightHip: { x: -bend },
-        leftKnee: { x: bend }, rightKnee: { x: bend },
-        leftShoulder: { x: -bend * 0.28 }, rightShoulder: { x: -bend * 0.28 },
-        torso: { x: -bend * 0.2 }, groupY: -positiveWave * 0.55,
-      };
-    }
-    case 'step-over': {
-      const lift = Math.sin(phase * Math.PI);
-      return {
-        leftHip: { x: -lift * 1.15 }, leftKnee: { x: lift * 1.35 },
-        rightHip: { x: phase > 0.5 ? -(1 - lift) * 0.45 : 0 },
-        leftShoulder: { z: -lift * 0.25 }, rightShoulder: { z: lift * 0.25 },
-        groupY: lift * 0.08,
-      };
-    }
-    case 'jump': {
-      const lift = Math.sin(phase * Math.PI);
-      return {
-        leftHip: { x: -lift * 0.55 }, rightHip: { x: -lift * 0.55 },
-        leftKnee: { x: lift * 1.05 }, rightKnee: { x: lift * 1.05 },
-        leftShoulder: { x: -lift * 2.4 }, rightShoulder: { x: -lift * 2.4 },
-        groupY: lift * 0.55,
-      };
-    }
-    case 'wave':
-      return {
-        rightShoulder: { x: -1.75, z: 0.2 },
-        rightElbow: { x: -1.05 + wave * 0.2 },
-        head: { y: wave * 0.08 },
-      };
-    case 'idle-breath':
-      return { torso: { x: wave * 0.018 }, leftShoulder: { z: -0.06 - wave * 0.025 }, rightShoulder: { z: 0.06 + wave * 0.025 }, scaleY: 1 + wave * 0.012 };
-    case 'turn-look':
-      return { head: { y: wave * 0.58 }, torso: { x: -0.025 }, rightShoulder: { x: -0.12 } };
-    case 'clap':
-      return { leftShoulder: { x: -1.1, z: -0.5 - positiveWave * 0.48 }, rightShoulder: { x: -1.1, z: 0.5 + positiveWave * 0.48 }, leftElbow: { x: -0.8 }, rightElbow: { x: -0.8 } };
-    case 'phone':
-      return { rightShoulder: { x: -0.68, z: 0.23 }, rightElbow: { x: -1.85 + wave * 0.05 }, head: { y: -0.12 + wave * 0.04 }, leftShoulder: { x: -0.08 } };
-    case 'walk-back':
-      return { leftHip: { x: -wave * 0.48 }, rightHip: { x: wave * 0.48 }, leftKnee: { x: Math.max(0, wave) * 0.55 }, rightKnee: { x: Math.max(0, -wave) * 0.55 }, leftShoulder: { x: wave * 0.35 }, rightShoulder: { x: -wave * 0.35 }, groupY: Math.abs(wave) * 0.02 };
-    case 'side-step':
-      return { leftHip: { z: -0.18 - wave * 0.24 }, rightHip: { z: 0.18 + wave * 0.24 }, leftKnee: { x: positiveWave * 0.3 }, rightKnee: { x: (1 - positiveWave) * 0.3 }, leftShoulder: { z: -0.28 }, rightShoulder: { z: 0.28 }, groupY: Math.abs(wave) * 0.025 };
-    case 'bow': {
-      const bend = Math.sin(phase * Math.PI) ** 2;
-      return { torso: { x: -bend * 0.78 }, head: { x: bend * 0.12 }, leftShoulder: { x: -bend * 0.2 }, rightShoulder: { x: -bend * 0.2 } };
-    }
-    default:
-      return {};
-  }
-}
-
 function sampleActionState(
   state: DirectorActionState,
   elapsedSeconds: number,
@@ -578,30 +443,47 @@ function sampleActionState(
         ? ((elapsedSeconds % clip.durationSeconds) + clip.durationSeconds) % clip.durationSeconds
         : clamp(elapsedSeconds, 0, clip.durationSeconds);
       const sampled = sampleActionTrack(clip.keyframes, clipTime, customClips);
-      return { ...sampled, clipId: clip.id };
+      return {
+        ...sampled,
+        ...state,
+        pose: overlayPersonPose(sampled.pose, state.pose),
+        bodyControls: state.bodyControls ?? sampled.bodyControls,
+        clipId: clip.id,
+      };
     }
   }
-  if (state.actionId) {
-    return { ...state, pose: sampleDirectorProceduralAction(state.actionId, elapsedSeconds) };
-  }
-  const staticPose = state.poseId ? DIRECTOR_STATIC_POSE_MAP[state.poseId] : undefined;
-  return { ...state, pose: state.pose ?? staticPose };
+  const basePose = state.actionId
+    ? samplePersonAction(state.actionId, elapsedSeconds)
+    : state.poseId ? PERSON_POSE_MAP[state.poseId] : undefined;
+  return { ...state, pose: overlayPersonPose(basePose, state.pose) };
 }
 
 function sampleActionTrack(
   track: Array<DirectorActionKeyframe | DirectorActionClipKeyframe>,
   time: number,
   customClips: DirectorActionClip[],
+  crossfadeDynamic = false,
 ): SampledDirectorActionState {
   const segment = findSegment(track, time);
   if (!segment) return {};
   const elapsed = Math.max(0, time - segment.from.time);
   const from = sampleActionState(segment.from, elapsed, customClips);
-  if (segment.from === segment.to || from.actionId || from.clipId) return from;
+  if (segment.from === segment.to) return from;
+  const dynamic = segment.from.actionId || segment.from.clipId;
+  let amount = segment.amount;
+  if (dynamic) {
+    // Clip splitting preserves its original easing ranges and procedural phase.
+    // Blend only scene-level actions; placed and nested clips remain exact.
+    if (!crossfadeDynamic || segment.from.clipId || segment.to.easing === 'hold' || segment.to.easingRange) return from;
+    const fadeDuration = Math.min(0.25, (segment.to.time - segment.from.time) / 2);
+    const remaining = segment.to.time - time;
+    if (remaining >= fadeDuration) return from;
+    amount = easeProgress(1 - remaining / fadeDuration, 'smooth');
+  }
   const to = sampleActionState(segment.to, 0, customClips);
   return {
     ...from,
-    pose: interpolatePose(from.pose, to.pose, segment.amount),
+    pose: interpolatePersonPose(from.pose, to.pose, amount),
   };
 }
 
@@ -698,6 +580,221 @@ function sampleCameraTrack(
   };
 }
 
+/** Subject transform at `time` from its own route only (rigs never depend on other rigs or the camera). */
+function sampleRigSubject(project: DirectorMotionProjectV1, item: BlueprintItem, time: number): SampledDirectorObjectState {
+  const track = project.objectTracks[item.id];
+  return (track && sampleObjectTrack(track, time)) ?? getBaseObjectState(item);
+}
+
+function rigAimPoint(rig: DirectorCameraRig, subject: SampledDirectorObjectState): DirectorMotionVector3 {
+  const offset = getBodyPartOffset(rig.bodyPart);
+  return { x: subject.position.x + offset.x, y: subject.position.y + offset.y, z: subject.position.z + offset.z };
+}
+
+/** Undamped camera position for the rig at one instant. */
+function rigCameraPosition(rig: DirectorCameraRig, subject: SampledDirectorObjectState, horizonY: number | null): DirectorMotionVector3 {
+  const aim = rigAimPoint(rig, subject);
+  // Persons face local +Z, so heading h looks along (sin h, cos h); azimuth 0 sits behind them.
+  const heading = rig.relative ? subject.rotation.y : 0;
+  const angle = heading + Math.PI + THREE.MathUtils.degToRad(rig.azimuthDeg);
+  return {
+    x: aim.x + Math.sin(angle) * rig.distance,
+    y: horizonY ?? aim.y + rig.height,
+    z: aim.z + Math.cos(angle) * rig.distance,
+  };
+}
+
+/**
+ * Live follow / close-up camera. Damping is a deterministic exponentially weighted average of the
+ * subject-driven position over the recent past, so scrubbing, playback and export all agree.
+ */
+export function sampleDirectorCameraRig(
+  project: DirectorMotionProjectV1,
+  rig: DirectorCameraRig,
+  time: number,
+  item: BlueprintItem,
+): SampledDirectorCameraState {
+  const horizonY = rig.lockHorizon ? rigAimPoint(rig, sampleRigSubject(project, item, rig.start)).y + rig.height : null;
+  let weightSum = 0;
+  const position = { x: 0, y: 0, z: 0 };
+  const samples = rig.damping > 0 ? RIG_LAG_SAMPLES : 1;
+  for (let index = 0; index < samples; index += 1) {
+    const weight = rig.damping ** index;
+    if (weight < 0.002) break;
+    const sampleTime = Math.max(rig.start, time - index * RIG_LAG_STEP_SECONDS);
+    const sample = rigCameraPosition(rig, sampleRigSubject(project, item, sampleTime), horizonY);
+    position.x += sample.x * weight;
+    position.y += sample.y * weight;
+    position.z += sample.z * weight;
+    weightSum += weight;
+  }
+  position.x /= weightSum;
+  position.y /= weightSum;
+  position.z /= weightSum;
+  const aim = rigAimPoint(rig, sampleRigSubject(project, item, time));
+  const horizontal = Math.hypot(aim.x - position.x, aim.z - position.z);
+  return {
+    position,
+    target: { x: aim.x, y: aim.y + Math.tan(THREE.MathUtils.degToRad(rig.pitchDeg)) * Math.max(0.1, horizontal), z: aim.z },
+    fov: rig.fov,
+    trackTargetId: rig.targetId,
+    trackTargetBodyPart: rig.bodyPart,
+    rigId: rig.id,
+  };
+}
+
+/** Higher explicit priority first; on a tie the later start, then the later rig, wins. */
+function rigOutranks(candidate: DirectorCameraRig, current: DirectorCameraRig): boolean {
+  const candidatePriority = candidate.priority ?? 0;
+  const currentPriority = current.priority ?? 0;
+  if (candidatePriority !== currentPriority) return candidatePriority > currentPriority;
+  return candidate.start >= current.start;
+}
+
+/** The rig covering `time`; overlaps resolve by explicit priority, then the latest start. */
+export function findActiveDirectorCameraRig(project: DirectorMotionProjectV1, time: number): DirectorCameraRig | null {
+  let active: DirectorCameraRig | null = null;
+  for (const rig of project.cameraRigs) {
+    if (time < rig.start || time > rig.end) continue;
+    if (!active || rigOutranks(rig, active)) active = rig;
+  }
+  return active;
+}
+
+export interface DirectorCameraRigCoverage {
+  rigId: string;
+  start: number;
+  end: number;
+}
+
+/** Intervals where each rig actually drives the camera, in time order; adjacent pieces of one rig merge. */
+export function resolveDirectorCameraRigCoverage(project: DirectorMotionProjectV1): DirectorCameraRigCoverage[] {
+  const bounds = [...new Set(project.cameraRigs.flatMap((rig) => [rig.start, rig.end]))].sort((a, b) => a - b);
+  const coverage: DirectorCameraRigCoverage[] = [];
+  for (let index = 0; index < bounds.length - 1; index += 1) {
+    const start = bounds[index];
+    const end = bounds[index + 1];
+    const winner = findActiveDirectorCameraRig(project, (start + end) / 2);
+    if (!winner) continue;
+    const previous = coverage[coverage.length - 1];
+    if (previous && previous.rigId === winner.id && Math.abs(previous.end - start) < 1e-9) previous.end = end;
+    else coverage.push({ rigId: winner.id, start, end });
+  }
+  return coverage;
+}
+
+function requireCameraRig(project: DirectorMotionProjectV1, rigId: string): DirectorCameraRig {
+  const rig = project.cameraRigs.find((entry) => entry.id === rigId);
+  if (!rig) throw new Error(`Camera rig ${rigId} does not exist.`);
+  return rig;
+}
+
+function topCameraRigPriority(project: DirectorMotionProjectV1, exceptId?: string): number {
+  return project.cameraRigs.reduce((top, rig) => rig.id === exceptId ? top : Math.max(top, rig.priority ?? 0), 0);
+}
+
+/**
+ * Make a rig win wherever it overlaps others. Returns the same project when it already wins its
+ * whole interval, so callers can skip recording an empty undo step.
+ */
+export function bringDirectorCameraRigToFront(project: DirectorMotionProjectV1, rigId: string): DirectorMotionProjectV1 {
+  const rig = requireCameraRig(project, rigId);
+  const overridden = resolveDirectorCameraRigCoverage(project)
+    .some((entry) => entry.rigId !== rigId && entry.start < rig.end && entry.end > rig.start);
+  if (!overridden) return project;
+  const priority = topCameraRigPriority(project, rigId) + 1;
+  return { ...project, cameraRigs: project.cameraRigs.map((entry) => entry.id === rigId ? { ...entry, priority } : entry) };
+}
+
+/** Cut a rig at scene time `time`; the left part keeps its id, both parts keep parameters and layer. */
+export function splitDirectorCameraRig(
+  project: DirectorMotionProjectV1,
+  rigId: string,
+  time: number,
+): { project: DirectorMotionProjectV1; leftId: string; rightId: string } {
+  const rig = requireCameraRig(project, rigId);
+  if (!Number.isFinite(time) || time - rig.start < DIRECTOR_CAMERA_RIG_MIN_SECONDS - 1e-9 || rig.end - time < DIRECTOR_CAMERA_RIG_MIN_SECONDS - 1e-9) {
+    throw new Error(`Both split rigs must be at least ${DIRECTOR_CAMERA_RIG_MIN_SECONDS} seconds.`);
+  }
+  const rightId = createDirectorMotionId(`rig-${rig.kind}`);
+  const cameraRigs = project.cameraRigs.flatMap((entry) => entry.id === rigId
+    ? [{ ...entry, end: time }, { ...entry, id: rightId, start: time }]
+    : [entry]);
+  return { project: { ...project, cameraRigs }, leftId: rigId, rightId };
+}
+
+/** Copy a rig to start at `start` (clamped inside the shot); the copy lands in front of every rig. */
+export function duplicateDirectorCameraRig(
+  project: DirectorMotionProjectV1,
+  rigId: string,
+  start: number,
+): { project: DirectorMotionProjectV1; rigId: string } {
+  const rig = requireCameraRig(project, rigId);
+  const span = rig.end - rig.start;
+  const nextStart = clamp(Number.isFinite(start) ? start : rig.start, 0, Math.max(0, project.durationSeconds - span));
+  const copy: DirectorCameraRig = {
+    ...rig,
+    id: createDirectorMotionId(`rig-${rig.kind}`),
+    start: nextStart,
+    end: Math.min(project.durationSeconds, nextStart + span),
+    priority: topCameraRigPriority(project) + 1,
+  };
+  return { project: { ...project, cameraRigs: [...project.cameraRigs, copy] }, rigId: copy.id };
+}
+
+/** Move or trim a rig in scene seconds, keeping it inside the shot and at least the minimum length. */
+export function retimeDirectorCameraRig(project: DirectorMotionProjectV1, rigId: string, start: number, end: number): DirectorMotionProjectV1 {
+  requireCameraRig(project, rigId);
+  const nextStart = clamp(start, 0, Math.max(0, project.durationSeconds - DIRECTOR_CAMERA_RIG_MIN_SECONDS));
+  const nextEnd = clamp(end, nextStart + DIRECTOR_CAMERA_RIG_MIN_SECONDS, project.durationSeconds);
+  return { ...project, cameraRigs: project.cameraRigs.map((entry) => entry.id === rigId ? { ...entry, start: nextStart, end: nextEnd } : entry) };
+}
+
+/**
+ * Cut a person's procedural action (walk, run …) at scene time `time`. The new hold frame resumes the
+ * same phase, so playback is unchanged until either half is edited. Placed library clips split via
+ * `splitDirectorMotionClip` instead.
+ */
+export function splitDirectorActionSegment(
+  project: DirectorMotionProjectV1,
+  itemId: string,
+  time: number,
+): { project: DirectorMotionProjectV1; keyframeId: string } {
+  const track = project.actionTracks[itemId] ?? [];
+  let index = -1;
+  for (let cursor = 0; cursor < track.length && track[cursor].time <= time; cursor += 1) index = cursor;
+  const from = track[index];
+  if (!from?.actionId || from.clipId) throw new Error('No procedural action covers this time.');
+  const end = track[index + 1]?.time ?? project.durationSeconds;
+  if (!Number.isFinite(time) || time - from.time < DIRECTOR_TIMELINE_MIN_CLIP_SECONDS - 1e-9 || end - time < DIRECTOR_TIMELINE_MIN_CLIP_SECONDS - 1e-9) {
+    throw new Error(`Both split actions must be at least ${DIRECTOR_TIMELINE_MIN_CLIP_SECONDS} seconds.`);
+  }
+  const frame: DirectorActionKeyframe = {
+    ...from,
+    id: createDirectorMotionId('action-split'),
+    time,
+    easing: 'hold',
+    easingRange: undefined,
+    actionOffsetSeconds: (from.actionOffsetSeconds ?? 0) + time - from.time,
+  };
+  return {
+    project: { ...project, actionTracks: { ...project.actionTracks, [itemId]: sortKeyframes([...track, frame]) } },
+    keyframeId: frame.id,
+  };
+}
+
+function sampleCamera(
+  project: DirectorMotionProjectV1,
+  time: number,
+  objects: Record<string, SampledDirectorObjectState>,
+  itemsById: Map<string, BlueprintItem>,
+): SampledDirectorCameraState | null {
+  const rig = findActiveDirectorCameraRig(project, time);
+  const subject = rig ? itemsById.get(rig.targetId) : undefined;
+  if (rig && subject) return sampleDirectorCameraRig(project, rig, time, subject);
+  return sampleCameraTrack(project.cameraTrack, time, objects, itemsById);
+}
+
 export function sampleNormalizedDirectorMotion(
   project: DirectorMotionProjectV1,
   requestedTime: number,
@@ -712,13 +809,17 @@ export function sampleNormalizedDirectorMotion(
     if (sampled) objects[itemId] = sampled;
   });
   const actions: Record<string, SampledDirectorActionState> = {};
+  items.forEach((item) => {
+    const pose = overlayPersonPose(resolvePersonActionPose(item.action), normalizePersonPose(item.pose));
+    if (pose || item.bodyControls) actions[item.id] = { poseId: item.action, pose, bodyControls: item.bodyControls };
+  });
   Object.entries(project.actionTracks).forEach(([itemId, track]) => {
-    if (track.length > 0) actions[itemId] = sampleActionTrack(track, time, project.customClips);
+    if (track.length > 0) actions[itemId] = sampleActionTrack(track, time, project.customClips, true);
   });
   const itemsById = new Map(items.map((item) => [item.id, item]));
   return {
     time,
-    camera: sampleCameraTrack(project.cameraTrack, time, objects, itemsById),
+    camera: sampleCamera(project, time, objects, itemsById),
     objects,
     actions,
   };
@@ -1055,6 +1156,9 @@ export function splitDirectorMotionClip(
   const crossing = from && to && from !== to && localTime > from.time && localTime < to.time;
   const boundary: DirectorActionClipKeyframe = {
     ...sampled,
+    // A procedural boundary keeps only the authored overlay, not its sampled
+    // moving joints, which would otherwise freeze the right-hand split clip.
+    ...((from?.actionId || from?.clipId) ? { pose: from.pose } : {}),
     id: createDirectorMotionId('split-frame'), time: localTime, easing: to?.easing ?? 'linear',
     ...(crossing ? { easingRange: [start, midpoint] as [number, number] } : {}),
     ...((from?.actionId || from?.clipId) ? {

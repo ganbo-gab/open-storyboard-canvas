@@ -1,216 +1,226 @@
-import { useCallback } from 'react';
+import { changeWindowSize } from './windowControls';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { Minus, X, Maximize2, Settings, ArrowLeft } from 'lucide-react';
+import { ChevronLeft, Languages, Maximize2, Minimize2, Minus, Moon, Settings, Sun, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Moon, Sun, Languages } from 'lucide-react';
 import { useThemeStore } from '@/stores/themeStore';
 import { useProjectStore } from '@/stores/projectStore';
-import closeNormalIcon from '@/assets/macos-traffic-lights/1-close-1-normal.svg';
-import closeHoverIcon from '@/assets/macos-traffic-lights/2-close-2-hover.svg';
-import minimizeNormalIcon from '@/assets/macos-traffic-lights/2-minimize-1-normal.svg';
-import minimizeHoverIcon from '@/assets/macos-traffic-lights/2-minimize-2-hover.svg';
-import maximizeNormalIcon from '@/assets/macos-traffic-lights/3-maximize-1-normal.svg';
-import maximizeHoverIcon from '@/assets/macos-traffic-lights/3-maximize-2-hover.svg';
+import { Tooltip } from '@/components/ui';
+import { setTopBarActionsSlot } from '@/components/topBarSlot';
 
 interface TitleBarProps {
   onSettingsClick: () => void;
-  showBackButton?: boolean;
+  /** Present while a project is open: back to home + editable project name. */
   onBackClick?: () => void;
+  /** Float over the workspace, hidden until the pointer reaches the top edge (the canvas). */
+  overlay?: boolean;
 }
 
-export function TitleBar({ onSettingsClick, showBackButton, onBackClick }: TitleBarProps) {
+const HIDE_DELAY_MS = 450;
+
+/**
+ * The window's only top bar: window controls, back + project name, page actions (slot), language,
+ * theme and settings. Quiet by default; on the canvas it takes no space and slides in on demand.
+ */
+export function TitleBar({ onSettingsClick, onBackClick, overlay: requestedOverlay = false }: TitleBarProps) {
   const { t, i18n } = useTranslation();
   const { theme, toggleTheme } = useThemeStore();
-  const currentProjectName = useProjectStore((state) => state.currentProject?.name);
+  const projectId = useProjectStore((state) => state.currentProjectId);
+  const projectName = useProjectStore((state) => state.currentProject?.name ?? '');
+  const renameProject = useProjectStore((state) => state.renameProject);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState(false);
+  const hideTimerRef = useRef<number | undefined>(undefined);
 
   const isDesktopRuntime = isTauri();
-  const appWindow = isDesktopRuntime ? getCurrentWindow() : null;
-  const isZh = i18n.language.startsWith('zh');
+  const appWindow = useMemo(() => isDesktopRuntime ? getCurrentWindow() : null, [isDesktopRuntime]);
+  const overlay = requestedOverlay && !isDesktopRuntime;
+  const [windowState, setWindowState] = useState({ maximized: false, fullscreen: false });
+  const [windowError, setWindowError] = useState("");
+  const sizing = useRef(false);
+  const windowReadEpoch = useRef(0);
   const isMac =
     typeof navigator !== 'undefined'
     && /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform} ${navigator.userAgent}`);
-  const appTitle = t('app.title');
-  const titleText = currentProjectName ? `${currentProjectName} - ${appTitle}` : appTitle;
+  const inProject = Boolean(onBackClick && projectId);
+  const switchLanguageLabel = i18n.language.startsWith('zh') ? t('titleBar.toEnglishHint') : t('titleBar.toChineseHint');
+  const themeLabel = theme === 'dark' ? t('titleBar.toLightHint') : t('titleBar.toDarkHint');
+
+  useEffect(() => () => window.clearTimeout(hideTimerRef.current), []);
+  // Leaving overlay mode (back to home) must not keep a stale "revealed" state.
+  useEffect(() => { if (!overlay) setRevealed(false); }, [overlay]);
+
+  const reveal = useCallback(() => {
+    window.clearTimeout(hideTimerRef.current);
+    setRevealed(true);
+  }, []);
+  const scheduleHide = useCallback(() => {
+    window.clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = window.setTimeout(() => setRevealed(false), HIDE_DELAY_MS);
+  }, []);
 
   const handleMinimize = useCallback(async () => {
     if (!appWindow) return;
-    await appWindow.minimize();
+    try { await appWindow.minimize(); } catch { setWindowError(t('titleBar.minimizeFailed')); }
+  }, [appWindow, t]);
+
+  const updateWindowState = useCallback(async () => {
+    if (!appWindow) return;
+    const epoch = ++windowReadEpoch.current;
+    try {
+      const [maximized, fullscreen] = await Promise.all([appWindow.isMaximized(), appWindow.isFullscreen()]);
+      if (epoch === windowReadEpoch.current) setWindowState({ maximized, fullscreen });
+    } catch { /* An unavailable window event must not interrupt editing. */ }
   }, [appWindow]);
 
-  const handleMaximize = useCallback(async () => {
+  const resizeWindow = useCallback(async (mode: 'maximize' | 'fullscreen') => {
+    if (!appWindow || sizing.current) return;
+    sizing.current = true; setWindowError('');
+    try {
+      await changeWindowSize(appWindow, mode);
+      await updateWindowState();
+    } catch { setWindowError(t('titleBar.resizeFailed')); }
+    finally { sizing.current = false; }
+  }, [appWindow, t, updateWindowState]);
+  const handleMaximize = useCallback(() => resizeWindow('maximize'), [resizeWindow]);
+  useEffect(() => {
     if (!appWindow) return;
-    const isMaximized = await appWindow.isMaximized();
-    if (isMaximized) {
-      await appWindow.unmaximize();
-    } else {
-      await appWindow.maximize();
-    }
-  }, [appWindow]);
+    let disposed = false;
+    void updateWindowState();
+    const unlisten = appWindow.onResized(() => { if (!disposed) void updateWindowState(); }).catch(() => null);
+    const shortcut = (event: KeyboardEvent) => {
+      const matches = isMac ? event.ctrlKey && event.metaKey && event.key.toLowerCase() === 'f' : event.key === 'F11';
+      if (!matches || event.repeat || event.defaultPrevented) return;
+      event.preventDefault(); void resizeWindow('fullscreen');
+    };
+    window.addEventListener('keydown', shortcut);
+    return () => { disposed = true; windowReadEpoch.current++; void unlisten.then((off) => off?.()); window.removeEventListener('keydown', shortcut); };
+  }, [appWindow, isMac, resizeWindow, updateWindowState]);
+  const restorable = windowState.maximized || windowState.fullscreen;
+  const maximizeLabel = restorable ? t('titleBar.restore') : t('titleBar.maximize');
 
   const handleClose = useCallback(async () => {
     if (!appWindow) return;
-    await appWindow.close();
-  }, [appWindow]);
+    try { await appWindow.close(); } catch { setWindowError(t('titleBar.closeFailed')); }
+  }, [appWindow, t]);
 
   const handleDragStart = useCallback(async (e: React.MouseEvent) => {
     if (!appWindow) return;
     if (e.button !== 0) return;
     const target = e.target as HTMLElement | null;
-    if (target?.closest('button') || target?.closest('[data-no-drag="true"]')) {
+    if (target?.closest('button, input, textarea, select, a, [role="button"]') || target?.closest('[data-no-drag="true"]')) {
       return;
     }
-    await appWindow.startDragging();
-  }, [appWindow]);
+    if (e.detail > 1) return;
+    try { await appWindow.startDragging(); } catch { setWindowError(t('titleBar.dragFailed')); }
+  }, [appWindow, t]);
 
   const handleLanguageClick = useCallback(() => {
     const newLang = i18n.language.startsWith('zh') ? 'en' : 'zh';
     i18n.changeLanguage(newLang);
   }, [i18n]);
 
-  const handleThemeClick = useCallback(() => {
-    toggleTheme();
-  }, [toggleTheme]);
+  const commitRename = () => {
+    const next = draft?.trim();
+    setDraft(null);
+    if (projectId && next && next !== projectName) renameProject(projectId, next);
+  };
 
   return (
-    <div className="relative z-50 flex h-10 items-center justify-between border-b border-border-dark bg-surface-dark select-none">
-      {isDesktopRuntime && isMac ? (
-        <div className="group flex items-center h-full pl-3 pr-2 gap-2" data-no-drag="true">
-          <button
-            type="button"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={handleClose}
-            className="relative flex h-3 w-3 items-center justify-center"
-            title={t('titleBar.close')}
-            aria-label={t('titleBar.close')}
-          >
-            <img src={closeNormalIcon} alt="" className="h-3 w-3 pointer-events-none opacity-100 transition-opacity group-hover:opacity-0" />
-            <img src={closeHoverIcon} alt="" className="absolute h-3 w-3 pointer-events-none opacity-0 transition-opacity group-hover:opacity-100" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={handleMinimize}
-            className="relative flex h-3 w-3 items-center justify-center"
-            title={t('titleBar.minimize')}
-            aria-label={t('titleBar.minimize')}
-          >
-            <img src={minimizeNormalIcon} alt="" className="h-3 w-3 pointer-events-none opacity-100 transition-opacity group-hover:opacity-0" />
-            <img src={minimizeHoverIcon} alt="" className="absolute h-3 w-3 pointer-events-none opacity-0 transition-opacity group-hover:opacity-100" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={handleMaximize}
-            className="relative flex h-3 w-3 items-center justify-center"
-            title={t('titleBar.maximize')}
-            aria-label={t('titleBar.maximize')}
-          >
-            <img src={maximizeNormalIcon} alt="" className="h-3 w-3 pointer-events-none opacity-100 transition-opacity group-hover:opacity-0" />
-            <img src={maximizeHoverIcon} alt="" className="absolute h-3 w-3 pointer-events-none opacity-0 transition-opacity group-hover:opacity-100" />
-          </button>
+    <div
+      className="app-topbar select-none"
+      data-overlay={overlay || undefined}
+      data-revealed={(overlay && (revealed || draft !== null)) || undefined}
+      onPointerEnter={overlay ? reveal : undefined}
+      onPointerLeave={overlay ? scheduleHide : undefined}
+    >
+      {overlay ? (
+        <div className="app-topbar__hotzone" aria-hidden="true">
+          <span className="app-topbar__grip" />
         </div>
       ) : null}
+      {windowError && <div role="alert" className="absolute right-3 top-full z-50 rounded-lg bg-elevated p-2 text-xs text-danger" onClick={() => setWindowError("")}>{windowError}</div>}
+      <div className="app-topbar__bar">
+        {isDesktopRuntime && isMac ? <div className="w-[82px] shrink-0" aria-hidden="true" data-no-drag="true" /> : null}
 
-      <div
-        className={`flex h-full min-w-0 flex-1 items-center px-2 sm:px-4 ${isDesktopRuntime ? 'cursor-move' : 'cursor-default'}`}
-        onMouseDown={isDesktopRuntime ? handleDragStart : undefined}
-      >
-        {showBackButton && onBackClick && (
-          <button
-            type="button"
-            data-no-drag="true"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              onBackClick();
-            }}
-            className="mr-2 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark sm:mr-3"
-            title={t('titleBar.back')}
-            aria-label={t('titleBar.back')}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </button>
-        )}
-        <span className="min-w-0 truncate text-sm font-semibold text-text-dark">
-          {titleText}
-        </span>
-        {!isZh && !currentProjectName ? (
-          <span className="ml-2 hidden shrink-0 text-xs text-text-muted lg:inline">{t('app.subtitle')}</span>
-        ) : null}
-      </div>
-
-      {/* 右侧按钮区域 */}
-      <div className="flex items-center h-full">
-        <button
-          type="button"
-          onClick={handleLanguageClick}
-          className="inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
-          title={i18n.language.startsWith('zh') ? t('titleBar.switchToEnglish') : t('titleBar.switchToChinese')}
-          aria-label={i18n.language.startsWith('zh') ? t('titleBar.switchToEnglish') : t('titleBar.switchToChinese')}
+        <div
+          className={`flex h-full min-w-0 flex-1 items-center gap-1 px-2 ${isDesktopRuntime ? 'cursor-move' : 'cursor-default'}`}
+          onMouseDown={isDesktopRuntime ? handleDragStart : undefined}
+          onDoubleClick={isDesktopRuntime ? (event) => { if (!(event.target instanceof Element) || event.target.closest('button,input,textarea,select,a,[role="button"],[data-no-drag]')) return; event.preventDefault(); void handleMaximize(); } : undefined}
         >
-          <Languages className="h-4 w-4" />
-        </button>
-
-        <button
-          type="button"
-          onClick={handleThemeClick}
-          className="inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
-          title={theme === 'dark' ? t('theme.light') : t('theme.dark')}
-          aria-label={theme === 'dark' ? t('theme.light') : t('theme.dark')}
-        >
-          {theme === 'dark' ? (
-            <Sun className="h-4 w-4" />
+          {inProject ? (
+            <>
+              <Tooltip label={t('titleBar.backHint')} side="bottom">
+                <button type="button" className="app-topbar__button" aria-label={t('titleBar.back')} onClick={onBackClick}>
+                  <ChevronLeft />
+                </button>
+              </Tooltip>
+              <span className="app-topbar__app">{t('app.title')}</span>
+              <span className="app-topbar__sep" aria-hidden="true">/</span>
+              {draft === null ? (
+                <Tooltip label={t('titleBar.renameHint')} side="bottom">
+                  <button type="button" className="app-topbar__title" onClick={() => setDraft(projectName)}>
+                    {projectName}
+                  </button>
+                </Tooltip>
+              ) : (
+                <input
+                  autoFocus
+                  className="app-topbar__title"
+                  aria-label={t('rework.projectName')}
+                  value={draft}
+                  maxLength={120}
+                  onFocus={(event) => event.currentTarget.select()}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(event) => {
+                    event.stopPropagation();
+                    if (event.key === 'Enter') commitRename();
+                    if (event.key === 'Escape') setDraft(null);
+                  }}
+                />
+              )}
+            </>
           ) : (
-            <Moon className="h-4 w-4" />
+            <span className="app-topbar__app">{t('app.title')}</span>
           )}
-        </button>
+        </div>
 
-        <button
-          type="button"
-          onClick={onSettingsClick}
-          className="inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
-          title={t('settings.title')}
-          aria-label={t('settings.title')}
-        >
-          <Settings className="h-4 w-4" />
-        </button>
-
-        {isDesktopRuntime && !isMac ? (
-          <>
-            <div className="w-px h-4 bg-border-dark mx-1" />
-
-            <button
-              type="button"
-              onClick={handleMinimize}
-              className="inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
-              title={t('titleBar.minimize')}
-              aria-label={t('titleBar.minimize')}
-            >
-              <Minus className="w-4 h-4 text-text-muted hover:text-text-dark" />
+        <div className="flex h-full items-center gap-0.5 pr-1.5">
+          {/* Page actions (the canvas portals its agent launcher here). */}
+          <div ref={setTopBarActionsSlot} className="app-topbar__actions" data-no-drag="true" />
+          <Tooltip label={switchLanguageLabel} side="bottom">
+            <button type="button" className="app-topbar__button" aria-label={switchLanguageLabel} onClick={handleLanguageClick}>
+              <Languages />
             </button>
-
-            <button
-              type="button"
-              onClick={handleMaximize}
-              className="inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
-              title={t('titleBar.maximize')}
-              aria-label={t('titleBar.maximize')}
-            >
-              <Maximize2 className="w-4 h-4 text-text-muted hover:text-text-dark" />
+          </Tooltip>
+          <Tooltip label={themeLabel} side="bottom">
+            <button type="button" className="app-topbar__button" aria-label={themeLabel} onClick={toggleTheme}>
+              {theme === 'dark' ? <Sun /> : <Moon />}
             </button>
-
-            <button
-              type="button"
-              onClick={handleClose}
-              className="group inline-flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:bg-red-500 hover:text-white"
-              title={t('titleBar.close')}
-              aria-label={t('titleBar.close')}
-            >
-              <X className="w-4 h-4 text-text-muted group-hover:text-white" />
+          </Tooltip>
+          <Tooltip label={t('titleBar.settingsHint')} side="bottom-end">
+            <button type="button" className="app-topbar__button" aria-label={t('settings.title')} onClick={onSettingsClick}>
+              <Settings />
             </button>
-          </>
-        ) : null}
+          </Tooltip>
+
+          {isDesktopRuntime && !isMac ? (
+            <>
+              <div className="mx-1 h-4 w-px bg-[var(--line)]" />
+              <button type="button" className="app-topbar__button" title={t('titleBar.minimize')} aria-label={t('titleBar.minimize')} onClick={handleMinimize}>
+                <Minus />
+              </button>
+              <button type="button" className="app-topbar__button" title={maximizeLabel} aria-label={maximizeLabel} onClick={handleMaximize}>
+                {restorable ? <Minimize2 /> : <Maximize2 />}
+              </button>
+              <button type="button" className="app-topbar__button" data-tone="danger" title={t('titleBar.close')} aria-label={t('titleBar.close')} onClick={handleClose}>
+                <X />
+              </button>
+            </>
+          ) : null}
+        </div>
       </div>
     </div>
   );

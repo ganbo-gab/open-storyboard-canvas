@@ -1,6 +1,19 @@
-import { Component, type ComponentType, type ErrorInfo, type ReactNode } from 'react';
+import { Component, memo, type ComponentType, type ErrorInfo, type ReactNode } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { NodeLevelOfDetail } from './NodeLevelOfDetail';
+
+/** Custom canvas bodies do not consume absolute position or dragging; the Flow wrapper owns both. */
+const BODY_PROPS = [
+  'id', 'data', 'type', 'width', 'height', 'sourcePosition', 'targetPosition', 'dragHandle', 'parentId',
+  'zIndex', 'selectable', 'deletable', 'selected', 'draggable', 'isConnectable',
+] as const satisfies readonly (keyof NodeProps)[];
+
+export function sameCanvasNodeBodyProps(previous: NodeProps, next: NodeProps): boolean {
+  for (const key of BODY_PROPS) {
+    if (!Object.is(previous[key], next[key])) return false;
+  }
+  return true;
+}
 
 interface NodeRenderErrorBoundaryProps {
   nodeId: string;
@@ -43,10 +56,10 @@ class NodeRenderErrorBoundary extends Component<
     }
 
     return (
-      <div className="w-[360px] rounded-(--node-radius) border border-red-400/30 bg-(--canvas-node-bg) p-3 text-xs leading-5 text-text-dark shadow-(--canvas-node-shadow)">
-        <div className="mb-1 font-semibold text-red-200">节点渲染失败</div>
+      <div className="w-[360px] rounded-(--node-radius) border border-danger/30 bg-(--canvas-node-bg) p-3 text-xs leading-5 text-text-dark shadow-(--canvas-node-shadow)">
+        <div className="mb-1 font-semibold text-danger">节点渲染失败</div>
         <div className="text-text-muted">这个节点的数据触发了渲染异常，画布已继续加载。</div>
-        <pre className="ui-scrollbar mt-2 max-h-28 overflow-auto whitespace-pre-wrap wrap-break-word rounded-sm border border-(--canvas-node-border) bg-bg-dark/70 p-2 text-[11px]">
+        <pre className="ui-scrollbar mt-2 max-h-28 overflow-auto whitespace-pre-wrap wrap-break-word rounded-sm border border-(--canvas-node-border) bg-[var(--field-bg)] p-2 text-[11px]">
           {this.state.error.message}
         </pre>
       </div>
@@ -54,7 +67,7 @@ class NodeRenderErrorBoundary extends Component<
   }
 }
 
-export function withNodeRenderErrorBoundary<TProps extends { id: string | number }>(
+export function withNodeRenderErrorBoundary<TProps extends NodeProps>(
   NodeComponent: ComponentType<TProps>
 ): ComponentType<NodeProps> {
   function SafeNode(props: TProps) {
@@ -66,5 +79,5 @@ export function withNodeRenderErrorBoundary<TProps extends { id: string | number
   }
 
   SafeNode.displayName = `Safe${NodeComponent.displayName || NodeComponent.name || 'CanvasNode'}`;
-  return SafeNode as unknown as ComponentType<NodeProps>;
+  return memo(SafeNode, sameCanvasNodeBodyProps) as unknown as ComponentType<NodeProps>;
 }

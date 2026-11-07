@@ -22,7 +22,7 @@ describe('manual image provider workbench', () => {
       bindings: { images: [] }, outputNodeIds: ['2'],
     };
     const config = customImageProviderDraftToConfig(draft, 'h3').value!;
-    const sample = createWorkbenchPreviewRequest(config, 'h3');
+    const sample = createWorkbenchPreviewRequest(config, config.models[0]);
     expect(sample).toMatchObject({ size: '768P', aspect_ratio: '16:9', extra_params: { seconds: 5 } });
     const workflow = prepareComfyUIWorkflow(parseComfyUIConfig(config), sample);
     expect(workflow['1'].inputs).toMatchObject({ width: 1344, height: 768, length: 124 });

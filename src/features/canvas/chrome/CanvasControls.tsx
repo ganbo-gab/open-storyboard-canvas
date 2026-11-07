@@ -13,7 +13,7 @@ import {
   Undo2,
 } from 'lucide-react';
 
-import { MenuItem, MenuSeparator, MenuSurface, Tooltip } from '@/components/ui';
+import { MenuItem, MenuSeparator, MenuSurface, Tooltip, anchorAbove } from '@/components/ui';
 import { useCanvasActions } from '@/features/canvas/engine/canvasActions';
 import { shortcutLabel } from '@/features/canvas/engine/shortcuts';
 import { useCanvasUiStore } from '@/features/canvas/state/canvasUiStore';
@@ -72,9 +72,8 @@ export const CanvasControls = memo(function CanvasControls() {
         aria-expanded={Boolean(zoomMenu)}
         aria-label={t('rework.canvas.zoomLevel')}
         onClick={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
           setZoomDraft(String(zoomPercent));
-          setZoomMenu(zoomMenu ? null : { x: rect.left, y: rect.top - 8 });
+          setZoomMenu(zoomMenu ? null : anchorAbove(event.currentTarget));
         }}
       >
         {zoomPercent}%

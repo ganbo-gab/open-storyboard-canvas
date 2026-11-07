@@ -42,6 +42,10 @@ export const usePanelStateStore = create<PanelStateStore>((set, get) => ({
 
   openPanel: (type, anchor, openMode = 'click') => {
     const current = get();
+    if (openMode === 'click' && current.isOpen && current.openMode === 'click' && current.type === type && current.anchor?.nodeId === anchor.nodeId) {
+      set(initialPanelState);
+      return;
+    }
     // hover-open must not overwrite a click-pinned panel
     if (openMode === 'hover' && current.openMode === 'click' && current.isOpen) {
       return;

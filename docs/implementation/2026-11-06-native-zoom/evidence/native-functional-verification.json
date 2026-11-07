@@ -1,0 +1,54 @@
+{
+  "wideHit": {
+    "x": 581.3719029672703,
+    "y": 260.6109938546028,
+    "offsetCssPixels": 0.6,
+    "zoom": 0.1,
+    "edge": "qa-e-42",
+    "stroke": "none",
+    "pointerEvents": "stroke",
+    "method": "elementFromPoint then trusted native CUA click; selected qa-e-42"
+  },
+  "deleteUndo": {
+    "nativeDoubleClick": true,
+    "afterEdges": 999,
+    "deletedExpected": true,
+    "historyDelta": 1,
+    "nativeCmdZ": true,
+    "restoredEdges": 1000
+  },
+  "maximize": {
+    "rootCss": [
+      1710,
+      957
+    ],
+    "gpuBacking": [
+      3420,
+      1914
+    ],
+    "dpr": 2
+  },
+  "restore": {
+    "rootCss": [
+      1440,
+      901
+    ],
+    "gpuBacking": [
+      2880,
+      1802
+    ]
+  },
+  "contextLoss": {
+    "beforeReady": true,
+    "afterReady": false,
+    "afterActive": false,
+    "canvasDisplay": "none",
+    "visibleSvgPaths": 1000,
+    "canonicalEdges": 1000
+  },
+  "limits": [
+    "Node drag measurements use scripted input.",
+    "Native wide-hit click and double click were real CUA clicks.",
+    "No Windows native verification."
+  ]
+}

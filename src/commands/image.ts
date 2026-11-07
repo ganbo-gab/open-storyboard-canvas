@@ -109,6 +109,18 @@ export interface SystemClipboardImage {
 export interface SystemClipboardContent {
   image?: SystemClipboardImage | null;
   text?: string | null;
+  filePaths?: string[];
+}
+
+export async function writeSystemClipboardText(text: string): Promise<boolean> {
+  if (!isTauri()) return false;
+  await invoke('write_system_clipboard_text', { text });
+  return true;
+}
+
+export async function readCanvasClipboardPointer(): Promise<{ x: number; y: number } | null> {
+  if (!isTauri()) return null;
+  return await invoke('canvas_clipboard_pointer');
 }
 
 export async function mergeStoryboardImages(

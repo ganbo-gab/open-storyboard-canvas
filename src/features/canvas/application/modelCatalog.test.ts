@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { AGNES_PROVIDER_DEFAULTS } from '@/stores/customProvidersStore';
 import { buildImageModelCatalog } from './modelCatalog';
+import { migrateAgnesSettingsCredential } from '@/features/channels/runtime/agnesChannel';
+import { getChannelCatalogProviders } from '@/features/channels/application/channelCatalog';
 
 describe('Agnes image catalog', () => {
   it('exposes 3K only for Image 2.1 while retaining Image 2.0 explicit pixels', () => {
-    const entries = buildImageModelCatalog({ customProviders: [], agnesApiKey: 'agnes-key' });
+    migrateAgnesSettingsCredential('agnes-key');
+    const entries = buildImageModelCatalog({ customProviders: getChannelCatalogProviders() });
     const image21 = entries.find(({ modelId }) => (
       modelId === AGNES_PROVIDER_DEFAULTS.models.image21Flash
     ));

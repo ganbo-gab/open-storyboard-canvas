@@ -9,7 +9,6 @@ export type SettingsCategory =
   | 'dreamina'
   | 'agnes'
   | 'imageHosting'
-  | 'audioModels'
   | 'promptManagement'
   | 'promptPresets'
   | 'textAgents'

@@ -20,6 +20,14 @@ export const openAIStandardProfile: ChannelProfileV2 = {
         tool_choice: '{{toolChoice}}',
         temperature: '{{param.temperature}}',
         max_tokens: '{{param.max_tokens}}',
+        top_p: '{{param.top_p}}',
+        max_completion_tokens: '{{param.max_completion_tokens}}',
+        parallel_tool_calls: '{{param.parallel_tool_calls}}',
+        stream: '{{param.stream}}',
+        stream_options: '{{chatPayload.stream_options}}',
+        response_format: '{{chatPayload.response_format}}',
+        stop: '{{chatPayload.stop}}',
+        reasoning_effort: '{{param.reasoning_effort}}',
       },
       response: { mode: 'sync', outputs: [] },
       errorPath: 'error.message',
@@ -81,6 +89,11 @@ export const openAIStandardProfile: ChannelProfileV2 = {
       params: [
         { key: 'temperature', label: 'Temperature', type: 'number', min: 0, max: 2, step: 0.1 },
         { key: 'max_tokens', label: '最大输出 token', type: 'number', min: 1, step: 1 },
+        { key: 'top_p', label: 'Top P', type: 'number', min: 0, max: 1 },
+        { key: 'max_completion_tokens', label: '最大完成 token', type: 'number', min: 1, step: 1 },
+        { key: 'parallel_tool_calls', label: '并行工具', type: 'boolean' },
+        { key: 'reasoning_effort', label: '推理强度', type: 'text' },
+        { key: 'stream', label: '流式输出', type: 'boolean', default: false },
       ],
     },
     {
@@ -111,8 +124,8 @@ export const openAICompatibleProfile: ChannelProfileV2 = {
   name: 'OpenAI 兼容中转',
   baseUrl: 'https://relay.example.invalid',
   notes: [
-    '请替换 baseUrl 并核对模型名；new-api / one-api 的具体视频字段以中转站文档为准。',
-    '视频预设采用 model/prompt/seconds/size JSON 方言，完成后鉴权下载 /v1/videos/{taskId}/content；不推断 CC API 的 input/parameters 方言。',
+    '请替换 baseUrl 并核对模型名；兼容接口的实际字段以所用服务商文档为准。',
+    '视频模板采用 model/prompt/seconds/size JSON 格式，完成后鉴权下载 /v1/videos/{taskId}/content；若服务商使用其他格式，可在高级 JSON 中按其文档调整。',
   ],
   operations: {
     ...openAIStandardProfile.operations,

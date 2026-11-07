@@ -160,3 +160,145 @@ fn inventories_nested_director_video_audio_and_bundle_references() {
     assert!(sources.contains_key("/tmp/reference.png"));
     assert!(sources.contains_key("bundle://assets/missing.jpg"));
 }
+
+fn legacy_credential_fixture() -> Value {
+    json!({
+        "providers": [{
+            "apiKey": "sentinel-provider-key",
+            "baseUrl": "https://sentinel-user:sentinel-userinfo@example.com/v1?api%5Fkey=sentinel-url-key&mode=portable",
+            "extraHeaders": { "Authorization": "Bearer sentinel-header", "X-Access-Key": "sentinel-access-key", "Accept": "application/json" },
+            "queryParams": { "key": "sentinel-query-key", "access_token": "sentinel-query-token", "vendor_key": "sentinel-legacy-auth-query", "version": "v1" },
+            "extraParams": { "comfyOrgKey": "sentinel-comfy-key",
+                "auth": { "mode": "query", "name": "vendor_key", "value": "sentinel-legacy-auth-value" } }
+        }],
+        "imageHost": { "password": "sentinel-image-password", "token": "sentinel-image-token" },
+        "agentModels": [{ "apiKey": "sentinel-agent-key", "maxOutputTokens": 4096,
+            "credentialRef": { "namespace": "agent-model", "id": "portable-model" } }],
+        "oldBackup": "{\"nested\":{\"apiKey\":\"sentinel-encoded-key\",\"password\":\"sentinel-encoded-password\"}}",
+        "request": {
+            "malformedBackup": "{\"apiKey\":\"sentinel-malformed-backup\"",
+            "rawRequest": "Authorization: sentinel-raw-header\nAccept: application/json",
+            "formQuery": "api_key=sentinel-form-key&mode=portable",
+            "auth": { "type": "query", "name": "vendor_auth", "value": "sentinel-auth-value" },
+            "url": "/v1/tasks?vendor_auth=sentinel-custom-query&mode=portable",
+            "queryParams": { "vendor_auth": "sentinel-custom-map" },
+            "headers": [{ "name": "Authorization", "value": "sentinel-header-entry" }]
+        },
+        "migrationIssues": [{ "key": "extraParams.apiKey", "value": "sentinel-migration-key", "reason": "Unsupported" }]
+    })
+}
+
+#[test]
+fn project_portability_redacts_legacy_nested_snapshots_and_preserves_refs() {
+    let fixture = legacy_credential_fixture();
+    let mut record = valid_record();
+    record.node_count = 1;
+    record.nodes_json = json!([{ "id": "node", "data": { "settings": fixture } }]).to_string();
+    record.history_json =
+        json!({ "past": [{ "settings": legacy_credential_fixture() }], "future": [] }).to_string();
+    record.image_pool_json =
+        Some(json!(["https://example.com/image?token=sentinel-media-token"]).to_string());
+    let safe = redact_project_credentials(record.clone());
+    validate_record(&safe).unwrap();
+    // The export writer serializes this record, and the import inspector uses the same sanitizer.
+    let export = json!({ "schemaVersion": PROJECT_BUNDLE_SCHEMA_VERSION, "record": safe });
+    assert!(!export.to_string().contains("sentinel-"));
+    let nodes: Value =
+        serde_json::from_str(export["record"]["nodesJson"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        nodes[0]["data"]["settings"]["agentModels"][0]["credentialRef"],
+        json!({ "namespace": "agent-model", "id": "portable-model" })
+    );
+    assert_eq!(
+        nodes[0]["data"]["settings"]["providers"][0]["extraHeaders"],
+        json!({ "Accept": "application/json" })
+    );
+    assert!(record.nodes_json.contains("sentinel-provider-key"));
+    let imported = parse_project_payload(
+        json!({ "schemaVersion": PROJECT_BUNDLE_SCHEMA_VERSION, "record": record }),
+    )
+    .unwrap();
+    let imported = redact_project_credentials(imported);
+    assert!(!serde_json::to_string(&imported)
+        .unwrap()
+        .contains("sentinel-"));
+    let again = redact_project_credentials(imported.clone());
+    assert_eq!(
+        serde_json::to_value(imported).unwrap(),
+        serde_json::to_value(again).unwrap()
+    );
+}
+
+#[test]
+fn settings_text_exports_and_legacy_imports_never_contain_credentials() {
+    let legacy = json!({
+        "format": "open-storyboard-settings", "schemaVersion": 1,
+        "appVersion": "fixture", "createdAt": "1970-01-01T00:00:00.000Z",
+        "includesCredentials": true,
+        "categories": { "models": { "lastModelConfigByPanel": legacy_credential_fixture() } },
+        "credentials": {
+            "providerApiKeys": { "old": "sentinel-old-key" },
+            "channelApiKeys": { "channel": "sentinel-channel-key" },
+            "legacyProviderBackups": { "old": "{\"apiKey\":\"sentinel-archived-key\"}" },
+            "imageHost": { "password": "sentinel-old-password" }
+        }
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let exported_path = directory.path().join("export.osc-settings.json");
+    write_portability_text_file(
+        exported_path.to_string_lossy().into_owned(),
+        legacy.to_string(),
+    )
+    .unwrap();
+    let exported = std::fs::read_to_string(&exported_path).unwrap();
+    assert!(!exported.contains("sentinel-"));
+    let exported: Value = serde_json::from_str(&exported).unwrap();
+    assert_eq!(exported["includesCredentials"], false);
+    assert!(exported.get("credentials").is_none());
+    assert_eq!(
+        exported["categories"]["models"]["lastModelConfigByPanel"]["agentModels"][0]
+            ["credentialRef"],
+        json!({ "namespace": "agent-model", "id": "portable-model" })
+    );
+    let old_path = directory.path().join("old.osc-settings.json");
+    std::fs::write(&old_path, legacy.to_string()).unwrap();
+    let imported = read_portability_text_file(old_path.to_string_lossy().into_owned()).unwrap();
+    assert!(!imported.contains("sentinel-"));
+    assert_eq!(serde_json::from_str::<Value>(&imported).unwrap(), exported);
+}
+
+#[test]
+fn portability_keeps_only_strict_refs_and_opaque_tokens_not_disguised_values() {
+    for namespace in [
+        "channel",
+        "provider",
+        "settings",
+        "image-host",
+        "agent-model",
+        "comfyui",
+    ] {
+        let reference = json!({ "namespace": namespace, "id": "fixture:模型" });
+        let token = format!(
+            "__SC_SECRET_{}__",
+            URL_SAFE_NO_PAD.encode(reference.to_string())
+        );
+        let mut value = json!({
+            "credentialRef": reference, "apiKey": token, "header": format!("Bearer {token}"),
+            "url": format!("https://example.com?api_key={token}"), "max_tokens": 2048
+        });
+        let original = value.clone();
+        let mut changed = false;
+        redact_portable_value(&mut value, "", &HashSet::new(), &mut changed);
+        assert_eq!(value, original);
+        assert!(!changed);
+    }
+    let fake_reference =
+        json!({ "namespace": "provider", "id": "fixture", "value": "sentinel-disguised" });
+    let fake_token = format!(
+        "__SC_SECRET_{}__",
+        URL_SAFE_NO_PAD.encode(fake_reference.to_string())
+    );
+    let mut value = json!({ "credentialRef": fake_reference, "apiKey": fake_token, "passwordRef": "sentinel-fake-ref" });
+    redact_portable_value(&mut value, "", &HashSet::new(), &mut false);
+    assert_eq!(value, json!({}));
+}

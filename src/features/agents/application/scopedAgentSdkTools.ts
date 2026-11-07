@@ -7,10 +7,11 @@ import { canvasAgentApprovalExecution, canvasAgentApprovalStore, createAgentRequ
 import { redactSensitiveValue } from '@/features/canvas/agent/application/agentRedaction';
 import { getScopedAgentTools, inspectScopedAgentTool } from './scopedAgentTools';
 import { strictScopedToolSchema, type Schema } from './scopedAgentSchemas';
+import { withCanvasHistoryAgentTurn } from '@/stores/canvasHistory';
 
 
 export function createScopedSdkTools(scope: AgentScope, context: CanvasAgentContext, supportsVision: boolean) {
-  return getScopedAgentTools(scope).filter((definition) => definition.name !== 'asset_view' || supportsVision).map((definition) => {
+  return getScopedAgentTools(scope).filter((definition) => (!context.allowedToolNames || context.allowedToolNames.includes(definition.name)) && (definition.name !== 'asset_view' || supportsVision)).map((definition) => {
     const original = z.toJSONSchema(definition.schema) as Schema;
     // Every registry schema is a closed Zod object; adapt only the SDK's structural type.
     const parameters = strictScopedToolSchema(original) as unknown as JsonObjectSchemaStrict<Record<string, Schema>>;
@@ -24,6 +25,7 @@ export function createScopedSdkTools(scope: AgentScope, context: CanvasAgentCont
         const callId = details?.toolCall?.callId;
         if (!callId) throw new Error('Scoped tool requires a stable callId.');
         if (context.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+        if (context.allowedToolNames && !context.allowedToolNames.includes(definition.name)) throw new Error('Tool is not allowed by the selected skills.');
         const parsed = inspectScopedAgentTool(scope, definition.name, rawInput);
         const approvalId = createApprovalId(context.runId, definition.name, callId);
         const requestFingerprint = await createAgentRequestFingerprint(definition.name, rawInput);
@@ -32,13 +34,13 @@ export function createScopedSdkTools(scope: AgentScope, context: CanvasAgentCont
           const execution = await canvasAgentApprovalExecution.executeOnce({
             approvalId, runId: context.runId, projectId: context.projectId, toolName: definition.name, callId, requestFingerprint,
             activeProjectId: scope === 'home' ? context.projectId : context.getActiveProjectId?.(),
-            isSuccess: (output) => !(output && typeof output === 'object' && 'status' in output && (output.status === 'failed' || output.status === 'unknown')),
+            isSuccess: (output) => !(output && typeof output === 'object' && (('ok' in output && output.ok === false) || ('status' in output && (output.status === 'failed' || output.status === 'unknown')))),
             isUnknownOutcome: (output) => Boolean(output && typeof output === 'object' && 'status' in output && output.status === 'unknown'),
             currentRevision: scope === 'stage' && parsed.risk !== 'read' && definition.name === 'stage_command' ? context.getCanvasRevision?.() : undefined,
             execute: async () => {
               if (context.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
-              const result = await parsed.tool.execute(parsed.input, { signal: context.signal, projectId: context.projectId, runId: context.runId, expectedRevision: canvasAgentApprovalStore.get(approvalId)?.baseRevision });
-              if (scope !== 'home' && parsed.risk !== 'read') await context.persistCanvasCheckpoint?.();
+              const result = await withCanvasHistoryAgentTurn(JSON.stringify([context.projectId, context.runId]), () => parsed.tool.execute(parsed.input, { signal: context.signal, projectId: context.projectId, runId: context.runId, expectedRevision: canvasAgentApprovalStore.get(approvalId)?.baseRevision, selectedTurnModel: context.selectedTurnModel, knowledgeModel: context.knowledgeModel }));
+              if (scope !== 'home' && parsed.risk !== 'read' && !definition.name.startsWith('kb_') && !definition.name.startsWith('integration_')) await context.persistCanvasCheckpoint?.();
               return redactSensitiveValue(result);
             },
           });
@@ -51,7 +53,7 @@ export function createScopedSdkTools(scope: AgentScope, context: CanvasAgentCont
           if (context.signal?.aborted) throw error;
           const message = redactSensitiveValue(error instanceof Error ? error.message : String(error));
           context.onToolEvent?.({ toolName: definition.name, callId, status: 'failed', error: message });
-          return { ok: false, error: message };
+          return { ok: false, error: message, ...(error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? { code: error.code } : {}) };
         }
       },
     });

@@ -1,11 +1,15 @@
 import type { z } from 'zod';
 import type { AgentScope } from '@/features/canvas/agent/domain/agentModel';
+import type { ChatCatalogEntry } from '@/features/canvas/application/chatModelCatalog';
+import type { KnowledgeModelPort } from '@/features/knowledge/domain/organize';
 
 export interface ScopedAgentToolContext {
   signal?: AbortSignal;
   projectId: string;
   runId: string;
   expectedRevision?: number;
+  selectedTurnModel?: ChatCatalogEntry;
+  knowledgeModel?: KnowledgeModelPort;
 }
 export type ScopedToolRisk = 'read' | 'edit' | 'paid' | 'destructive';
 export interface ScopedAgentTool {

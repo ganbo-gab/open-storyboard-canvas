@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Image as ImageIcon, Settings2, Sparkles, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { UiButton, UiChipButton, UiIconButton } from '@/components/ui';
 
 import { useImageModelCatalog } from '@/features/canvas/application/modelCatalog';
 import { openSettingsDialog } from '@/features/settings/settingsEvents';
@@ -105,7 +106,7 @@ export const PromptPresetPanel = memo(({
 
   return (
     <div
-      className="fixed z-100 w-[390px] max-w-[calc(100vw-16px)] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-dark/95 shadow-2xl backdrop-blur-xs"
+      className="fixed z-100 w-[390px] max-w-[calc(100vw-16px)] overflow-hidden rounded-xl border border-[var(--line)] bg-elevated shadow-[var(--shadow-pop)] backdrop-blur-xs"
       style={{ left: `${panelLeft}px`, top: `${panelTop}px` }}
       onClick={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
@@ -117,19 +118,20 @@ export const PromptPresetPanel = memo(({
             {t('promptPresetPanel.title')}
           </span>
         </div>
-        <button
+        <UiIconButton size="sm"
           type="button"
           onClick={onClose}
-          className="rounded-md p-1 text-text-muted transition-colors hover:bg-bg-dark hover:text-text-dark"
+          className="rounded-md p-1"
           title={t('common.close') as string}
+          aria-label={t('common.close')}
         >
           <X className="h-3.5 w-3.5" />
-        </button>
+        </UiIconButton>
       </div>
 
       <div className="space-y-2 px-3 pb-3">
         {previewImageUrl && (
-          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-2">
+          <div className="flex items-center gap-2 rounded-lg border border-[var(--line)] bg-[var(--field-bg)] p-2">
             <img
               src={previewImageUrl}
               alt={t('promptPresetPanel.sourcePreview') as string}
@@ -137,7 +139,7 @@ export const PromptPresetPanel = memo(({
               draggable={false}
             />
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-[11px] font-medium text-white/80">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-dark">
                 <ImageIcon className="h-3 w-3 text-accent" />
                 {t('promptPresetPanel.sourcePreview')}
               </div>
@@ -148,31 +150,31 @@ export const PromptPresetPanel = memo(({
           </div>
         )}
 
-        <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-          <div className="mb-1.5 text-[11px] font-medium text-white/72">
+        <div className="rounded-lg border border-[var(--line)] bg-[var(--field-bg)] p-2">
+          <div className="mb-1.5 text-[11px] font-medium text-text-muted">
             {t('promptPresetPanel.modelTitle')}
           </div>
           <ModelConfigPicker
             panelKey="promptPreset"
             value={modelConfig ?? undefined}
             onChange={handleModelConfigChange}
-            className="rounded-md border border-white/10 bg-white/3 px-2 py-1.5"
+            className="rounded-md border border-[var(--line)] bg-[var(--hover)] px-2 py-1.5"
           />
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-black/20">
-          <div className="flex items-center justify-between gap-2 border-b border-white/10 px-2.5 py-2">
-            <span className="text-[11px] font-medium text-white/72">
+        <div className="rounded-lg border border-[var(--line)] bg-[var(--field-bg)]">
+          <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] px-2.5 py-2">
+            <span className="text-[11px] font-medium text-text-muted">
               {t('promptPresetPanel.presetTitle')}
             </span>
-            <button
+            <UiButton variant="secondary" size="sm"
               type="button"
               onClick={handleManagePresets}
-              className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/70 transition-colors hover:border-white/25 hover:text-white/90"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px]"
             >
               <Settings2 className="h-3 w-3" />
               {t('nodeToolbar.managePromptPresets')}
-            </button>
+            </UiButton>
           </div>
 
           {promptPresets.length > 0 ? (
@@ -180,15 +182,11 @@ export const PromptPresetPanel = memo(({
               {promptPresets.map((preset) => {
                 const active = preset.id === selectedPresetId;
                 return (
-                  <button
+                  <UiChipButton active={active}
                     key={preset.id}
                     type="button"
                     onClick={() => setSelectedPresetId(preset.id)}
-                    className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                      active
-                        ? 'border-accent/55 bg-accent/16 text-white'
-                        : 'border-transparent text-text-dark hover:border-white/12 hover:bg-bg-dark'
-                    }`}
+                    className="flex h-auto min-h-[64px] w-full whitespace-normal items-start gap-2 rounded-lg px-2.5 py-2 text-left"
                     title={preset.prompt}
                   >
                     <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
@@ -199,20 +197,20 @@ export const PromptPresetPanel = memo(({
                       </span>
                     </span>
                     {active && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />}
-                  </button>
+                  </UiChipButton>
                 );
               })}
             </div>
           ) : (
-            <div className="m-2 rounded-lg border border-dashed border-white/12 bg-bg-dark/35 px-3 py-4 text-center text-xs text-text-muted">
+            <div className="m-2 rounded-lg border border-dashed border-[var(--line)] bg-[var(--field-bg)] px-3 py-4 text-center text-xs text-text-muted">
               {t('nodeToolbar.promptPresetEmpty')}
             </div>
           )}
         </div>
 
         {selectedPreset && (
-          <div className="rounded-lg border border-white/10 bg-white/3 p-2.5">
-            <div className="mb-1 text-[11px] font-medium text-white/72">
+          <div className="rounded-lg border border-[var(--line)] bg-[var(--hover)] p-2.5">
+            <div className="mb-1 text-[11px] font-medium text-text-muted">
               {t('promptPresetPanel.selectedPrompt')}
             </div>
             <div className="ui-scrollbar max-h-[76px] overflow-y-auto whitespace-pre-wrap text-xs leading-5 text-text-muted">
@@ -221,19 +219,15 @@ export const PromptPresetPanel = memo(({
           </div>
         )}
 
-        <button
+        <UiButton variant="primary" size="sm"
           type="button"
           disabled={!canGenerate}
           onClick={() => { void handleGenerate(); }}
-          className={`flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors ${
-            canGenerate
-              ? 'border-accent/50 bg-accent/22 text-white hover:bg-accent/30'
-              : 'cursor-not-allowed border-white/10 bg-white/3 text-white/35'
-          }`}
+          className="flex h-9 w-full items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium"
         >
           <Sparkles className="h-3.5 w-3.5" />
           {isSubmitting ? t('promptPresetPanel.submitting') : t('promptPresetPanel.generate')}
-        </button>
+        </UiButton>
       </div>
     </div>
   );

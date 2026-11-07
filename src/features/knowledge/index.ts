@@ -1,0 +1,18 @@
+export { useKnowledgeStore, createKnowledgeStore } from './application/knowledgeStore';
+export type { KnowledgeState, KnowledgeStore, KnowledgeStoreDependencies } from './application/knowledgeStore';
+export { KnowledgeService, startKnowledgePolling, collisionSafePath, safeKnowledgeName } from './application/knowledgeService';
+export type { KnowledgeServiceOptions } from './application/knowledgeService';
+export type { KnowledgeVaultIO, KnowledgeMediaResolver } from './application/ports';
+export { createKnowledgeAgentTools, knowledgeSearchToolSchema, knowledgeReadToolSchema, knowledgeWriteToolSchema, knowledgeOrganizeToolSchema } from './application/knowledgeAgentTools';
+export type { KnowledgeAgentTool } from './application/knowledgeAgentTools';
+export { parseMarkdown, serializeMarkdown, updateFrontmatter, extractWikiLinks, noteTags, addNoteTags, noteTitle } from './domain/markdown';
+export type { ParsedMarkdown } from './domain/markdown';
+export { KnowledgeSearchIndex } from './domain/search';
+export type { KnowledgeBacklink } from './domain/search';
+export { buildOrganizePrompt, buildOrganizeEdits, validateOrganizeResult, organizeResultSchema, organizeResultJsonSchema } from './domain/organize';
+export type { OrganizeKind, OrganizeResult, KnowledgeModelPort, KnowledgeModelRequest, VaultEdit } from './domain/organize';
+export { KnowledgeError, asKnowledgeError, assertNotePath, assertVaultRelativePath, assertVaultRoot } from './domain/types';
+export type { KnowledgeErrorCode, VaultEntry, VaultNote, WikiLink, KnowledgeSearchQuery, KnowledgeSearchResult, CanvasNodeSnapshot, CanvasSnapshotMedia, KnowledgeIngestInput, KnowledgeIngestResult, IngestProgress } from './domain/types';
+export { assertAttachmentPath, MAX_KNOWLEDGE_ATTACHMENT_BYTES } from './domain/attachments';
+export type { KnowledgeAttachment, KnowledgeAttachmentContent, KnowledgeAttachmentImport } from './domain/attachments';
+export { chooseKnowledgeVault, tauriKnowledgeIO, resolveLocalKnowledgeMedia } from './infrastructure/tauriKnowledgeIO';

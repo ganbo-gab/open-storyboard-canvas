@@ -1,9 +1,11 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ExternalLink, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
+import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ExternalLink, ShieldCheck } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useTranslation } from 'react-i18next';
 
-import { verifyAgnesKey } from '@/features/canvas/infrastructure/customProviderGateway';
+import { UiButton, UiField } from '@/components/ui';
+import { SecretField } from '@/features/secrets/SecretField';
+import { verifyAgnesKey } from '@/features/channels/runtime/agnesChannel';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 const AGNES_DOCS = [
@@ -40,10 +42,13 @@ export const AgnesSettingsSection = memo(function AgnesSettingsSection() {
   const setAgnesApiKey = useSettingsStore((state) => state.setAgnesApiKey);
   const [localKey, setLocalKey] = useState(agnesApiKey);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [verification, setVerification] = useState<
     { state: 'unverified' | 'verifying' | 'verified' | 'failed'; message?: string }
   >({ state: 'unverified' });
   const verificationRequestRef = useRef(0);
+  const keyInputId = useId();
 
   const invalidateVerification = useCallback(() => {
     verificationRequestRef.current += 1;
@@ -59,10 +64,17 @@ export const AgnesSettingsSection = memo(function AgnesSettingsSection() {
     verificationRequestRef.current += 1;
   }, []);
 
-  const handleSave = useCallback(() => {
-    setAgnesApiKey(localKey.trim());
-    setSavedFlash(true);
-    window.setTimeout(() => setSavedFlash(false), 1500);
+  const handleSave = useCallback(async () => {
+    setSaving(true); setSaveError('');
+    try {
+      await setAgnesApiKey(localKey.trim());
+      setSavedFlash(true);
+      window.setTimeout(() => setSavedFlash(false), 1500);
+    } catch (cause) {
+      setSaveError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
   }, [localKey, setAgnesApiKey]);
 
   const handleVerify = useCallback(async () => {
@@ -86,96 +98,93 @@ export const AgnesSettingsSection = memo(function AgnesSettingsSection() {
   }, [localKey, t]);
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-base font-semibold text-text-dark">Agnes</h2>
-        <p className="mt-1 text-xs leading-5 text-text-muted">
+    <>
+      <div className="border-b border-[var(--line)] px-6 py-5">
+        <h2 className="text-[15px] font-semibold text-text-dark">Agnes</h2>
+        <p className="mt-1 text-[13px] text-text-muted">
           {t('settings.agnes.description')}
         </p>
       </div>
 
-      <div className="rounded-lg border border-border-dark bg-bg-dark p-4">
-        <label className="space-y-1.5">
-          <span className="text-xs font-medium text-text-muted">{t('settings.agnes.keyLabel')}</span>
-          <div className="flex flex-wrap gap-2">
-            <div className="relative min-w-0 flex-1">
-              <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
-              <input
+      <div className="ui-scrollbar flex-1 space-y-4 overflow-y-auto p-6">
+        <section className="rounded-xl border border-[var(--line)] bg-surface p-4">
+          <UiField label={t('settings.agnes.keyLabel')} htmlFor={keyInputId}>
+            <div className="flex flex-wrap gap-2">
+              <SecretField
+                id={keyInputId}
+                label={t('settings.agnes.keyLabel')}
                 value={localKey}
-                onChange={(event) => {
-                  setLocalKey(event.target.value);
+                onChange={(next) => {
+                  setLocalKey(next);
                   invalidateVerification();
                 }}
-                className="h-9 w-full rounded-md border border-border-dark bg-surface-dark pl-9 pr-3 text-sm text-text-dark outline-hidden focus:border-accent"
                 placeholder={t('settings.agnes.keyPlaceholder')}
-                type="password"
+                className="flex-1 basis-56"
               />
+              <UiButton variant="primary" icon={<CheckCircle2 />} loading={saving} onClick={() => { void handleSave(); }}>
+                {t('settings.agnes.save')}
+              </UiButton>
+              <UiButton
+                variant="secondary"
+                icon={<ShieldCheck />}
+                loading={verification.state === 'verifying'}
+                onClick={() => { void handleVerify(); }}
+                disabled={!localKey.trim()}
+              >
+                {verification.state === 'verifying' ? t('settings.agnes.verifying') : t('settings.agnes.verify')}
+              </UiButton>
             </div>
-            <button
-              type="button"
-              onClick={handleSave}
-              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-4 text-sm font-medium text-white hover:bg-accent/90"
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              {t('settings.agnes.save')}
-            </button>
-            <button
-              type="button"
-              onClick={() => { void handleVerify(); }}
-              disabled={!localKey.trim() || verification.state === 'verifying'}
-              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border-dark px-3 text-sm font-medium text-text-dark hover:border-accent/45 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {verification.state === 'verifying'
-                ? <Loader2 className="h-4 w-4 animate-spin" />
-                : <ShieldCheck className="h-4 w-4" />}
-              {verification.state === 'verifying' ? t('settings.agnes.verifying') : t('settings.agnes.verify')}
-            </button>
-          </div>
-        </label>
-        {savedFlash && (
-          <div className="mt-2 inline-flex items-center gap-1 text-xs text-emerald-300">
-            <CheckCircle2 className="h-3.5 w-3.5" /> {t('settings.agnes.saved')}
-          </div>
-        )}
-        {verification.state === 'verifying' && (
-          <div aria-live="polite" className="mt-2 text-xs text-text-muted">
-            {t('settings.agnes.verifying')}
-          </div>
-        )}
-        {verification.state !== 'unverified' && verification.state !== 'verifying' && (
-          <div
-            role="status"
-            aria-live="polite"
-            className={`mt-2 inline-flex items-start gap-1 text-xs ${verification.state === 'verified' ? 'text-emerald-300' : 'text-amber-300'}`}
-          >
-            {verification.state === 'verified'
-              ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              : <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
-            {verification.message}
-          </div>
-        )}
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-        {AGNES_DOCS.map((doc) => (
-          <button
-            key={doc.url}
-            type="button"
-            onClick={() => { void openUrl(doc.url); }}
-            className="rounded-lg border border-border-dark bg-bg-dark p-3 text-left transition-colors hover:border-accent/45"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-sm font-medium text-text-dark">{doc.title}</span>
-              <ExternalLink className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+          </UiField>
+          {saveError && (
+            <div role="alert" className="mt-2 inline-flex items-start gap-1 text-[12px] text-danger">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {saveError}
             </div>
-            <p className="mt-2 text-[11px] leading-5 text-text-muted">{t(doc.noteKey)}</p>
-          </button>
-        ))}
-      </div>
+          )}
+          {savedFlash && (
+            <div className="mt-2 inline-flex items-center gap-1 text-[12px] text-success">
+              <CheckCircle2 className="h-3.5 w-3.5" /> {t('settings.agnes.saved')}
+            </div>
+          )}
+          {verification.state === 'verifying' && (
+            <div aria-live="polite" className="mt-2 text-[12px] text-text-muted">
+              {t('settings.agnes.verifying')}
+            </div>
+          )}
+          {verification.state !== 'unverified' && verification.state !== 'verifying' && (
+            <div
+              role="status"
+              aria-live="polite"
+              className={`mt-2 inline-flex items-start gap-1 text-[12px] ${verification.state === 'verified' ? 'text-success' : 'text-warning'}`}
+            >
+              {verification.state === 'verified'
+                ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                : <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+              {verification.message}
+            </div>
+          )}
+        </section>
 
-      <div className="rounded-lg border border-dashed border-border-dark bg-bg-dark/50 p-3 text-[11px] leading-5 text-text-muted">
-        {t('settings.agnes.chatNote')}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {AGNES_DOCS.map((doc) => (
+            <UiButton
+              key={doc.url}
+              variant="secondary"
+              onClick={() => { void openUrl(doc.url); }}
+              className="h-auto w-full flex-col items-stretch justify-start gap-2 rounded-xl p-3 text-left whitespace-normal"
+            >
+              <span className="flex items-center justify-between gap-2">
+                <span className="truncate text-[13px] font-medium text-text-dark">{doc.title}</span>
+                <ExternalLink className="text-text-muted" />
+              </span>
+              <span className="text-[12px] font-normal leading-5 text-text-muted">{t(doc.noteKey)}</span>
+            </UiButton>
+          ))}
+        </div>
+
+        <div className="rounded-xl border border-dashed border-[var(--line)] p-3 text-[12px] leading-5 text-text-muted">
+          {t('settings.agnes.chatNote')}
+        </div>
       </div>
-    </div>
+    </>
   );
 });

@@ -10,7 +10,8 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-import { AgentFeedCard, normalizeCompactAgentMarkdown } from './AgentFeedCard';
+import { normalizeCompactAgentMarkdown } from '@/features/agents/ui/AgentThread';
+import { AgentFeedCard } from './AgentFeedCard';
 
 const noop = () => {};
 const report = {
@@ -66,6 +67,7 @@ describe('AgentFeedCard diagnostics export actions', () => {
     expect(normalized).toContain('\n- 节点ID: `abc-123`');
     expect(normalized).toContain('\n- 比例:16:9');
     expect(normalized).toContain('https://example.test/a-b');
+    expect(normalizeCompactAgentMarkdown('**下一步**：告诉我故事发生在哪里。')).toBe('**下一步**：告诉我故事发生在哪里。');
   });
 
   it('shows copy and download actions only for a security-approved diagnostic bundle', () => {
@@ -157,6 +159,35 @@ describe('AgentFeedCard message and recovery presentation', () => {
     expect(markup).not.toContain('canvasAgent.viewDetails');
   });
 
+  it('keeps plan effect selection labelled and locks it for approved plans', () => {
+    const renderPlan = (status: 'pending' | 'approved') => renderToStaticMarkup(React.createElement(AgentFeedCard, {
+      item: {
+        id: 'plan-1', kind: 'plan', createdAt: 1,
+        plan: {
+          id: 'plan-draft-1', originalMessage: 'Inspect canvas', createdAt: 1,
+          status, revision: 1,
+          steps: [{ id: 'step-1', title: 'Inspect canvas', effect: 'read', cost: { unit: 'credits', confidence: 'unknown' }, duration: { unit: 'seconds', confidence: 'unknown' } }],
+        },
+      },
+      onApproval: noop,
+      onLocate: noop,
+      onRestoreDraft: noop,
+      onDiagnose: noop,
+      onPlanChange: noop,
+      onPlanConfirm: noop,
+      onPlanCancel: noop,
+      onBudgetLimitChange: noop,
+      onRollback: noop,
+    }));
+    const effectTrigger = /<button[^>]*aria-label="canvasAgent\.planStepEffect[^"]*"[^>]*>/;
+    const pending = renderPlan('pending');
+    expect(pending).toMatch(effectTrigger);
+    expect(pending.match(effectTrigger)?.[0]).toContain('aria-haspopup="listbox"');
+    expect(pending.match(effectTrigger)?.[0]).not.toContain('disabled=""');
+    expect(pending).toContain('canvasAgent.effect.read');
+    expect(renderPlan('approved').match(effectTrigger)?.[0]).toContain('disabled=""');
+  });
+
   it('offers Agent diagnostics and draft restoration after a recoverable failure', () => {
     const markup = renderToStaticMarkup(React.createElement(AgentFeedCard, {
       item: {
@@ -195,7 +226,7 @@ describe('AgentFeedCard message and recovery presentation', () => {
       onRollback: noop,
     } as any));
     expect(markup).toContain('canvasAgent.toolStatus.warning');
-    expect(markup).toContain('border-amber-500/30');
+    expect(markup).toContain('role="status"');
     expect(markup).not.toContain('role="alert"');
     expect(markup).toContain('canvasAgent.locateGenerationInput');
     expect(markup).toContain('canvasAgent.locateGenerationResult');

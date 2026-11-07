@@ -1,8 +1,8 @@
 import { useImageModelCatalog } from "@/features/canvas/application/modelCatalog";
 import { useVideoModelCatalog } from "@/features/canvas/application/videoModelCatalog";
 import { useChatModelCatalog } from "@/features/canvas/application/chatModelCatalog";
-import { useSettingsStore } from "@/stores/settingsStore";
 import type { WorkbenchKind } from "../domain/types";
+import { useChannelAudioModelCatalog } from "@/features/channels/application/audioModelCatalog";
 
 export interface CreationModel {
   id: string;
@@ -18,9 +18,7 @@ export function useCreationModels(kind: WorkbenchKind): CreationModel[] {
   const images = useImageModelCatalog();
   const videos = useVideoModelCatalog();
   const chats = useChatModelCatalog();
-  const audio = useSettingsStore(
-    (state) => state.audioGenerationSettings.models,
-  );
+  const channelAudio = useChannelAudioModelCatalog();
   if (kind === "image")
     return images.map((item) => ({
       id: item.id,
@@ -54,15 +52,10 @@ export function useCreationModels(kind: WorkbenchKind): CreationModel[] {
       resolutions: [],
       durations: [],
     }));
-  return audio
-    .filter((item) => item.enabled)
-    .map((item) => ({
-      id: item.id,
-      label: item.name,
-      provider: item.providerKind,
-      usable: true,
-      ratios: [],
-      resolutions: [],
-      durations: [],
-    }));
+  return [
+    ...channelAudio.map((item) => ({
+      id: item.id, label: item.modelLabel, provider: item.providerLabel, usable: item.usable,
+      reason: item.notReadyReason, ratios: [], resolutions: [], durations: [],
+    })),
+  ];
 }

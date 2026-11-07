@@ -1,6 +1,7 @@
+import { ComfyConfigurationAssistant } from './ComfyConfigurationAssistant';
 import { useMemo, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
-import { CheckCircle2, Loader2, SearchCheck } from "lucide-react";
+import { CheckCircle2, SearchCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { detectComfyUIBindings } from "@/features/channels/adapters/comfyui/bindings";
 import type { ComfyUIParameter } from "@/features/channels/adapters/comfyui/bindings";
@@ -9,8 +10,10 @@ import { preflightComfyUIWorkflow } from "@/features/channels/adapters/comfyui/p
 import {
   resolveComfyUIUrls,
   applyComfyUIAuth,
+  resolveComfyUIProviderAuth,
 } from "@/features/channels/adapters/comfyui/url";
 import { customHttpRequest } from "@/commands/ai";
+import { UiButton, UiSelect } from "@/components/ui";
 
 type Props = {
   workflowText: string;
@@ -65,15 +68,12 @@ export function ComfyBindingEditor({
     setReport("");
     setPassed(false);
     try {
-      const value = `${auth.prefix || ""}${apiKey}`;
-      const mode =
-        auth.mode === "bearer"
-          ? { mode: "bearer" as const, value: apiKey }
-          : auth.mode === "header"
-            ? { mode: "header" as const, name: auth.name, value }
-            : auth.mode === "query"
-              ? { mode: "query" as const, name: auth.name, value }
-              : { mode: "none" as const };
+      const { config, value } = resolveComfyUIProviderAuth({ apiKey, extraParams: { auth } });
+      const mode = config.mode === "none"
+        ? { mode: "none" as const }
+        : config.mode === "bearer"
+          ? { mode: "bearer" as const, value }
+          : { mode: config.mode, name: "name" in config ? config.name : "", value };
       const request = applyComfyUIAuth(urls.objectInfo, mode);
       let text: string;
       if (isTauri()) {
@@ -125,7 +125,7 @@ export function ComfyBindingEditor({
     (parameter) => parameter !== "negativePrompt",
   ) as ComfyUIParameter[];
   return (
-    <section className="space-y-3 rounded-xl border border-border-dark bg-bg-dark/40 p-4">
+    <section className="space-y-3 rounded-xl border border-[var(--line)] bg-bg/40 p-4">
       <div>
         <h3 className="text-xs font-semibold text-text-dark">
           {t("rework.comfy.title")}
@@ -134,6 +134,7 @@ export function ComfyBindingEditor({
           {t("rework.comfy.hint")}
         </p>
       </div>
+      <ComfyConfigurationAssistant workflowText={workflowText} onBindings={onBindings} onOutputs={onOutputs} />
       <div className="grid gap-3 sm:grid-cols-2">
         {parameters.map((parameter) => {
           const detection = parsed.detections[parameter];
@@ -167,7 +168,7 @@ export function ComfyBindingEditor({
                     : t(`rework.comfy.${parameter}`)}
                 </span>
                 <span
-                  className={`text-[10px] ${!selected ? "text-amber-500" : "text-emerald-500"}`}
+                  className={`text-[10px] ${!selected ? "text-warning" : "text-success"}`}
                 >
                   {current
                     ? t("rework.configured")
@@ -176,7 +177,7 @@ export function ComfyBindingEditor({
                       )}
                 </span>
               </div>
-              <select
+              <UiSelect
                 value={selected}
                 aria-label={parameter}
                 onChange={(event) => {
@@ -201,7 +202,7 @@ export function ComfyBindingEditor({
                   } else bindings[parameter] = binding;
                   onBindings(JSON.stringify(bindings, null, 2));
                 }}
-                className="h-9 w-full rounded-lg border border-border-dark bg-surface-dark px-2 text-xs text-text-dark"
+                className="h-9 text-xs"
               >
                 <option value="">{t("rework.comfy.ambiguous")}</option>
                 {detection.candidates.map((candidate) => (
@@ -212,13 +213,13 @@ export function ComfyBindingEditor({
                     {candidate.nodeId} · {candidate.title} · {candidate.input}
                   </option>
                 ))}
-              </select>
+              </UiSelect>
             </label>
           );
         })}
       </div>
       {urls && (
-        <div className="overflow-x-auto rounded-lg bg-surface-dark/60 p-3 font-mono text-[10px] leading-6 text-text-muted">
+        <div className="overflow-x-auto rounded-lg bg-surface/60 p-3 font-mono text-[10px] leading-6 text-text-muted">
           <div>{urls.prompt}</div>
           <div>
             {urls.history}/{"{promptId}"}
@@ -226,23 +227,20 @@ export function ComfyBindingEditor({
           <div>{urls.view}</div>
         </div>
       )}
-      <button
+      <UiButton
         type="button"
-        disabled={busy || !urls}
+        variant="secondary"
+        disabled={!urls}
+        loading={busy}
+        icon={<SearchCheck />}
         onClick={() => void preflight()}
-        className="flex h-9 items-center gap-2 rounded-lg border border-border-dark px-3 text-xs text-text-dark hover:bg-surface-dark disabled:opacity-40"
       >
-        {busy ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <SearchCheck className="h-3.5 w-3.5" />
-        )}
         {t(busy ? "rework.comfy.checking" : "rework.comfy.preflight")}
-      </button>
+      </UiButton>
       {report && (
         <div
           role="status"
-          className={`flex items-start gap-2 whitespace-pre-wrap break-words text-xs leading-6 ${passed ? "text-emerald-500" : "text-amber-500"}`}
+          className={`flex items-start gap-2 whitespace-pre-wrap break-words text-xs leading-6 ${passed ? "text-success" : "text-warning"}`}
         >
           {passed && <CheckCircle2 className="mt-1 h-4 w-4 shrink-0" />}
           {report}

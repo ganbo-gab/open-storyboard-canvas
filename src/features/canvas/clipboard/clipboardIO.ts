@@ -1,7 +1,6 @@
-import { copyImageSourceToClipboard, readSystemClipboard } from '@/commands/image';
-import { isAudioFile, isImageFile, isVideoFile } from '@/features/canvas/application/imageDragDrop';
-import { getGeneratedTextForConnection } from '@/features/canvas/application/nodeText';
-import { CANVAS_NODE_TYPES, DEFAULT_NODE_WIDTH, type CanvasNode, type CanvasEdge } from '@/features/canvas/domain/canvasNodes';
+import { readSystemClipboard, writeSystemClipboardText } from '@/commands/image';
+import { isAudioFile, isImageFile, isVideoFile, type DroppedMaterialSource } from '@/features/canvas/application/imageDragDrop';
+import { DEFAULT_NODE_WIDTH, type CanvasNode, type CanvasEdge } from '@/features/canvas/domain/canvasNodes';
 
 export interface CanvasClipboardSnapshot {
   nodes: CanvasNode[];
@@ -135,83 +134,14 @@ export interface ClipboardContentReadResult {
   mediaFile: File | null;
   imageFile: File | null;
   text: string;
-  fingerprint: string | null;
   readFailed?: boolean;
-}
-
-export type ClipboardPasteSource =
-  | { source: 'internal' }
-  | { source: 'system'; content: ClipboardContentReadResult }
-  | { source: 'none' };
-
-export interface SystemClipboardPasteOptions {
-  targetNode: CanvasNode | null;
-  flowPosition?: { x: number; y: number };
-  pasteIntoSelectedUpload?: boolean;
-}
-
-interface BrowserClipboardMediaReadResult {
-  file: File | null;
-  readFailed: boolean;
+  mediaFiles?: File[];
+  filePaths?: string[];
 }
 
 interface BrowserClipboardTextReadResult {
   text: string;
   readFailed: boolean;
-}
-
-interface ReadClipboardContentOptions {
-  preferBrowserApi?: boolean;
-  avoidBrowserApiWhenTauriAvailable?: boolean;
-}
-
-function hashBytes(bytes: ArrayLike<number>): string {
-  let hash = 2166136261;
-  for (let index = 0; index < bytes.length; index += 1) {
-    hash ^= bytes[index] ?? 0;
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
-export function hashText(text: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
-export function resolveMediaFingerprintKind(file: File): 'image' | 'video' | 'audio' | 'file' {
-  if (isImageFile(file)) return 'image';
-  if (isVideoFile(file)) return 'video';
-  if (isAudioFile(file)) return 'audio';
-  return 'file';
-}
-
-export async function fingerprintMediaFile(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  return `${resolveMediaFingerprintKind(file)}:${file.type || 'application/octet-stream'}:${bytes.byteLength}:${hashBytes(bytes)}`;
-}
-
-export async function fingerprintImageFile(file: File): Promise<string> {
-  return fingerprintMediaFile(file);
-}
-
-export function fingerprintClipboardContent(content: {
-  image?: { bytes: ArrayLike<number>; mimeType?: string | null } | null;
-  text?: string | null;
-}): string | null {
-  const image = content.image;
-  if (image) {
-    return `image:${image.mimeType || 'application/octet-stream'}:${image.bytes.length}:${hashBytes(image.bytes)}`;
-  }
-  const text = content.text?.trim();
-  if (text) {
-    return `text:${text.length}:${hashText(text)}`;
-  }
-  return null;
 }
 
 function createClipboardFile(blob: Blob, mimeType: string, fallbackKind: 'image' | 'video' | 'audio'): File {
@@ -222,39 +152,6 @@ function createClipboardFile(blob: Blob, mimeType: string, fallbackKind: 'image'
     type: blob.type || mimeType,
     lastModified: Date.now(),
   });
-}
-
-async function readBrowserClipboardMediaFile(): Promise<BrowserClipboardMediaReadResult> {
-  const clipboard = navigator.clipboard as Clipboard & {
-    read?: () => Promise<ClipboardItem[]>;
-  };
-  if (typeof clipboard?.read !== 'function') {
-    return { file: null, readFailed: false };
-  }
-
-  try {
-    const items = await clipboard.read();
-    const mediaPrefixes = ['image/', 'video/', 'audio/'] as const;
-    for (const prefix of mediaPrefixes) {
-      for (const item of items) {
-        const mediaType = item.types.find((type) => type.startsWith(prefix));
-        if (!mediaType) {
-          continue;
-        }
-        const blob = await item.getType(mediaType);
-        const kind = prefix.slice(0, -1) as 'image' | 'video' | 'audio';
-        return {
-          file: createClipboardFile(blob, blob.type || mediaType, kind),
-          readFailed: false,
-        };
-      }
-    }
-  } catch (error) {
-    console.warn('Failed to read media from clipboard', error);
-    return { file: null, readFailed: true };
-  }
-
-  return { file: null, readFailed: false };
 }
 
 async function readBrowserClipboardText(): Promise<BrowserClipboardTextReadResult> {
@@ -274,24 +171,36 @@ function emptyClipboardContent(readFailed = false): ClipboardContentReadResult {
     mediaFile: null,
     imageFile: null,
     text: '',
-    fingerprint: null,
     readFailed,
   };
 }
 
 async function readBrowserClipboardContent(): Promise<ClipboardContentReadResult> {
-  const mediaRead = await readBrowserClipboardMediaFile();
-  const textRead = await readBrowserClipboardText();
-  const mediaFile = mediaRead.file;
-  return {
-    mediaFile,
-    imageFile: isImageFile(mediaFile) ? mediaFile : null,
-    text: textRead.text,
-    fingerprint: mediaFile
-      ? await fingerprintMediaFile(mediaFile)
-      : fingerprintClipboardContent({ text: textRead.text }),
-    readFailed: mediaRead.readFailed || textRead.readFailed,
-  };
+  if (!navigator.clipboard) return emptyClipboardContent(true);
+  try {
+    if (typeof navigator.clipboard.read !== 'function') {
+      const result = await readBrowserClipboardText();
+      return { ...emptyClipboardContent(result.readFailed), text: result.text };
+    }
+    // Read one clipboard snapshot. Separate read()/readText() calls can observe different copies.
+    const items = await navigator.clipboard.read();
+    const mediaFiles: File[] = [];
+    let text = '';
+    for (const item of items) {
+      if (item.types.includes('text/plain')) text = await (await item.getType('text/plain')).text();
+      const type = item.types.find(type => /^(image|video|audio)\//.test(type));
+      if (type) {
+        const blob = await item.getType(type);
+        const kind = type.startsWith('video/') ? 'video' : type.startsWith('audio/') ? 'audio' : 'image';
+        mediaFiles.push(createClipboardFile(blob, blob.type || type, kind));
+      }
+    }
+    const mediaFile = mediaFiles[0] ?? null;
+    return { mediaFiles, mediaFile, imageFile: isImageFile(mediaFile) ? mediaFile : null, text };
+  } catch {
+    // A denied binary read must not silently paste a different text representation.
+    return emptyClipboardContent(true);
+  }
 }
 
 async function readTauriClipboardContent(): Promise<ClipboardContentReadResult | null> {
@@ -309,7 +218,7 @@ async function readTauriClipboardContent(): Promise<ClipboardContentReadResult |
         mediaFile: imageFile,
         imageFile,
         text: systemClipboard.text ?? '',
-        fingerprint: fingerprintClipboardContent(systemClipboard),
+            filePaths: systemClipboard.filePaths ?? [],
       };
     }
   } catch (error) {
@@ -320,59 +229,15 @@ async function readTauriClipboardContent(): Promise<ClipboardContentReadResult |
   return null;
 }
 
-export async function readClipboardContent(
-  options: ReadClipboardContentOptions = {}
-): Promise<ClipboardContentReadResult> {
-  if (options.avoidBrowserApiWhenTauriAvailable) {
-    const tauriClipboard = await readTauriClipboardContent();
-    if (tauriClipboard) {
-      return tauriClipboard;
-    }
-
-    return await readBrowserClipboardContent();
-  }
-
-  if (options.preferBrowserApi) {
-    const browserClipboard = await readBrowserClipboardContent();
-    if (hasClipboardPayload(browserClipboard)) {
-      return browserClipboard;
-    }
-
-    const tauriClipboard = await readTauriClipboardContent();
-    if (tauriClipboard && hasClipboardPayload(tauriClipboard)) {
-      return {
-        ...tauriClipboard,
-        readFailed: tauriClipboard.readFailed || browserClipboard.readFailed,
-      };
-    }
-
-    return tauriClipboard
-      ? {
-          ...tauriClipboard,
-          readFailed: tauriClipboard.readFailed || browserClipboard.readFailed,
-        }
-      : browserClipboard;
-  }
-
-  const tauriClipboard = await readTauriClipboardContent();
-  if (tauriClipboard && hasClipboardPayload(tauriClipboard)) {
-    return tauriClipboard;
-  }
-
-  const browserClipboard = await readBrowserClipboardContent();
-  if (hasClipboardPayload(browserClipboard)) {
-    return browserClipboard;
-  }
-
-  return tauriClipboard
-    ? {
-        ...tauriClipboard,
-        readFailed: tauriClipboard.readFailed || browserClipboard.readFailed,
-      }
-    : browserClipboard;
+export async function readClipboardContent(): Promise<ClipboardContentReadResult> {
+  // The native reader is authoritative in desktop builds, even when empty or unreadable.
+  // Falling back to another clipboard representation resurrected stale data in WebKit.
+  const native = await readTauriClipboardContent();
+  return native ?? await readBrowserClipboardContent();
 }
 
 export async function writeTextToClipboard(text: string): Promise<void> {
+  if (await writeSystemClipboardText(text)) return;
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
     return;
@@ -393,71 +258,18 @@ export async function writeTextToClipboard(text: string): Promise<void> {
   }
 }
 
-export function hasClipboardPayload(content: ClipboardContentReadResult): boolean {
-  return Boolean(content.mediaFile || content.imageFile || content.text.trim() || content.fingerprint);
-}
-
-function resolveNodeImageClipboardSource(node: CanvasNode): string {
-  if (
-    node.type !== CANVAS_NODE_TYPES.upload
-    && node.type !== CANVAS_NODE_TYPES.imageEdit
-    && node.type !== CANVAS_NODE_TYPES.exportImage
-  ) {
-    return '';
-  }
-  const data = node.data as { imageUrl?: unknown; previewImageUrl?: unknown };
-  return (
-    (typeof data.imageUrl === 'string' && data.imageUrl.trim())
-    || (typeof data.previewImageUrl === 'string' && data.previewImageUrl.trim())
-    || ''
-  );
-}
-
-function resolveNodeTextClipboardContent(node: CanvasNode, nodes: CanvasNode[]): string {
-  if (node.type === CANVAS_NODE_TYPES.textAnnotation || node.type === CANVAS_NODE_TYPES.jsonCard || node.type === CANVAS_NODE_TYPES.aiText) {
-    return getGeneratedTextForConnection(node, nodes);
-  }
-  if (node.type === CANVAS_NODE_TYPES.aiVideo || node.type === CANVAS_NODE_TYPES.imageEdit) {
-    const prompt = (node.data as { prompt?: unknown }).prompt;
-    return typeof prompt === 'string' ? prompt.trim() : '';
-  }
-  if (node.type === CANVAS_NODE_TYPES.video) {
-    const data = node.data as { localVideoUrl?: unknown; videoUrl?: unknown };
-    return (
-      (typeof data.localVideoUrl === 'string' && data.localVideoUrl.trim())
-      || (typeof data.videoUrl === 'string' && data.videoUrl.trim())
-      || ''
-    );
-  }
-  return '';
-}
-
-export async function syncSingleCanvasNodeToSystemClipboard(
-  snapshot: CanvasClipboardSnapshot | null,
-  allNodes: CanvasNode[]
-): Promise<string | null> {
-  if (!snapshot || snapshot.nodes.length !== 1) {
-    return (await readClipboardContent()).fingerprint;
-  }
-
-  const [node] = snapshot.nodes;
-  const imageSource = resolveNodeImageClipboardSource(node);
-  try {
-    if (imageSource) {
-      await copyImageSourceToClipboard(imageSource);
-      return (await readClipboardContent()).fingerprint;
-    }
-
-    const text = resolveNodeTextClipboardContent(node, allNodes);
-    if (text) {
-      await writeTextToClipboard(text);
-      return (await readClipboardContent()).fingerprint;
-    }
-  } catch (error) {
-    console.warn('Failed to sync canvas copy into system clipboard', error);
-  }
-
-  return (await readClipboardContent()).fingerprint;
+/** Only standalone media URLs/paths become media; normal copied prose stays text. */
+export function clipboardMaterialSources(values: readonly string[]): DroppedMaterialSource[] {
+  return values.flatMap(value => value.split(/\r?\n/)).flatMap(raw => {
+    const source = raw.trim();
+    if (!/^(?:https?:\/\/|file:\/\/|\/|[A-Za-z]:[\\/]|data:(?:image|video|audio)\/)/i.test(source)) return [];
+    let fileName: string;
+    try { fileName = decodeURIComponent(new URL(source).pathname).split(/[\\/]/).at(-1) || ''; }
+    catch { fileName = source.split(/[\\/]/).at(-1) || ''; }
+    const probe = new File([], fileName, { type: source.startsWith('data:') ? source.slice(5).split(/[;,]/)[0] : '' });
+    const kind = isImageFile(probe) ? 'image' : isVideoFile(probe) ? 'video' : isAudioFile(probe) ? 'audio' : null;
+    return kind ? [{ source, kind, fileName: source.startsWith('data:') ? null : fileName }] : [];
+  });
 }
 
 export function hasRectCollision(
@@ -487,17 +299,6 @@ export function cloneNodeData<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-export function isLikelyVideoSourceText(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed || /\s/.test(trimmed)) {
-    return false;
-  }
-  return /\.(mp4|webm|mov|m4v|avi|mkv|mpeg|mpg)(?:[?#].*)?$/i.test(trimmed)
-    || /^https?:\/\/.+\/.+\.(mp4|webm|mov|m4v|avi|mkv|mpeg|mpg)(?:[?#].*)?$/i.test(trimmed)
-    || /^file:\/\/.+\.(mp4|webm|mov|m4v|avi|mkv|mpeg|mpg)(?:[?#].*)?$/i.test(trimmed);
-}
-
 export function createUiNodeId(prefix: string): string {
-  const randomUuid = globalThis.crypto?.randomUUID?.();
-  return randomUuid ? `${prefix}-${randomUuid}` : `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+  return `${prefix}-${crypto.randomUUID()}`;
 }

@@ -9,6 +9,7 @@ import type {
   StoryboardFrameItem,
 } from '../domain/canvasNodes';
 import type { CanvasNodeDefinition } from '../domain/nodeRegistry';
+import type { GenerationJobResult, GenerationJobStatus } from '@/commands/ai';
 
 export interface IdGenerator {
   next: () => string;
@@ -37,6 +38,8 @@ export interface GenerateImagePayload {
   size: string;
   aspectRatio: string;
   referenceImages?: string[];
+  channelModeId?: string;
+  referenceSlots?: Record<string, string[]>;
   extraParams?: Record<string, unknown>;
 }
 
@@ -50,10 +53,12 @@ export interface GenerateVideoPayload {
   referenceImages?: string[];
   referenceVideos?: string[];
   referenceAudios?: string[];
+  channelModeId?: string;
+  referenceSlots?: Record<string, string[]>;
   extraParams?: Record<string, unknown>;
 }
 
-export interface GenerationJobPollStatus {
+export interface GenerationJobPollStatus extends Pick<GenerationJobStatus, 'progress' | 'current_node' | 'step' | 'total_steps' | 'progress_transport' | 'local_result_missing'> {
   job_id: string;
   status:
     | 'queued'
@@ -67,12 +72,15 @@ export interface GenerationJobPollStatus {
     | 'unknown'
     | 'canceled';
   result?: string | null;
+  results?: GenerationJobResult[];
   error?: string | null;
   warning?: string | null;
   phase?: string;
   external_task_id?: string | null;
   result_url?: string | null;
   error_category?: string | null;
+  error_status?: number;
+  error_raw?: string;
   network_route?: 'system' | 'direct' | 'custom-proxy';
   resumable?: boolean;
   created_at?: number;
@@ -128,8 +136,9 @@ export interface CanvasEventMap {
     nodeId: string;
     file: File;
   };
-  'generation-node/trigger': {
-    nodeId: string;
+  /** Selection toolbar "add to chat": open the canvas Agent with these nodes' images attached. */
+  'agent/attach-nodes': {
+    nodeIds: string[];
   };
   'director-studio/open': {
     nodeId: string;

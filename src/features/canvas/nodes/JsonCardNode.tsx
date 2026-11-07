@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import type { NodeProps } from '@xyflow/react';
 import { Braces, Expand, LoaderCircle } from 'lucide-react';
 
 import { CANVAS_NODE_TYPES, type JsonCardNodeData } from '@/features/canvas/domain/canvasNodes';
@@ -10,8 +10,7 @@ import {
   tokenizeJsonPath,
 } from '@/features/canvas/application/aiText/helpers';
 import { resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
-import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
-import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
+import { NodeFrame, resolveNodeBox } from '@/features/canvas/ui/NodeFrame';
 import { TextPreviewModal } from '@/features/canvas/ui/TextPreviewModal';
 import { formatGenerationElapsedMs } from '@/features/canvas/ui/generationElapsed';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -245,12 +244,6 @@ function resolveGroupedFieldLabel(field: ResolvedDisplayField, pathPrefixTokens:
   return label;
 }
 
-function resolveJsonCardDimension(value: number | undefined, min: number, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= min) {
-    return fallback;
-  }
-  return Math.round(value);
-}
 
 function areJsonValuesEquivalent(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) {
@@ -306,8 +299,12 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
     ? data.parsedJson
     : null;
   const resolvedTitle = resolveNodeDisplayName(CANVAS_NODE_TYPES.jsonCard, data);
-  const resolvedWidth = resolveJsonCardDimension(width, MIN_WIDTH, DEFAULT_WIDTH);
-  const resolvedHeight = resolveJsonCardDimension(height, MIN_HEIGHT, DEFAULT_HEIGHT);
+  const { width: resolvedWidth, height: resolvedHeight } = resolveNodeBox(
+    CANVAS_NODE_TYPES.jsonCard,
+    width ?? DEFAULT_WIDTH,
+    height ?? DEFAULT_HEIGHT,
+    { minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT },
+  );
   const configuredFields = Array.isArray(data.displayFields) ? data.displayFields : [];
   const sourceAgent = useMemo(
     () => textAgents.find((agent) => agent.id === data.sourceAgentId) ?? null,
@@ -330,6 +327,7 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
     [configuredFields, effectiveParsedJson, liveAgentFields]
   );
   const generationStartedAt = typeof data.generationStartedAt === 'number' ? data.generationStartedAt : null;
+  const generationError = typeof data.generationError === 'string' ? data.generationError.trim() : '';
   const hasStaleStreamingFlag =
     data.isStreaming === true
     && data.isGenerating === false
@@ -513,71 +511,48 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
 
   return (
     <>
-      <div
-        className={`
-          group relative flex h-full w-full flex-col overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-2 shadow-(--canvas-node-shadow) transition-colors duration-150
-          ${selected
-            ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-            : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
-        `}
-        style={{ width: resolvedWidth, height: resolvedHeight }}
-        onClick={() => setSelectedNode(id)}
+      <NodeFrame
+        type={CANVAS_NODE_TYPES.jsonCard}
+        selected={selected}
+        icon={<Braces />}
+        title={resolvedTitle}
+        onRename={(displayName) => updateNodeData(id, { displayName })}
+        meta={isStreaming ? undefined : shouldShowStructuredTable ? `结构化 ${tableRowCount}行` : shouldShowStructuredFields ? '结构化' : '原始'}
+        status={isStreaming
+          ? { kind: 'generating', startedAt: generationStartedAt }
+          : generationError ? { kind: 'error', label: generationError }
+          : data.parseError || generationWarning ? { kind: 'attention', label: data.parseError || generationWarning || undefined } : null}
+        badges={!isStreaming && generationElapsedText ? <span className="node-frame__badge" title="生成耗时">{generationElapsedText}</span> : null}
+        actions={(
+          <button
+            type="button"
+            data-canvas-no-marquee="true"
+            className="nodrag nowheel"
+            title="放大查看源 JSON"
+            aria-label="放大查看源 JSON"
+            onClick={(event) => {
+              event.stopPropagation();
+              setPreviewOpen(true);
+            }}
+          >
+            <Expand />
+          </button>
+        )}
+        width={resolvedWidth}
+        height={resolvedHeight}
+        resize={{ minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT, maxWidth: MAX_WIDTH, maxHeight: MAX_HEIGHT }}
+        className="group"
+        bodyStyle={{ padding: 8 }}
       >
-        <NodeHeader
-          className={NODE_HEADER_FLOATING_POSITION_CLASS}
-          icon={<Braces className="h-4 w-4" />}
-          titleText={resolvedTitle}
-          rightSlot={(
-            <div className="flex items-center gap-1.5">
-              {generationElapsedText ? (
-                <span
-                  className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-px text-[10px] font-medium leading-tight text-white"
-                  title="生成耗时"
-                >
-                  {generationElapsedText}
-                </span>
-              ) : null}
-              <span className="inline-flex h-6 items-center gap-1 rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) px-2 text-[10px] text-text-muted">
-                {isStreaming ? (
-                  <>
-                    <LoaderCircle className="h-3 w-3 animate-spin text-accent" />
-                    生成中
-                  </>
-                ) : shouldShowStructuredTable ? `结构化 ${tableRowCount}行` : shouldShowStructuredFields ? '结构化' : '原始'}
-              </span>
-              <button
-                type="button"
-                data-canvas-no-marquee="true"
-                className="nodrag nowheel inline-flex h-6 w-6 items-center justify-center rounded-full border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) text-text-muted shadow-xs transition-colors hover:border-accent/50 hover:bg-(--canvas-node-menu-hover) hover:text-accent"
-                title="放大查看源 JSON"
-                aria-label="放大查看源 JSON"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setPreviewOpen(true);
-                }}
-              >
-                <Expand className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-          editable
-          onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
-        />
-
-        <NodeResizeHandle
-          minWidth={MIN_WIDTH}
-          minHeight={MIN_HEIGHT}
-          maxWidth={MAX_WIDTH}
-          maxHeight={MAX_HEIGHT}
-        />
 
         <div
           className="ui-scrollbar nodrag nowheel min-h-0 flex-1 overflow-auto rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) p-3"
+          onClick={() => setSelectedNode(id)}
           onMouseDown={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
         >
           {isStreaming ? (
-            <div className="flex h-full min-h-[180px] flex-col justify-center gap-4 rounded-lg border border-(--canvas-node-field-border) bg-[rgba(15,23,42,0.28)] p-4">
+            <div className="flex h-full min-h-[180px] flex-col justify-center gap-4 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-subtle-bg) p-4">
               <div className="flex items-center gap-2 text-sm font-medium text-text-dark">
                 <LoaderCircle className="h-4 w-4 animate-spin text-accent" />
                 正在生成 JSON，完成后自动解析结构化展示
@@ -591,13 +566,13 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
               </div>
             </div>
           ) : data.parseError ? (
-            <div className="mb-2 rounded-md border border-amber-400/25 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-200">
+            <div className="mb-2 rounded-md border border-warning/25 bg-warning/10 px-2.5 py-2 text-xs text-warning">
               JSON 解析失败: {data.parseError}
             </div>
           ) : null}
 
           {generationWarning && !isStreaming ? (
-            <div className="mb-2 rounded-md border border-amber-400/25 bg-amber-500/10 px-2.5 py-2 text-xs leading-5 text-amber-100">
+            <div className="mb-2 rounded-md border border-warning/25 bg-warning/10 px-2.5 py-2 text-xs leading-5 text-warning">
               {generationWarning}
             </div>
           ) : null}
@@ -647,7 +622,7 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
                             <button
                               type="button"
                               data-canvas-no-marquee="true"
-                              className="nodrag nowheel absolute bottom-1 right-0 top-1 w-2 cursor-col-resize rounded-xs border-r border-transparent transition-colors hover:border-accent/70 hover:bg-accent/10"
+                              className="nodrag nowheel absolute bottom-1 right-0 top-1 w-2 cursor-col-resize rounded-xs border-r border-transparent transition-colors hover:border-accent/70 hover:bg-accent/10 active:border-accent active:bg-accent/15"
                               title="拖动调整列宽"
                               aria-label="拖动调整列宽"
                               onPointerDown={(event) => startColumnResize(event, group, field)}
@@ -699,19 +674,7 @@ export const JsonCardNode = memo(({ id, data, selected, width, height }: JsonCar
           ) : null}
         </div>
 
-        <Handle
-          type="target"
-          id="target"
-          position={Position.Left}
-          className="h-2! w-2! border-surface-dark! bg-accent!"
-        />
-        <Handle
-          type="source"
-          id="source"
-          position={Position.Right}
-          className="h-2! w-2! border-surface-dark! bg-accent!"
-        />
-      </div>
+      </NodeFrame>
 
       <TextPreviewModal
         open={previewOpen}

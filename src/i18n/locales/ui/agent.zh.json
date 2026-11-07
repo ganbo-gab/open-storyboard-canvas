@@ -1,0 +1,29 @@
+{
+  "showError": "查看完整错误（已脱敏）",
+  "hideError": "收起错误详情",
+  "copyError": "复制错误详情",
+  "invalidToolArguments": "这次工具指令的参数格式不正确，未应用该操作。助手可根据校验结果修正后继续。",
+  "newMessages": "回到最新内容",
+  "homeTitle": "把想法变成一个好故事",
+  "homeHint": "从故事、角色或一个镜头开始。助手会先给你方案，需要改动画布或生成时再请你确认。",
+  "stageTitle": "一起安排这场戏",
+  "stageHint": "描述人物走位、机位和动作，先预演方案，再应用到舞台。",
+  "suggestStory": "为一个想法设计六个分镜",
+  "suggestCharacter": "规划主角的外形与性格",
+  "suggestStage": "安排两个人相遇的走位和镜头",
+  "history": "最近对话",
+  "new": "新对话",
+  "approvalDescriptions": {
+    "project_create": "创建并打开「{{name}}」空白画布。",
+    "project_open": "打开你选择的现有画布。",
+    "canvas_open_plan": "把下方分镜方案放到画布，确认后仍可撤销。",
+    "home_generation_submit": "使用下方模型和参数提交一次生成。",
+    "channel_create": "保存这份新渠道配置。",
+    "channel_update": "更新已有渠道，请检查下方配置变化。",
+    "stage_command": "应用这次舞台修改，确认后可撤销。"
+  },
+  "retrying": "服务暂时不可用，正在重连（{{attempt}} / {{total}}）…",
+  "continueRemaining": "继续未完成的部分",
+  "continueHint": "保留已完成修改，先核对执行记录再继续。",
+  "continuePrompt": "请先查看当前项目、场景及已有工具执行回执，保留已经完成的修改，只继续上一任务尚未完成的部分。遇到结果未知的调用，先查询或核对；不要重复创建已有内容，不要重新提交已受理或结果未知的生成任务。"
+}

@@ -480,12 +480,9 @@ export const ModelParamsControls = memo(({
                   {providerOptions.map((provider) => {
                     const active = provider.id === panelProviderId;
                     return (
-                      <button
+                      <UiChipButton active={active}
                         key={provider.id}
-                        className={`h-8 rounded-lg border text-xs transition-colors ${providerOptionClassName} ${active
-                          ? 'border-accent/50 bg-accent/15 text-text-dark'
-                          : 'border-[rgba(255,255,255,0.12)] bg-bg-dark/65 text-text-muted hover:border-[rgba(255,255,255,0.2)]'
-                          }`}
+                        className={`h-8 rounded-lg text-xs ${providerOptionClassName}`}
                         onClick={(event) => {
                           event.stopPropagation();
                           const providerApiKey = (apiKeys[provider.id] ?? '').trim();
@@ -504,7 +501,7 @@ export const ModelParamsControls = memo(({
                         }}
                       >
                         {provider.label || provider.name}
-                      </button>
+                      </UiChipButton>
                     );
                   })}
                 </div>
@@ -520,12 +517,9 @@ export const ModelParamsControls = memo(({
                     const targetModel = group.models.find((model) => model.id === selectedModel.id)
                       ?? group.models[0];
                     return (
-                      <button
+                      <UiChipButton active={active}
                         key={group.name}
-                        className={`inline-flex max-w-full items-center rounded-lg border text-xs leading-4 transition-colors ${modelOptionClassName} ${active
-                          ? 'border-accent/50 bg-accent/15 text-text-dark shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'
-                          : 'border-[rgba(255,255,255,0.12)] bg-bg-dark/65 text-text-muted hover:border-[rgba(255,255,255,0.2)] hover:bg-[rgba(255,255,255,0.05)]'
-                          }`}
+                        className={`max-w-full rounded-lg text-xs leading-4 ${modelOptionClassName}`}
                         onClick={(event) => {
                           event.stopPropagation();
                           onModelChange(targetModel.id);
@@ -533,7 +527,7 @@ export const ModelParamsControls = memo(({
                         }}
                       >
                         <span className="max-w-full wrap-break-word text-center">{group.name}</span>
-                      </button>
+                      </UiChipButton>
                     );
                   })}
                 </div>
@@ -555,23 +549,20 @@ export const ModelParamsControls = memo(({
           <UiPanel className={paramsPanelClassName}>
             <div>
               <div className="mb-2 text-xs text-text-muted">{t('modelParams.quality')}</div>
-              <div className="grid grid-cols-4 gap-1 rounded-xl border border-[rgba(255,255,255,0.1)] bg-bg-dark/65 p-1">
+              <div className="grid grid-cols-4 gap-1 rounded-xl border border-(--line) bg-(--canvas-node-subtle-bg) p-1">
                 {resolutionOptions.map((item) => {
                   const active = item.value === selectedResolution.value;
                   return (
-                    <button
+                    <UiChipButton active={active}
                       key={item.value}
-                      className={`h-8 rounded-lg text-sm transition-colors ${active
-                        ? 'bg-surface-dark text-text-dark'
-                        : 'text-text-muted hover:bg-bg-dark'
-                        }`}
+                      className="h-8 rounded-lg text-sm"
                       onClick={(event) => {
                         event.stopPropagation();
                         onResolutionChange(item.value);
                       }}
                     >
                       {item.label}
-                    </button>
+                    </UiChipButton>
                   );
                 })}
               </div>
@@ -579,7 +570,7 @@ export const ModelParamsControls = memo(({
 
             <div className="mt-3">
               <div className="mb-2 text-xs text-text-muted">{t('modelParams.aspectRatio')}</div>
-              <div className="grid grid-cols-5 gap-1 rounded-xl border border-[rgba(255,255,255,0.1)] bg-bg-dark/65 p-1">
+              <div className="grid grid-cols-5 gap-1 rounded-xl border border-(--line) bg-(--canvas-node-subtle-bg) p-1">
                 {aspectRatioOptions.map((item) => {
                   const active = item.value === selectedAspectRatio.value;
                   const previewStyle = getRatioPreviewStyle(
@@ -587,12 +578,9 @@ export const ModelParamsControls = memo(({
                   );
 
                   return (
-                    <button
+                    <UiChipButton active={active}
                       key={item.value}
-                      className={`rounded-lg px-1 py-1.5 transition-colors ${active
-                        ? 'bg-surface-dark text-text-dark'
-                        : 'text-text-muted hover:bg-bg-dark'
-                        }`}
+                      className="h-auto flex-col gap-0 rounded-lg px-1 py-1.5"
                       onClick={(event) => {
                         event.stopPropagation();
                         onAspectRatioChange(item.value);
@@ -609,7 +597,7 @@ export const ModelParamsControls = memo(({
                         )}
                       </div>
                       <div className="text-[10px]">{item.label}</div>
-                    </button>
+                    </UiChipButton>
                   );
                 })}
               </div>
@@ -618,7 +606,7 @@ export const ModelParamsControls = memo(({
             {panelExtraParamSchema.length > 0 && (
               <div className="mt-3">
                 <div className="mb-2 text-xs text-text-muted">{t('modelParams.extraOptions')}</div>
-                <div className="space-y-2 rounded-xl border border-[rgba(255,255,255,0.1)] bg-bg-dark/65 p-3">
+                <div className="space-y-2 rounded-xl border border-(--line) bg-(--canvas-node-subtle-bg) p-3">
                   {panelExtraParamSchema.map((definition) => {
                     const translatedLabel = resolveTranslatedText(
                       t,
@@ -640,7 +628,7 @@ export const ModelParamsControls = memo(({
                     );
 
                     return (
-                      <div key={definition.key} className="space-y-2 rounded-lg border border-[rgba(255,255,255,0.08)] bg-black/10 p-2">
+                      <div key={definition.key} className="space-y-2 rounded-lg border border-(--line) bg-(--canvas-node-field-bg) p-2">
                         <div>
                           <div className="text-xs font-medium text-text-dark">{translatedLabel}</div>
                           {translatedDescription && (
@@ -723,7 +711,7 @@ export const ModelParamsControls = memo(({
           <UiPanel className={OTHER_PARAMS_PANEL_CLASS_NAME}>
             <div className="space-y-3">
               {showWebSearchToggle && (
-                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[rgba(255,255,255,0.08)] bg-bg-dark/65 px-3 py-2">
+                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-(--line) bg-(--canvas-node-subtle-bg) px-3 py-2">
                   <UiCheckbox
                     checked={webSearchEnabled}
                     onCheckedChange={(checked) => onWebSearchToggle?.(checked)}
@@ -756,7 +744,7 @@ export const ModelParamsControls = memo(({
                 return (
                   <div
                     key={definition.key}
-                    className="space-y-2 rounded-lg border border-[rgba(255,255,255,0.08)] bg-bg-dark/65 p-3"
+                    className="space-y-2 rounded-lg border border-(--line) bg-(--canvas-node-subtle-bg) p-3"
                   >
                     <div>
                       <div className="text-xs font-medium text-text-dark">{translatedLabel}</div>
@@ -796,7 +784,7 @@ export const ModelParamsControls = memo(({
           footer={(
             <>
               <UiButton
-                variant="muted"
+                variant="secondary"
                 size="sm"
                 onClick={() => setMissingKeyProviderName(null)}
               >

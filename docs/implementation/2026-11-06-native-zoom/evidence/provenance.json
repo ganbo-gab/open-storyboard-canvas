@@ -1,0 +1,13 @@
+{
+  "sourceHashes": {
+    "src/features/canvas/Canvas.tsx": "cfd17475ef3c7ceae1f6d4b22e7b11d10375fac0155f41d4a4c1f959658de13b",
+    "src/features/canvas/canvas.css": "adb70585eb6540d322eff7852efb70a209b1762cdc24b6f3a323f547af1de35c",
+    "src/features/canvas/edges/viewportEdgeGeometry.ts": "017338d0782b844e2fe8bd6c8095bba535f5ae1b3858ec7b240dcc6aba68d81f",
+    "src/features/canvas/edges/viewportEdgeRenderer.ts": "607bf256bf6599866bfa755495c9217685fb162519e14d410e8da0df6478fdbf",
+    "src/features/canvas/edges/viewportEdgeSnapshot.ts": "1b24d65b63d359a8c4409660cad04172cd01c16d9930746451757f4c978d3cc8",
+    "src/features/canvas/engine/useCanvasViewportEdges.ts": "35d7e39a078b14096e6b342db412101bf1a736bb3db03b52b58b9d01b2079013"
+  },
+  "qaBinarySha256": "5719c12bbf55250fcbb7b20107091a0b08437e10e6c383059805973b3d847be8",
+  "productBinarySha256": "1ce94733ae329cb1b9bbf30694325ec6531f4acdd41bafc2fe1ea08b47613968",
+  "qaVersusFinal": "Final source adds one symmetric window.resize handler to update backing on DPR changes; QA tested ResizeObserver window sizing. Final full suite includes this small addition."
+}

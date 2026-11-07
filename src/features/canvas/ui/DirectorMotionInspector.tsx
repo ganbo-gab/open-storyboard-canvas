@@ -1,13 +1,13 @@
 import { memo } from 'react';
 import { Copy, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { UiButton, UiCheckbox, UiIconButton, UiSegmented, UiSelect } from '@/components/ui';
+import { ScrubNumber, VectorField } from '@/features/stage/ui/stageKit';
 
-import {
-  DIRECTOR_PROCEDURAL_ACTIONS,
-  DIRECTOR_STATIC_POSES,
-} from '@/features/canvas/application/directorMotion';
+import { PERSON_ACTIONS, PERSON_POSES } from '@/features/canvas/application/personMotionLibrary';
 import type {
   BlueprintItem,
+  DirectorMotionEasing,
   DirectorActionKeyframe,
   DirectorCameraKeyframe,
   DirectorMotionProjectV1,
@@ -42,8 +42,38 @@ type Props = {
   className?: string;
 };
 
-const FIELD_CLASS = 'h-8 w-full min-w-0 rounded-sm border border-white/15 bg-[#171a1f] px-2 text-xs text-white outline-hidden transition-colors hover:border-white/30 focus:border-teal-400/70 focus:ring-1 focus:ring-teal-400/30';
-const BUTTON_CLASS = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-sm border border-white/15 bg-white/5 text-xs text-white/80 transition-colors hover:border-teal-300/40 hover:bg-white/10 active:bg-teal-400/20 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-teal-400/60';
+const FIELD_CLASS = 'h-8 w-full min-w-0 px-2 text-xs';
+const DEG = 180 / Math.PI;
+const EASING_OPTIONS: readonly DirectorMotionEasing[] = ['linear', 'smooth', 'hold'];
+
+type CameraLookMode = 'target' | 'point' | 'free';
+
+/**
+ * Euler XYZ (radians, z = 0) that turns the camera's forward axis (0, 0, -1) towards `target`.
+ * Mirrors `sampleCameraTrack`: R = Rx·Ry, so forward = (-sin y, sin x·cos y, -cos x·cos y).
+ */
+export function freeRotationFromLook(position: DirectorMotionVector3, target: DirectorMotionVector3): DirectorMotionVector3 {
+  const dx = target.x - position.x;
+  const dy = target.y - position.y;
+  const dz = target.z - position.z;
+  const length = Math.hypot(dx, dy, dz);
+  if (length < 1e-6) return { x: 0, y: 0, z: 0 };
+  const y = Math.asin(Math.max(-1, Math.min(1, -dx / length)));
+  const x = Math.atan2(dy / length, -dz / length);
+  return { x, y, z: 0 };
+}
+
+/** Inverse of {@link freeRotationFromLook}: the point `distance` ahead of the camera. */
+export function lookPointFromRotation(position: DirectorMotionVector3, rotation: DirectorMotionVector3, distance: number): DirectorMotionVector3 {
+  const forward = { x: -Math.sin(rotation.y), y: Math.sin(rotation.x) * Math.cos(rotation.y), z: -Math.cos(rotation.x) * Math.cos(rotation.y) };
+  return { x: position.x + forward.x * distance, y: position.y + forward.y * distance, z: position.z + forward.z * distance };
+}
+
+function cameraLookMode(keyframe: DirectorCameraKeyframe): CameraLookMode {
+  if (keyframe.freeRotation) return 'free';
+  return keyframe.trackTargetId ? 'target' : 'point';
+}
+
 
 type NumberFieldProps = {
   label: string;
@@ -67,34 +97,10 @@ export function DirectorInspectorNumberField({
   precision = 2,
   ariaLabel,
 }: NumberFieldProps) {
-  const displayValue = Number(value.toFixed(precision));
   return (
-    <label className="block min-w-0 text-xs text-white/60">
+    <label className="block min-w-0 text-xs text-text-muted">
       <span className="mb-1.5 block">{label}</span>
-      <input
-        key={value}
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        defaultValue={displayValue}
-        aria-label={ariaLabel ?? label}
-        onBlur={(event) => {
-          const next = event.currentTarget.valueAsNumber;
-          if (!Number.isFinite(next)) {
-            event.currentTarget.value = String(displayValue);
-            return;
-          }
-          const clamped = Math.max(min ?? -Infinity, Math.min(max ?? Infinity, next));
-          event.currentTarget.value = String(Number(clamped.toFixed(precision)));
-          if (clamped !== displayValue) onCommit(clamped);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') event.currentTarget.value = String(displayValue);
-          if (event.key === 'Enter' || event.key === 'Escape') event.currentTarget.blur();
-        }}
-        className={`${FIELD_CLASS} font-mono tabular-nums`}
-      />
+      <ScrubNumber label="↔" ariaLabel={ariaLabel ?? label} value={value} min={min} max={max} step={step} precision={precision} onCommit={onCommit} />
     </label>
   );
 }
@@ -116,25 +122,7 @@ export function DirectorInspectorVectorFields({
   step?: number;
   suffix?: string;
 }) {
-  return (
-    <fieldset className="min-w-0">
-      <legend className="mb-2 text-xs font-medium text-white/80">{label}{suffix ? ` (${suffix})` : ''}</legend>
-      <div className="grid grid-cols-3 gap-2">
-        {(['x', 'y', 'z'] as const).map((axis) => (
-          <DirectorInspectorNumberField
-            key={axis}
-            label={axis.toUpperCase()}
-            ariaLabel={`${label} ${axis.toUpperCase()}`}
-            value={value[axis]}
-            min={min}
-            max={max}
-            step={step}
-            onCommit={(next) => onCommit(axis, next)}
-          />
-        ))}
-      </div>
-    </fieldset>
-  );
+  return <VectorField label={label} value={value} min={min} max={max} step={step} suffix={suffix || undefined} onCommit={onCommit} />;
 }
 
 export function getSelectedDirectorKeyframe(
@@ -179,22 +167,22 @@ export const DirectorMotionInspector = memo(function DirectorMotionInspector({
   const trackEnd = track[track.length - 1]?.time ?? 0;
   const hasEditableClip = trackKind !== 'action' && track.length >= 2 && trackEnd - trackStart >= 0.1;
   const actionFrame = selection?.kind === 'action' && keyframe && !('position' in keyframe) ? keyframe : null;
-  const action = DIRECTOR_PROCEDURAL_ACTIONS.find((entry) => entry.id === actionFrame?.actionId);
-  const pose = DIRECTOR_STATIC_POSES.find((entry) => entry.id === actionFrame?.poseId);
+  const action = PERSON_ACTIONS.find((entry) => entry.id === actionFrame?.actionId);
+  const pose = PERSON_POSES.find((entry) => entry.id === actionFrame?.poseId);
   const clip = project.customClips.find((entry) => entry.id === actionFrame?.clipId);
   const actionLabel = action ? t(action.labelKey) : pose ? t(pose.labelKey)
     : clip?.name ?? actionFrame?.actionId ?? actionFrame?.poseId ?? t('directorStudio.motion.library.custom');
 
   return (
     <section className={`flex min-w-0 flex-col gap-4 text-xs ${className}`} aria-label={t('directorStudio.motion.inspector.title')}>
-      <div className="rounded-md border border-white/10 bg-[#20242a] p-3">
+      <div className="rounded-md border border-[var(--line)] bg-elevated p-3">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="min-w-0 truncate font-semibold text-white">{trackLabel}</h3>
-          <span className="shrink-0 text-white/50">{t('directorStudio.motion.inspector.trackSummary', { count: track.length })}</span>
+          <h3 className="min-w-0 truncate font-semibold text-text-dark">{trackLabel}</h3>
+          <span className="shrink-0 text-text-subtle">{t('directorStudio.motion.inspector.trackSummary', { count: track.length })}</span>
         </div>
         {hasEditableClip ? (
-          <div className="mt-3 border-t border-white/10 pt-3">
-            <div className="mb-2 font-medium text-teal-200">{t('directorStudio.motion.timeline.routeClip', { start: trackStart.toFixed(1), end: trackEnd.toFixed(1) })}</div>
+          <div className="mt-3 border-t border-[var(--line)] pt-3">
+            <div className="mb-2 font-medium text-accent">{t('directorStudio.motion.timeline.routeClip', { start: trackStart.toFixed(1), end: trackEnd.toFixed(1) })}</div>
             <div className="grid grid-cols-2 gap-2">
               <DirectorInspectorNumberField
                 label={t('directorStudio.motion.inspector.clipStart')}
@@ -211,15 +199,16 @@ export const DirectorMotionInspector = memo(function DirectorMotionInspector({
                 onCommit={(end) => onRetimeTrack(trackKind, trackId, trackStart, end)}
               />
             </div>
-            <p className="mt-2 leading-5 text-white/50">{t('directorStudio.motion.inspector.clipHelp')}</p>
+            <p className="mt-2 leading-5 text-text-subtle">{t('directorStudio.motion.inspector.clipHelp')}</p>
           </div>
         ) : null}
       </div>
       {track.length > 0 ? (
-        <label className="block text-white/60">
+        <label className="block text-text-muted">
           <span className="mb-1.5 block">{t('directorStudio.motion.inspector.keyframes')}</span>
-          <select
+          <UiSelect
             value={keyframe?.id ?? ''}
+            aria-label={t('directorStudio.motion.inspector.keyframes')}
             onChange={(event) => {
               const frame = track.find((entry) => entry.id === event.target.value);
               if (!frame) return;
@@ -234,11 +223,11 @@ export const DirectorMotionInspector = memo(function DirectorMotionInspector({
                 {t('directorStudio.motion.inspector.keyframeNumber', { index: index + 1 })} · {frame.time.toFixed(2)}s
               </option>
             ))}
-          </select>
+          </UiSelect>
         </label>
       ) : null}
       {!selection || !keyframe ? (
-        <p className="leading-5 text-white/55">{t(track.length ? 'directorStudio.motion.inspector.empty' : 'directorStudio.motion.inspector.emptyTrack')}</p>
+        <p className="leading-5 text-text-muted">{t(track.length ? 'directorStudio.motion.inspector.empty' : 'directorStudio.motion.inspector.emptyTrack')}</p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-2">
@@ -252,16 +241,16 @@ export const DirectorMotionInspector = memo(function DirectorMotionInspector({
               precision={3}
               onCommit={(time) => { onPatch(selection, { time }); onTimeChange(time); }}
             />
-            <label className="block text-white/60">
+            <label className="block text-text-muted">
               <span className="mb-1.5 block">{t('directorStudio.motion.inspector.easing')}</span>
-              <select
+              <UiSelect
                 value={keyframe.easing}
-                onChange={(event) => onPatch(selection, { easing: event.target.value === 'smooth' ? 'smooth' : 'linear' })}
+                aria-label={t('directorStudio.motion.inspector.easing')}
+                onChange={(event) => { const easing = EASING_OPTIONS.find((entry) => entry === event.target.value); if (easing) onPatch(selection, { easing }); }}
                 className={FIELD_CLASS}
               >
-                <option value="linear">{t('directorStudio.motion.inspector.linear')}</option>
-                <option value="smooth">{t('directorStudio.motion.inspector.smooth')}</option>
-              </select>
+                {EASING_OPTIONS.map((easing) => <option key={easing} value={easing}>{t(`directorStudio.motion.inspector.${easing}`)}</option>)}
+              </UiSelect>
             </label>
           </div>
           {'position' in keyframe ? (
@@ -273,7 +262,7 @@ export const DirectorMotionInspector = memo(function DirectorMotionInspector({
             />
           ) : null}
           {selection.kind === 'camera' && 'fov' in keyframe ? (
-            <div className="space-y-4 border-t border-white/10 pt-4">
+            <div className="space-y-4 border-t border-[var(--line)] pt-4">
               <DirectorInspectorNumberField
                 key={`${selection.keyframeId}:fov`}
                 label={t('directorStudio.motion.inspector.fov')}
@@ -282,49 +271,21 @@ export const DirectorMotionInspector = memo(function DirectorMotionInspector({
                 max={150}
                 onCommit={(fov) => onPatch(selection, { fov })}
               />
-              <label className="block text-white/60">
-                <span className="mb-1.5 block">{t('directorStudio.motion.inspector.targetMode')}</span>
-                <select
-                  value={keyframe.trackTargetId ?? ''}
-                  onChange={(event) => onPatch(selection, { trackTargetId: event.target.value || null })}
-                  className={FIELD_CLASS}
-                >
-                  <option value="">{t('directorStudio.motion.inspector.fixedTarget')}</option>
-                  {items.map((item) => <option key={item.id} value={item.id}>{t('directorStudio.previs.followObject', { name: item.label })}</option>)}
-                </select>
-              </label>
-              {keyframe.trackTargetId ? (
-                <label className="block text-white/60">
-                  <span className="mb-1.5 block">{t('directorStudio.motion.inspector.targetBodyPart')}</span>
-                  <select
-                    value={keyframe.trackTargetBodyPart ?? 'torso'}
-                    onChange={(event) => onPatch(selection, { trackTargetBodyPart: event.target.value })}
-                    className={FIELD_CLASS}
-                  >
-                    {(['head', 'torso', 'feet'] as const).map((part) => (
-                      <option key={part} value={part}>{t(`directorStudio.motion.inspector.${part}`)}</option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <DirectorInspectorVectorFields
-                  key={`${selection.keyframeId}:target`}
-                  label={t('directorStudio.motion.inspector.fixedTarget')}
-                  value={keyframe.target}
-                  onCommit={(axis, value) => onPatch(selection, { target: { ...keyframe.target, [axis]: value } })}
-                />
-              )}
+              <CameraLookFields
+                keyframe={keyframe}
+                items={items}
+                onPatch={(patch) => onPatch(selection, patch)}
+              />
             </div>
           ) : null}
           {selection.kind === 'object' && 'rotation' in keyframe ? (
-            <div className="space-y-4 border-t border-white/10 pt-4">
-              <label className="flex items-center justify-between gap-3 text-white/75">
+            <div className="space-y-4 border-t border-[var(--line)] pt-4">
+              <label className="flex items-center justify-between gap-3 text-text-muted">
                 <span>{t('directorStudio.motion.inspector.orientToPath')}</span>
-                <input
-                  type="checkbox"
+                <UiCheckbox
                   checked={keyframe.orientToPath === true}
-                  onChange={(event) => onPatch(selection, { orientToPath: event.target.checked })}
-                  className="h-4 w-4 accent-teal-400 focus-visible:outline-teal-400"
+                  onCheckedChange={(checked) => onPatch(selection, { orientToPath: checked })}
+                  aria-label={t('directorStudio.motion.inspector.orientToPath')}
                 />
               </label>
               <DirectorInspectorNumberField
@@ -338,35 +299,128 @@ export const DirectorMotionInspector = memo(function DirectorMotionInspector({
             </div>
           ) : null}
           {actionFrame ? (
-            <div className="rounded-md border border-teal-300/15 bg-teal-400/5 p-3">
-              <div className="mb-1 text-white/55">{t('directorStudio.inspector.action')}</div>
-              <div className="font-medium text-teal-100">{actionLabel}</div>
+            <div className="rounded-md border border-accent/15 bg-accent/5 p-3">
+              <div className="mb-1 text-text-muted">{t('directorStudio.inspector.action')}</div>
+              <div className="font-medium text-accent">{actionLabel}</div>
             </div>
           ) : null}
-          <div className="flex gap-2 border-t border-white/10 pt-3">
-            <button
+          <div className="flex gap-2 border-t border-[var(--line)] pt-3">
+            <UiButton variant="secondary" size="sm"
               type="button"
               onClick={() => onDuplicate(selection)}
-              className={`${BUTTON_CLASS} flex-1`}
+              className="flex-1"
               title={t('directorStudio.previs.duplicateFrameHelp')}
               data-director-tooltip={t('directorStudio.previs.duplicateFrameHelp')}
             >
               <Copy className="h-3.5 w-3.5" />
               {t('directorStudio.motion.inspector.duplicate')}
-            </button>
-            <button
+            </UiButton>
+            <UiIconButton size="sm"
               type="button"
               onClick={() => onDelete(selection)}
-              className={`${BUTTON_CLASS} w-8 text-red-200 hover:border-red-300/40 hover:bg-red-500/15 active:bg-red-500/25`}
+              className="w-8 text-danger hover:text-danger"
               title={t('directorStudio.motion.inspector.delete')}
               data-director-tooltip={t('directorStudio.motion.inspector.delete')}
               aria-label={t('directorStudio.motion.inspector.delete')}
             >
               <Trash2 className="h-3.5 w-3.5" />
-            </button>
+            </UiIconButton>
           </div>
         </>
       )}
     </section>
   );
 });
+
+/** Camera aim per keyframe: follow an item, look at a fixed point, or free rotation (spec §4.4 定点跟拍). */
+function CameraLookFields({ keyframe, items, onPatch }: {
+  keyframe: DirectorCameraKeyframe;
+  items: BlueprintItem[];
+  onPatch: (patch: Partial<DirectorCameraKeyframe>) => void;
+}) {
+  const { t } = useTranslation();
+  const mode = cameraLookMode(keyframe);
+  const distance = Math.max(1, Math.hypot(keyframe.target.x - keyframe.position.x, keyframe.target.y - keyframe.position.y, keyframe.target.z - keyframe.position.z));
+  const setMode = (next: CameraLookMode) => {
+    if (next === mode) return;
+    if (next === 'target') {
+      const targetId = keyframe.trackTargetId ?? items[0]?.id;
+      if (targetId) onPatch({ trackTargetId: targetId, freeRotation: undefined });
+      return;
+    }
+    if (next === 'point') {
+      onPatch({
+        trackTargetId: null,
+        freeRotation: undefined,
+        target: keyframe.freeRotation ? lookPointFromRotation(keyframe.position, keyframe.freeRotation, distance) : keyframe.target,
+      });
+      return;
+    }
+    onPatch({ trackTargetId: null, freeRotation: freeRotationFromLook(keyframe.position, keyframe.target) });
+  };
+  const rotation = keyframe.freeRotation;
+  return (
+    <div className="space-y-3">
+      <div className="text-text-muted">
+        <span className="mb-1.5 block">{t('directorStudio.motion.inspector.lookAt')}</span>
+        <UiSegmented<CameraLookMode>
+          size="sm"
+          className="w-full"
+          value={mode}
+          aria-label={t('directorStudio.motion.inspector.lookAt')}
+          onChange={setMode}
+          options={[
+            { value: 'target', label: t('directorStudio.motion.inspector.lookTarget'), disabled: items.length === 0 },
+            { value: 'point', label: t('directorStudio.motion.inspector.lookPoint') },
+            { value: 'free', label: t('directorStudio.motion.inspector.lookFree') },
+          ]}
+        />
+      </div>
+      {mode === 'target' ? (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block min-w-0 text-text-muted">
+            <span className="mb-1.5 block">{t('directorStudio.motion.inspector.targetMode')}</span>
+            <UiSelect
+              value={keyframe.trackTargetId ?? ''}
+              aria-label={t('directorStudio.motion.inspector.targetMode')}
+              onChange={(event) => { if (event.target.value) onPatch({ trackTargetId: event.target.value }); }}
+              className={FIELD_CLASS}
+            >
+              {items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </UiSelect>
+          </label>
+          <label className="block min-w-0 text-text-muted">
+            <span className="mb-1.5 block">{t('directorStudio.motion.inspector.targetBodyPart')}</span>
+            <UiSelect
+              value={keyframe.trackTargetBodyPart ?? 'torso'}
+              aria-label={t('directorStudio.motion.inspector.targetBodyPart')}
+              onChange={(event) => onPatch({ trackTargetBodyPart: event.target.value })}
+              className={FIELD_CLASS}
+            >
+              {(['head', 'torso', 'feet'] as const).map((part) => (
+                <option key={part} value={part}>{t(`directorStudio.motion.inspector.${part}`)}</option>
+              ))}
+            </UiSelect>
+          </label>
+        </div>
+      ) : mode === 'point' ? (
+        <DirectorInspectorVectorFields
+          key={`${keyframe.id}:target`}
+          label={t('directorStudio.motion.inspector.fixedTarget')}
+          value={keyframe.target}
+          onCommit={(axis, value) => onPatch({ target: { ...keyframe.target, [axis]: value } })}
+        />
+      ) : rotation ? (
+        <DirectorInspectorVectorFields
+          key={`${keyframe.id}:rotation`}
+          label={t('directorStudio.motion.inspector.rotationDeg')}
+          value={{ x: rotation.x * DEG, y: rotation.y * DEG, z: rotation.z * DEG }}
+          step={1}
+          suffix="°"
+          onCommit={(axis, value) => onPatch({ freeRotation: { ...rotation, [axis]: value / DEG } })}
+        />
+      ) : null}
+      <p className="leading-5 text-text-subtle">{t(`directorStudio.motion.inspector.${mode === 'target' ? 'lookTargetHelp' : mode === 'point' ? 'lookPointHelp' : 'lookFreeHelp'}`)}</p>
+    </div>
+  );
+}

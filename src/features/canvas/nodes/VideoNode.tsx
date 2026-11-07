@@ -1,15 +1,8 @@
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type DragEvent,
-} from 'react';
-import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { AlertTriangle, CircleHelp, Film, Loader2, PauseCircle, RefreshCw, Upload } from 'lucide-react';
+import { BatchStackControl } from '@/features/canvas/ui/BatchStackControl';
+import { NodeMediaMetadata } from '../ui/NodeMediaMetadata';
+import { memo, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
+import { Film, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -23,18 +16,22 @@ import {
   extractFileNameFromPath,
   resolveCustomGeneratedVideoName,
 } from '@/features/canvas/application/generatedMediaNaming';
-import { resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
-import {
-  isNodeUsingDefaultDisplayName,
-  resolveNodeDisplayName,
-} from '@/features/canvas/domain/nodeDisplay';
+import { useAssetDisplaySource } from '@/features/assets/ui/useAssetDisplaySource';
+import { isNodeUsingDefaultDisplayName, resolveNodeDisplayName } from '@/features/canvas/domain/nodeDisplay';
 import { isVideoFile, resolveDroppedVideoFile } from '@/features/canvas/application/imageDragDrop';
 import { prepareVideoNodeDataFromFile } from '@/features/canvas/application/videoUpload';
 import { renameLocalMediaFiles } from '@/commands/image';
-import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
-import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
+import { NodeFrame } from '@/features/canvas/ui/NodeFrame';
+import {
+  GenerationProgress,
+  ResultProblemFace,
+  WaitingLabel,
+  resolveResultFaceState,
+  resultFaceStatus,
+} from '@/features/canvas/ui/NodeGenerationFace';
 import { formatGenerationElapsedMs } from '@/features/canvas/ui/generationElapsed';
 import { GenerationJobStatus } from '@/features/canvas/ui/GenerationJobStatus';
+import { GenerationReferenceRetry } from '@/features/canvas/ui/GenerationReferenceRetry';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 
@@ -44,379 +41,203 @@ type VideoNodeProps = NodeProps & {
   selected?: boolean;
 };
 
-const VIDEO_NODE_DEFAULT_WIDTH = 384;
-const VIDEO_NODE_DEFAULT_HEIGHT = 288;
-const VIDEO_NODE_MIN_WIDTH = 256;
-const VIDEO_NODE_MIN_HEIGHT = 180;
-const VIDEO_NODE_MAX_WIDTH = 1600;
-const VIDEO_NODE_MAX_HEIGHT = 1200;
+const DEFAULT_SIZE = { width: 384, height: 288 };
+const RESIZE = { minWidth: 256, minHeight: 180, maxWidth: 1600, maxHeight: 1200, keepAspectRatio: true } as const;
 const DEFAULT_VIDEO_GENERATION_DURATION_MS = 15 * 60 * 1000;
+const VIDEO_ACCEPT = 'video/*,.mp4,.webm,.mov,.m4v,.avi,.mkv,.mpeg,.mpg,.3gp,.3gpp';
 
-function resolveNodeDimension(value: number | undefined, fallback: number): number {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 1) {
-    return Math.round(value);
-  }
-  return fallback;
-}
-
-export const VideoNode = memo(({ id, data, selected, type, width, height }: VideoNodeProps) => {
+/** Video material or a generated video result. Click / drop to import when empty. */
+export const VideoNode = memo(({ id, data, selected = false, type, width, height }: VideoNodeProps) => {
   const { t } = useTranslation();
   const updateNodeInternals = useUpdateNodeInternals();
   const inputRef = useRef<HTMLInputElement>(null);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
-  const useUploadFilenameAsNodeTitle = useSettingsStore((state) => state.useUploadFilenameAsNodeTitle);
-  const [now, setNow] = useState(() => Date.now());
+  const useFileNameAsTitle = useSettingsStore((state) => state.useUploadFilenameAsNodeTitle);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
   const isGenerating = data.isGenerating === true;
-  const videoSource = useMemo(() => {
-    const source = data.localVideoUrl || data.videoUrl;
-    return source ? resolveImageDisplayUrl(source) : null;
-  }, [data.localVideoUrl, data.videoUrl]);
+  const source = data.localVideoUrl || data.videoUrl || null;
+  const videoSource = useAssetDisplaySource(source).url;
+  const posterSource = useAssetDisplaySource(data.thumbnailUrl).url;
   const generationError = typeof data.generationError === 'string' ? data.generationError.trim() : '';
-  const errorText = uploadError.trim() || generationError;
-  const generationJobState = typeof data.generationJobState === 'string'
-    ? data.generationJobState as CanvasGenerationJobState
-    : null;
-  const hasUnknownSubmission =
-    !isGenerating && !isUploading && !videoSource && generationJobState === 'unknown';
-  const hasRecoverableWait =
-    !isGenerating && !isUploading && !videoSource && generationJobState === 'recoverable_wait';
-  const hasGenerationAttention = hasUnknownSubmission || hasRecoverableWait;
-  const hasVideoError =
-    !isGenerating && !isUploading && !videoSource && errorText.length > 0 && !hasGenerationAttention;
-  const errorTitleKey = uploadError.trim()
-    ? 'node.videoNode.uploadFailed'
-    : 'node.videoNode.generationFailed';
-  const generationStartedAt = typeof data.generationStartedAt === 'number' ? data.generationStartedAt : null;
-  const generationDurationMs = typeof data.generationDurationMs === 'number' ? data.generationDurationMs : DEFAULT_VIDEO_GENERATION_DURATION_MS;
-  const resolvedWidth = resolveNodeDimension(width, VIDEO_NODE_DEFAULT_WIDTH);
-  const resolvedHeight = resolveNodeDimension(height, VIDEO_NODE_DEFAULT_HEIGHT);
-  const resolvedTitle = useMemo(() => {
-    const sourceFileName = typeof data.sourceFileName === 'string' ? data.sourceFileName.trim() : '';
-    if (
-      useUploadFilenameAsNodeTitle
-      && sourceFileName
-      && isNodeUsingDefaultDisplayName(CANVAS_NODE_TYPES.video, data)
-    ) {
-      return sourceFileName;
-    }
-
-    return resolveNodeDisplayName(type as CanvasNodeType, data);
-  }, [data, type, useUploadFilenameAsNodeTitle]);
-  const liveGenerationElapsedMs = isGenerating && generationStartedAt !== null
-    ? Math.max(0, now - generationStartedAt)
-    : data.generationElapsedMs;
-  const generationElapsedText = formatGenerationElapsedMs(liveGenerationElapsedMs);
+  const referenceFailure = generationError ? data.generationReferenceFailure ?? null : null;
+  const jobState = typeof data.generationJobState === 'string' ? data.generationJobState as CanvasGenerationJobState : null;
+  const startedAt = typeof data.generationStartedAt === 'number' ? data.generationStartedAt : null;
+  const face = resolveResultFaceState({
+    hasMedia: Boolean(source),
+    busy: isGenerating || isUploading,
+    jobState,
+    error: uploadError.trim() || (referenceFailure ? t('reference.needsPublicUrl', { slotKey: referenceFailure.slotKey }) : generationError),
+    safeRecovery: data.generationSafeRecoveryAvailable === true,
+  });
+  const frameWidth = typeof width === 'number' && width > 1 ? Math.round(width) : DEFAULT_SIZE.width;
+  const frameHeight = typeof height === 'number' && height > 1 ? Math.round(height) : DEFAULT_SIZE.height;
+  const title = useMemo(() => {
+    const fileName = typeof data.sourceFileName === 'string' ? data.sourceFileName.trim() : '';
+    return useFileNameAsTitle && fileName && isNodeUsingDefaultDisplayName(CANVAS_NODE_TYPES.video, data)
+      ? fileName
+      : resolveNodeDisplayName(type as CanvasNodeType, data);
+  }, [data, type, useFileNameAsTitle]);
+  const finishedElapsed = isGenerating ? '' : formatGenerationElapsedMs(data.generationElapsedMs);
 
   useEffect(() => {
     updateNodeInternals(id);
-  }, [id, resolvedHeight, resolvedWidth, updateNodeInternals]);
+  }, [id, frameHeight, frameWidth, updateNodeInternals]);
 
   useEffect(() => {
-    if (!isGenerating) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 100);
-    return () => window.clearInterval(timer);
-  }, [isGenerating]);
+    if (source) setUploadError('');
+  }, [source]);
 
-  const progress = useMemo(() => {
-    if (!isGenerating) return 0;
-    const startedAt = generationStartedAt ?? Date.now();
-    const duration = Math.max(1000, generationDurationMs);
-    return Math.min(Math.max(0, now - startedAt) / duration, 0.96);
-  }, [generationDurationMs, generationStartedAt, isGenerating, now]);
+  const importFile = async (file: File) => {
+    if (!isVideoFile(file)) return;
+    setIsUploading(true);
+    setUploadError('');
+    try {
+      const prepared = await prepareVideoNodeDataFromFile(file);
+      updateNodeData(id, useFileNameAsTitle ? { ...prepared, displayName: file.name } : prepared);
+    } catch (error) {
+      console.error('[VideoNode] failed to import local video', { id, fileName: file.name, error });
+      setUploadError((error instanceof Error ? error.message : String(error)) || t('node.videoNode.uploadFailed'));
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
-  const waitedMinutes = useMemo(() => {
-    if (!isGenerating || generationStartedAt === null) return 0;
-    return Math.floor(Math.max(0, now - generationStartedAt) / 60000);
-  }, [generationStartedAt, isGenerating, now]);
-
-  const handleTitleChange = async (nextTitle: string) => {
+  const rename = async (nextTitle: string) => {
     if (!data.localVideoUrl) {
-      updateNodeData(id, {
-        displayName: nextTitle,
-        generatedNamingMode: 'custom',
-      });
+      updateNodeData(id, { displayName: nextTitle, generatedNamingMode: 'custom' });
       return;
     }
-
-    const normalizedTitle = nextTitle.trim() || DEFAULT_GENERATED_VIDEO_DISPLAY_NAME;
-    const desiredFileName = resolveCustomGeneratedVideoName(normalizedTitle) ?? undefined;
-    const fallbackPatch = {
-      displayName: normalizedTitle,
-      generatedFileName: desiredFileName
-        ? data.generatedFileName ?? extractFileNameFromPath(data.localVideoUrl)
-        : null,
-      generatedNamingMode: desiredFileName ? 'custom' as const : 'default' as const,
-    };
-
+    const displayName = nextTitle.trim() || DEFAULT_GENERATED_VIDEO_DISPLAY_NAME;
+    const desiredFileName = resolveCustomGeneratedVideoName(displayName) ?? undefined;
     try {
-      const renamed = await renameLocalMediaFiles({
-        primaryPath: data.localVideoUrl,
-        desiredFileName,
-        mediaKind: 'video',
-      });
-      const shouldPreserveVideoUrl = Boolean(data.videoUrl && data.videoUrl !== data.localVideoUrl);
-
+      const renamed = await renameLocalMediaFiles({ primaryPath: data.localVideoUrl, desiredFileName, mediaKind: 'video' });
+      const keepRemoteUrl = Boolean(data.videoUrl && data.videoUrl !== data.localVideoUrl);
       updateNodeData(id, {
-        displayName: normalizedTitle,
-        videoUrl: shouldPreserveVideoUrl ? data.videoUrl : renamed.primaryPath,
+        displayName,
+        videoUrl: keepRemoteUrl ? data.videoUrl : renamed.primaryPath,
         localVideoUrl: renamed.primaryPath,
         generatedFileName: renamed.fileName ?? extractFileNameFromPath(renamed.primaryPath),
         generatedNamingMode: desiredFileName ? 'custom' : 'default',
       });
     } catch (error) {
       console.warn('[VideoNode] failed to rename generated video file', { id, error });
-      updateNodeData(id, fallbackPatch);
+      updateNodeData(id, {
+        displayName,
+        generatedFileName: desiredFileName ? data.generatedFileName ?? extractFileNameFromPath(data.localVideoUrl) : null,
+        generatedNamingMode: desiredFileName ? 'custom' : 'default',
+      });
     }
   };
 
-  useEffect(() => {
-    if (videoSource && uploadError) {
-      setUploadError('');
-    }
-  }, [uploadError, videoSource]);
-
-  const processFile = useCallback(
-    async (file: File) => {
-      if (!isVideoFile(file)) {
-        return;
-      }
-
-      setIsUploading(true);
-      setUploadError('');
-      try {
-        const prepared = await prepareVideoNodeDataFromFile(file);
-        const nextData: Partial<VideoNodeData> = {
-          ...prepared,
-        };
-        if (useUploadFilenameAsNodeTitle) {
-          nextData.displayName = file.name;
-        }
-        updateNodeData(id, nextData);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setUploadError(message || t('node.videoNode.uploadFailed'));
-        console.error('[VideoNode] failed to import local video', { id, fileName: file.name, error });
-      } finally {
-        setIsUploading(false);
-      }
-    },
-    [id, t, updateNodeData, useUploadFilenameAsNodeTitle]
-  );
-
-  const handleFileChange = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0] ?? null;
-      if (isVideoFile(file)) {
-        await processFile(file);
-      }
-      event.target.value = '';
-    },
-    [processFile]
-  );
-
-  const handleDrop = useCallback(
-    async (event: DragEvent<HTMLElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const file = resolveDroppedVideoFile(event.dataTransfer);
-      if (file) {
-        await processFile(file);
-      }
-    },
-    [processFile]
-  );
-
-  const handleDragOver = useCallback((event: DragEvent<HTMLElement>) => {
+  const canImport = !source && !isGenerating && !isUploading && face.kind === 'waiting' && !data.generationJobId;
+  const stopDrag = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
-  }, []);
-
-  const handleNodeClick = useCallback(() => {
-    setSelectedNode(id);
-    if (!videoSource && !isGenerating && !isUploading && !errorText && !data.generationJobId) {
-      inputRef.current?.click();
-    }
-  }, [data.generationJobId, errorText, id, isGenerating, isUploading, setSelectedNode, videoSource]);
+  };
 
   return (
-    <div
-      className={`
-        group relative overflow-visible rounded-(--node-radius) border bg-(--canvas-node-bg) p-0 shadow-(--canvas-node-shadow) transition-colors duration-150
-        ${hasGenerationAttention
-          ? (selected
-            ? 'border-amber-300 shadow-[0_0_0_1px_rgba(252,211,77,0.34)]'
-            : 'border-amber-400/65 bg-amber-950/10 hover:border-amber-300/80')
-          : hasVideoError
-          ? (selected
-            ? 'border-red-400 shadow-[0_0_0_1px_rgba(248,113,113,0.42)]'
-            : 'border-red-500/70 bg-[rgba(127,29,29,0.12)] hover:border-red-400/80')
-          : selected
-          ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-(--canvas-node-border) hover:border-(--canvas-node-border-hover)'}
-      `}
-      style={{ width: resolvedWidth, height: resolvedHeight }}
-      onClick={handleNodeClick}
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
+    <NodeFrame
+      type={type as CanvasNodeType}
+      selected={selected}
+      icon={<Film />}
+      title={title}
+      onRename={(next) => void rename(next)}
+      meta={<NodeMediaMetadata data={data} fallback={data.durationSeconds ? `${data.durationSeconds}s` : data.aspectRatio} />}
+      status={resultFaceStatus(face, isGenerating, startedAt)}
+      badges={<>{finishedElapsed ? <span className="node-frame__badge" title={t('node.videoNode.generationElapsed')}>{finishedElapsed}</span> : null}{typeof data.batchId === 'string' && data.batchId && typeof data.batchIndex === 'number' && typeof data.batchTotal === 'number' && data.batchTotal > 1 ? <BatchStackControl nodeId={id} batchId={data.batchId} index={data.batchIndex+1} total={data.batchTotal} collapsed={data.batchCollapsed===true} selected={Boolean(selected)} /> : null}</>}
+      actions={source ? (
+        <button
+          type="button"
+          className="nodrag"
+          aria-label={t('node.videoNode.replace')}
+          title={t('node.videoNode.replace')}
+          onClick={(event) => {
+            event.stopPropagation();
+            inputRef.current?.click();
+          }}
+        >
+          <RefreshCw />
+        </button>
+      ) : null}
+      variant="media"
+      width={frameWidth}
+      height={frameHeight}
+      resize={RESIZE}
     >
-      <NodeHeader
-        className={NODE_HEADER_FLOATING_POSITION_CLASS}
-        icon={<Film className="h-4 w-4" />}
-        titleText={resolvedTitle}
-        titleClassName="inline-block max-w-[220px] truncate whitespace-nowrap align-bottom"
-        editable
-        onTitleChange={(nextTitle) => {
-          void handleTitleChange(nextTitle);
-        }}
-        rightSlot={(
-          <span className="flex items-center gap-1">
-            {generationElapsedText ? (
-              <span
-                className="rounded-full bg-[rgba(15,23,42,0.72)] px-2 py-px text-[10px] font-medium leading-tight text-white"
-                title={t('node.videoNode.generationElapsed')}
-              >
-                {generationElapsedText}
-              </span>
-            ) : null}
-            {data.durationSeconds ? (
-              <span className="rounded-full bg-accent/80 px-2 py-px text-[10px] font-medium leading-tight text-white">
-                {data.durationSeconds}s
-              </span>
-            ) : null}
-          </span>
-        )}
-      />
-
       <div
-        className={`relative h-full w-full overflow-hidden rounded-(--node-radius) ${
-          hasGenerationAttention
-            ? 'bg-amber-950/25'
-            : hasVideoError ? 'bg-[rgba(127,29,29,0.2)]' : 'bg-(--canvas-node-media-bg)'
-        }`}
+        className="contents"
+        onDragOver={stopDrag}
+        onDrop={(event) => {
+          stopDrag(event);
+          const file = resolveDroppedVideoFile(event.dataTransfer);
+          if (file) void importFile(file);
+        }}
       >
-        {videoSource ? (
-          <>
-            <video
-              src={videoSource}
-              poster={data.thumbnailUrl ? resolveImageDisplayUrl(data.thumbnailUrl) : undefined}
-              className="h-full w-full bg-black object-contain"
-              controls
-              playsInline
-              preload="metadata"
-            />
-            <button
-              type="button"
-              className="nodrag nowheel absolute left-2 top-2 flex h-7 items-center gap-1 rounded-full border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) px-2 text-xs text-text-dark shadow-xs backdrop-blur-xs transition-colors hover:bg-(--canvas-node-menu-hover)"
-              title={t('node.videoNode.replace') as string}
-              onClick={(event) => {
-                event.stopPropagation();
-                inputRef.current?.click();
-              }}
-            >
-              <RefreshCw className="h-3 w-3" />
-              {t('node.videoNode.replace')}
-            </button>
-          </>
-        ) : hasGenerationAttention ? (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-amber-100">
-            {hasUnknownSubmission ? (
-              <CircleHelp className="h-7 w-7 text-amber-300" aria-hidden="true" />
-            ) : (
-              <PauseCircle className="h-7 w-7 text-amber-300" aria-hidden="true" />
-            )}
-            <span className="text-center text-[12px] font-semibold leading-5">
-              {t(hasUnknownSubmission
-                ? 'generationJob.unknownTitle'
-                : 'generationJob.recoverableTitle')}
+        {source ? (
+          <video
+            src={videoSource ?? undefined}
+            poster={posterSource ?? undefined}
+            className="nodrag h-full w-full bg-black object-contain"
+            controls
+            playsInline
+            preload="metadata"
+          />
+        ) : face.kind === 'waiting' ? (
+          <button
+            type="button"
+            className="node-face"
+            disabled={!canImport}
+            onClick={(event) => {
+              if (!canImport) return;
+              event.stopPropagation();
+              inputRef.current?.click();
+            }}
+          >
+            {isGenerating || isUploading ? <Loader2 className="animate-spin" /> : <Upload />}
+            <span>
+              {isUploading ? t('node.videoNode.uploading') : isGenerating ? (
+                <WaitingLabel
+                  startedAt={startedAt}
+                  render={(minutes) => (minutes === null
+                    ? t('node.videoNode.waitingResult')
+                    : t('node.videoNode.waitingResultDelayed', { minutes }))}
+                />
+              ) : t('node.videoNode.empty')}
             </span>
-            <span className="max-h-[64px] overflow-y-auto wrap-break-word text-center text-[12px] leading-5 text-amber-100/85">
-              {errorText || t('generationJob.recoverableDescription')}
-            </span>
-            <span className="text-center text-[11px] leading-4 text-amber-200/70">
-              {hasUnknownSubmission
-                ? t(data.generationSafeRecoveryAvailable
-                  ? 'generationJob.unknownSafeHint'
-                  : 'generationJob.unknownBlockedHint')
-                : t('generationJob.recoverableHint')}
-            </span>
-          </div>
-        ) : hasVideoError ? (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-red-700 dark:text-red-300">
-            <AlertTriangle className="h-7 w-7 opacity-90" />
-            <span className="text-center text-[12px] font-semibold leading-5 text-red-800 dark:text-red-200">
-              {t(errorTitleKey)}
-            </span>
-            <span className="max-h-[96px] overflow-y-auto wrap-break-word text-center text-[11px] leading-5 text-red-800/90 dark:text-red-200/90">
-              {errorText}
-            </span>
-          </div>
+          </button>
         ) : (
-          <div className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-2 text-text-muted/85">
-            {isGenerating || isUploading ? (
-              <Loader2 className="h-7 w-7 animate-spin opacity-70" />
-            ) : (
-              <Upload className="h-7 w-7 opacity-60" />
-            )}
-            <span className="px-4 text-center text-[12px] leading-6">
-              {isUploading
-                ? t('node.videoNode.uploading')
-                : isGenerating
-                ? waitedMinutes >= 2
-                  ? t('node.videoNode.waitingResultDelayed', { minutes: waitedMinutes })
-                  : t('node.videoNode.waitingResult')
-                : t('node.videoNode.empty')}
-            </span>
-          </div>
+          <ResultProblemFace
+            face={face}
+            failedTitle={t(uploadError.trim() ? 'node.videoNode.uploadFailed' : 'node.videoNode.generationFailed')}
+            action={referenceFailure && !uploadError.trim() ? <GenerationReferenceRetry nodeId={id} failure={referenceFailure} /> : null}
+          />
         )}
-
-        {isGenerating && (
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="absolute inset-0 bg-bg-dark/55" />
-            <div
-              className="absolute left-0 top-0 h-full w-full origin-left bg-linear-to-r from-[rgba(255,255,255,0.34)] to-[rgba(255,255,255,0.05)] transition-transform duration-100 ease-linear"
-              style={{ transform: `scaleX(${progress})` }}
-            />
-          </div>
-        )}
-
-        <GenerationJobStatus
-          state={isGenerating ? generationJobState : null}
-          phase={data.generationJobPhase}
-          networkRoute={data.generationNetworkRoute}
-        />
       </div>
-
+      {isGenerating ? (
+        <GenerationProgress
+          startedAt={startedAt}
+          expectedDurationMs={typeof data.generationDurationMs === 'number' ? data.generationDurationMs : DEFAULT_VIDEO_GENERATION_DURATION_MS}
+        />
+      ) : null}
+      <GenerationJobStatus
+        state={isGenerating ? jobState : null}
+        phase={data.generationJobPhase}
+        networkRoute={data.generationNetworkRoute}
+      />
       <input
         ref={inputRef}
         type="file"
-        accept="video/*,.mp4,.webm,.mov,.m4v,.avi,.mkv,.mpeg,.mpg,.3gp,.3gpp"
+        accept={VIDEO_ACCEPT}
         className="hidden"
-        onChange={handleFileChange}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void importFile(file);
+          event.target.value = '';
+        }}
       />
-
-      <Handle
-        type="target"
-        id="target"
-        position={Position.Left}
-        className="h-2! w-2! border-surface-dark! bg-accent!"
-      />
-      <Handle
-        type="source"
-        id="source"
-        position={Position.Right}
-        className="h-2! w-2! border-surface-dark! bg-accent!"
-      />
-      <NodeResizeHandle
-        minWidth={VIDEO_NODE_MIN_WIDTH}
-        minHeight={VIDEO_NODE_MIN_HEIGHT}
-        maxWidth={VIDEO_NODE_MAX_WIDTH}
-        maxHeight={VIDEO_NODE_MAX_HEIGHT}
-      />
-    </div>
+    </NodeFrame>
   );
 });
 

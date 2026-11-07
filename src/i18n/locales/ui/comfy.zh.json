@@ -1,0 +1,16 @@
+{
+  "check": "检查连接与依赖",
+  "connected": "连接正常",
+  "unreachable": "无法连接",
+  "unknownVersion": "版本未知",
+  "queue": "运行 {{running}} · 排队 {{pending}}",
+  "preflightPassed": "当前工作流的节点和模型依赖已通过检查。",
+  "missingDependencies": "缺少节点：{{nodes}}；缺少模型：{{models}}",
+  "duplicate": "复制工作流",
+  "copy": "副本",
+  "outputType": "输出类型",
+  "import": "添加工作流",
+  "apiFormat": "导入 ComfyUI API 格式 JSON",
+  "imported": "工作流已添加，可在模型选择器中选择。",
+  "deleteHint": "只删除此工作流配置，已有任务与结果会保留。"
+}

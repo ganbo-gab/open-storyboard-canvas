@@ -1,14 +1,16 @@
 import type { ChatCatalogEntry } from '@/features/canvas/application/chatModelCatalog';
 import type { AgentScope, AgentTurnMediaInput } from '@/features/canvas/agent/domain/agentModel';
-import type { CanvasAgentToolEvent } from '@/features/canvas/agent/infrastructure/sdkRuntime';
+import type { AgentModelRetryNotice, CanvasAgentToolEvent } from '@/features/canvas/agent/infrastructure/sdkRuntime';
 import {
   runCanvasAgentTurn, resolveCanvasAgentApproval, cancelCanvasAgentRun,
   listCanvasAgentSessions, getCanvasAgentSession, getCanvasAgentSessionMessages,
   listPendingCanvasAgentApprovals,
+  refreshCanvasAgentSessionMedia,
   type AgentApprovalView, type CanvasAgentSessionMessage, type CanvasAgentTurnResult,
 } from '@/features/canvas/agent/application/canvasAgentController';
 import type { CanvasAgentExecutionMode } from '@/features/canvas/agent/application/agentAutoApprovalPolicy';
 import { redactSensitiveValue } from '@/features/canvas/agent/application/agentRedaction';
+import { classifyCanvasAgentFailure, type CanvasAgentFailurePolicy } from '@/features/canvas/agent/application/agentFailurePolicy';
 import type { AgentSessionRecord } from '@/features/canvas/agent/infrastructure/agentSessionRepository';
 
 export interface ScopedAgentSnapshot {
@@ -23,11 +25,14 @@ export interface ScopedAgentSnapshot {
   liveText: string;
   reasoningSummary: string;
   error?: string;
+  failure?: CanvasAgentFailurePolicy;
+  retry?: AgentModelRetryNotice;
 }
 export interface ScopedAgentSendInput {
   message: string;
-  model: ChatCatalogEntry;
+  model?: ChatCatalogEntry;
   executionMode?: CanvasAgentExecutionMode;
+  explicitSkillIds?: string[];
   media?: AgentTurnMediaInput[];
   generationPreferences?: Parameters<typeof runCanvasAgentTurn>[0]['generationPreferences'];
 }
@@ -75,25 +80,33 @@ export function createScopedAgentSession(options: ScopedAgentSessionOptions): Sc
     for (const listener of listeners) listener();
   };
   const callbacks = {
-    onTextDelta: (delta: string) => publish({ liveText: snapshot.liveText + delta }),
+    onRunStarted: (identity: { sessionId: string; runId: string }) => publish(identity),
+    onRetry: (retry: AgentModelRetryNotice) => publish({ retry }),
+    onTurnStopped: (error: Error) => publish({ status: 'error', approvals: [], liveText: '', error: error.message,
+      failure: classifyCanvasAgentFailure(error) }),
+    onTextDelta: (delta: string) => publish({ liveText: snapshot.liveText + delta, retry: undefined }),
     onReasoningDelta: (delta: string) => publish({ reasoningSummary: snapshot.reasoningSummary + delta }),
     onToolEvent: (event: CanvasAgentToolEvent) => {
       const events = [...snapshot.toolEvents];
       const index = event.callId ? events.findIndex((item) => item.callId === event.callId && item.toolName === event.toolName) : -1;
       if (index < 0) events.push(event);
       else events[index] = { ...events[index], ...event };
-      publish({ toolEvents: events });
+      publish({ toolEvents: events, retry: undefined });
     },
   };
   const finish = (result: CanvasAgentTurnResult) => {
     publish({ sessionId: result.sessionId, runId: result.runId, status: result.status,
-      approvals: result.approvals, messages: getCanvasAgentSessionMessages(result.sessionId), liveText: '',
+      approvals: result.approvals, messages: getCanvasAgentSessionMessages(result.sessionId), liveText: '', retry: undefined,
     });
   };
   const fail = (error: unknown) => {
     const cancelled = controller?.signal.aborted || (error instanceof Error && error.name === 'AbortError');
-    publish({ status: cancelled ? 'cancelled' : 'error', approvals: [], liveText: '',
-      error: cancelled ? undefined : redactSensitiveValue(error instanceof Error ? error.message : String(error)),
+    const session = snapshot.sessionId ? getCanvasAgentSession(snapshot.sessionId) : undefined;
+    const failure = cancelled ? undefined : classifyCanvasAgentFailure(error);
+    publish({ status: cancelled ? 'cancelled' : 'error', approvals: [], liveText: '', retry: undefined,
+      ...(session ? { messages: getCanvasAgentSessionMessages(session.id) } : { sessionId: undefined, runId: undefined }),
+      error: failure ? redactSensitiveValue(failure.rawMessage) : undefined,
+      failure: failure ? { ...failure, rawMessage: redactSensitiveValue(failure.rawMessage) } : undefined,
     });
   };
   return {
@@ -109,21 +122,31 @@ export function createScopedAgentSession(options: ScopedAgentSessionOptions): Sc
       if (runIds.size > 1) throw new Error('会话存在多个未处理回合；请先处理原会话审批。');
       controller = undefined;
       publish({ sessionId, runId: approvals[0]?.runId, status: approvals.length ? 'awaiting-approval' : 'idle',
-        messages: getCanvasAgentSessionMessages(sessionId), approvals, toolEvents: [], error: undefined, liveText: '', reasoningSummary: '',
+        messages: getCanvasAgentSessionMessages(sessionId), approvals, toolEvents: [], error: undefined, failure: undefined, liveText: '', reasoningSummary: '',
+      });
+      void refreshCanvasAgentSessionMedia(sessionId).then(() => {
+        if (snapshot.sessionId === sessionId && !busy) publish({ messages: getCanvasAgentSessionMessages(sessionId) });
+      }).catch(() => {
+        // A missing/unavailable asset remains visibly missing; it must not replace another conversation.
       });
     },
     newSession() {
       if (busy || snapshot.status === 'awaiting-approval') throw new Error('请先停止当前回合。');
       controller = undefined;
-      publish({ sessionId: undefined, runId: undefined, status: 'idle', messages: [], toolEvents: [], approvals: [], error: undefined, liveText: '', reasoningSummary: '' });
+      publish({ sessionId: undefined, runId: undefined, status: 'idle', messages: [], toolEvents: [], approvals: [], error: undefined, failure: undefined, liveText: '', reasoningSummary: '' });
     },
     async send(input: ScopedAgentSendInput) {
       if (busy || snapshot.status === 'awaiting-approval') throw new Error('当前回合尚未完成；请停止或处理审批。');
       if (!input.message.trim()) throw new Error('消息不能为空。');
       busy = true;
       controller = new AbortController();
-      publish({ status: 'running', error: undefined, liveText: '', reasoningSummary: '', approvals: [],
-        messages: [...snapshot.messages, { role: 'user', text: input.message, mediaReferences: [], createdAt: Date.now() }],
+      publish({ status: 'running', error: undefined, failure: undefined, liveText: '', reasoningSummary: '', approvals: [], retry: undefined,
+        messages: [...snapshot.messages, { role: 'user', text: input.message,
+          mediaReferences: (input.media ?? []).map((media) => ({
+            referenceId: `pending:${media.assetId}`, runId: 'pending', assetId: media.assetId,
+            nodeId: media.nodeId, title: media.title, origin: media.origin, mimeType: media.mimeType,
+            createdAt: Date.now(), availability: 'available' as const, previewSource: media.source,
+          })), createdAt: Date.now() }],
       });
       try {
         const result = await runCanvasAgentTurn({ ...input, projectId, scope: options.scope, sessionId: snapshot.sessionId, signal: controller.signal, ...callbacks });
@@ -138,7 +161,7 @@ export function createScopedAgentSession(options: ScopedAgentSessionOptions): Sc
       if (controller?.signal.aborted) throw new DOMException('Cancelled', 'AbortError');
       busy = true;
       controller ??= new AbortController();
-      publish({ status: 'running', error: undefined, liveText: '' });
+      publish({ status: 'running', error: undefined, failure: undefined, liveText: '', retry: undefined });
       try {
         const result = await resolveCanvasAgentApproval({ ...input, runId: snapshot.runId, signal: controller.signal, ...callbacks });
         if (controller.signal.aborted) { cancelCanvasAgentRun(result.runId); publish({ status: 'cancelled', approvals: [] }); return; }
@@ -150,7 +173,7 @@ export function createScopedAgentSession(options: ScopedAgentSessionOptions): Sc
     stop() {
       controller?.abort();
       if (snapshot.runId) cancelCanvasAgentRun(snapshot.runId);
-      publish({ status: 'cancelled', approvals: [], liveText: '' });
+      publish({ status: 'cancelled', approvals: [], liveText: '', retry: undefined, error: undefined, failure: undefined });
     },
   };
 }

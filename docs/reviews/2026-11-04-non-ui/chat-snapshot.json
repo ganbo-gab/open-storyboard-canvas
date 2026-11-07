@@ -1,0 +1,81 @@
+{
+  "version": 2,
+  "adapter": "template",
+  "profile": {
+    "version": 2,
+    "id": "audit-contract",
+    "name": "Audit",
+    "baseUrl": "https://audit.invalid",
+    "auth": {
+      "type": "bearer"
+    },
+    "operations": {
+      "chat": {
+        "method": "POST",
+        "path": "/chat",
+        "body": "json",
+        "template": {
+          "model": "{{model}}",
+          "messages": "{{messages}}"
+        },
+        "response": {
+          "mode": "sync",
+          "outputs": []
+        }
+      },
+      "image.generate": {
+        "method": "POST",
+        "path": "/images",
+        "body": "json",
+        "template": {
+          "model": "{{model}}",
+          "prompt": "{{prompt}}"
+        },
+        "response": {
+          "mode": "sync",
+          "outputs": [
+            {
+              "path": "url",
+              "as": "url"
+            }
+          ]
+        }
+      }
+    },
+    "models": [
+      {
+        "id": "chat",
+        "operations": [
+          "chat"
+        ],
+        "params": []
+      },
+      {
+        "id": "image",
+        "operations": [
+          "image.generate"
+        ],
+        "params": []
+      }
+    ]
+  },
+  "input": {
+    "jobId": "custom-local-channel-job-38f1d9bc-e7fb-4633-9f84-6c9660d16967",
+    "channelId": "audit-contract",
+    "modelId": "chat",
+    "operation": "chat",
+    "prompt": "",
+    "refs": [],
+    "params": {},
+    "count": 1,
+    "chatPayload": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "AUDIT_PRIVATE_PROMPT"
+        }
+      ]
+    }
+  },
+  "submit": {}
+}

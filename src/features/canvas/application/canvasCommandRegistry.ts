@@ -4,30 +4,18 @@ import {
   type CanvasCommandEffect,
   type CanvasCommandError,
   type CanvasCommandErrorCode,
+  type CanvasCommandExecutionOptions,
   type CanvasCommandExecutionResult,
   type CanvasCommandImpact,
   type CanvasCommandOrigin,
   type CanvasCommandOutput,
   type CanvasCommandSchema,
   type CanvasCommandType,
-  type CanvasJsonSchema,
   type CanvasTransaction,
   type CanvasTransactionPreview,
   type CanvasTransactionResult,
 } from '../domain/canvasCommands';
-import {
-  CANVAS_AGENT_DIRECT_CREATE_NODE_TYPES,
-  canCreateCanvasNodeDirectly,
-  canvasNodeCapabilityManifest,
-  type CanvasNodeCapabilityDeclaration,
-} from '../domain/canvasCapabilities';
-import {
-  CANVAS_NODE_TYPES,
-  TAG_COLORS,
-  TAG_GROUP_SHAPES,
-  isTagNode,
-  type CanvasNodeType,
-} from '../domain/canvasNodes';
+import { CANVAS_NODE_TYPES, isTagNode } from '../domain/canvasNodes';
 import {
   buildCanvasAssetCatalog,
   projectCanvasAssetCatalogItem,
@@ -44,14 +32,22 @@ import {
 } from './canvasTransactionCoordinator';
 import {
   applyCanvasGraphCommand,
-  CANVAS_GRAPH_COMMAND_TYPES,
+  isAtomicCanvasGraphCommand,
 } from './canvasCommandGraph';
 import {
   collectInputReferences,
   inspectTagGraphState,
 } from './graphReferenceResolver';
-import { isAgentCanvasToolType, type CanvasToolWorkflowFacade } from './canvasToolWorkflowFacade';
+import type { CanvasToolWorkflowFacade } from './canvasToolWorkflowFacade';
 import type { CanvasEventBus } from './ports';
+import { withCanvasHistoryGroup } from '@/stores/canvasHistory';
+import { runNodeMediaEdit } from './media';
+import { CANVAS_COMMAND_INPUT_SCHEMAS } from './canvasCommandSchemas';
+import { isPlainRecord, validateCommandInput } from './canvasCommandValidation';
+import {
+  getCanvasGraphCommandOriginError,
+  isCanvasCommandOrigin,
+} from './canvasCommandOriginPolicy';
 
 export interface CanvasCommandDefinition {
   type: CanvasCommandType;
@@ -70,62 +66,6 @@ export interface CanvasCommandRegistryDependencies {
   nextTransactionId?: () => string;
 }
 
-function objectSchema(
-  required: string[],
-  properties: Record<string, CanvasJsonSchema['properties'][string]>,
-): CanvasJsonSchema {
-  return { type: 'object', additionalProperties: false, required, properties };
-}
-
-const stringField = (description: string, values?: readonly string[]) => ({
-  type: 'string' as const,
-  description,
-  ...(values ? { enum: values } : {}),
-});
-const numberField = (description: string) => ({ type: 'number' as const, description });
-const booleanField = (description: string) => ({ type: 'boolean' as const, description });
-const arrayField = (description: string, items?: CanvasJsonSchema['properties'][string]) => ({
-  type: 'array' as const,
-  description,
-  ...(items ? { items } : {}),
-});
-const objectField = (
-  description: string,
-  properties?: Record<string, CanvasJsonSchema['properties'][string]>,
-  required?: string[],
-  additionalProperties?: boolean,
-) => ({
-  type: 'object' as const,
-  description,
-  ...(properties ? { properties } : {}),
-  ...(required ? { required } : {}),
-  ...(additionalProperties !== undefined ? { additionalProperties } : {}),
-});
-
-const finitePositionField = objectField('Finite canvas position hint; the application may move it to nearby empty space.', {
-  x: numberField('Finite canvas X coordinate.'),
-  y: numberField('Finite canvas Y coordinate.'),
-}, ['x', 'y'], false);
-
-const createConfigurationField = objectField('Allowed create-time configuration. Use aspectRatio (not ratio) and resolution (not size).', {
-  displayName: stringField('Optional visible node title.'),
-  prompt: stringField('Generation prompt.'),
-  content: stringField('Text annotation content.'),
-  modelId: stringField('Exact configured catalog model id.'),
-  providerId: stringField('Optional configured text provider id.'),
-  aspectRatio: stringField('Requested ratio such as 16:9.'),
-  resolution: stringField('Requested resolution such as 2K.'),
-  duration: stringField('Requested video duration.'),
-  extraParams: objectField('Bounded model-specific parameters.', undefined, undefined, true),
-  openDirectorStudio: booleanField('Open Director Studio after creation.'),
-  directorStudioMode: stringField('Director Studio mode.', ['flat', 'panorama']),
-  enabled: booleanField('Whether a tag or tag group is enabled.'),
-  tagColor: stringField('Legacy tag color.', TAG_COLORS),
-  memberNodeIds: arrayField('Direct tag-group member node ids.', stringField('Canvas node id.')),
-  tagGroupColor: stringField('Tag-group color.', TAG_COLORS),
-  tagGroupShape: stringField('Tag-group shape.', TAG_GROUP_SHAPES),
-}, [], false);
-
 const EFFECTS: Record<CanvasCommandType, CanvasCommandEffect> = {
   'canvas.query': 'read',
   'node.create': 'graph',
@@ -137,8 +77,13 @@ const EFFECTS: Record<CanvasCommandType, CanvasCommandEffect> = {
   'node.layout': 'graph',
   'node.setEnabled': 'graph',
   'node.duplicate': 'graph',
+  'batch.setPrimary': 'graph',
+  'batch.setCollapsed': 'graph',
+  'batch.split': 'graph',
+  'node.media.edit': 'graph',
   'node.tool.run': 'generation',
   'storyboard.update': 'graph',
+  'storyboard.merge': 'graph',
   'panorama.update': 'graph',
   'director.update': 'graph',
   'director.open': 'navigation',
@@ -148,6 +93,7 @@ const EFFECTS: Record<CanvasCommandType, CanvasCommandEffect> = {
   'tagGroup.setAppearance': 'graph',
   'edge.connect': 'graph',
   'edge.disconnect': 'graph',
+  'selection.connect': 'graph',
   'group.create': 'graph',
   'group.ungroup': 'graph',
   'selection.set': 'navigation',
@@ -160,172 +106,8 @@ const EFFECTS: Record<CanvasCommandType, CanvasCommandEffect> = {
   'generation.locateResult': 'navigation',
 };
 
-const INPUT_SCHEMAS: Record<CanvasCommandType, CanvasJsonSchema> = {
-  'canvas.query': objectSchema(['scope'], {
-    scope: stringField('Bounded projection to return.', ['graph', 'nodes', 'edges', 'selection']),
-    nodeIds: arrayField('Optional node id filter.'),
-    limit: numberField('Maximum number of records.'),
-  }),
-  'node.create': objectSchema(['nodeType', 'position'], {
-    nodeType: stringField(
-      'Exact registered directly creatable canvas node type. For image generation use imageNode.',
-      CANVAS_AGENT_DIRECT_CREATE_NODE_TYPES,
-    ),
-    position: finitePositionField,
-    nodeId: stringField('Optional caller-provided stable node id.'),
-    dimensions: objectField('Optional finite positive initial dimensions.', {
-      width: numberField('Positive width.'),
-      height: numberField('Positive height.'),
-    }, ['width', 'height'], false),
-    configuration: createConfigurationField,
-  }),
-  'node.delete': objectSchema(['nodeIds'], { nodeIds: arrayField('Node ids to delete with descendants.') }),
-  'node.rename': objectSchema(['nodeId', 'displayName'], {
-    nodeId: stringField('Node id.'),
-    displayName: stringField('New display name.'),
-  }),
-  'node.setPrompt': objectSchema(['nodeId', 'prompt'], {
-    nodeId: stringField('Prompt-capable node id.'),
-    prompt: stringField('New prompt or annotation content.'),
-  }),
-  'node.setModelConfig': objectSchema(['nodeId', 'modelId'], {
-    nodeId: stringField('Generation node id.'),
-    modelId: stringField('Catalog model id.'),
-    providerId: stringField('Optional provider id.'),
-    aspectRatio: stringField('Optional request ratio.'),
-    resolution: stringField('Optional video resolution.'),
-    duration: stringField('Optional video duration.'),
-    extraParams: objectField('Model-specific validated parameter values.'),
-  }),
-  'node.move': objectSchema(['positions'], { positions: arrayField('Node id and finite position records.') }),
-  'node.layout': objectSchema(['nodeIds', 'direction'], {
-    nodeIds: arrayField('Node ids to lay out.'),
-    direction: stringField('horizontal, vertical, or grid.'),
-    origin: objectField('Optional canvas origin.'),
-    gap: numberField('Optional non-negative gap.'),
-    columns: numberField('Optional positive grid column count.'),
-  }),
-  'node.setEnabled': objectSchema(['nodeIds', 'enabled'], {
-    nodeIds: arrayField('Tag or tag-group node ids to update atomically.'),
-    enabled: booleanField('Whether references through these tags remain active.'),
-  }),
-  'node.duplicate': objectSchema(['copies'], {
-    copies: arrayField('Metadata-only tag or tag-group copy records.'),
-  }),
-  'node.tool.run': objectSchema(['nodeId', 'toolType'], {
-    nodeId: stringField('Image source node id.'),
-    toolType: stringField('Registered image or storyboard tool type.'),
-    options: objectField('Bounded tool-specific options.'),
-  }),
-  'storyboard.update': objectSchema(['nodeId'], {
-    nodeId: stringField('Storyboard split node id.'),
-    frames: arrayField('Frame note/order patches.'),
-    exportOptions: objectField('Storyboard export display options.'),
-  }),
-  'panorama.update': objectSchema(['nodeId'], {
-    nodeId: stringField('Panorama node id.'),
-    sourceMode: stringField('text or image.'),
-    sourceAssetId: stringField('Stable source image asset id.'),
-    sourcePrompt: stringField('Panorama generation prompt.'),
-    projection: stringField('spherical or cylindrical.'),
-    smartBase: booleanField('Use the panorama base-image constraint.'),
-    initialYaw: numberField('Initial viewer yaw.'),
-    initialPitch: numberField('Initial viewer pitch.'),
-    initialFov: numberField('Initial viewer field of view.'),
-  }),
-  'director.update': objectSchema(['nodeId'], {
-    nodeId: stringField('Director Studio node id.'),
-    mode: stringField('flat or panorama.'),
-    basePrompt: stringField('Scene prompt.'),
-    aspectRatio: stringField('Canvas aspect ratio.'),
-    aspectFrame: stringField('Director aspect frame.'),
-    screenshotResolution: stringField('Screenshot resolution.'),
-    themeColor: stringField('Director Studio theme color.'),
-    backgroundAssetId: stringField('Stable background image asset id.'),
-    backgroundPanoramaAssetId: stringField('Stable panorama background asset id.'),
-    referenceAssetIds: arrayField('Stable reference asset ids.'),
-    items: arrayField('Structured Director Studio scene items.'),
-    customActionPresets: arrayField('Custom action names.'),
-    customActionPoses: objectField('Custom action poses.'),
-    camera: objectField('Camera settings.'),
-    lighting: objectField('Lighting settings.'),
-    grid: objectField('Grid settings.'),
-    viewSettings: objectField('View settings.'),
-    shortcuts: objectField('Shortcut bindings.'),
-    motionProject: objectField('Versioned Director Studio motion project, or null.'),
-  }),
-  'director.open': objectSchema(['nodeId'], {
-    nodeId: stringField('Director Studio node id.'),
-    focus: booleanField('Focus the owning canvas node before opening.'),
-  }),
-  'director.record': objectSchema(['nodeId', 'resolution', 'fps'], {
-    nodeId: stringField('Director Studio node id.'),
-    resolution: stringField('720p or 1080p.'),
-    fps: numberField('24 or 30 frames per second.'),
-    addToCanvas: booleanField('Create and locate a canvas video node after recording.'),
-  }),
-  'tag.setColor': objectSchema(['tagId', 'color'], {
-    tagId: stringField('Tag node id.'),
-    color: stringField('Registered semantic tag color.'),
-  }),
-  'tagGroup.setMembers': objectSchema(['groupId', 'memberNodeIds'], {
-    groupId: stringField('Tag-group node id.'),
-    memberNodeIds: arrayField('Explicit direct image, video, and text member node ids.'),
-  }),
-  'tagGroup.setAppearance': objectSchema(['groupId'], {
-    groupId: stringField('Tag-group node id.'),
-    color: stringField('Registered semantic group color.'),
-    shape: stringField('rectangle, rounded, or frame.'),
-  }),
-  'edge.connect': objectSchema(['sourceNodeId', 'targetNodeId'], {
-    sourceNodeId: stringField('Source node id.'),
-    targetNodeId: stringField('Target node id.'),
-    edgeId: stringField('Optional caller-provided stable edge id.'),
-  }),
-  'edge.disconnect': objectSchema(['edgeIds'], { edgeIds: arrayField('Edge ids to delete.') }),
-  'group.create': objectSchema(['nodeIds'], {
-    nodeIds: arrayField('Member node ids.'),
-    groupId: stringField('Optional caller-provided stable group id.'),
-    displayName: stringField('Optional group display name.'),
-  }),
-  'group.ungroup': objectSchema(['groupIds'], { groupIds: arrayField('Group ids to dissolve.') }),
-  'selection.set': objectSchema(['nodeIds'], { nodeIds: arrayField('Node ids to select, or empty to clear.') }),
-  'viewport.focus': objectSchema(['nodeIds'], {
-    nodeIds: arrayField('Node ids to focus.'),
-    padding: numberField('Viewport padding from zero to one.'),
-    select: booleanField('Whether to select focused nodes.'),
-  }),
-  'asset.list': objectSchema([], {
-    kind: stringField('Optional image, video, or audio filter.'),
-    query: stringField('Optional case-insensitive title, source, or asset id search.'),
-    nodeIds: arrayField('Optional exact owning node ids.'),
-    relatedToNodeIds: arrayField('Optional node ids whose direct graph neighbors should be searched.'),
-    selectedOnly: booleanField('Only return assets owned by selected nodes.'),
-    region: objectField('Optional finite canvas rectangle with x, y, width, and height.'),
-    limit: numberField('Maximum number of assets.'),
-  }),
-  'asset.locate': objectSchema(['assetId'], {
-    assetId: stringField('Stable asset id from asset.list.'),
-    select: booleanField('Whether to select the asset node.'),
-  }),
-  'generation.submit': objectSchema(['nodeIds'], { nodeIds: arrayField('Generation-capable node ids.') }),
-  'generation.recover': objectSchema(['jobId'], {
-    jobId: stringField('Persisted generation job id with a safe upstream handle.'),
-    nodeIds: arrayField('Optional canvas nodes already associated with this job.'),
-  }),
-  'generation.status': objectSchema([], {
-    nodeId: stringField('Generation node id.'),
-    jobId: stringField('Stable generation job id.'),
-  }),
-  'generation.locateResult': objectSchema([], {
-    nodeId: stringField('Generation node id.'),
-    jobId: stringField('Stable generation job id.'),
-    select: booleanField('Whether to select the result node.'),
-  }),
-};
-
 export const CANVAS_REGISTERED_COMMAND_TYPES = Object.freeze(
-  Object.keys(INPUT_SCHEMAS) as CanvasCommandType[],
+  Object.keys(CANVAS_COMMAND_INPUT_SCHEMAS) as CanvasCommandType[],
 );
 
 function summarizeCommand(command: CanvasCommand): string {
@@ -337,9 +119,21 @@ function summarizeCommand(command: CanvasCommand): string {
     case 'node.create':
       return `Create ${command.input.nodeType} node.`;
     case 'node.setEnabled':
-      return `${command.input.enabled ? 'Enable' : 'Disable'} ${command.input.nodeIds.length} tag item(s).`;
+      return `${command.input.enabled ? 'Enable' : 'Disable'} ${command.input.nodeIds.length} node(s).`;
     case 'node.duplicate':
-      return `Duplicate ${command.input.copies.length} tag item(s) without edges.`;
+      return `Duplicate ${command.input.copies.length} node(s) with all graph connections.`;
+    case 'batch.setPrimary':
+      return `Set ${command.input.nodeId} as primary result of ${command.input.batchId}.`;
+    case 'batch.setCollapsed':
+      return `${command.input.collapsed ? 'Collapse' : 'Expand'} result stack ${command.input.batchId}.`;
+    case 'batch.split':
+      return `Separate result stack ${command.input.batchId} into independent nodes.`;
+    case 'storyboard.merge':
+      return `Create a storyboard from ${command.input.nodeIds.length} ordered image nodes.`;
+    case 'selection.connect':
+      return `Connect ${command.input.sourceNodeIds.length} source node(s) to ${command.input.targetNodeId}.`;
+    case 'node.media.edit':
+      return `Apply local ${command.input.operation.kind} to ${command.input.nodeId}; no generation request.`;
     case 'tag.setColor':
       return `Update tag ${command.input.tagId} color.`;
     case 'tagGroup.setMembers':
@@ -371,655 +165,9 @@ function createDefinitions(): Map<CanvasCommandType, CanvasCommandDefinition> {
   return new Map(CANVAS_REGISTERED_COMMAND_TYPES.map((type) => [type, {
     type,
     effect: EFFECTS[type],
-    schema: { commandType: type, version: CANVAS_COMMAND_VERSION, input: INPUT_SCHEMAS[type] },
+    schema: { commandType: type, version: CANVAS_COMMAND_VERSION, input: CANVAS_COMMAND_INPUT_SCHEMAS[type] },
     summarize: summarizeCommand,
   }]));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (!isRecord(value)) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-function isCanvasCommandOrigin(value: unknown): value is CanvasCommandOrigin {
-  return value === 'ui' || value === 'agent' || value === 'system';
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: readonly string[]): boolean {
-  const allowed = new Set(allowedKeys);
-  return Object.keys(value).every((key) => allowed.has(key));
-}
-
-function validateFinitePosition(value: unknown, label: string, errors: string[]): void {
-  if (!isPlainRecord(value)
-    || !hasOnlyKeys(value, ['x', 'y'])
-    || !Object.prototype.hasOwnProperty.call(value, 'x')
-    || !Object.prototype.hasOwnProperty.call(value, 'y')
-    || !Number.isFinite(value.x)
-    || !Number.isFinite(value.y)) {
-    errors.push(`${label} must contain only finite x and y values.`);
-  }
-}
-
-function validateString(value: unknown, label: string, errors: string[], allowEmpty = false): void {
-  if (typeof value !== 'string' || (!allowEmpty && !value.trim())) {
-    errors.push(`${label} must be a ${allowEmpty ? '' : 'non-empty '}string.`);
-  }
-}
-
-function validateStringArray(value: unknown, label: string, errors: string[], allowEmpty = false): void {
-  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
-    errors.push(`${label} must be ${allowEmpty ? 'an' : 'a non-empty'} array.`);
-    return;
-  }
-  if (value.some((item) => typeof item !== 'string' || !item.trim())) {
-    errors.push(`${label} must contain only non-empty strings.`);
-  }
-}
-
-function validateJsonConfiguration(
-  value: unknown,
-  label: string,
-  errors: string[],
-  depth = 0,
-): void {
-  if (depth > 6) {
-    errors.push(`${label} cannot exceed 6 nested levels.`);
-    return;
-  }
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
-    return;
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) errors.push(`${label} numbers must be finite.`);
-    return;
-  }
-  if (Array.isArray(value)) {
-    if (value.length > 100) errors.push(`${label} arrays cannot exceed 100 items.`);
-    value.slice(0, 100).forEach((item, index) => {
-      validateJsonConfiguration(item, `${label}[${index}]`, errors, depth + 1);
-    });
-    return;
-  }
-  if (!isPlainRecord(value)) {
-    errors.push(`${label} must contain only JSON-compatible values.`);
-    return;
-  }
-  const entries = Object.entries(value);
-  if (entries.length > 100) errors.push(`${label} objects cannot exceed 100 fields.`);
-  for (const [key, child] of entries.slice(0, 100)) {
-    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (['__proto__', 'prototype', 'constructor'].includes(key)) {
-      errors.push(`${label}.${key} is not allowed.`);
-      continue;
-    }
-    if ([
-      'apikey',
-      'xapikey',
-      'authorization',
-      'proxyauthorization',
-      'cookie',
-      'setcookie',
-      'token',
-      'accesstoken',
-      'refreshtoken',
-      'idtoken',
-      'bearertoken',
-      'password',
-      'passwd',
-      'secret',
-      'clientsecret',
-      'privatekey',
-      'secretkey',
-      'credential',
-      'credentials',
-    ].includes(normalizedKey)
-      || normalizedKey.includes('apikey')
-      || /(?:access|refresh|id|bearer)token(?:value)?$/.test(normalizedKey)
-      || /(?:clientsecret|privatekey|secretkey|password|passwd|credentials?)$/.test(normalizedKey)) {
-      errors.push(`${label}.${key} cannot contain credentials; use the approved settings workflow.`);
-      continue;
-    }
-    validateJsonConfiguration(child, `${label}.${key}`, errors, depth + 1);
-  }
-}
-
-function allowedCreateConfigurationKeys(nodeType: CanvasNodeType): Set<string> {
-  const common = ['displayName'];
-  switch (nodeType) {
-    case CANVAS_NODE_TYPES.imageEdit:
-    case CANVAS_NODE_TYPES.storyboardGen:
-      return new Set([...common, 'prompt', 'modelId', 'aspectRatio', 'resolution', 'extraParams']);
-    case CANVAS_NODE_TYPES.aiVideo:
-      return new Set([...common, 'prompt', 'modelId', 'aspectRatio', 'resolution', 'duration', 'extraParams']);
-    case CANVAS_NODE_TYPES.aiText:
-      return new Set([...common, 'prompt', 'modelId', 'providerId']);
-    case CANVAS_NODE_TYPES.aiAudio:
-      return new Set([...common, 'prompt', 'modelId']);
-    case CANVAS_NODE_TYPES.textAnnotation:
-      return new Set([...common, 'content']);
-    case CANVAS_NODE_TYPES.upload:
-    case CANVAS_NODE_TYPES.panorama:
-      return new Set([...common, 'aspectRatio']);
-    case CANVAS_NODE_TYPES.blueprint:
-      return new Set([...common, 'aspectRatio', 'openDirectorStudio', 'directorStudioMode']);
-    case CANVAS_NODE_TYPES.tag:
-      return new Set([...common, 'enabled', 'tagColor']);
-    case CANVAS_NODE_TYPES.tagGroup:
-      return new Set([...common, 'enabled', 'memberNodeIds', 'tagGroupColor', 'tagGroupShape']);
-    default:
-      return new Set(common);
-  }
-}
-
-function validateCreateConfiguration(
-  nodeType: CanvasNodeType,
-  value: unknown,
-  errors: string[],
-): void {
-  if (!isPlainRecord(value)) {
-    errors.push('configuration must be an object.');
-    return;
-  }
-  const allowedKeys = allowedCreateConfigurationKeys(nodeType);
-  const unknownConfigurationKey = Object.keys(value).find((key) => !allowedKeys.has(key));
-  if (unknownConfigurationKey) {
-    errors.push(`Unknown or unsupported ${nodeType} create configuration field: ${unknownConfigurationKey}.`);
-  }
-  if ('displayName' in value) {
-    validateString(value.displayName, 'configuration.displayName', errors);
-    if (typeof value.displayName === 'string' && value.displayName.length > 200) {
-      errors.push('configuration.displayName cannot exceed 200 characters.');
-    }
-  }
-  if ('prompt' in value) {
-    validateString(value.prompt, 'configuration.prompt', errors, true);
-    if (typeof value.prompt === 'string' && value.prompt.length > 100_000) {
-      errors.push('configuration.prompt cannot exceed 100000 characters.');
-    }
-  }
-  if ('content' in value) {
-    validateString(value.content, 'configuration.content', errors, true);
-    if (typeof value.content === 'string' && value.content.length > 100_000) {
-      errors.push('configuration.content cannot exceed 100000 characters.');
-    }
-  }
-  if ('modelId' in value) validateString(value.modelId, 'configuration.modelId', errors);
-  if ('providerId' in value && value.providerId !== null) {
-    validateString(value.providerId, 'configuration.providerId', errors);
-  }
-  if ('aspectRatio' in value) validateString(value.aspectRatio, 'configuration.aspectRatio', errors);
-  if ('resolution' in value) validateString(value.resolution, 'configuration.resolution', errors);
-  if ('duration' in value) validateString(value.duration, 'configuration.duration', errors);
-  if ('extraParams' in value) {
-    if (!isPlainRecord(value.extraParams)) errors.push('configuration.extraParams must be an object.');
-    else validateJsonConfiguration(value.extraParams, 'configuration.extraParams', errors);
-  }
-  if ('openDirectorStudio' in value && typeof value.openDirectorStudio !== 'boolean') {
-    errors.push('configuration.openDirectorStudio must be a boolean.');
-  }
-  if (
-    'directorStudioMode' in value
-    && value.directorStudioMode !== 'flat'
-    && value.directorStudioMode !== 'panorama'
-  ) {
-    errors.push('configuration.directorStudioMode must be flat or panorama.');
-  }
-  if ('enabled' in value && typeof value.enabled !== 'boolean') {
-    errors.push('configuration.enabled must be a boolean.');
-  }
-  if ('tagColor' in value && !(TAG_COLORS as readonly unknown[]).includes(value.tagColor)) {
-    errors.push(`configuration.tagColor must be one of: ${TAG_COLORS.join(', ')}.`);
-  }
-  if ('memberNodeIds' in value) {
-    validateStringArray(value.memberNodeIds, 'configuration.memberNodeIds', errors, true);
-    if (Array.isArray(value.memberNodeIds) && value.memberNodeIds.length > 100) {
-      errors.push('configuration.memberNodeIds cannot exceed 100 items.');
-    }
-  }
-  if ('tagGroupColor' in value && !(TAG_COLORS as readonly unknown[]).includes(value.tagGroupColor)) {
-    errors.push(`configuration.tagGroupColor must be one of: ${TAG_COLORS.join(', ')}.`);
-  }
-  if ('tagGroupShape' in value && !(TAG_GROUP_SHAPES as readonly unknown[]).includes(value.tagGroupShape)) {
-    errors.push(`configuration.tagGroupShape must be one of: ${TAG_GROUP_SHAPES.join(', ')}.`);
-  }
-  if (nodeType === CANVAS_NODE_TYPES.aiVideo && 'aspectRatio' in value && !('modelId' in value)) {
-    errors.push('AI video create configuration requires modelId when aspectRatio is provided.');
-  }
-}
-
-function validateFiniteNumber(value: unknown, label: string, errors: string[]): void {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    errors.push(`${label} must be a finite number.`);
-  }
-}
-
-function validateBoundedStringArray(value: unknown, label: string, errors: string[], max = 100): void {
-  validateStringArray(value, label, errors, true);
-  if (Array.isArray(value) && value.length > max) errors.push(`${label} cannot exceed ${max} items.`);
-}
-
-function validateStoryboardUpdateInput(input: Record<string, unknown>, errors: string[]): void {
-  if (input.frames !== undefined) {
-    if (!Array.isArray(input.frames) || input.frames.length > 100) {
-      errors.push('frames must be an array with at most 100 items.');
-    } else {
-      input.frames.forEach((frame, index) => {
-        if (!isPlainRecord(frame) || !hasOnlyKeys(frame, ['frameId', 'note', 'order'])) {
-          errors.push(`frames[${index}] contains unsupported fields.`);
-          return;
-        }
-        validateString(frame.frameId, `frames[${index}].frameId`, errors);
-        if (frame.note !== undefined) validateString(frame.note, `frames[${index}].note`, errors, true);
-        if (frame.order !== undefined && (!Number.isInteger(frame.order) || Number(frame.order) < 0)) {
-          errors.push(`frames[${index}].order must be a non-negative integer.`);
-        }
-      });
-    }
-  }
-  if (input.exportOptions !== undefined) {
-    const options = input.exportOptions;
-    const allowed = ['showFrameIndex', 'showFrameNote', 'notePlacement', 'imageFit', 'frameIndexPrefix', 'cellGap', 'outerPadding', 'fontSize', 'backgroundColor', 'textColor'];
-    if (!isPlainRecord(options) || !hasOnlyKeys(options, allowed)) {
-      errors.push('exportOptions contains unsupported fields.');
-      return;
-    }
-    for (const field of ['showFrameIndex', 'showFrameNote'] as const) {
-      if (field in options && typeof options[field] !== 'boolean') errors.push(`exportOptions.${field} must be a boolean.`);
-    }
-    if (options.notePlacement !== undefined && !['overlay', 'bottom'].includes(String(options.notePlacement))) errors.push('exportOptions.notePlacement is invalid.');
-    if (options.imageFit !== undefined && !['cover', 'contain'].includes(String(options.imageFit))) errors.push('exportOptions.imageFit is invalid.');
-    if (options.frameIndexPrefix !== undefined) validateString(options.frameIndexPrefix, 'exportOptions.frameIndexPrefix', errors, true);
-    for (const field of ['cellGap', 'outerPadding', 'fontSize'] as const) {
-      if (options[field] !== undefined) {
-        validateFiniteNumber(options[field], `exportOptions.${field}`, errors);
-        if (typeof options[field] === 'number' && options[field] < 0) errors.push(`exportOptions.${field} cannot be negative.`);
-      }
-    }
-    for (const field of ['backgroundColor', 'textColor'] as const) {
-      if (field in options) validateString(options[field], `exportOptions.${field}`, errors);
-    }
-  }
-}
-
-function validateVector3(value: unknown, label: string, errors: string[]): void {
-  if (!isPlainRecord(value) || !hasOnlyKeys(value, ['x', 'y', 'z'])) {
-    errors.push(`${label} must contain only x, y, and z.`);
-    return;
-  }
-  for (const axis of ['x', 'y', 'z'] as const) validateFiniteNumber(value[axis], `${label}.${axis}`, errors);
-}
-
-function validateDirectorUpdateInput(input: Record<string, unknown>, errors: string[]): void {
-  if (input.mode !== undefined && !['flat', 'panorama'].includes(String(input.mode))) errors.push('mode must be flat or panorama.');
-  for (const field of ['basePrompt', 'aspectRatio', 'themeColor'] as const) {
-    if (input[field] !== undefined) validateString(input[field], field, errors, field === 'basePrompt');
-  }
-  if (input.aspectFrame !== undefined && !['panorama', '1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'].includes(String(input.aspectFrame))) errors.push('aspectFrame is invalid.');
-  if (input.screenshotResolution !== undefined && !['1080p', '1440p', '4k'].includes(String(input.screenshotResolution))) errors.push('screenshotResolution is invalid.');
-  for (const field of ['backgroundAssetId', 'backgroundPanoramaAssetId'] as const) {
-    if (input[field] !== undefined && input[field] !== null) validateString(input[field], field, errors);
-  }
-  for (const field of ['referenceAssetIds', 'customActionPresets'] as const) {
-    if (input[field] !== undefined) validateBoundedStringArray(input[field], field, errors);
-  }
-  for (const field of ['customActionPoses', 'shortcuts'] as const) {
-    if (input[field] !== undefined) {
-      if (!isPlainRecord(input[field])) errors.push(`${field} must be an object.`);
-      else validateJsonConfiguration(input[field], field, errors);
-    }
-  }
-  if (input.items !== undefined) {
-    if (!Array.isArray(input.items) || input.items.length > 100) {
-      errors.push('items must be an array with at most 100 items.');
-    } else {
-      const allowed = ['id', 'label', 'x', 'y', 'color', 'showLabel', 'note', 'pos3d', 'rotation3d', 'scale3d', 'category', 'presetId', 'relation', 'action', 'directorStudioRole', 'directorStudioNumber', 'bodyControls', 'referenceAssetId'];
-      input.items.forEach((item, index) => {
-        if (!isPlainRecord(item) || !hasOnlyKeys(item, allowed)) {
-          errors.push(`items[${index}] contains unsupported fields.`);
-          return;
-        }
-        for (const field of ['id', 'label', 'color'] as const) validateString(item[field], `items[${index}].${field}`, errors);
-        for (const field of ['x', 'y'] as const) validateFiniteNumber(item[field], `items[${index}].${field}`, errors);
-        if (item.showLabel !== undefined && typeof item.showLabel !== 'boolean') errors.push(`items[${index}].showLabel must be a boolean.`);
-        for (const field of ['note', 'presetId', 'relation', 'action', 'referenceAssetId'] as const) {
-          if (item[field] !== undefined && item[field] !== null) validateString(item[field], `items[${index}].${field}`, errors, field !== 'referenceAssetId');
-        }
-        if (item.category !== undefined && !['person', 'object', 'scene'].includes(String(item.category))) errors.push(`items[${index}].category is invalid.`);
-        if (item.directorStudioRole !== undefined && item.directorStudioRole !== 'pedestrian') errors.push(`items[${index}].directorStudioRole is invalid.`);
-        if (item.directorStudioNumber !== undefined && (!Number.isInteger(item.directorStudioNumber) || Number(item.directorStudioNumber) < 0)) errors.push(`items[${index}].directorStudioNumber must be a non-negative integer.`);
-        for (const field of ['pos3d', 'rotation3d', 'scale3d'] as const) if (item[field] !== undefined) validateVector3(item[field], `items[${index}].${field}`, errors);
-        if (item.bodyControls !== undefined) validateJsonConfiguration(item.bodyControls, `items[${index}].bodyControls`, errors);
-      });
-    }
-  }
-  for (const [field, allowed] of [['camera', ['fov', 'lensDistance', 'activePreset']], ['lighting', ['enabled', 'mainIntensity', 'mainYaw', 'mainPitch', 'mainColor', 'ambientIntensity', 'ambientColor']], ['grid', ['visible', 'height']], ['viewSettings', ['wheelZoomEnabled', 'reverseWheelZoom', 'showAdvancedPedestrianTags']]] as const) {
-    const value = input[field];
-    if (value === undefined) continue;
-    if (!isPlainRecord(value) || !hasOnlyKeys(value, allowed)) {
-      errors.push(`${field} contains unsupported fields.`);
-      continue;
-    }
-    const record = value as Record<string, unknown>;
-    if (field === 'camera') {
-      for (const key of ['fov', 'lensDistance'] as const) if (record[key] !== undefined) validateFiniteNumber(record[key], `${field}.${key}`, errors);
-      if (record.activePreset !== undefined && record.activePreset !== null) validateString(record.activePreset, `${field}.activePreset`, errors);
-    } else if (field === 'lighting') {
-      if (record.enabled !== undefined && typeof record.enabled !== 'boolean') errors.push(`${field}.enabled must be a boolean.`);
-      for (const key of ['mainIntensity', 'mainYaw', 'mainPitch', 'ambientIntensity'] as const) if (record[key] !== undefined) validateFiniteNumber(record[key], `${field}.${key}`, errors);
-      for (const key of ['mainColor', 'ambientColor'] as const) if (record[key] !== undefined) validateString(record[key], `${field}.${key}`, errors);
-    } else if (field === 'grid') {
-      if (record.visible !== undefined && typeof record.visible !== 'boolean') errors.push(`${field}.visible must be a boolean.`);
-      if (record.height !== undefined) validateFiniteNumber(record.height, `${field}.height`, errors);
-    } else {
-      for (const key of ['wheelZoomEnabled', 'reverseWheelZoom', 'showAdvancedPedestrianTags'] as const) {
-        if (record[key] !== undefined && typeof record[key] !== 'boolean') errors.push(`${field}.${key} must be a boolean.`);
-      }
-    }
-  }
-  if (input.motionProject !== undefined && input.motionProject !== null) {
-    const project = input.motionProject;
-    if (!isPlainRecord(project) || !hasOnlyKeys(project, ['schemaVersion', 'durationSeconds', 'loop', 'cameraTrack', 'objectTracks', 'actionTracks', 'customClips']) || project.schemaVersion !== 1) errors.push('motionProject must be a version 1 project with only supported fields.');
-    else {
-      validateFiniteNumber(project.durationSeconds, 'motionProject.durationSeconds', errors);
-      if (typeof project.durationSeconds === 'number' && project.durationSeconds < 0) errors.push('motionProject.durationSeconds cannot be negative.');
-      for (const field of ['cameraTrack', 'objectTracks', 'actionTracks', 'customClips'] as const) {
-        if (project[field] === undefined) errors.push(`motionProject.${field} is required.`);
-        else validateJsonConfiguration(project[field], `motionProject.${field}`, errors);
-      }
-    }
-  }
-}
-
-function validateCommandInput(
-  command: CanvasCommand,
-  origin: CanvasCommandOrigin,
-): string[] {
-  const errors: string[] = [];
-  const input = command.input as unknown;
-  if (!isPlainRecord(input)) {
-    return ['Command input must be an object.'];
-  }
-  const schema = INPUT_SCHEMAS[command.type];
-  const unknownKey = Object.keys(input).find((key) => !(key in schema.properties));
-  if (unknownKey) {
-    errors.push(`Unknown ${command.type} input field: ${unknownKey}.`);
-  }
-  for (const required of schema.required) {
-    if (!Object.prototype.hasOwnProperty.call(input, required)) {
-      errors.push(`Missing required ${command.type} input field: ${required}.`);
-    }
-  }
-
-  switch (command.type) {
-    case 'canvas.query':
-      if (!['graph', 'nodes', 'edges', 'selection'].includes(command.input.scope)) errors.push('Invalid query scope.');
-      if (command.input.nodeIds !== undefined) validateStringArray(command.input.nodeIds, 'nodeIds', errors, true);
-      break;
-    case 'node.create':
-      if (!Object.prototype.hasOwnProperty.call(canvasNodeCapabilityManifest, command.input.nodeType)) {
-        errors.push('nodeType is not registered.');
-      } else if (!canCreateCanvasNodeDirectly(command.input.nodeType, origin)) {
-        const capability: CanvasNodeCapabilityDeclaration =
-          canvasNodeCapabilityManifest[command.input.nodeType];
-        errors.push(
-          origin === 'agent' && capability.status !== 'supported'
-            ? capability.reason ?? `Node type ${command.input.nodeType} is UI-only.`
-            : capability.directCreateReason
-            ?? 'nodeType requires a dedicated creation workflow.',
-        );
-      }
-      validateFinitePosition(command.input.position, 'position', errors);
-      if (command.input.nodeId !== undefined) validateString(command.input.nodeId, 'nodeId', errors);
-      if (command.input.dimensions !== undefined) {
-        const dimensions = command.input.dimensions as unknown;
-        if (!isPlainRecord(dimensions)
-          || !hasOnlyKeys(dimensions, ['width', 'height'])
-          || !Object.prototype.hasOwnProperty.call(dimensions, 'width')
-          || !Object.prototype.hasOwnProperty.call(dimensions, 'height')
-          || !Number.isFinite(dimensions.width)
-          || Number(dimensions.width) <= 0
-          || !Number.isFinite(dimensions.height)
-          || Number(dimensions.height) <= 0) {
-          errors.push('dimensions must contain only finite positive width and height values.');
-        }
-      }
-      if (command.input.configuration !== undefined) {
-        validateCreateConfiguration(command.input.nodeType, command.input.configuration, errors);
-      }
-      break;
-    case 'node.tool.run':
-      validateString(command.input.nodeId, 'nodeId', errors);
-      validateString(command.input.toolType, 'toolType', errors);
-      if (origin === 'agent'
-        && typeof command.input.toolType === 'string'
-        && !isAgentCanvasToolType(command.input.toolType)) {
-        errors.push('node.tool.run only supports deterministic crop, annotate, and split-storyboard tools for Agent callers.');
-      }
-      if (command.input.options !== undefined) {
-        validateJsonConfiguration(command.input.options, 'options', errors);
-      }
-      break;
-    case 'storyboard.update':
-      validateString(command.input.nodeId, 'nodeId', errors);
-      if (command.input.frames === undefined && command.input.exportOptions === undefined) {
-        errors.push('storyboard.update requires frames or exportOptions.');
-      }
-      validateStoryboardUpdateInput(command.input as Record<string, unknown>, errors);
-      break;
-    case 'panorama.update':
-      validateString(command.input.nodeId, 'nodeId', errors);
-      if (command.input.sourceMode !== undefined && !['text', 'image'].includes(command.input.sourceMode)) errors.push('sourceMode must be text or image.');
-      if (command.input.sourceAssetId !== undefined && command.input.sourceAssetId !== null) validateString(command.input.sourceAssetId, 'sourceAssetId', errors);
-      if (command.input.sourcePrompt !== undefined) validateString(command.input.sourcePrompt, 'sourcePrompt', errors, true);
-      if (command.input.projection !== undefined && !['spherical', 'cylindrical'].includes(command.input.projection)) errors.push('projection must be spherical or cylindrical.');
-      if (command.input.smartBase !== undefined && typeof command.input.smartBase !== 'boolean') errors.push('smartBase must be a boolean.');
-      for (const field of ['initialYaw', 'initialPitch', 'initialFov'] as const) {
-        if (command.input[field] !== undefined && !Number.isFinite(command.input[field])) errors.push(`${field} must be finite.`);
-      }
-      if (command.input.initialFov !== undefined && (command.input.initialFov < 10 || command.input.initialFov > 150)) errors.push('initialFov must be between 10 and 150.');
-      break;
-    case 'director.update':
-      validateString(command.input.nodeId, 'nodeId', errors);
-      if (Object.keys(command.input).length === 1) errors.push('director.update requires at least one scene field.');
-      validateDirectorUpdateInput(command.input as Record<string, unknown>, errors);
-      break;
-    case 'director.open':
-      validateString(command.input.nodeId, 'nodeId', errors);
-      if (command.input.focus !== undefined && typeof command.input.focus !== 'boolean') errors.push('focus must be a boolean.');
-      break;
-    case 'director.record':
-      validateString(command.input.nodeId, 'nodeId', errors);
-      if (!['720p', '1080p'].includes(command.input.resolution)) errors.push('resolution must be 720p or 1080p.');
-      if (command.input.fps !== 24 && command.input.fps !== 30) errors.push('fps must be 24 or 30.');
-      if (command.input.addToCanvas !== undefined && typeof command.input.addToCanvas !== 'boolean') errors.push('addToCanvas must be a boolean.');
-      break;
-    case 'node.delete':
-      validateStringArray(command.input.nodeIds, 'nodeIds', errors);
-      break;
-    case 'node.rename':
-      validateString(command.input.nodeId, 'nodeId', errors);
-      validateString(command.input.displayName, 'displayName', errors);
-      if (typeof command.input.displayName === 'string' && command.input.displayName.length > 200) errors.push('displayName cannot exceed 200 characters.');
-      break;
-    case 'node.setPrompt':
-      validateString(command.input.nodeId, 'nodeId', errors);
-      validateString(command.input.prompt, 'prompt', errors, true);
-      if (typeof command.input.prompt === 'string' && command.input.prompt.length > 100_000) errors.push('prompt cannot exceed 100000 characters.');
-      break;
-    case 'node.setModelConfig':
-      validateString(command.input.nodeId, 'nodeId', errors);
-      validateString(command.input.modelId, 'modelId', errors);
-      if (command.input.providerId !== undefined && command.input.providerId !== null) {
-        validateString(command.input.providerId, 'providerId', errors);
-      }
-      if (command.input.aspectRatio !== undefined) validateString(command.input.aspectRatio, 'aspectRatio', errors);
-      if (command.input.resolution !== undefined) validateString(command.input.resolution, 'resolution', errors);
-      if (command.input.duration !== undefined) validateString(command.input.duration, 'duration', errors);
-      if (command.input.extraParams !== undefined) {
-        if (!isPlainRecord(command.input.extraParams)) {
-          errors.push('extraParams must be an object.');
-        } else {
-          validateJsonConfiguration(command.input.extraParams, 'extraParams', errors);
-        }
-      }
-      break;
-    case 'node.move':
-      if (!Array.isArray(command.input.positions) || command.input.positions.length === 0) {
-        errors.push('positions must be a non-empty array.');
-      } else {
-        command.input.positions.forEach((item, index) => {
-          if (!isPlainRecord(item)
-            || !hasOnlyKeys(item, ['nodeId', 'position'])
-            || typeof item.nodeId !== 'string'
-            || !item.nodeId.trim()) {
-            errors.push(`positions[${index}] must contain only nodeId and position.`);
-            return;
-          }
-          validateFinitePosition(item.position, `positions[${index}].position`, errors);
-        });
-      }
-      break;
-    case 'node.layout':
-      validateStringArray(command.input.nodeIds, 'nodeIds', errors);
-      if (!['horizontal', 'vertical', 'grid'].includes(command.input.direction)) errors.push('Invalid layout direction.');
-      if (command.input.origin !== undefined) validateFinitePosition(command.input.origin, 'origin', errors);
-      if (command.input.gap !== undefined && (!Number.isFinite(command.input.gap) || command.input.gap < 0)) errors.push('gap must be a non-negative finite number.');
-      if (command.input.columns !== undefined && (!Number.isInteger(command.input.columns) || command.input.columns <= 0)) errors.push('columns must be a positive integer.');
-      break;
-    case 'node.setEnabled':
-      validateStringArray(command.input.nodeIds, 'nodeIds', errors);
-      if (typeof command.input.enabled !== 'boolean') errors.push('enabled must be a boolean.');
-      break;
-    case 'node.duplicate':
-      if (!Array.isArray(command.input.copies) || command.input.copies.length === 0) {
-        errors.push('copies must be a non-empty array.');
-      } else if (command.input.copies.length > 100) {
-        errors.push('copies cannot exceed 100 items.');
-      } else {
-        command.input.copies.forEach((copy, index) => {
-          if (!isPlainRecord(copy) || !hasOnlyKeys(copy, ['sourceNodeId', 'nodeId', 'position'])) {
-            errors.push(`copies[${index}] contains unsupported fields.`);
-            return;
-          }
-          validateString(copy.sourceNodeId, `copies[${index}].sourceNodeId`, errors);
-          if (copy.nodeId !== undefined) validateString(copy.nodeId, `copies[${index}].nodeId`, errors);
-          if (copy.position !== undefined) validateFinitePosition(copy.position, `copies[${index}].position`, errors);
-        });
-      }
-      break;
-    case 'tag.setColor':
-      validateString(command.input.tagId, 'tagId', errors);
-      if (!(TAG_COLORS as readonly string[]).includes(command.input.color)) {
-        errors.push(`color must be one of: ${TAG_COLORS.join(', ')}.`);
-      }
-      break;
-    case 'tagGroup.setMembers':
-      validateString(command.input.groupId, 'groupId', errors);
-      validateStringArray(command.input.memberNodeIds, 'memberNodeIds', errors, true);
-      if (Array.isArray(command.input.memberNodeIds) && command.input.memberNodeIds.length > 100) {
-        errors.push('memberNodeIds cannot exceed 100 items.');
-      }
-      break;
-    case 'tagGroup.setAppearance':
-      validateString(command.input.groupId, 'groupId', errors);
-      if (command.input.color === undefined && command.input.shape === undefined) {
-        errors.push('At least one appearance field is required.');
-      }
-      if (command.input.color !== undefined && !(TAG_COLORS as readonly string[]).includes(command.input.color)) {
-        errors.push(`color must be one of: ${TAG_COLORS.join(', ')}.`);
-      }
-      if (command.input.shape !== undefined && !(TAG_GROUP_SHAPES as readonly string[]).includes(command.input.shape)) {
-        errors.push(`shape must be one of: ${TAG_GROUP_SHAPES.join(', ')}.`);
-      }
-      break;
-    case 'edge.connect':
-      validateString(command.input.sourceNodeId, 'sourceNodeId', errors);
-      validateString(command.input.targetNodeId, 'targetNodeId', errors);
-      if (command.input.edgeId !== undefined) validateString(command.input.edgeId, 'edgeId', errors);
-      break;
-    case 'edge.disconnect':
-      validateStringArray(command.input.edgeIds, 'edgeIds', errors);
-      break;
-    case 'group.create':
-      validateStringArray(command.input.nodeIds, 'nodeIds', errors);
-      if (Array.isArray(command.input.nodeIds) && command.input.nodeIds.length < 2) errors.push('A group requires at least two node ids.');
-      if (command.input.groupId !== undefined) validateString(command.input.groupId, 'groupId', errors);
-      if (command.input.displayName !== undefined) {
-        validateString(command.input.displayName, 'displayName', errors);
-        if (typeof command.input.displayName === 'string' && command.input.displayName.length > 200) {
-          errors.push('displayName cannot exceed 200 characters.');
-        }
-      }
-      break;
-    case 'group.ungroup':
-      validateStringArray(command.input.groupIds, 'groupIds', errors);
-      break;
-    case 'selection.set':
-      validateStringArray(command.input.nodeIds, 'nodeIds', errors, true);
-      break;
-    case 'viewport.focus':
-      validateStringArray(command.input.nodeIds, 'nodeIds', errors);
-      if (command.input.padding !== undefined && (!Number.isFinite(command.input.padding) || command.input.padding < 0 || command.input.padding > 1)) errors.push('padding must be between zero and one.');
-      if (command.input.select !== undefined && typeof command.input.select !== 'boolean') errors.push('select must be a boolean.');
-      break;
-    case 'asset.list':
-      if (command.input.kind !== undefined && !['image', 'video', 'audio'].includes(command.input.kind)) errors.push('Invalid asset kind.');
-      if (command.input.query !== undefined) {
-        validateString(command.input.query, 'query', errors);
-        if (typeof command.input.query === 'string' && command.input.query.length > 200) errors.push('query cannot exceed 200 characters.');
-      }
-      if (command.input.nodeIds !== undefined) validateStringArray(command.input.nodeIds, 'nodeIds', errors);
-      if (command.input.relatedToNodeIds !== undefined) validateStringArray(command.input.relatedToNodeIds, 'relatedToNodeIds', errors);
-      if (command.input.selectedOnly !== undefined && typeof command.input.selectedOnly !== 'boolean') errors.push('selectedOnly must be a boolean.');
-      if (command.input.region !== undefined) {
-        const region = command.input.region as unknown;
-        if (!isPlainRecord(region)
-          || !hasOnlyKeys(region, ['x', 'y', 'width', 'height'])
-          || !Number.isFinite(region.x)
-          || !Number.isFinite(region.y)
-          || !Number.isFinite(region.width)
-          || Number(region.width) <= 0
-          || !Number.isFinite(region.height)
-          || Number(region.height) <= 0) {
-          errors.push('region must contain only finite x, y and positive width, height values.');
-        }
-      }
-      break;
-    case 'asset.locate':
-      validateString(command.input.assetId, 'assetId', errors);
-      if (command.input.select !== undefined && typeof command.input.select !== 'boolean') errors.push('select must be a boolean.');
-      break;
-    case 'generation.submit':
-      validateStringArray(command.input.nodeIds, 'nodeIds', errors);
-      break;
-    case 'generation.recover':
-      validateString(command.input.jobId, 'jobId', errors);
-      if (command.input.nodeIds !== undefined) validateStringArray(command.input.nodeIds, 'nodeIds', errors);
-      break;
-    case 'generation.status':
-    case 'generation.locateResult':
-      if (!command.input.nodeId && !command.input.jobId) errors.push('nodeId or jobId is required.');
-      if (command.input.nodeId !== undefined) validateString(command.input.nodeId, 'nodeId', errors);
-      if (command.input.jobId !== undefined) validateString(command.input.jobId, 'jobId', errors);
-      if (command.type === 'generation.locateResult'
-        && command.input.select !== undefined
-        && typeof command.input.select !== 'boolean') errors.push('select must be a boolean.');
-      break;
-  }
-
-  const limit = 'limit' in command.input ? command.input.limit : undefined;
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 500)) {
-    errors.push('limit must be an integer between 1 and 500.');
-  }
-  return errors;
 }
 
 function simpleImpact(effect: CanvasCommandEffect, summary: string, nodeIds: string[] = []): CanvasCommandImpact {
@@ -1129,7 +277,7 @@ export class CanvasCommandRegistry {
         errors,
       };
     }
-    if (CANVAS_GRAPH_COMMAND_TYPES.has(command.type)) {
+    if (isAtomicCanvasGraphCommand(command.type)) {
       return this.coordinator.preview({
         id: this.nextTransactionId(),
         origin,
@@ -1155,6 +303,8 @@ export class CanvasCommandRegistry {
     command: CanvasCommand,
     expectedRevision: number,
     origin: CanvasTransaction['origin'] = 'agent',
+    historyGroupId?: string,
+    options: CanvasCommandExecutionOptions = {},
   ): Promise<CanvasCommandExecutionResult> {
     const revisionBefore = this.getRevision();
     const errors = this.validate(command, origin);
@@ -1181,15 +331,15 @@ export class CanvasCommandRegistry {
         retryPreview: this.inspect(command, origin),
       };
     }
-    if (!CANVAS_GRAPH_COMMAND_TYPES.has(command.type)) {
-      return this.execute(command, origin);
+    if (!isAtomicCanvasGraphCommand(command.type)) {
+      return this.execute(command, origin, options);
     }
-    const transactionResult = this.coordinator.execute({
+    const transactionResult = withCanvasHistoryGroup(historyGroupId, () => this.coordinator.execute({
       id: this.nextTransactionId(),
       origin,
       expectedRevision,
       commands: [command],
-    });
+    }));
     if (!transactionResult.ok) {
       return {
         ok: false,
@@ -1210,7 +360,7 @@ export class CanvasCommandRegistry {
     };
   }
 
-  async execute(command: CanvasCommand, origin: CanvasTransaction['origin'] = 'agent'): Promise<CanvasCommandExecutionResult> {
+  async execute(command: CanvasCommand, origin: CanvasTransaction['origin'] = 'agent', options: CanvasCommandExecutionOptions = {}): Promise<CanvasCommandExecutionResult> {
     const revisionBefore = this.getRevision();
     const validationErrors = this.validate(command, origin);
     if (validationErrors.length > 0) {
@@ -1227,7 +377,7 @@ export class CanvasCommandRegistry {
       };
     }
 
-    if (CANVAS_GRAPH_COMMAND_TYPES.has(command.type)) {
+    if (isAtomicCanvasGraphCommand(command.type)) {
       const transactionResult = this.coordinator.execute({
         id: this.nextTransactionId(),
         origin,
@@ -1255,7 +405,7 @@ export class CanvasCommandRegistry {
     }
 
     try {
-      const output = await this.executeNonGraph(command);
+      const output = await this.executeNonGraph(command, origin, options);
       return {
         ok: true,
         commandType: command.type,
@@ -1292,103 +442,11 @@ export class CanvasCommandRegistry {
     if (validationErrors.length > 0) {
       return { ok: false, error: validationErrors[0] };
     }
-    const restrictedNodeId = this.findOriginRestrictedNodeId(command, draft, origin);
-    if (restrictedNodeId) {
-      const node = draft.nodes.find((candidate) => candidate.id === restrictedNodeId);
-      const capability: CanvasNodeCapabilityDeclaration | null = node
-        ? canvasNodeCapabilityManifest[node.type]
-        : null;
-      return {
-        ok: false,
-        error: {
-          code: 'invalid_command',
-          message: capability?.reason
-            ?? `Node ${restrictedNodeId} can only be edited by UI-origin commands.`,
-        },
-      };
+    const originError = getCanvasGraphCommandOriginError(command, draft, origin);
+    if (originError) {
+      return { ok: false, error: originError };
     }
     return applyCanvasGraphCommand(command, draft, this.dependencies.nodeFactory, origin);
-  }
-
-  private findOriginRestrictedNodeId(
-    command: CanvasCommand,
-    draft: CanvasGraphDraft,
-    origin: CanvasCommandOrigin,
-  ): string | null {
-    if (origin === 'ui' || command.type === 'node.create') {
-      return null;
-    }
-
-    const seedIds = new Set<string>();
-    switch (command.type) {
-      case 'node.delete':
-      case 'node.layout':
-      case 'group.create':
-      case 'node.setEnabled':
-        command.input.nodeIds.forEach((nodeId) => seedIds.add(nodeId));
-        break;
-      case 'node.duplicate':
-        command.input.copies.forEach(({ sourceNodeId }) => seedIds.add(sourceNodeId));
-        break;
-      case 'tag.setColor':
-        seedIds.add(command.input.tagId);
-        break;
-      case 'tagGroup.setMembers':
-        seedIds.add(command.input.groupId);
-        command.input.memberNodeIds.forEach((nodeId) => seedIds.add(nodeId));
-        break;
-      case 'tagGroup.setAppearance':
-        seedIds.add(command.input.groupId);
-        break;
-      case 'node.rename':
-      case 'node.setPrompt':
-      case 'node.setModelConfig':
-        seedIds.add(command.input.nodeId);
-        break;
-      case 'storyboard.update':
-      case 'panorama.update':
-      case 'director.update':
-        seedIds.add(command.input.nodeId);
-        break;
-      case 'node.move':
-        command.input.positions.forEach(({ nodeId }) => seedIds.add(nodeId));
-        break;
-      case 'edge.connect':
-        seedIds.add(command.input.sourceNodeId);
-        seedIds.add(command.input.targetNodeId);
-        break;
-      case 'edge.disconnect': {
-        const edgeIds = new Set(command.input.edgeIds);
-        draft.edges.forEach((edge) => {
-          if (edgeIds.has(edge.id)) {
-            seedIds.add(edge.source);
-            seedIds.add(edge.target);
-          }
-        });
-        break;
-      }
-      case 'group.ungroup':
-        command.input.groupIds.forEach((groupId) => seedIds.add(groupId));
-        break;
-      default:
-        return null;
-    }
-
-    let addedDescendant = true;
-    while (addedDescendant) {
-      addedDescendant = false;
-      draft.nodes.forEach((node) => {
-        if (node.parentId && seedIds.has(node.parentId) && !seedIds.has(node.id)) {
-          seedIds.add(node.id);
-          addedDescendant = true;
-        }
-      });
-    }
-
-    return draft.nodes.find((node) => (
-      seedIds.has(node.id)
-      && canvasNodeCapabilityManifest[node.type].status !== 'supported'
-    ))?.id ?? null;
   }
 
   private inspectNonGraphImpact(command: CanvasCommand): CanvasCommandImpact {
@@ -1408,13 +466,14 @@ export class CanvasCommandRegistry {
       case 'node.tool.run':
       case 'director.open':
       case 'director.record':
+      case 'node.media.edit':
         return simpleImpact(EFFECTS[command.type], this.summarize(command), [command.input.nodeId]);
       default:
         return simpleImpact(EFFECTS[command.type], this.summarize(command));
     }
   }
 
-  private async executeNonGraph(command: CanvasCommand): Promise<CanvasCommandOutput> {
+  private async executeNonGraph(command: CanvasCommand, origin: CanvasCommandOrigin, options: CanvasCommandExecutionOptions): Promise<CanvasCommandOutput> {
     const snapshot = this.dependencies.store.getSnapshot();
     switch (command.type) {
       case 'canvas.query': {
@@ -1540,7 +599,7 @@ export class CanvasCommandRegistry {
             `Node ${unsupported} does not support generation.`,
           );
         }
-        const result = this.dependencies.generation.submit(command.input.nodeIds, snapshot.nodes);
+        const result = await this.dependencies.generation.submit(command.input.nodeIds, snapshot.nodes, origin === 'agent' ? 'agent' : 'canvas');
         return { references: { nodeIds: result.acceptedNodeIds }, value: result };
       }
       case 'generation.recover': {
@@ -1572,6 +631,10 @@ export class CanvasCommandRegistry {
         }
         const focused = await this.dependencies.navigation.focusNodeIds([nodeId], { select: command.input.select });
         return { references: { nodeId, nodeIds: [nodeId], jobId: command.input.jobId }, value: { focused } };
+      }
+      case 'node.media.edit': {
+        const result = await runNodeMediaEdit(command.input.nodeId, command.input.operation, { signal: options.signal });
+        return { references: { nodeId: result.nodeIds[0], nodeIds: result.nodeIds }, value: result };
       }
       case 'node.tool.run': {
         const result = await this.dependencies.tools.run(command.input);

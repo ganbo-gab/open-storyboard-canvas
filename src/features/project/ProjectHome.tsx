@@ -2,6 +2,7 @@ import { Suspense, lazy, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FolderKanban, Library, type LucideIcon } from 'lucide-react';
 import { ProjectManager } from './ProjectManager';
+import { UiChipButton } from '@/components/ui';
 
 type HomeBranch = 'projects' | 'prompts';
 
@@ -54,11 +55,11 @@ export function ProjectHome() {
   };
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-bg-dark">
-      <div className="shrink-0 border-b border-border-dark bg-bg-dark/95 px-4 py-3 sm:px-6 sm:py-4 lg:px-8">
+    <div className="studio-page flex h-full min-h-0 w-full flex-col">
+      <div className="shrink-0 border-b border-[var(--line)] bg-surface px-4 py-3 sm:px-6 sm:py-4 lg:px-8">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
           <div
-            className="inline-flex max-w-full rounded-lg border border-border-dark bg-surface-dark p-1"
+            className="inline-flex max-w-full gap-2"
             role="tablist"
             aria-label={t('mainHome.views')}
           >
@@ -66,7 +67,7 @@ export function ProjectHome() {
               const Icon = branch.icon;
               const isActive = activeBranch === branch.id;
               return (
-                <button
+                <UiChipButton
                   ref={(element) => {
                     branchRefs.current[branch.id] = element;
                   }}
@@ -79,15 +80,12 @@ export function ProjectHome() {
                   tabIndex={isActive ? 0 : -1}
                   onClick={() => setActiveBranch(branch.id)}
                   onKeyDown={(event) => handleBranchKeyDown(event, branch.id)}
-                  className={`inline-flex h-10 items-center gap-2 rounded-md px-4 text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-accent text-white shadow-xs'
-                      : 'text-text-muted hover:bg-bg-dark/75 hover:text-text-dark'
-                  }`}
+                  active={isActive}
+                  className="h-10 px-4 text-sm"
                 >
                   <Icon className="h-4 w-4" />
                   {branch.label}
-                </button>
+                </UiChipButton>
               );
             })}
           </div>
@@ -106,14 +104,14 @@ export function ProjectHome() {
         role="tabpanel"
         aria-labelledby={`home-tab-${activeBranch}`}
         tabIndex={0}
-        className="ui-branch-enter min-h-0 flex-1 overflow-hidden outline-hidden"
+        className="ui-branch-enter min-h-0 flex-1 overflow-hidden focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
       >
         {activeBranch === 'projects' ? (
           <ProjectManager />
         ) : (
           <Suspense
             fallback={
-              <div className="flex h-full items-center justify-center bg-bg-dark text-sm text-text-muted">
+              <div className="studio-page flex h-full items-center justify-center text-sm text-text-muted">
                 {t('common.loading')}
               </div>
             }

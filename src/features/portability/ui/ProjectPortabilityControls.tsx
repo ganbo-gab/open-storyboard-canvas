@@ -8,7 +8,7 @@ import {
   importTauriProjectBundle,
   inspectTauriProjectBundle,
 } from '@/commands/portability';
-import { UiButton, UiModal, UiSelect } from '@/components/ui';
+import { UiButton, UiChipButton, UiIconButton, UiModal, UiSelect } from '@/components/ui';
 import type { ProjectSummary } from '@/stores/projectStore';
 import {
   WEB_PROJECT_BUNDLE_MAX_BYTES,
@@ -273,10 +273,8 @@ export function ProjectPortabilityControls({
       />
 
       {(operation || feedback) && (
-        <div className={`fixed bottom-5 right-5 z-40 w-[min(420px,calc(100vw-2.5rem))] rounded-lg border p-3 shadow-xl ${
-          feedback?.kind === 'error'
-            ? 'border-red-500/40 bg-surface-dark'
-            : 'border-border-dark bg-surface-dark'
+        <div className={`fixed bottom-5 right-5 z-40 w-[min(420px,calc(100vw-2.5rem))] rounded-xl border bg-elevated p-3 shadow-[var(--shadow-pop)] ${
+          feedback?.kind === 'error' ? 'border-danger/40' : 'border-[var(--line)]'
         }`}>
           {operation ? (
             <div>
@@ -284,13 +282,14 @@ export function ProjectPortabilityControls({
                 <Loader2 className="h-4 w-4 animate-spin" />
                 <span className="min-w-0 flex-1 wrap-break-word">{operation.label}</span>
                 <span className="shrink-0 text-xs text-text-muted">{percent}%</span>
-                <button
+                <UiButton
                   type="button"
                   onClick={() => operation.controller.abort()}
-                  className="inline-flex min-h-9 shrink-0 items-center rounded-sm px-2 text-xs text-text-muted hover:bg-bg-dark hover:text-text-dark"
+                  variant="ghost"
+                  size="sm"
                 >
                   {t('common.cancel')}
-                </button>
+                </UiButton>
               </div>
               <div
                 role="progressbar"
@@ -298,7 +297,7 @@ export function ProjectPortabilityControls({
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={percent}
-                className="mt-2 h-1 overflow-hidden rounded-sm bg-bg-dark"
+                className="mt-2 h-1 overflow-hidden rounded-sm bg-[var(--press)]"
               >
                 <div
                   className="h-full w-full origin-left bg-accent transition-transform"
@@ -313,18 +312,18 @@ export function ProjectPortabilityControls({
               className="flex items-start gap-2 text-sm text-text-dark"
             >
               {feedback?.kind === 'error'
-                ? <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
-                : <Download className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />}
+                ? <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
+                : <Download className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
               <span className="min-w-0 flex-1 wrap-break-word">{feedback?.message}</span>
-              <button
+              <UiIconButton
                 type="button"
                 onClick={() => setFeedback(null)}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-text-muted hover:bg-bg-dark hover:text-text-dark"
+                variant="ghost"
                 aria-label={t('common.close')}
                 title={t('common.close')}
               >
                 <X className="h-4 w-4" />
-              </button>
+              </UiIconButton>
             </div>
           )}
         </div>
@@ -350,8 +349,7 @@ export function ProjectPortabilityControls({
             </UiButton>
             <UiButton
               type="button"
-              variant="primary"
-              className={importMode === 'replace' ? 'bg-red-600 hover:bg-red-500' : ''}
+              variant={importMode === 'replace' ? 'destructive' : 'primary'}
               disabled={Boolean(operation) || (importMode === 'replace' && !replacementId)}
               onClick={handleConfirmImport}
             >
@@ -363,8 +361,8 @@ export function ProjectPortabilityControls({
         {candidate && (
           <div className="space-y-4">
             {replaceConfirm ? (
-              <div className="flex gap-3 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-text-dark">
-                <AlertTriangle className="h-5 w-5 shrink-0 text-red-400" />
+              <div className="flex gap-3 rounded-lg border border-danger/30 bg-danger/10 p-3 text-sm text-text-dark">
+                <AlertTriangle className="h-5 w-5 shrink-0 text-danger" />
                 <p>{t('portability.project.replaceConfirmDescription', {
                   name: projects.find((project) => project.id === replacementId)?.name ?? '',
                 })}</p>
@@ -388,8 +386,8 @@ export function ProjectPortabilityControls({
                 </dl>
 
                 {candidate.preview.warnings.length > 0 && (
-                  <div className="max-h-32 overflow-auto rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
-                    <div className="mb-2 flex items-center gap-2 text-sm font-medium text-amber-300">
+                  <div className="max-h-32 overflow-auto rounded-lg border border-warning/30 bg-warning/10 p-3">
+                    <div className="mb-2 flex items-center gap-2 text-sm font-medium text-warning">
                       <AlertTriangle className="h-4 w-4" />
                       {t('portability.project.warnings')}
                     </div>
@@ -401,17 +399,18 @@ export function ProjectPortabilityControls({
 
                 <div>
                   <div className="mb-2 text-xs font-medium text-text-muted">{t('portability.project.importMode')}</div>
-                  <div className="grid grid-cols-2 rounded-md border border-border-dark bg-bg-dark p-1">
+                  <div className="grid grid-cols-2 gap-2">
                     {(['new', 'replace'] as const).map((mode) => (
-                      <button
+                      <UiChipButton
                         key={mode}
                         type="button"
                         aria-pressed={importMode === mode}
                         onClick={() => { setImportMode(mode); setReplaceConfirm(false); }}
-                        className={`h-9 rounded-sm text-sm transition-colors ${importMode === mode ? 'bg-accent text-white' : 'text-text-muted hover:text-text-dark'}`}
+                        active={importMode === mode}
+                        className="h-9 justify-center text-sm"
                       >
                         {t(`portability.project.modes.${mode}`)}
-                      </button>
+                      </UiChipButton>
                     ))}
                   </div>
                   {importMode === 'replace' && (

@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Download,
   FlaskConical,
-  Loader2,
   Sparkles,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -15,10 +14,11 @@ import { ComfyBindingEditor } from './ComfyBindingEditor';
 import {
   UiButton,
   UiCheckbox,
+  UiChipButton,
   UiInput,
   UiSelect,
   UiTextArea,
-} from '@/components/ui/primitives';
+} from '@/components/ui';
 import {
   customImageProviderConfigToDraft,
   customImageProviderDraftToConfig,
@@ -52,13 +52,14 @@ import {
   listCustomComfyUICheckpoints,
   testCustomProviderConnectivity,
   type CustomProviderTestResult,
-} from '@/features/canvas/infrastructure/customProviderGateway';
+} from '@/features/canvas/infrastructure/providerGateway';
 import {
   isImageCustomProvider,
   useCustomProvidersStore,
 } from '@/stores/customProvidersStore';
 import { CustomImageProviderCreationChoice } from './CustomImageProviderCreationChoice';
 import { CustomProviderConfigAssistantDialog } from './CustomProviderConfigAssistantDialog';
+import { SecretField } from '@/features/secrets/SecretField';
 import {
   CUSTOM_IMAGE_PROVIDER_WORKBENCH_STEPS,
   createCustomImageProviderWorkbenchDraft,
@@ -144,7 +145,7 @@ interface StepSurfaceProps {
 
 function StepSurface({ title, description, children }: StepSurfaceProps) {
   return (
-    <div className="rounded-xl border border-border-dark bg-bg-dark/55 p-4">
+    <div className="rounded-xl border border-[var(--line)] bg-bg/55 p-4">
       <h3 className="text-sm font-semibold text-text-dark">{title}</h3>
       <p className="mt-1 text-xs leading-5 text-text-muted">{description}</p>
       <div className="mt-4">{children}</div>
@@ -170,7 +171,7 @@ function JsonField({ label, help, value, onChange, className = '' }: JsonFieldPr
         onChange={(event) => onChange(event.target.value)}
         spellCheck={false}
       />
-      <span className="mt-1 block text-[10px] leading-4 text-text-muted/75">{help}</span>
+      <span className="mt-1 block text-[10px] leading-4 text-text-subtle">{help}</span>
     </label>
   );
 }
@@ -541,7 +542,7 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (isComfyRoute && (comfyChoice === 'text-to-image' || comfyChoice === 'image-to-image') && !checkpointName) {
       setStepIndex(0);
       setError(t('settings.comfyui.checkpointRequired'));
@@ -549,9 +550,15 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
     }
     const config = buildConfig();
     if (!config) return;
-    if (draft.id) updateProvider(draft.id, config);
-    else addProvider(config);
-    hydrateDraft(customImageProviderConfigToDraft(config), route ?? 'manual');
+    try {
+      if (draft.id) await updateProvider(draft.id, config);
+      else await addProvider(config);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : String(saveError));
+      return;
+    }
+    const stored = useCustomProvidersStore.getState().providers.find((provider) => provider.id === config.id) ?? config;
+    hydrateDraft(customImageProviderConfigToDraft(stored), route ?? 'manual');
     setStepIndex(visibleSteps.length - 1);
     setSaved(true);
   };
@@ -574,16 +581,16 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
           <div className="mb-2 text-xs font-semibold text-text-dark">{t('settings.comfyui.chooseWorkflow')}</div>
           <div className="grid gap-2 sm:grid-cols-2">
             {(['text-to-image', 'image-to-image', 'minimax-h3-local', 'custom'] as const).map((choice) => (
-              <button
+              <UiChipButton
                 key={choice}
-                type="button"
+                active={comfyChoice === choice}
                 onClick={() => chooseComfyWorkflow(choice)}
                 aria-pressed={comfyChoice === choice}
-                className={`min-h-[84px] rounded-lg border p-3 text-left transition-colors focus:outline-hidden focus:ring-2 focus:ring-accent/60 ${comfyChoice === choice ? 'border-accent/70 bg-accent/10' : 'border-border-dark bg-surface-dark hover:border-accent/40'}`}
+                className="h-auto min-h-[84px] w-full flex-col items-start justify-start gap-0 whitespace-normal rounded-lg p-3 text-left"
               >
                 <span className="block text-xs font-semibold text-text-dark">{t(`settings.comfyui.templates.${choice}.title`)}</span>
                 <span className="mt-1 block text-[11px] leading-4 text-text-muted">{t(`settings.comfyui.templates.${choice}.description`)}</span>
-              </button>
+              </UiChipButton>
             ))}
           </div>
         </div>
@@ -604,10 +611,10 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
           </UiSelect>
         </label>
         {auth.mode !== 'none' && (
-          <label className="block text-xs font-medium text-text-muted">
+          <div className="block text-xs font-medium text-text-muted">
             {t('settings.customProviders.workbench.fields.apiKey')}
-            <UiInput className="mt-1.5 font-mono" type="password" value={draft.apiKey} onChange={(event) => updateDraft((current) => ({ ...current, apiKey: event.target.value }))} />
-          </label>
+            <SecretField className="mt-1.5" label={t('settings.customProviders.workbench.fields.apiKey')} value={draft.apiKey} onChange={(apiKey) => updateDraft((current) => ({ ...current, apiKey }))} />
+          </div>
         )}
         {(auth.mode === 'header' || auth.mode === 'query') && (
           <label className="block text-xs font-medium text-text-muted">
@@ -625,7 +632,7 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
         {!isComfyRoute && <JsonField label={t('settings.customProviders.workbench.fields.queryParams')} help={t('settings.customProviders.workbench.help.queryParams')} value={queryParamsText} onChange={setQueryParamsText} />}
       </div>
       {isComfyRoute && (
-        <div className="mt-5 space-y-4 rounded-lg border border-border-dark bg-surface-dark p-4">
+        <div className="mt-5 space-y-4 rounded-lg border border-[var(--line)] bg-surface p-4">
           {comfyChoice === 'minimax-h3-local' ? <p className="text-xs leading-5 text-text-muted">{t('settings.comfyui.h3LocalHelp')}</p> : comfyChoice === 'custom' ? <label className="block text-xs font-medium text-text-muted">
             {t('settings.customProviders.workbench.fields.comfyOutputType')}
             <UiSelect
@@ -643,8 +650,7 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
                 <UiInput className="mt-1.5 font-mono" aria-label={t('settings.comfyui.checkpoint')} value={checkpointName} list="comfyui-checkpoint-options" onChange={(event) => changeComfyCheckpoint(event.target.value)} placeholder="model.safetensors" />
                 <datalist id="comfyui-checkpoint-options">{availableCheckpoints.map((name) => <option key={name} value={name} />)}</datalist>
               </label>
-              <UiButton type="button" variant="muted" size="sm" disabled={loadingCheckpoints} onClick={() => { void fetchComfyCheckpoints(); }}>
-                {loadingCheckpoints ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1 h-3.5 w-3.5" />}
+              <UiButton type="button" variant="secondary" size="sm" loading={loadingCheckpoints} icon={<Download />} onClick={() => { void fetchComfyCheckpoints(); }}>
                 {t('settings.comfyui.loadCheckpoints')}
               </UiButton>
               <p className="text-[11px] leading-4 text-text-muted sm:col-span-2">{t('settings.comfyui.checkpointHelp')}</p>
@@ -652,10 +658,10 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
           )}
           {(comfyChoice === 'custom' || comfyChoice === 'minimax-h3-local') && <label className="block text-xs font-medium text-text-muted">
             {t('settings.customProviders.workbench.fields.comfyImportFile')}
-            <input
+            <UiInput
               type="file"
               accept=".json,application/json"
-              className="mt-1.5 block w-full rounded-lg border border-border-dark bg-bg-dark px-3 py-2 text-xs text-text-dark file:mr-3 file:rounded-sm file:border-0 file:bg-accent/15 file:px-2 file:py-1 file:text-accent"
+              className="mt-1.5 h-auto py-1.5 text-xs"
               onChange={(event) => {
                 const file = event.currentTarget.files?.[0];
                 if (!file) return;
@@ -682,7 +688,7 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
             />
           </label>}
           <ComfyBindingEditor workflowText={comfyWorkflowText} bindingsText={comfyBindingsText} outputsText={comfyOutputsText} baseUrl={draft.baseUrl} apiKey={draft.apiKey} auth={auth} onBindings={setComfyBindingsText} onOutputs={setComfyOutputsText} />
-          <details key={comfyChoice} open={comfyChoice === 'custom' || comfyChoice === 'minimax-h3-local' ? true : undefined} className="rounded-lg border border-border-dark bg-bg-dark/45 px-3 py-2">
+          <details key={comfyChoice} open={comfyChoice === 'custom' || comfyChoice === 'minimax-h3-local' ? true : undefined} className="rounded-lg border border-[var(--line)] bg-bg/45 px-3 py-2">
             <summary className="cursor-pointer text-xs font-medium text-text-dark">{t('settings.comfyui.advanced')}</summary>
             <div className="mt-3 space-y-3">
               <JsonField label={t('settings.customProviders.workbench.fields.comfyWorkflow')} help={t('settings.customProviders.workbench.help.comfyWorkflow')} value={comfyWorkflowText} onChange={setComfyWorkflowText} />
@@ -936,7 +942,7 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
           ['models', String(draft.models.length)],
           ['requestVariants', isComfyRoute ? `ComfyUI ${draft.mediaType === 'video' ? 'Video' : 'Image'}` : imageEnabled ? 'T2I + I2I' : 'T2I'],
         ] as const).map(([key, value]) => (
-          <div key={key} className="rounded-lg border border-border-dark bg-surface-dark px-3 py-2">
+          <div key={key} className="rounded-lg border border-[var(--line)] bg-surface px-3 py-2">
             <div className="text-[10px] text-text-muted">{t(`settings.customProviders.workbench.review.${key}`)}</div>
             <div className="mt-1 truncate text-xs font-medium text-text-dark">{value}</div>
           </div>
@@ -952,18 +958,18 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
         />
       </div>}
       {requestPreviews && (
-        <div className="mt-4 rounded-lg border border-border-dark bg-surface-dark p-3">
+        <div className="mt-4 rounded-lg border border-[var(--line)] bg-surface p-3">
           <div className="text-xs font-semibold text-text-dark">{t('settings.customProviders.workbench.requestPreviewTitle')}</div>
           <p className="mt-1 text-[11px] leading-5 text-text-muted">{t('settings.customProviders.workbench.requestPreviewHelp')}</p>
           {'error' in requestPreviews ? (
-            <p className="mt-2 whitespace-pre-wrap text-[11px] text-amber-300">{requestPreviews.error}</p>
+            <p className="mt-2 whitespace-pre-wrap text-[11px] text-warning">{requestPreviews.error}</p>
           ) : (
             <div className="mt-3 space-y-2">
               {([
                 [t(isComfyRoute ? 'settings.customProviders.workbench.comfyPreview' : 'settings.customProviders.workbench.previewText'), requestPreviews.text],
                 ...(requestPreviews.image ? [[t('settings.customProviders.workbench.previewImage'), requestPreviews.image] as const] : []),
               ] as const).map(([label, preview]) => (
-                <details key={label} className="rounded-md border border-border-dark bg-bg-dark px-3 py-2">
+                <details key={label} className="rounded-md border border-[var(--line)] bg-bg px-3 py-2">
                   <summary className="cursor-pointer text-xs font-medium text-text-dark">
                     {label} · {preview.method} · {preview.bodyMode}
                   </summary>
@@ -980,23 +986,22 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
         </div>
       )}
       {testResult && (
-        <div className={`mt-4 rounded-lg border px-3 py-2 text-xs ${testResult.ok ? 'border-emerald-500/25 bg-emerald-500/5 text-emerald-300' : 'border-red-500/25 bg-red-500/5 text-red-300'}`}>
+        <div className={`mt-4 rounded-lg border px-3 py-2 text-xs ${testResult.ok ? 'border-success/25 bg-success/8 text-success' : 'border-danger/25 bg-danger/8 text-danger'}`}>
           {testResult.ok ? (testResult.text || t('settings.customProviders.workbench.testPassed')) : testResult.errorMessage}
         </div>
       )}
       {saved && (
-        <div className="mt-4 flex items-center gap-1.5 rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300">
+        <div className="mt-4 flex items-center gap-1.5 rounded-lg border border-success/25 bg-success/8 px-3 py-2 text-xs text-success">
           <CheckCircle2 className="h-3.5 w-3.5" />
           {t('settings.customProviders.workbench.saved')}
         </div>
       )}
       <div className="mt-4 flex flex-wrap justify-end gap-2">
-        <p className="mr-auto self-center text-[11px] text-amber-300/80">{t(isComfyRoute ? 'settings.customProviders.workbench.comfyTestNotice' : 'settings.customProviders.workbench.testCostNotice')}</p>
-        <UiButton type="button" variant="muted" size="sm" disabled={testing} onClick={() => { void handleTest(); }}>
-          {testing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="mr-1.5 h-3.5 w-3.5" />}
+        <p className="mr-auto self-center text-[11px] text-warning">{t(isComfyRoute ? 'settings.customProviders.workbench.comfyTestNotice' : 'settings.customProviders.workbench.testCostNotice')}</p>
+        <UiButton type="button" variant="secondary" size="sm" loading={testing} icon={<FlaskConical />} onClick={() => { void handleTest(); }}>
           {testing ? t('settings.customProviders.workbench.testing') : t(isComfyRoute ? 'settings.customProviders.workbench.comfyTest' : 'settings.customProviders.workbench.test')}
         </UiButton>
-        <UiButton type="button" variant="primary" size="sm" onClick={handleSave}>
+        <UiButton type="button" variant="primary" size="sm" onClick={() => { void handleSave(); }}>
           {t('settings.customProviders.workbench.save')}
         </UiButton>
       </div>
@@ -1022,7 +1027,7 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
   }
 
   return (
-    <section className="space-y-4 rounded-xl border border-border-dark bg-surface-dark p-4">
+    <section className="space-y-4 rounded-xl border border-[var(--line)] bg-surface p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-text-dark">
@@ -1040,31 +1045,33 @@ export function CustomImageProviderWorkbench({ initialRoute }: CustomImageProvid
 
       <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
         {visibleSteps.map((step, index) => (
-          <button
+          <UiChipButton
             key={step}
-            type="button"
+            active={index === stepIndex}
             onClick={() => { if (normalizeFragmentState()) setStepIndex(index); }}
-            className={`rounded-lg border px-3 py-2 text-left transition-colors ${index === stepIndex ? 'border-accent/60 bg-accent/10' : index < stepIndex ? 'border-emerald-500/25 bg-emerald-500/5' : 'border-border-dark bg-bg-dark hover:border-accent/35'}`}
+            className="h-auto w-full flex-col items-start justify-start gap-0 whitespace-normal rounded-lg px-3 py-2 text-left"
           >
-            <div className={`text-[10px] ${index <= stepIndex ? 'text-accent' : 'text-text-muted'}`}>{String(index + 1).padStart(2, '0')}</div>
-            <div className="mt-0.5 text-xs font-medium text-text-dark">{t(isComfyRoute ? `settings.comfyui.steps.${step}` : `settings.customProviders.workbench.steps.${step}`)}</div>
-          </button>
+            <span className={`flex items-center gap-1 text-[10px] ${index <= stepIndex ? 'text-accent' : 'text-text-muted'}`}>
+              {String(index + 1).padStart(2, '0')}
+              {index < stepIndex && <CheckCircle2 className="h-3 w-3 text-success" />}
+            </span>
+            <span className="mt-0.5 text-xs font-medium text-text-dark">{t(isComfyRoute ? `settings.comfyui.steps.${step}` : `settings.customProviders.workbench.steps.${step}`)}</span>
+          </UiChipButton>
         ))}
       </div>
 
       {renderCurrentStep(currentStep)}
 
-      {error && <pre className="whitespace-pre-wrap rounded-lg border border-red-500/25 bg-red-500/5 p-3 text-[11px] leading-5 text-red-300">{error}</pre>}
+      {error && <pre className="whitespace-pre-wrap rounded-lg border border-danger/25 bg-danger/8 p-3 text-[11px] leading-5 text-danger">{error}</pre>}
 
-      <div className="flex items-center justify-between border-t border-border-dark pt-3">
-        <UiButton type="button" variant="ghost" size="sm" disabled={stepIndex === 0} onClick={() => moveStep(-1)}>
-          <ChevronLeft className="mr-1 h-3.5 w-3.5" />
+      <div className="flex items-center justify-between border-t border-[var(--line)] pt-3">
+        <UiButton type="button" variant="ghost" size="sm" icon={<ChevronLeft />} disabled={stepIndex === 0} onClick={() => moveStep(-1)}>
           {t('settings.customProviders.workbench.previous')}
         </UiButton>
         {stepIndex < visibleSteps.length - 1 && (
           <UiButton type="button" variant="primary" size="sm" onClick={() => moveStep(1)}>
             {t('settings.customProviders.workbench.next')}
-            <ChevronRight className="ml-1 h-3.5 w-3.5" />
+            <ChevronRight />
           </UiButton>
         )}
       </div>

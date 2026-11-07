@@ -1,5 +1,6 @@
 import { memo, useState, useCallback, useEffect } from 'react';
 import { X, RotateCcw, Sun } from 'lucide-react';
+import { UiButton, UiChipButton, UiIconButton, UiSegmented, UiSlider, UiSwitch, UiTextArea } from '@/components/ui';
 
 // Lighting reference photos live in `public/lighting-presets/` so Vite
 // serves them as static files instead of inlining their ~18MB combined
@@ -203,7 +204,6 @@ export const LightingControlPanel = memo(
       pos.azimuth === azimuth && pos.elevation === elevation;
 
     const panelWidth = 700;
-    const brightnessSliderClassName = 'w-full h-[4px] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4.5 [&::-webkit-slider-thumb]:w-4.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.45)] [&::-moz-range-thumb]:h-4.5 [&::-moz-range-thumb]:w-4.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white';
     const presetBackgrounds: Record<string, string> = {
       overexposed: 'linear-gradient(135deg, #f1dcc8 0%, #c6ab8e 42%, #8a6f57 100%)',
       blueBacklight: 'linear-gradient(135deg, #1d2840 0%, #243b6d 48%, #7aa8ff 100%)',
@@ -221,44 +221,32 @@ export const LightingControlPanel = memo(
 
     return (
       <div
-        className="fixed z-200 rounded-xl border border-[rgba(255,255,255,0.1)] bg-[#202020] shadow-2xl"
+        className="fixed z-200 rounded-xl border border-[var(--line)] bg-elevated shadow-[var(--shadow-pop)]"
         style={{ left: panelLeft, top: panelTop, width: panelWidth }}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[rgba(255,255,255,0.08)]">
-          <span className="text-sm font-semibold text-white">打光效果</span>
-          <button
-            onClick={onClose}
-            className="flex items-center justify-center w-6 h-6 rounded-md text-[rgba(255,255,255,0.45)] hover:text-white hover:bg-[rgba(255,255,255,0.1)] transition-colors"
-          >
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--line)]">
+          <span className="text-sm font-semibold text-text-dark">打光效果</span>
+          <UiIconButton onClick={onClose} aria-label="关闭" title="关闭">
             <X className="w-4 h-4" />
-          </button>
+          </UiIconButton>
         </div>
 
         {/* Body */}
         <div className="flex gap-0 p-0">
           {/* Left col: view tabs + sphere */}
-          <div className="flex flex-col items-center gap-2 px-3 py-3 border-r border-[rgba(255,255,255,0.06)]" style={{ width: 185 }}>
-            {/* 透视 / 正面 tabs */}
-            <div className="flex gap-1 w-full mb-1 rounded-md bg-[rgba(255,255,255,0.04)] p-1">
-              {(['perspective', 'front'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setViewMode(mode)}
-                  className={`flex-1 rounded-md py-1 text-[11px] font-medium transition-colors ${
-                    viewMode === mode
-                      ? 'bg-[rgba(255,255,255,0.14)] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]'
-                      : 'text-[rgba(255,255,255,0.38)] hover:text-[rgba(255,255,255,0.7)]'
-                  }`}
-                >
-                  {mode === 'perspective' ? '透视' : '正面'}
-                </button>
-              ))}
-            </div>
+          <div className="flex flex-col items-center gap-2 px-3 py-3 border-r border-[var(--line)]" style={{ width: 185 }}>
+            <UiSegmented
+              value={viewMode}
+              onChange={setViewMode}
+              options={[{ value: 'perspective', label: '透视' }, { value: 'front', label: '正面' }]}
+              size="sm"
+              className="w-full mb-1"
+              aria-label="视图"
+            />
 
-            {/* Sphere */}
             <LightingSphereControl
               azimuth={azimuth}
               elevation={elevation}
@@ -269,54 +257,41 @@ export const LightingControlPanel = memo(
           </div>
 
           {/* Middle col: controls */}
-          <div className="flex flex-col gap-3 px-3 py-3 border-r border-[rgba(255,255,255,0.06)]" style={{ width: 210 }}>
-            {/* 全局 label + 智能模式 toggle */}
+          <div className="flex flex-col gap-3 px-3 py-3 border-r border-[var(--line)]" style={{ width: 210 }}>
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-[rgba(255,255,255,0.5)]">全局</span>
+              <span className="text-xs font-medium text-text-muted">全局</span>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-[rgba(255,255,255,0.7)]">智能模式</span>
-                <button
-                  type="button"
-                  onClick={() => setSmartMode(!smartMode)}
-                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
-                    smartMode ? 'bg-accent' : 'bg-[rgba(255,255,255,0.15)]'
-                  }`}
-                >
-                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${smartMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                </button>
+                <span className="text-xs text-text-muted">智能模式</span>
+                <UiSwitch checked={smartMode} onCheckedChange={setSmartMode} aria-label="智能模式" />
               </div>
             </div>
 
-            {/* 亮度 */}
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <span className="text-xs text-[rgba(255,255,255,0.6)] w-6">亮度</span>
-                <div className="flex-1">
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={brightness}
-                    onChange={(e) => setBrightness(Number(e.target.value))}
-                    className={brightnessSliderClassName}
-                    style={{
-                      background: `linear-gradient(to right, rgba(255,255,255,0.88) ${brightness}%, rgba(255,255,255,0.14) ${brightness}%)`
-                    }}
-                  />
-                </div>
-                <div className="flex items-center gap-1 rounded-md border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-2 py-1 text-[11px] text-[rgba(255,255,255,0.45)]">
+                <span className="text-xs text-text-muted w-6">亮度</span>
+                <UiSlider
+                  min={0}
+                  max={100}
+                  value={brightness}
+                  onChange={setBrightness}
+                  className="flex-1"
+                  aria-label="亮度"
+                />
+                <div className="flex items-center gap-1 rounded-md border border-[var(--line)] bg-[var(--field-bg)] px-2 py-1 text-[11px] text-text-subtle">
                   <Sun className="w-3 h-3" />
                   <span className="w-8 text-right">{brightness}%</span>
                 </div>
               </div>
             </div>
 
-            {/* 颜色 */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-[rgba(255,255,255,0.6)] w-6">颜色</span>
+              <span className="text-xs text-text-muted w-6">颜色</span>
               <div className="relative flex items-center">
-                <div
-                  className="w-10 h-6 rounded-sm border border-[rgba(255,255,255,0.15)] cursor-pointer overflow-hidden"
+                {/* The color swatch and its neutral-color indicator are data, not UI colors. */}
+                <UiButton
+                  variant="ghost"
+                  className="w-10 h-6 min-h-0 rounded-sm p-0 overflow-hidden"
+                  aria-label="光源颜色"
                   style={{ background: lightColor === '#ffffff' ? 'linear-gradient(135deg, #ff0000 0%, #ff9900 25%, #ffff00 50%, transparent 50%, transparent 100%), linear-gradient(45deg, #aaa 25%, transparent 25%, transparent 75%, #aaa 75%)' : lightColor }}
                   onClick={() => {
                     const inp = document.createElement('input');
@@ -328,79 +303,62 @@ export const LightingControlPanel = memo(
                 />
                 {lightColor === '#ffffff' && (
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-full h-px bg-red-500 rotate-45" />
+                    <div className="w-full h-px bg-danger rotate-45" />
                   </div>
                 )}
               </div>
             </div>
 
-            {/* 主光源 */}
             <div className="space-y-1.5">
-              <span className="text-xs text-[rgba(255,255,255,0.5)]">主光源</span>
+              <span className="text-xs text-text-muted">主光源</span>
               <div className="grid grid-cols-3 gap-1">
                 {LIGHT_POSITIONS.map((pos) => (
-                  <button
+                  <UiChipButton
                     key={pos.label}
+                    active={isPositionActive(pos)}
+                    aria-pressed={isPositionActive(pos)}
                     onClick={() => { setAzimuth(pos.azimuth); setElevation(pos.elevation); }}
-                    className={`rounded-md py-1.5 text-xs font-medium transition-colors ${
-                      isPositionActive(pos)
-                        ? 'bg-white text-black'
-                        : 'bg-[rgba(255,255,255,0.08)] text-[rgba(255,255,255,0.65)] hover:bg-[rgba(255,255,255,0.14)]'
-                    }`}
+                    className="rounded-md text-xs"
                   >
                     {pos.label}
-                  </button>
+                  </UiChipButton>
                 ))}
               </div>
             </div>
 
-            {/* 轮廓光 */}
             <div className="flex items-center justify-between">
-              <span className="text-xs text-[rgba(255,255,255,0.6)]">轮廓光</span>
-              <button
-                type="button"
-                onClick={() => setRimLight(!rimLight)}
-                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
-                  rimLight ? 'bg-accent' : 'bg-[rgba(255,255,255,0.15)]'
-                }`}
-              >
-                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${rimLight ? 'translate-x-4' : 'translate-x-0.5'}`} />
-              </button>
+              <span className="text-xs text-text-muted">轮廓光</span>
+              <UiSwitch checked={rimLight} onCheckedChange={setRimLight} aria-label="轮廓光" />
             </div>
           </div>
 
           {/* Right col: smart input + presets */}
           <div className="flex flex-col gap-3 px-4 py-4 flex-1">
-            {/* 智能模式 header */}
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-[rgba(255,255,255,0.7)]">智能模式</span>
-              <button className="flex items-center gap-1 rounded-md px-2 py-1 bg-[rgba(255,255,255,0.08)] text-xs text-[rgba(255,255,255,0.5)] hover:bg-[rgba(255,255,255,0.14)] transition-colors">
+              <span className="text-xs font-medium text-text-muted">智能模式</span>
+              <UiButton size="sm">
                 <span className="text-base leading-none">+</span>
                 <span>打光参考图</span>
-              </button>
+              </UiButton>
             </div>
 
-            {/* Smart description textarea */}
-            <textarea
+            <UiTextArea
               value={smartDesc}
               onChange={(e) => setSmartDesc(e.target.value)}
               placeholder="简单描述你想要实现的打光效果，或者情绪风格"
-              className="w-full h-16 resize-none rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] px-3 py-2 text-xs text-[rgba(255,255,255,0.8)] placeholder-[rgba(255,255,255,0.25)] outline-hidden focus:border-[rgba(255,255,255,0.2)] transition-colors"
+              className="w-full h-16 resize-none text-xs"
             />
 
-            {/* 预设 label */}
-            <span className="text-xs text-[rgba(255,255,255,0.5)]">预设</span>
-
-            {/* Preset grid 2x4 */}
+            <span className="text-xs text-text-muted">预设</span>
             <div className="grid grid-cols-2 gap-1.5">
               {STYLE_PRESETS.map((preset) => (
-                <button
+                <UiButton
+                  variant="ghost"
                   key={preset.id}
+                  aria-pressed={stylePreset === preset.id}
                   onClick={() => setStylePreset(stylePreset === preset.id ? '' : preset.id)}
-                  className={`relative overflow-hidden rounded-lg h-[60px] text-left transition-[box-shadow,filter,border-color,background-color] duration-150 ${
-                    stylePreset === preset.id
-                      ? 'ring-2 ring-white/60 shadow-[0_0_0_1px_rgba(255,255,255,0.15)]'
-                      : 'hover:ring-1 hover:ring-white/30'
+                  className={`relative overflow-hidden rounded-lg h-[60px] p-0 text-left ${
+                    stylePreset === preset.id ? 'ring-2 ring-accent' : 'hover:ring-1 hover:ring-accent/40'
                   }`}
                   style={{
                     backgroundImage: `linear-gradient(to top, rgba(0,0,0,0.78), rgba(0,0,0,0.08)), url(${preset.image})`,
@@ -409,52 +367,38 @@ export const LightingControlPanel = memo(
                     backgroundColor: presetBackgrounds[preset.id] ?? preset.color,
                   }}
                 >
+                  {/* Media highlights/scrim and caption stay fixed for contrast over photos. */}
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_30%,rgba(255,255,255,0.22),transparent_36%)]" />
                   <span className="absolute bottom-1.5 left-2 right-2 text-[11px] font-medium text-white leading-tight drop-shadow-[0_1px_2px_rgba(0,0,0,0.55)]">
                     {preset.name}
                   </span>
-                </button>
+                </UiButton>
               ))}
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-5 py-3 border-t border-[rgba(255,255,255,0.08)]">
-          <button
-            onClick={handleReset}
-            className="flex items-center gap-1.5 text-xs text-[rgba(255,255,255,0.45)] hover:text-white transition-colors"
-          >
-            <RotateCcw className="w-3 h-3" />
+        <div className="flex items-center justify-between px-5 py-3 border-t border-[var(--line)]">
+          <UiButton variant="ghost" size="sm" onClick={handleReset} icon={<RotateCcw className="w-3.5 h-3.5" />}>
             重置参数
-          </button>
+          </UiButton>
 
-          {/* Model picker — persisted per panel. Replaces the old stray 14 + ⚡ badge. */}
+          {/* Model picker — persisted per panel. */}
           <ModelConfigPicker panelKey="lighting" />
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onCopyPrompt?.(buildPrompt())}
-              className="rounded-md bg-[rgba(255,255,255,0.08)] px-3 py-1.5 text-xs text-[rgba(255,255,255,0.72)] transition-colors hover:bg-[rgba(255,255,255,0.14)]"
-            >
+            <UiButton size="sm" onClick={() => onCopyPrompt?.(buildPrompt())}>
               复制提示词
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsTemplateDialogOpen(true)}
-              className="rounded-md bg-[rgba(255,255,255,0.08)] px-3 py-1.5 text-xs text-[rgba(255,255,255,0.72)] transition-colors hover:bg-[rgba(255,255,255,0.14)]"
-            >
+            </UiButton>
+            <UiButton size="sm" onClick={() => setIsTemplateDialogOpen(true)}>
               设置提示词
-            </button>
-            <button
-              onClick={handleApply}
-              className="flex items-center justify-center w-9 h-9 rounded-full bg-white text-black hover:bg-gray-100 transition-colors"
-            >
+            </UiButton>
+            <UiButton variant="primary" onClick={handleApply} className="w-9 h-9 rounded-full p-0" aria-label="应用打光效果">
               <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
                 <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-            </button>
+            </UiButton>
           </div>
         </div>
 

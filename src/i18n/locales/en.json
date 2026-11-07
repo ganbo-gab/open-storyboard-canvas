@@ -1,6 +1,5 @@
 {
   "minimaxH3": {
-    "requestStructureHelp": "This preset builds requests using the official MiniMax V2 format. Field mappings and body templates are unnecessary. Select MiniMax-H3 and configure supported durations, resolutions and ratios; choose the image input mode in the video node parameters.",
     "hint": "Official MiniMax H3 · text, frames and multimodal references",
     "note": "MiniMax H3 V2: 4–15 seconds, 768P / 2K; default 5 seconds / 768P. Select Reference, First frame, Last frame or First + last frames in the video node parameters. Frames cannot be mixed with reference video/audio. Text-only requests require a concrete aspect ratio. Uses a MiniMax API key; ComfyUI credentials are separate.",
     "errors": {
@@ -32,8 +31,7 @@
     "hint": "Frames use connected images in order and determine the output ratio. Reference mode can combine images, video and audio."
   },
   "app": {
-    "title": "Open Storyboard Canvas",
-    "subtitle": "AI storyboard canvas"
+    "title": "Open Storyboard Canvas"
   },
   "canvasAgent": {
     "title": "Canvas Agent",
@@ -44,7 +42,12 @@
       "description": "Connect a Codex or Claude Code session that you open separately to the current canvas. Storyboard Copilot must remain open.",
       "refresh": "Refresh connection status",
       "statusLabel": "Status",
-      "status": { "disconnected": "Disconnected", "ready": "Waiting for external Agent", "connected": "Connected", "expired": "Expired" },
+      "status": {
+        "disconnected": "Disconnected",
+        "ready": "Waiting for external Agent",
+        "connected": "Connected",
+        "expired": "Expired"
+      },
       "project": "Active project",
       "noProject": "No project open",
       "scope": "Tool scope",
@@ -86,13 +89,19 @@
       "installGuide": "Open the official installation guide",
       "requiresDesktop": "Codex and Claude Code are available in the desktop app",
       "unavailableHint": "This runtime is not ready. Detect it again or switch runtimes",
+      "noTurnAuthority": "The external Agent's tool request does not belong to the turn in progress and was refused.",
       "status": {
         "ready": "Connected and ready",
         "not-installed": "Not installed on this computer",
         "login-required": "Sign in from the terminal first",
         "incompatible": "The installed version is incompatible",
         "unavailable": "Currently unavailable"
-      }
+      },
+      "plan": "External runtime plan",
+      "composerHint": "{{runtime}} manages its own login and model. Every canvas tool call still requires in-app approval; CLI usage may incur charges. Conversation histories are not shared across runtimes.",
+      "historyBuiltinOnly": "This is the built-in Agent history. Switch to Built-in to view it.",
+      "changed": "Switched to {{runtime}}. The next turn uses only this runtime’s own conversation context.",
+      "eventError": "External runtime event connection failed: {{error}}"
     },
     "newConversation": "New conversation",
     "showCompletedTools": "Show completed tool calls",
@@ -132,8 +141,10 @@
       "expiredApproval": "This approval was already resolved or expired and will not run twice. Let the Agent re-plan from the current canvas state.",
       "stateChanged": "The canvas or project changed after the preview, so the stale action stopped safely. Let the Agent read the current state and continue.",
       "localStorageFull": "The application's local storage is full. The Agent will not mistake this for model quota and keep retrying. This page will preserve the current conversation where possible; save important work before closing or refreshing.",
-      "providerQuotaExceeded": "The account for the current Agent text model has exhausted its quota. No further canvas tools were called. Add quota or use another account, or choose another available text model from the model menu below.",
-      "providerRateLimited": "The current Agent text model is being rate-limited. No further canvas tools were called. Retry later or choose another available text model from the model menu below."
+      "providerQuotaExceeded": "The provider reported an account quota or billing restriction. Check the account, project and usage limits for this API key; this does not necessarily mean your channel balance is zero. Completed work is retained.",
+      "providerRateLimited": "The provider limited request frequency, concurrency or usage. This turn paused and completed work is retained. Continue later or choose another text model; this does not imply an empty account balance.",
+      "toolCallLimitReached": "This turn reached its {{count}} tool-call limit and stopped safely. Review completed work, then continue the remaining steps; generation jobs are not resubmitted automatically.",
+      "turnDeadlineExceeded": "This turn reached its {{minutes}}-minute limit; it stopped safely and withdrew pending approvals. Submitted generation jobs keep running; check them in the task panel."
     },
     "locate": "Locate on canvas",
     "locateGenerationInput": "Locate generation node",
@@ -165,23 +176,40 @@
     "textModels": "Text models",
     "imageModels": "Image models",
     "videoModels": "Video models",
-    "modelTabs": { "text": "Text", "image": "Image", "video": "Video" },
+    "modelTabs": {
+      "text": "Text",
+      "image": "Image",
+      "video": "Video"
+    },
     "noTextModels": "No text models available",
     "noImageModels": "No image models available",
     "noVideoModels": "No video models available",
     "manageModels": "Manage models",
     "executionMode": "Execution mode",
     "executionModes": {
-      "manual": { "title": "Manual approval", "description": "Show a confirmation card before canvas changes and generation.", "short": "Manual" },
-      "auto": { "title": "Automatic execution", "description": "Run reads, settings, canvas actions, generation, and safe recovery directly; only node deletion asks for approval.", "short": "Auto" }
+      "manual": {
+        "title": "Ask before changes",
+        "short": "Ask",
+        "description": "Run reads directly; confirm edits, generation, configuration and deletion."
+      },
+      "auto": {
+        "title": "Assist execution",
+        "short": "Assist",
+        "description": "Run reads and ordinary edits; ask before generation, external submissions, configuration and deletion."
+      },
+      "full": {
+        "title": "Full execution",
+        "short": "Full",
+        "description": "Authorize app tools, including billable generation, configuration and deletion. Budgets and duplicate-submission protection remain. No arbitrary system files or shell access."
+      }
     },
     "contextUsage": "Context",
     "contextEstimate": "About {{used}} / {{limit}} tokens",
     "contextEstimateUnknownLimit": "About {{used}} tokens used / model limit unknown",
     "contextIncludes": "Includes this conversation, attachment references, canvas query results, and skills loaded on demand.",
     "contextEstimateNotice": "This is a local estimate, not an exact provider token count.",
-    "autoModeConfirmTitle": "Enable automatic execution?",
-    "autoModeConfirmDescription": "The built-in Agent will directly run reads, settings, canvas changes, new generation submissions, and safe result recovery; only deleting canvas nodes asks for approval. It never automatically replays an ambiguous paid submission. External Codex and Claude Code connections always remain manually approved.",
+    "autoModeConfirmTitle": "Enable full execution?",
+    "autoModeConfirmDescription": "Authorize app tools, including billable generation, configuration and deletion. Budgets and duplicate-submission protection remain. No arbitrary system files or shell access.",
     "enableAutoMode": "Enable automatic execution",
     "noImageOnSelection": "Select a canvas node that contains an image first",
     "enterHint": "Enter to send, Shift + Enter for a new line",
@@ -217,24 +245,6 @@
     "cancelPlan": "Cancel plan",
     "planApproved": "Plan approved; every tool call still requires separate approval.",
     "planCancelled": "Plan cancelled.",
-    "projectContext": "Current project context",
-    "projectBrief": "Project brief",
-    "projectBriefReady": "Project brief enabled",
-    "projectBriefEmpty": "Add a project brief or pinned references",
-    "projectBriefPlaceholder": "Record style, identity, delivery, and other constraints that apply to this project...",
-    "pinnedReferences": "Pinned references",
-    "pinnedCount": "{{count}} pinned",
-    "pinReference": "Pin reference: {{name}}",
-    "unpinReference": "Unpin reference: {{name}}",
-    "selectNodeToPin": "Select a canvas node first",
-    "pinSelected": "Pin selected node",
-    "unpinSelected": "Unpin selected node",
-    "clearProjectContext": "Clear project brief and pinned references",
-    "projectBudget": "Project Agent budget (credits)",
-    "projectBudgetUnlimited": "No limit",
-    "resetBudgetUsage": "Reset usage",
-    "budgetUsage": "Spent {{spent}}, reserved {{reserved}} / {{limit}} credits",
-    "budgetUsageUnlimited": "Spent {{spent}}, reserved {{reserved}} credits; no limit set",
     "budgetBlocked": "This action may use {{cost}} credits, but only {{remaining}} credits remain.",
     "adjustBudget": "Adjust this project's Agent budget",
     "newBudgetLimit": "New budget limit",
@@ -258,6 +268,7 @@
       "tool-search": "Responses tool search"
     },
     "toolStatus": {
+      "awaiting-approval": "Awaiting approval",
       "executing": "Running",
       "succeeded": "Completed",
       "failed": "Failed",
@@ -278,7 +289,46 @@
       "rejected": "Rejected",
       "failed": "Approval could not be completed",
       "expired": "Approval expired; request it again"
-    }
+    },
+    "withdrawTurn": "Withdraw this turn",
+    "withdrawnTurn": "Turn withdrawn",
+    "withdrawTurnHint": "Withdraws every canvas change this Agent turn made in one step; submitted generation jobs are not cancelled. Ordinary ⌘Z still undoes step by step.",
+    "withdrawTurnSuccess": "Withdrew {{count}} canvas change(s) from this turn. Submitted generation tasks remain available.",
+    "withdrawTurnLive": "This turn is still running or has pending approvals. Stop it or resolve them first.",
+    "withdrawTurnRefused": {
+      "not-latest": "Later canvas changes prevent safely withdrawing this turn.",
+      "no-changes": "This turn has no canvas changes to withdraw.",
+      "project-changed": "Open this turn’s project first."
+    },
+    "mergedApprovalTitle": "{{count}} similar actions awaiting approval",
+    "mergedApprovalHint": "{{count}} actions of the same kind from one turn; each runs individually.",
+    "approveGroup": "Approve all ({{count}})",
+    "rejectGroup": "Reject all ({{count}})",
+    "skillsLoadedNoEstimate": "Loaded {{count}} skills on demand: {{skills}}",
+    "question": {
+      "title": "A little more information",
+      "answered": "Question resolved",
+      "custom": "Add a note or another choice",
+      "invalid": "Please provide a valid answer",
+      "cancel": "Cancel",
+      "continue": "Confirm and continue",
+      "continuing": "Continuing",
+      "cancelled": "Question cancelled",
+      "expired": "This question expired. Start a new request."
+    },
+    "context": {
+      "lastInput": "Last input used",
+      "system": "System and skills",
+      "tools": "Tool definitions",
+      "conversation": "Messages and tool results",
+      "media": "Images and attachments",
+      "empty": "Send a message to see request context, including system instructions, tools and messages.",
+      "providerNote": "Total is the provider’s last input usage. Categories are estimates. Newer replies and the draft are not included.",
+      "estimateNote": "Provider usage is unavailable; estimated from the actual request. Image tokens vary by model and resolution.",
+      "draft": "Pending input: approximately {{tokens}} tokens",
+      "cache": "Cache hit: {{tokens}} tokens ({{percent}}%)"
+    },
+    "fullModeEnable": "Enable full execution"
   },
   "generationJob": {
     "status": {
@@ -341,20 +391,20 @@
     "recoveryConfirm": "This only queries the existing upstream task, downloads its result, and saves it locally. It will not submit a generation request or intentionally create a new generation charge.",
     "confirmRecovery": "Retrieve result",
     "recoveryRunning": "Retrieving the existing result...",
-    "recoverySucceeded": "Result saved locally and updated on the canvas."
-    ,"logDrawerTitle": "Run Log"
-    ,"logDrawerDescription": "Read clear summaries first, then disclose technical records when needed"
-    ,"showRaw": "View original"
-    ,"hideRaw": "Hide original"
-    ,"filterOption": {
+    "recoverySucceeded": "Result saved locally and updated on the canvas.",
+    "logDrawerTitle": "Run Log",
+    "logDrawerDescription": "Read clear summaries first, then disclose technical records when needed",
+    "showRaw": "View original",
+    "hideRaw": "Hide original",
+    "filterOption": {
       "error": "Errors",
       "warning": "Warnings",
       "info": "Information",
       "debug": "Debug",
       "generation": "Generation",
       "application": "Application"
-    }
-    ,"summary": {
+    },
+    "summary": {
       "generationFailed": "Generation result retrieval failed",
       "generationRecovered": "Generation result retrieved",
       "generationRunning": "Generation task updated",
@@ -398,11 +448,23 @@
   },
   "titleBar": {
     "back": "Back",
-    "switchToEnglish": "English",
-    "switchToChinese": "中文",
     "minimize": "Minimize",
     "maximize": "Maximize",
-    "close": "Close"
+    "close": "Close",
+    "backHint": "Back to home",
+    "renameHint": "Click to rename the project",
+    "settingsHint": "Settings: channels & models, keys, storage, shortcuts",
+    "toEnglishHint": "Interface language: switch to English",
+    "toChineseHint": "Interface language: switch to Chinese",
+    "toLightHint": "Switch to light theme",
+    "toDarkHint": "Switch to dark theme",
+    "restore": "Restore window",
+    "enterFullscreenHint": "Enter full screen (Option-click to maximize)",
+    "exitFullscreenHint": "Exit full screen (Option-click to resize)",
+    "resizeFailed": "Could not change the window size. Please try again.",
+    "minimizeFailed": "Could not minimize the window. Please try again.",
+    "closeFailed": "Could not close the window. Please try again.",
+    "dragFailed": "Could not move the window. Please try again."
   },
   "canvas": {
     "addImage": "Add Image",
@@ -427,6 +489,29 @@
       "fitView": "Fit View",
       "lock": "Lock Canvas",
       "unlock": "Unlock Canvas"
+    },
+    "connection": {
+      "reject": {
+        "targetIsMaterial": "Materials and media results can only be upstream references",
+        "kindMismatch": "This node accepts {{expected}} references, not {{actual}} references",
+        "cycle": "This connection would create a cycle",
+        "duplicate": "These nodes are already connected",
+        "missingSource": "The source node no longer exists",
+        "missingTarget": "The target node no longer exists",
+        "selfConnection": "A node cannot connect to itself",
+        "sourceNotConnectable": "This node cannot start a connection",
+        "targetNotConnectable": "This node does not accept input connections",
+        "invalidHandle": "Connect the right output to the left input",
+        "tagSourceConflict": "This tag already has an upstream source",
+        "tagGroupTarget": "Tag groups can only connect to supported generation nodes"
+      },
+      "kind": {
+        "image": "image",
+        "video": "video",
+        "audio": "audio",
+        "text": "text",
+        "stage": "stage"
+      }
     }
   },
   "tool": {
@@ -682,7 +767,13 @@
   },
   "directorStudio": {
     "title": "Director Studio",
-    "studioMode": { "label": "Workspace mode", "director": "Director", "previs": "Previsualization" },
+    "studioMode": {
+      "label": "Workspace mode",
+      "director": "Director",
+      "previs": "Previsualization",
+      "directorHelp": "Director: stage people, props and lens, then capture stills",
+      "previsHelp": "Previs: animate people and camera along paths to preview a shot"
+    },
     "open": "Open",
     "openFullscreen": "Open fullscreen Director Studio",
     "saveProject": "Save Project",
@@ -742,7 +833,7 @@
       "scaleTitle": "Scale: drag the axis scale handles",
       "cancel": "Cancel Transform",
       "cancelTitle": "Esc cancels the current transform mode",
-      "help": "1 Move · 2 Rotate · 3 Scale · Esc Cancel"
+      "help": "G Move · R Rotate · T Scale · V Select · Esc Cancel"
     },
     "clearPanorama": "Clear Panorama",
     "assetFallbackName": "Image {{count}}",
@@ -834,7 +925,7 @@
     "previs": {
       "tools": "Previsualization tools",
       "select": "Select",
-      "selectHelp": "Click a character or object to select it; drag empty space to orbit the scene",
+      "selectHelp": "Click to select; drag empty space to select a region; Alt-drag to orbit",
       "move": "Move",
       "moveHelp": "Drag the red, green, or blue axis to move the selected object",
       "rotate": "Rotate",
@@ -845,7 +936,7 @@
       "draw": "Draw path",
       "drawHelp": "Draw a path for {{name}} by dragging on the ground; release to create a timeline clip",
       "points": "Mark path",
-      "pointsHelp": "Click points on the ground for {{name}}, then choose Finish route",
+      "pointsHelp": "Click points on the ground for {{name}}; press Enter or double-click to finish",
       "routePersonOnly": "Select a character or the camera before drawing a path",
       "person": "Character",
       "personHelp": "Add a character, then give it a path and an action",
@@ -863,12 +954,12 @@
       "shotViewHelp": "Check composition and motion through the camera",
       "followHelp": "First select a character with an existing path",
       "drawingFor": "Drawing a path for {{name}}",
-      "navigationHint": "Drag to orbit · Right-drag to pan · Scroll to zoom",
+      "navigationHint": "Drag empty space to select · Shift / ⌘ to add · Alt-drag to orbit · Right-drag to pan · Scroll to zoom",
       "currentTarget": "Selected: {{name}}",
       "helpTitle": "From a character to a preview",
-      "helpStep1": "Add a character with the left toolbar, or select an existing character in Layers on the right.",
+      "helpStep1": "Use Add → Person in the left rail, or pick an existing character in Layers on the right.",
       "helpStep2": "Choose Draw path and drag on the ground, or use Mark path to click points. The result appears as a clip in the timeline.",
-      "helpStep3": "Drag the clip to move it or its ends to change duration. Select numbered keyframes to edit position and time on the right; use Actions to add motion.",
+      "helpStep3": "Drag a clip to move it, or its ends to change duration. Click a diamond keyframe to edit position and time on the right; use Actions to add motion.",
       "helpStep4": "Select the camera and draw a camera path or choose a preset. Play to review motion, switch to Camera view for composition, then record your preview.",
       "undo": "Undo",
       "record": "Record",
@@ -894,14 +985,20 @@
         "startHandleHelp": "Drag the left handle to change the start time and proportionally retime the whole route.",
         "endHelp": "Drag the right handle to change the end time and proportionally retime the whole route.",
         "actionHelp": "{{name}}: drag to change its start time. The action lasts until the next action or project end.",
-        "keyframeHelp": "Drag to change time. Arrow keys move one frame; Shift plus arrows moves ten.",
-        "emptyTrack": "Click + on the left to record a keyframe, or draw a route in the scene",
-        "emptyAction": "Click + to record an action, or choose one from the action library",
+        "keyframeHelp": "Drag to retime; ⌘-drag copies; Shift-click or Shift-drag on the lane to multi-select; right-click for easing, aim or delete; K keys the active track, Delete removes.",
+        "emptyTrack": "Click ◇ to record a key, or draw a route in the scene",
+        "emptyAction": "Click ◇ to record an action, or open Actions",
         "speed": "Preview speed",
         "speedHelp": "Change preview speed. Exported video keeps the original project timing.",
-        "keyframeCount": "Keys: {{count}} · zoom",
+        "keyframeCount": "{{count}} keys",
         "keyframeCountAria": "Zoom to the {{count}} keyframes in {{name}}",
-        "keyframeCountHelp": "Zoom to the track start to select individual keyframes. Dense markers show numbers on selection, hover or focus. Zoom is limited to 16×; all frames are also available in the right-hand list."
+        "keyframeCountHelp": "Zoom to this track's keyframes; you can also hold Cmd/Ctrl and scroll to zoom the timeline.",
+        "durationShort": "Len",
+        "multiLabel": "Keyframe selection",
+        "multiCount": "{{count}} keyframes selected",
+        "multiLookAt": "Aim all at…",
+        "multiLookAtHelp": "Point every selected camera keyframe at the same object.",
+        "multiClear": "Clear selection"
       },
       "sceneAndProperties": "Scene and properties",
       "sceneObjects": "Scene objects",
@@ -925,7 +1022,49 @@
       "followObject": "Follow {{name}}",
       "duplicateFrameHelp": "Copy the selected keyframe, then adjust its time or properties.",
       "toggleSidebar": "Scene and properties",
-      "toggleSidebarHelp": "Collapse or expand the right sidebar to give the scene more space"
+      "toggleSidebarHelp": "Collapse or expand the right sidebar to give the scene more space",
+      "recordHelp": "Record a preview video along the camera path",
+      "previewSource": "Preview view",
+      "presetSubject": "Subject: {{name}}",
+      "propKeyEmpty": "Props have no route tool: scrub to a time, move the prop, then click ◇ on its timeline row to record a key.",
+      "pip": {
+        "show": "Show shot picture-in-picture",
+        "hide": "Hide shot picture-in-picture",
+        "open": "Switch to the shot view",
+        "openHelp": "The picture-in-picture shows what the camera sees at the playhead; click to switch to the shot view.",
+        "empty": "No camera keyframes yet: press ◇ or K on the camera track."
+      },
+      "rig": {
+        "title": "Follow / close-up tracking",
+        "help": "The camera rides with the subject; later route edits are followed automatically. The picture-in-picture updates while you drag.",
+        "subject": "Subject",
+        "addFollow": "Relative follow",
+        "addCloseup": "Close-up tracking",
+        "followHelp": "From the playhead to the end of the subject's route, the camera stays behind the subject at a set distance.",
+        "closeupHelp": "From the playhead, a tight framing on the subject's head — for dialogue and reaction shots.",
+        "noSubjects": "Add a person or object to the scene first.",
+        "follow": "Follow",
+        "closeup": "Close-up",
+        "missingSubject": "Subject deleted",
+        "start": "In",
+        "end": "Out",
+        "bodyPart": "Aim at",
+        "distance": "Distance",
+        "height": "Height",
+        "azimuth": "Azimuth",
+        "pitch": "Tilt",
+        "fov": "Field of view",
+        "damping": "Damping",
+        "relative": "Turn with subject heading",
+        "relativeHelp": "On: the angle is relative to the subject's heading (always behind). Off: the angle is fixed in world space.",
+        "lockHorizon": "Lock height",
+        "lockHorizonHelp": "The camera height ignores the subject's vertical movement.",
+        "bake": "Bake to keyframes",
+        "bakeHelp": "Converts the rig into ordinary camera keyframes (4 per second) for hand-tuning; the rig is removed.",
+        "delete": "Delete"
+      },
+      "line": "Straight line",
+      "lineHelp": "Draw a straight path for {{name}}: click the start, then the end; hold Shift to stay on an axis"
     },
     "motion": {
       "guide": {
@@ -941,74 +1080,231 @@
         "emptyTracks": "Add or select a person to show movement and action tracks here. You can draw a camera route above now."
       },
       "timeline": {
-        "title": "Timeline", "camera": "Camera", "actionTrack": "{{name}} · Action", "tracks": "Tracks",
-        "play": "Play", "pause": "Pause", "goToStart": "Go to start", "loop": "Loop playback",
-        "currentTime": "Current time", "duration": "Duration", "routePreview": "Director route view",
-        "shotPreview": "Final camera view", "showRoutes": "Show motion routes", "hideRoutes": "Hide motion routes",
-        "addKeyframe": "Add keyframe", "routeClip": "Route {{start}}–{{end}}s",
+        "title": "Timeline",
+        "camera": "Camera",
+        "actionTrack": "{{name}} · Action",
+        "tracks": "Tracks",
+        "play": "Play",
+        "pause": "Pause",
+        "goToStart": "Go to start",
+        "loop": "Loop playback",
+        "currentTime": "Current time",
+        "duration": "Duration",
+        "routePreview": "Director route view",
+        "shotPreview": "Final camera view",
+        "showRoutes": "Show motion routes",
+        "hideRoutes": "Hide motion routes",
+        "addKeyframe": "Add keyframe",
+        "routeClip": "Route {{start}}–{{end}}s",
         "routeClipAria": "{{name}} route from {{start}} to {{end}} seconds",
         "routeClipHelp": "Drag the route clip to move it; drag either end to change duration",
-        "trimStart": "Adjust route start", "trimEnd": "Adjust route end",
-        "keyframeAria": "{{name}} keyframe {{index}} at {{time}} seconds", "actionClip": "Action",
+        "trimStart": "Adjust route start",
+        "trimEnd": "Adjust route end",
+        "keyframeAria": "{{name}} keyframe {{index}} at {{time}} seconds",
+        "actionClip": "Action",
         "scrubHelp": "Drag the ruler to scrub; arrow keys move one frame, Shift plus arrows move ten frames",
         "resize": "Drag to resize timeline"
       },
       "route": {
-        "point": "Place Route Points", "draw": "Draw Route", "finish": "Finish Route", "cancel": "Cancel Drawing",
-        "hintPoints": "Click the ground to add route points. Drag keyframes afterward to refine the path.",
-        "hintDraw": "Hold the mouse button and draw on the ground. Refine the result in the timeline."
+        "point": "Place Route Points",
+        "draw": "Draw Route",
+        "finish": "Finish Route",
+        "cancel": "Cancel Drawing",
+        "hintPoints": "Click the ground to add route points; press Enter or double-click to finish. Drag keyframes afterward to refine the path.",
+        "hintDraw": "Hold the mouse button and draw on the ground. Refine the result in the timeline.",
+        "hintLine": "Click the ground for the start, then the end; hold Shift to stay on an axis.",
+        "lineStart": "Click the ground to set the start · Esc to cancel",
+        "lineEnd": "Click the end to finish · hold Shift for an axis · Esc to cancel",
+        "pointsStart": "Click the ground for point 1 · Esc to cancel",
+        "pointsCount_one": "1 point · Enter to finish · Esc to cancel",
+        "pointsCount_other": "{{count}} points · Enter to finish · Esc to cancel"
       },
       "inspector": {
-        "title": "Motion Inspector", "empty": "Select a keyframe to edit it.", "time": "Time",
-        "easing": "Interpolation", "linear": "Linear", "smooth": "Smooth", "fov": "Field of view",
-        "orientToPath": "Face travel direction", "duplicate": "Duplicate", "delete": "Delete keyframe",
-        "position": "Position", "yaw": "Heading", "targetMode": "Camera Target", "fixedTarget": "Fixed Target",
-        "targetBodyPart": "Track Body Part", "head": "Head", "torso": "Torso", "feet": "Feet",
-        "trackSummary": "{{count}} keyframes", "keyframes": "Keyframes", "keyframeNumber": "Keyframe {{index}}",
+        "title": "Motion Inspector",
+        "empty": "Select a keyframe to edit it.",
+        "time": "Time",
+        "easing": "Interpolation",
+        "linear": "Linear",
+        "smooth": "Smooth",
+        "fov": "Field of view",
+        "orientToPath": "Face travel direction",
+        "duplicate": "Duplicate",
+        "delete": "Delete keyframe",
+        "position": "Position",
+        "yaw": "Heading",
+        "targetMode": "Camera Target",
+        "fixedTarget": "Fixed Target",
+        "targetBodyPart": "Track Body Part",
+        "head": "Head",
+        "torso": "Torso",
+        "feet": "Feet",
+        "trackSummary": "{{count}} keyframes",
+        "keyframes": "Keyframes",
+        "keyframeNumber": "Keyframe {{index}}",
         "emptyTrack": "Draw a route or add keyframes on the timeline to edit them here.",
-        "clipStart": "Clip start", "clipEnd": "Clip end",
-        "clipHelp": "You can also drag the route clip or its handles on the timeline."
+        "clipStart": "Clip start",
+        "clipEnd": "Clip end",
+        "clipHelp": "You can also drag the route clip or its handles on the timeline.",
+        "hold": "Hold",
+        "lookAt": "Aim",
+        "lookTarget": "Object",
+        "lookPoint": "Point",
+        "lookFree": "Free",
+        "lookTargetHelp": "The camera keeps aiming at the chosen body part and follows the object as it moves.",
+        "lookPointHelp": "The camera aims at a fixed point in the scene — good for a locked-off pan.",
+        "lookFreeHelp": "Set the camera rotation directly (X tilt · Y pan · Z roll), with no aim target.",
+        "rotationDeg": "Rotation (°)"
       },
       "library": {
-        "title": "Action Library", "poses": "Static Poses", "actions": "Playable Actions", "clips": "Custom Clips",
-        "custom": "Custom", "selectPerson": "Select a person to apply a pose, action, or clip.",
-        "clipNamePlaceholder": "Clip name", "saveClip": "Save Track as Clip", "noClips": "No custom clips yet",
-        "keyframes": "keyframes", "apply": "Apply clip", "rename": "Rename clip", "duplicate": "Duplicate clip",
-        "loop": "Loop clip", "delete": "Delete clip", "timeAt": "Apply at {{time}}s", "untitledClip": "Untitled clip"
+        "title": "Action Library",
+        "poses": "Static Poses",
+        "actions": "Playable Actions",
+        "clips": "Custom Clips",
+        "custom": "Custom",
+        "selectPerson": "Select a person to apply a pose, action, or clip.",
+        "clipNamePlaceholder": "Clip name",
+        "saveClip": "Save Track as Clip",
+        "noClips": "No custom clips yet",
+        "keyframes": "keyframes",
+        "apply": "Apply clip",
+        "rename": "Rename clip",
+        "duplicate": "Duplicate clip",
+        "loop": "Loop clip",
+        "delete": "Delete clip",
+        "timeAt": "Apply at {{time}}s",
+        "untitledClip": "Untitled clip"
       },
       "pilot": {
-        "enter": "Free camera move", "exit": "Exit free camera", "active": "Moving camera", "noTarget": "No tracking target",
+        "enter": "Free camera move",
+        "exit": "Exit free camera",
+        "active": "Moving camera",
+        "noTarget": "No tracking target",
         "help": "Move the camera like an operator. Press Enter to record its current position on the timeline.",
         "controls": "WASD move · Mouse look · Enter record camera · F lock subject · Esc exit"
       },
       "cameraPresets": {
-        "title": "Camera Route", "cinematicPush": "Cinematic Push", "characterFollow": "Character Follow",
-        "fastChase": "Fast Chase", "productOrbit": "Product Orbit", "craneRise": "Crane Rise", "lateralDolly": "Lateral Dolly",
+        "title": "Camera Route",
+        "cinematicPush": "Cinematic Push",
+        "characterFollow": "Character Follow",
+        "fastChase": "Fast Chase",
+        "productOrbit": "Product Orbit",
+        "craneRise": "Crane Rise",
+        "lateralDolly": "Lateral Dolly",
         "followActorRoute": "Follow Actor Route"
       },
       "export": {
-        "title": "Export Preview Video", "needsCamera": "Add at least two camera keyframes before exporting.",
-        "resolution": "Resolution", "fps": "Frame rate", "duration": "Duration", "format": "Format",
-        "unsupported": "Unavailable", "recording": "Recording clean scene", "remaining": "About {{seconds}}s remaining",
-        "complete": "{{format}} recording complete", "start": "Start Recording", "cancel": "Cancel Recording",
-        "save": "Save to Disk", "addToCanvas": "Add to Canvas", "failed": "Reference video recording failed.",
-        "sceneUnavailable": "The 3D scene is not ready for recording.", "canvasNodeName": "Director Studio Reference Video",
+        "title": "Export Preview Video",
+        "needsCamera": "Add at least two camera keyframes before exporting.",
+        "resolution": "Resolution",
+        "fps": "Frame rate",
+        "duration": "Duration",
+        "format": "Format",
+        "unsupported": "Unavailable",
+        "recording": "Recording clean scene",
+        "remaining": "About {{seconds}}s remaining",
+        "complete": "{{format}} recording complete",
+        "start": "Start Recording",
+        "cancel": "Cancel Recording",
+        "save": "Save to Disk",
+        "addToCanvas": "Add to Canvas",
+        "failed": "Reference video recording failed.",
+        "sceneUnavailable": "The 3D scene is not ready for recording.",
+        "canvasNodeName": "Director Studio Reference Video",
         "addToCanvasFailed": "Could not add the recorded video to the canvas."
       },
       "actions": {
-        "walk": "Walk", "run": "Run", "squatRise": "Squat and Rise", "stepOver": "Step Over", "jump": "Jump", "wave": "Wave",
-        "idleBreath": "Idle Breathing", "turnLook": "Turn and Look", "clap": "Clap", "phone": "Phone Call",
-        "walkBack": "Walk Backward", "sideStep": "Side Step", "bow": "Bow"
+        "walk": "Walk",
+        "run": "Run",
+        "squatRise": "Squat and Rise",
+        "stepOver": "Step Over",
+        "jump": "Jump",
+        "wave": "Wave",
+        "idleBreath": "Idle Breathing",
+        "turnLook": "Turn and Look",
+        "clap": "Clap",
+        "phone": "Phone Call",
+        "walkBack": "Walk Backward",
+        "sideStep": "Side Step",
+        "bow": "Bow",
+        "sneak": "Sneak",
+        "talk": "Talk",
+        "nod": "Nod",
+        "shakeHead": "Shake head",
+        "typing": "Typing",
+        "sitDown": "Sit down",
+        "standUp": "Stand up",
+        "pickUp": "Pick up",
+        "punch": "Punch",
+        "kick": "Kick",
+        "fallDown": "Fall down"
       },
       "poses": {
-        "standNeutral": "Neutral Stand", "standAttention": "Stand at Attention", "leanForward": "Lean Forward",
-        "leanBack": "Lean Back", "handsOnHips": "Hands on Hips", "armsCrossed": "Arms Crossed",
-        "sitUpright": "Sit Upright", "sitRelaxed": "Sit Relaxed", "squatLow": "Low Squat",
-        "kneelOne": "One-Knee Kneel", "kneelTwo": "Two-Knee Kneel", "lieBack": "Lie Back",
-        "walkStride": "Walking Stride", "runStride": "Running Stride", "pointForward": "Point Forward",
-        "reachUp": "Reach Up", "wave": "Wave", "lookUp": "Look Up", "lookDown": "Look Down",
-        "lookLeft": "Look Left", "lookRight": "Look Right", "talkGesture": "Talking Gesture",
-        "observe": "Observe", "jumpApex": "Jump Apex"
+        "standNeutral": "Neutral Stand",
+        "standAttention": "Stand at Attention",
+        "leanForward": "Lean Forward",
+        "leanBack": "Lean Back",
+        "handsOnHips": "Hands on Hips",
+        "armsCrossed": "Arms Crossed",
+        "sitUpright": "Sit Upright",
+        "sitRelaxed": "Sit Relaxed",
+        "squatLow": "Low Squat",
+        "kneelOne": "One-Knee Kneel",
+        "kneelTwo": "Two-Knee Kneel",
+        "lieBack": "Lie Back",
+        "walkStride": "Walking Stride",
+        "runStride": "Running Stride",
+        "pointForward": "Point Forward",
+        "reachUp": "Reach Up",
+        "wave": "Wave",
+        "lookUp": "Look Up",
+        "lookDown": "Look Down",
+        "lookLeft": "Look Left",
+        "lookRight": "Look Right",
+        "talkGesture": "Talking Gesture",
+        "observe": "Observe",
+        "jumpApex": "Jump Apex",
+        "standRelaxed": "Relaxed stand",
+        "handsBehindBack": "Hands behind back",
+        "handsInPockets": "Hands in pockets",
+        "thinking": "Thinking",
+        "shrug": "Shrug",
+        "cheer": "Cheer",
+        "handsOnHead": "Hands on head",
+        "reachForward": "Reach forward",
+        "phoneCall": "Phone call",
+        "salute": "Salute",
+        "pray": "Palms together",
+        "holdObject": "Hold object",
+        "sitForward": "Sit leaning forward",
+        "sitCrossLegged": "Sit cross-legged",
+        "sitKneesUp": "Sit hugging knees",
+        "crouchHide": "Crouch and hide",
+        "lieSide": "Lie on side",
+        "lieFront": "Lie face down",
+        "crawl": "Crawl",
+        "fallBack": "Fall backward",
+        "fightStance": "Fighting stance",
+        "punch": "Punch",
+        "kick": "Kick",
+        "aimPistol": "Aim pistol",
+        "push": "Push",
+        "pull": "Pull",
+        "carryBox": "Carry box",
+        "pickUp": "Pick up",
+        "bow": "Bow",
+        "lookBack": "Look back"
+      },
+      "categories": {
+        "all": "All",
+        "stand": "Standing",
+        "gesture": "Gesture",
+        "sit": "Sitting",
+        "ground": "Ground",
+        "move": "Moving",
+        "action": "Action",
+        "look": "Look",
+        "locomotion": "Locomotion",
+        "body": "Body"
       }
     },
     "prompt": {
@@ -1028,7 +1324,7 @@
     "scene": {
       "positionHint": "Click the ground to move the selected object there (click Cancel to exit)",
       "moveHint": "WASD/arrow keys = move · QE = vertical · left drag = orbit · right/Shift drag = pan · wheel = zoom",
-      "orbitHint": "Left drag = orbit · right/Shift drag = pan · wheel = zoom · click a 3D object = select",
+      "orbitHint": "Click to select · Drag empty space to select a region · Alt-drag to orbit · Right-drag to pan · Scroll to zoom",
       "reset": "Reset",
       "resetView": "Reset view",
       "fitAll": "Fit All",
@@ -1105,7 +1401,6 @@
       "action": "Action",
       "actionPlaceholder": "Enter a custom action or pose description",
       "saveActionPreset": "Save Preset",
-      "editCustomActionPose": "Edit Custom Action Pose",
       "customActionDefaultName": "Custom Action",
       "deleteActionPreset": "Delete action preset \"{{name}}\"",
       "confirmDeleteActionPreset": "Delete action preset \"{{name}}\"?",
@@ -1124,7 +1419,11 @@
       "armSpread": "Arm Spread",
       "legLength": "Leg Length",
       "legThickness": "Leg Thickness",
-      "legSpread": "Leg Spread"
+      "legSpread": "Leg Spread",
+      "transform": "Transform",
+      "scrubHint": "Drag a label sideways to scrub; hold Shift for fine steps",
+      "notes": "Relation & notes",
+      "motion": "Motion"
     },
     "actionPresets": {
       "stand": "Stand",
@@ -1154,90 +1453,493 @@
     "modelLibrary": {
       "title": "Choose Model",
       "uploadModel": "Upload Model",
-      "uploadDeferred": "My-model uploads are reserved for a later version",
       "myModelsEmpty": "No custom models yet",
-      "myModelsHint": "Model upload is reserved; this slice uses built-in procedural placeholders.",
+      "myModelsHint": "Use \"Upload model\" to import a GLB / glTF with embedded resources (≤100 MB). Models keep their metric size, are grounded and centered, and can be scaled in the scene.",
       "categories": {
         "basic": "Basic Models",
         "people": "Base Characters",
         "props": "Daily Props",
+        "architecture": "Architecture",
+        "street": "Street",
+        "nature": "Nature",
         "scenes": "Daily Sets",
         "vehicles": "Common Transport",
         "mine": "My Models"
       },
       "models": {
-        "basic-female": { "name": "Female", "labelBase": "Woman" },
-        "basic-male": { "name": "Male", "labelBase": "Man" },
-        "basic-terrain": { "name": "Terrain", "labelBase": "Terrain" },
-        "basic-pipe": { "name": "Pipe", "labelBase": "Pipe" },
-        "basic-cube": { "name": "Cube", "labelBase": "Cube" },
-        "basic-sphere": { "name": "Sphere", "labelBase": "Sphere" },
-        "basic-ramp": { "name": "Ramp", "labelBase": "Ramp" },
-        "basic-torus": { "name": "Torus", "labelBase": "Torus" },
-        "basic-cylinder": { "name": "Cylinder", "labelBase": "Cylinder" },
-        "basic-cone": { "name": "Cone", "labelBase": "Cone" },
-        "basic-plane": { "name": "Plane", "labelBase": "Plane" },
-        "basic-disc": { "name": "Disc", "labelBase": "Disc" },
-        "people-adult-male-average": { "name": "Adult Male", "labelBase": "Adult Male" },
-        "people-adult-female-average": { "name": "Adult Female", "labelBase": "Adult Female" },
-        "people-adult-male-slim": { "name": "Slim Adult Male", "labelBase": "Slim Adult Male" },
-        "people-adult-female-slim": { "name": "Slim Adult Female", "labelBase": "Slim Adult Female" },
-        "people-adult-male-strong": { "name": "Strong Adult Male", "labelBase": "Strong Adult Male" },
-        "people-adult-female-strong": { "name": "Strong Adult Female", "labelBase": "Strong Adult Female" },
-        "people-adult-male-heavy": { "name": "Heavy Adult Male", "labelBase": "Heavy Adult Male" },
-        "people-adult-female-heavy": { "name": "Heavy Adult Female", "labelBase": "Heavy Adult Female" },
-        "people-elder-male": { "name": "Elder Male", "labelBase": "Elder Male" },
-        "people-elder-female": { "name": "Elder Female", "labelBase": "Elder Female" },
-        "people-child-boy": { "name": "Child Boy", "labelBase": "Child Boy" },
-        "people-child-girl": { "name": "Child Girl", "labelBase": "Child Girl" },
-        "people-teen-male": { "name": "Teen Male", "labelBase": "Teen Male" },
-        "people-teen-female": { "name": "Teen Female", "labelBase": "Teen Female" },
-        "props-chair": { "name": "Chair", "labelBase": "Chair" },
-        "props-office-chair": { "name": "Office Chair", "labelBase": "Office Chair" },
-        "props-stool": { "name": "Stool", "labelBase": "Stool" },
-        "props-table": { "name": "Table", "labelBase": "Table" },
-        "props-desk": { "name": "Desk", "labelBase": "Desk" },
-        "props-sofa": { "name": "Sofa", "labelBase": "Sofa" },
-        "props-bed": { "name": "Bed", "labelBase": "Bed" },
-        "props-cabinet": { "name": "Cabinet", "labelBase": "Cabinet" },
-        "props-bookshelf": { "name": "Bookshelf", "labelBase": "Bookshelf" },
-        "props-door": { "name": "Door", "labelBase": "Door" },
-        "props-window": { "name": "Window", "labelBase": "Window" },
-        "props-floor-lamp": { "name": "Floor Lamp", "labelBase": "Floor Lamp" },
-        "props-table-lamp": { "name": "Table Lamp", "labelBase": "Table Lamp" },
-        "props-plant": { "name": "Plant", "labelBase": "Plant" },
-        "props-laptop": { "name": "Laptop", "labelBase": "Laptop" },
-        "props-phone": { "name": "Phone", "labelBase": "Phone" },
-        "props-cup": { "name": "Cup", "labelBase": "Cup" },
-        "props-suitcase": { "name": "Suitcase", "labelBase": "Suitcase" },
-        "props-monitor-tv": { "name": "TV / Monitor", "labelBase": "TV / Monitor" },
-        "scenes-living-room": { "name": "Living Room", "labelBase": "Living Room" },
-        "scenes-kitchen": { "name": "Kitchen", "labelBase": "Kitchen" },
-        "scenes-bedroom": { "name": "Bedroom", "labelBase": "Bedroom" },
-        "scenes-office": { "name": "Office", "labelBase": "Office" },
-        "scenes-classroom": { "name": "Classroom", "labelBase": "Classroom" },
-        "scenes-hospital-room": { "name": "Hospital Room", "labelBase": "Hospital Room" },
-        "scenes-shop-cafe": { "name": "Shop / Cafe", "labelBase": "Shop / Cafe" },
-        "scenes-restaurant": { "name": "Restaurant", "labelBase": "Restaurant" },
-        "scenes-street-corner": { "name": "Street Corner", "labelBase": "Street Corner" },
-        "scenes-parking-lot": { "name": "Parking Lot", "labelBase": "Parking Lot" },
-        "scenes-park-path": { "name": "Park Path", "labelBase": "Park Path" },
-        "scenes-warehouse": { "name": "Warehouse", "labelBase": "Warehouse" },
-        "scenes-house-exterior": { "name": "House Exterior", "labelBase": "House Exterior" },
-        "scenes-apartment-exterior": { "name": "Apartment Exterior", "labelBase": "Apartment Exterior" },
-        "vehicles-sedan": { "name": "Sedan", "labelBase": "Sedan" },
-        "vehicles-suv": { "name": "SUV", "labelBase": "SUV" },
-        "vehicles-taxi": { "name": "Taxi", "labelBase": "Taxi" },
-        "vehicles-van": { "name": "Van", "labelBase": "Van" },
-        "vehicles-bus": { "name": "Bus", "labelBase": "Bus" },
-        "vehicles-truck": { "name": "Truck", "labelBase": "Truck" },
-        "vehicles-motorcycle": { "name": "Motorcycle", "labelBase": "Motorcycle" },
-        "vehicles-bicycle": { "name": "Bicycle", "labelBase": "Bicycle" },
-        "vehicles-e-scooter": { "name": "E-Bike / Scooter", "labelBase": "E-Bike / Scooter" },
-        "vehicles-ambulance": { "name": "Ambulance", "labelBase": "Ambulance" },
-        "vehicles-police-car": { "name": "Police Car", "labelBase": "Police Car" },
-        "vehicles-subway-car": { "name": "Subway / Train Car", "labelBase": "Subway / Train Car" }
-      }
+        "people-construction-worker": {
+          "name": "Construction Worker",
+          "labelBase": "Construction Worker"
+        },
+        "people-medical-worker": {
+          "name": "Medical Worker",
+          "labelBase": "Medical Worker"
+        },
+        "people-security-officer": {
+          "name": "Security Officer",
+          "labelBase": "Security Officer"
+        },
+        "people-stage-performer": {
+          "name": "Stage Performer",
+          "labelBase": "Stage Performer"
+        },
+        "people-raincoat": {
+          "name": "Person in Raincoat",
+          "labelBase": "Person in Raincoat"
+        },
+        "architecture-wall-segment": {
+          "name": "Wall Segment",
+          "labelBase": "Wall Segment"
+        },
+        "architecture-wall-doorway": {
+          "name": "Wall with Door Opening",
+          "labelBase": "Wall with Door Opening"
+        },
+        "architecture-wall-window": {
+          "name": "Wall with Window",
+          "labelBase": "Wall with Window"
+        },
+        "architecture-floor-slab": {
+          "name": "Floor Slab",
+          "labelBase": "Floor Slab"
+        },
+        "architecture-stairs": {
+          "name": "Stairs",
+          "labelBase": "Stairs"
+        },
+        "architecture-column": {
+          "name": "Column",
+          "labelBase": "Column"
+        },
+        "architecture-railing": {
+          "name": "Railing / Fence",
+          "labelBase": "Railing / Fence"
+        },
+        "architecture-archway": {
+          "name": "Archway",
+          "labelBase": "Archway"
+        },
+        "street-road-segment": {
+          "name": "Road Segment",
+          "labelBase": "Road Segment"
+        },
+        "street-crosswalk": {
+          "name": "Crosswalk",
+          "labelBase": "Crosswalk"
+        },
+        "street-street-lamp": {
+          "name": "Street Lamp",
+          "labelBase": "Street Lamp"
+        },
+        "street-traffic-light": {
+          "name": "Traffic Light",
+          "labelBase": "Traffic Light"
+        },
+        "street-bench": {
+          "name": "Bench",
+          "labelBase": "Bench"
+        },
+        "street-bus-stop": {
+          "name": "Bus Shelter",
+          "labelBase": "Bus Shelter"
+        },
+        "street-trash-bin": {
+          "name": "Trash Bin",
+          "labelBase": "Trash Bin"
+        },
+        "street-fire-hydrant": {
+          "name": "Fire Hydrant",
+          "labelBase": "Fire Hydrant"
+        },
+        "street-road-sign": {
+          "name": "Road Sign",
+          "labelBase": "Road Sign"
+        },
+        "nature-tree-deciduous": {
+          "name": "Deciduous Tree",
+          "labelBase": "Deciduous Tree"
+        },
+        "nature-tree-pine": {
+          "name": "Pine Tree",
+          "labelBase": "Pine Tree"
+        },
+        "nature-bush": {
+          "name": "Bush",
+          "labelBase": "Bush"
+        },
+        "nature-rock": {
+          "name": "Rock",
+          "labelBase": "Rock"
+        },
+        "nature-grass-patch": {
+          "name": "Grass Patch",
+          "labelBase": "Grass Patch"
+        },
+        "nature-pond": {
+          "name": "Pond / Water Surface",
+          "labelBase": "Pond / Water Surface"
+        },
+        "nature-hill": {
+          "name": "Hill",
+          "labelBase": "Hill"
+        },
+        "props-book": {
+          "name": "Book",
+          "labelBase": "Book"
+        },
+        "props-bottle": {
+          "name": "Bottle",
+          "labelBase": "Bottle"
+        },
+        "props-backpack": {
+          "name": "Backpack",
+          "labelBase": "Backpack"
+        },
+        "props-umbrella": {
+          "name": "Umbrella",
+          "labelBase": "Umbrella"
+        },
+        "props-guitar": {
+          "name": "Guitar",
+          "labelBase": "Guitar"
+        },
+        "props-camera-tripod": {
+          "name": "Camera on Tripod",
+          "labelBase": "Camera on Tripod"
+        },
+        "props-crate-stack": {
+          "name": "Crate Stack",
+          "labelBase": "Crate Stack"
+        },
+        "props-knife": {
+          "name": "Prop Knife",
+          "labelBase": "Prop Knife"
+        },
+        "props-sword": {
+          "name": "Prop Sword",
+          "labelBase": "Prop Sword"
+        },
+        "props-pistol-prop": {
+          "name": "Pistol-shaped Prop",
+          "labelBase": "Pistol-shaped Prop"
+        },
+        "props-food-plate": {
+          "name": "Food Plate",
+          "labelBase": "Food Plate"
+        },
+        "vehicles-helicopter": {
+          "name": "Helicopter",
+          "labelBase": "Helicopter"
+        },
+        "vehicles-boat": {
+          "name": "Small Boat",
+          "labelBase": "Small Boat"
+        },
+        "vehicles-yacht": {
+          "name": "Yacht",
+          "labelBase": "Yacht"
+        },
+        "vehicles-airplane": {
+          "name": "Small Airplane",
+          "labelBase": "Small Airplane"
+        },
+        "scenes-ground": {
+          "name": "Ground Set",
+          "labelBase": "Ground Set"
+        },
+        "scenes-aerial": {
+          "name": "Aerial / Cloud Set",
+          "labelBase": "Aerial / Cloud Set"
+        },
+        "basic-female": {
+          "name": "Female",
+          "labelBase": "Woman"
+        },
+        "basic-male": {
+          "name": "Male",
+          "labelBase": "Man"
+        },
+        "basic-terrain": {
+          "name": "Terrain",
+          "labelBase": "Terrain"
+        },
+        "basic-pipe": {
+          "name": "Pipe",
+          "labelBase": "Pipe"
+        },
+        "basic-cube": {
+          "name": "Cube",
+          "labelBase": "Cube"
+        },
+        "basic-sphere": {
+          "name": "Sphere",
+          "labelBase": "Sphere"
+        },
+        "basic-ramp": {
+          "name": "Ramp",
+          "labelBase": "Ramp"
+        },
+        "basic-torus": {
+          "name": "Torus",
+          "labelBase": "Torus"
+        },
+        "basic-cylinder": {
+          "name": "Cylinder",
+          "labelBase": "Cylinder"
+        },
+        "basic-cone": {
+          "name": "Cone",
+          "labelBase": "Cone"
+        },
+        "basic-plane": {
+          "name": "Plane",
+          "labelBase": "Plane"
+        },
+        "basic-disc": {
+          "name": "Disc",
+          "labelBase": "Disc"
+        },
+        "people-adult-male-average": {
+          "name": "Adult Male",
+          "labelBase": "Adult Male"
+        },
+        "people-adult-female-average": {
+          "name": "Adult Female",
+          "labelBase": "Adult Female"
+        },
+        "people-adult-male-slim": {
+          "name": "Slim Adult Male",
+          "labelBase": "Slim Adult Male"
+        },
+        "people-adult-female-slim": {
+          "name": "Slim Adult Female",
+          "labelBase": "Slim Adult Female"
+        },
+        "people-adult-male-strong": {
+          "name": "Strong Adult Male",
+          "labelBase": "Strong Adult Male"
+        },
+        "people-adult-female-strong": {
+          "name": "Strong Adult Female",
+          "labelBase": "Strong Adult Female"
+        },
+        "people-adult-male-heavy": {
+          "name": "Heavy Adult Male",
+          "labelBase": "Heavy Adult Male"
+        },
+        "people-adult-female-heavy": {
+          "name": "Heavy Adult Female",
+          "labelBase": "Heavy Adult Female"
+        },
+        "people-elder-male": {
+          "name": "Elder Male",
+          "labelBase": "Elder Male"
+        },
+        "people-elder-female": {
+          "name": "Elder Female",
+          "labelBase": "Elder Female"
+        },
+        "people-child-boy": {
+          "name": "Child Boy",
+          "labelBase": "Child Boy"
+        },
+        "people-child-girl": {
+          "name": "Child Girl",
+          "labelBase": "Child Girl"
+        },
+        "people-teen-male": {
+          "name": "Teen Male",
+          "labelBase": "Teen Male"
+        },
+        "people-teen-female": {
+          "name": "Teen Female",
+          "labelBase": "Teen Female"
+        },
+        "props-chair": {
+          "name": "Chair",
+          "labelBase": "Chair"
+        },
+        "props-office-chair": {
+          "name": "Office Chair",
+          "labelBase": "Office Chair"
+        },
+        "props-stool": {
+          "name": "Stool",
+          "labelBase": "Stool"
+        },
+        "props-table": {
+          "name": "Table",
+          "labelBase": "Table"
+        },
+        "props-desk": {
+          "name": "Desk",
+          "labelBase": "Desk"
+        },
+        "props-sofa": {
+          "name": "Sofa",
+          "labelBase": "Sofa"
+        },
+        "props-bed": {
+          "name": "Bed",
+          "labelBase": "Bed"
+        },
+        "props-cabinet": {
+          "name": "Cabinet",
+          "labelBase": "Cabinet"
+        },
+        "props-bookshelf": {
+          "name": "Bookshelf",
+          "labelBase": "Bookshelf"
+        },
+        "props-door": {
+          "name": "Door",
+          "labelBase": "Door"
+        },
+        "props-window": {
+          "name": "Window",
+          "labelBase": "Window"
+        },
+        "props-floor-lamp": {
+          "name": "Floor Lamp",
+          "labelBase": "Floor Lamp"
+        },
+        "props-table-lamp": {
+          "name": "Table Lamp",
+          "labelBase": "Table Lamp"
+        },
+        "props-plant": {
+          "name": "Plant",
+          "labelBase": "Plant"
+        },
+        "props-laptop": {
+          "name": "Laptop",
+          "labelBase": "Laptop"
+        },
+        "props-phone": {
+          "name": "Phone",
+          "labelBase": "Phone"
+        },
+        "props-cup": {
+          "name": "Cup",
+          "labelBase": "Cup"
+        },
+        "props-suitcase": {
+          "name": "Suitcase",
+          "labelBase": "Suitcase"
+        },
+        "props-monitor-tv": {
+          "name": "TV / Monitor",
+          "labelBase": "TV / Monitor"
+        },
+        "scenes-living-room": {
+          "name": "Living Room",
+          "labelBase": "Living Room"
+        },
+        "scenes-kitchen": {
+          "name": "Kitchen",
+          "labelBase": "Kitchen"
+        },
+        "scenes-bedroom": {
+          "name": "Bedroom",
+          "labelBase": "Bedroom"
+        },
+        "scenes-office": {
+          "name": "Office",
+          "labelBase": "Office"
+        },
+        "scenes-classroom": {
+          "name": "Classroom",
+          "labelBase": "Classroom"
+        },
+        "scenes-hospital-room": {
+          "name": "Hospital Room",
+          "labelBase": "Hospital Room"
+        },
+        "scenes-shop-cafe": {
+          "name": "Shop / Cafe",
+          "labelBase": "Shop / Cafe"
+        },
+        "scenes-restaurant": {
+          "name": "Restaurant",
+          "labelBase": "Restaurant"
+        },
+        "scenes-street-corner": {
+          "name": "Street Corner",
+          "labelBase": "Street Corner"
+        },
+        "scenes-parking-lot": {
+          "name": "Parking Lot",
+          "labelBase": "Parking Lot"
+        },
+        "scenes-park-path": {
+          "name": "Park Path",
+          "labelBase": "Park Path"
+        },
+        "scenes-warehouse": {
+          "name": "Warehouse",
+          "labelBase": "Warehouse"
+        },
+        "scenes-house-exterior": {
+          "name": "House Exterior",
+          "labelBase": "House Exterior"
+        },
+        "scenes-apartment-exterior": {
+          "name": "Apartment Exterior",
+          "labelBase": "Apartment Exterior"
+        },
+        "vehicles-sedan": {
+          "name": "Sedan",
+          "labelBase": "Sedan"
+        },
+        "vehicles-suv": {
+          "name": "SUV",
+          "labelBase": "SUV"
+        },
+        "vehicles-taxi": {
+          "name": "Taxi",
+          "labelBase": "Taxi"
+        },
+        "vehicles-van": {
+          "name": "Van",
+          "labelBase": "Van"
+        },
+        "vehicles-bus": {
+          "name": "Bus",
+          "labelBase": "Bus"
+        },
+        "vehicles-truck": {
+          "name": "Truck",
+          "labelBase": "Truck"
+        },
+        "vehicles-motorcycle": {
+          "name": "Motorcycle",
+          "labelBase": "Motorcycle"
+        },
+        "vehicles-bicycle": {
+          "name": "Bicycle",
+          "labelBase": "Bicycle"
+        },
+        "vehicles-e-scooter": {
+          "name": "E-Bike / Scooter",
+          "labelBase": "E-Bike / Scooter"
+        },
+        "vehicles-ambulance": {
+          "name": "Ambulance",
+          "labelBase": "Ambulance"
+        },
+        "vehicles-police-car": {
+          "name": "Police Car",
+          "labelBase": "Police Car"
+        },
+        "vehicles-subway-car": {
+          "name": "Subway / Train Car",
+          "labelBase": "Subway / Train Car"
+        }
+      },
+      "uploadHint": "Import a GLB / glTF 2.0 model (embedded textures and buffers, ≤100 MB)",
+      "myModelMeta": "{{height}} m tall · {{size}}",
+      "deleteMine": "Delete \"{{name}}\" from My Models",
+      "confirmDeleteMine": "Delete \"{{name}}\" from My Models? Copies already placed in scenes will fail to load next time."
     },
     "pedestrians": {
       "title": "Add Pedestrians",
@@ -1326,7 +2028,7 @@
         "transformMove": "Transform Tool: Move",
         "transformRotate": "Transform Tool: Rotate",
         "transformScale": "Transform Tool: Scale",
-        "escape": "Cancel transform, close dialogs, or exit Director Studio",
+        "escape": "Step back: route draft, dialogs, pose, selection, transform",
         "delete": "Delete the selected element",
         "copyPaste": "Copy / paste the selected element",
         "copy": "Copy the selected element",
@@ -1341,8 +2043,11 @@
         "grid": "Open the grid panel",
         "prompt": "Open the prompt panel",
         "shortcuts": "Open the shortcuts panel",
-        "advancedPedestrianTags": "Show or hide pedestrian sequence numbers and short IDs"
-      }
+        "advancedPedestrianTags": "Show or hide pedestrian sequence numbers and short IDs",
+        "poseEdit": "Pose editing"
+      },
+      "editHint": "Click a key, then press a new combination to rebind",
+      "clickToEdit": "Click, then press a new key"
     },
     "category": {
       "person": "Person",
@@ -1366,6 +2071,173 @@
       "resolution": "Resolution",
       "screenshot": "Screenshot",
       "shortcuts": "Shortcuts"
+    },
+    "pose": {
+      "title": "Pose editing",
+      "enter": "Pose",
+      "exit": "Exit pose editing",
+      "viewportHint": "Pose mode: click the body or a yellow dot to pick a joint, drag the rings to rotate; drag the pink hand/foot handles to move a whole limb; Esc exits",
+      "targetItem": "Editing the person's default pose",
+      "targetKeyframe": "Recording to the action keyframe at {{time}}s",
+      "noJoint": "Click the person in the viewport or a button below to pick a joint.",
+      "resetJoint": "Reset",
+      "resetAll": "Clear edits",
+      "mirror": "Mirror",
+      "copyArmLeftToRight": "Left arm → right",
+      "copyArmRightToLeft": "Right arm → left",
+      "copyLegLeftToRight": "Left leg → right",
+      "copyLegRightToLeft": "Right leg → left",
+      "hands": "Hands",
+      "hand": {
+        "left": "Left",
+        "right": "Right"
+      },
+      "handShapes": {
+        "relaxed": "Relaxed",
+        "open": "Open",
+        "fist": "Fist",
+        "point": "Point",
+        "grip": "Grip",
+        "pinch": "Pinch"
+      },
+      "save": "Save pose",
+      "savePlaceholder": "Pose name (saved as an action preset)",
+      "regions": {
+        "core": "Torso",
+        "head": "Head",
+        "leftArm": "L arm",
+        "rightArm": "R arm",
+        "leftLeg": "L leg",
+        "rightLeg": "R leg"
+      },
+      "jointShort": {
+        "spine": "Waist",
+        "chest": "Chest",
+        "neck": "Neck",
+        "head": "Head",
+        "clavicle": "Clavicle",
+        "upperArm": "Upper arm",
+        "forearm": "Elbow",
+        "wrist": "Wrist",
+        "thigh": "Thigh",
+        "shin": "Knee",
+        "foot": "Ankle",
+        "toes": "Toes"
+      },
+      "joints": {
+        "spine": "Lower spine",
+        "chest": "Chest",
+        "neck": "Neck",
+        "head": "Head",
+        "leftClavicle": "Left clavicle",
+        "rightClavicle": "Right clavicle",
+        "leftUpperArm": "Left upper arm",
+        "rightUpperArm": "Right upper arm",
+        "leftForearm": "Left elbow",
+        "rightForearm": "Right elbow",
+        "leftWrist": "Left wrist",
+        "rightWrist": "Right wrist",
+        "leftThigh": "Left thigh",
+        "rightThigh": "Right thigh",
+        "leftShin": "Left knee",
+        "rightShin": "Right knee",
+        "leftFoot": "Left ankle",
+        "rightFoot": "Right ankle",
+        "leftToes": "Left toes",
+        "rightToes": "Right toes"
+      },
+      "axes": {
+        "core": {
+          "x": "Bend forward / back",
+          "y": "Turn",
+          "z": "Lean sideways"
+        },
+        "clavicle": {
+          "x": "Shrug",
+          "y": "Roll forward"
+        },
+        "limb": {
+          "x": "Swing forward / back",
+          "y": "Twist",
+          "z": "Raise sideways"
+        },
+        "elbow": {
+          "x": "Bend"
+        },
+        "knee": {
+          "x": "Bend"
+        },
+        "wrist": {
+          "x": "Flex / extend",
+          "y": "Turn",
+          "z": "Tilt"
+        },
+        "foot": {
+          "x": "Point / flex",
+          "y": "Toes in / out",
+          "z": "Roll in / out"
+        },
+        "toes": {
+          "x": "Bend up"
+        }
+      },
+      "editing": "Posing {{name}}",
+      "jointSelected": "Joint: {{joint}} — drag the rings to rotate",
+      "done": "Done"
+    },
+    "redo": "Redo",
+    "captureHelp": "Capture the framed view into Shots",
+    "captured": "Captured",
+    "viewSnapshots": "View shots",
+    "frameHelp": "Frame: change the safe-frame aspect ratio",
+    "dock": {
+      "toggle": "Show or hide the side panel",
+      "label": "Side panel",
+      "layers": "Layers",
+      "shots": "Shots",
+      "scene": "Scene",
+      "sceneHelp": "Prompt, grid, background and view settings",
+      "sceneCounts": "{{person}} people · {{object}} props · {{scene}} sets",
+      "background": "Panorama background",
+      "noSnapshots": "No shots yet",
+      "noSnapshotsHint": "Frame your shot, then press {{keys}} or use Capture in the header"
+    },
+    "projectsHint": "Double-click a name to rename; hover a card to set cover or delete",
+    "newProjectShort": "New",
+    "openProjectNamed": "Open project {{name}}",
+    "currentProject": "Current",
+    "renameProject": "Rename project",
+    "rail": {
+      "label": "Stage tools",
+      "add": "Add",
+      "addHelp": "Add a person, crowd, library model or your own model",
+      "addPerson": "Person",
+      "addCrowdHelp": "Add many people as an array or random scatter",
+      "myModels": "My models",
+      "lens": "Lens",
+      "lensHelp": "Focal length, distance and lens presets",
+      "help": "Shortcuts & guide",
+      "helpHint": "See all shortcuts; click a key to rebind it"
+    },
+    "selection": {
+      "label": "Selection",
+      "duplicate": "Duplicate",
+      "clear": "Deselect"
+    },
+    "view": {
+      "focus": "Focus & follow",
+      "stopFollow": "Stop following"
+    },
+    "guide": {
+      "title": "Three steps",
+      "done": "All done",
+      "close": "Close guide",
+      "person": "Add a person",
+      "personHint": "Use Add on the left to place a person in the scene",
+      "route": "Draw a route",
+      "routeHint": "Select the person and drag on the ground to draw their path",
+      "play": "Play",
+      "playHint": "Press Space to watch the person walk the route"
     }
   },
   "node": {
@@ -1521,7 +2393,7 @@
     "aiAudio": {
       "promptPlaceholder": "Enter text to synthesize, or connect a text node as input",
       "textRequired": "Enter text to synthesize, or connect a text node",
-      "noModel": "Configure and enable an audio model in Settings first",
+      "noModel": "Add a model supporting audio generation in Channels first.",
       "noVoice": "No synced voices",
       "generated": "Audio result generated",
       "generateFailed": "Audio generation failed",
@@ -1531,7 +2403,9 @@
       "staleResult": "Inputs changed; the result may be stale",
       "payloadDebug": "Preview audio request content",
       "payloadDebugTitle": "Audio Payload Preview",
-      "payloadDebugHint": "This shows the exact audio gateway payload and the provider request assembled from it. For VoxCPM, dataMap lists Gradio data[] fields by index; data URL audio is summarized and marked when actual generation will upload it before submit."
+      "payloadDebugHint": "This previews the request assembled from the audio channel declaration. Credentials and embedded media are redacted.",
+      "voice": "Voice",
+      "unavailableModel": "This audio model is unavailable. Choose an audio model from Channels. Existing media and history are preserved."
     },
     "audioNode": {
       "waitingResult": "Waiting for audio result",
@@ -1662,8 +2536,6 @@
       "settingsBackupExcludes": "Projects, canvas nodes, connections, and project media are excluded. Credentials are excluded by default.",
       "exportTitle": "Export Settings",
       "exportDescription": "API keys, tokens, passwords, Dreamina sessions, and machine-specific absolute paths are excluded by default.",
-      "includeCredentials": "Include credentials",
-      "credentialsPlaintextHint": "Credentials will be written as unencrypted plaintext.",
       "exportAction": "Export Settings",
       "exportSuccess": "Settings exported",
       "importTitle": "Import Settings",
@@ -1671,31 +2543,21 @@
       "importAction": "Choose Settings File",
       "importSuccess": "Selected settings imported",
       "fileTooLarge": "Settings files are limited to 16 MB.",
-      "credentialsWarningTitle": "Export Unencrypted Credentials",
-      "credentialsWarningDescription": "This file will contain API keys, provider keys, and image-host login credentials. Anyone who can read it can use those credentials.",
-      "exportUnencrypted": "Export Anyway",
       "previewTitle": "Settings Override Preview",
       "applySelected": "Apply Selected Categories",
       "appVersion": "App version",
       "schemaVersion": "Schema version",
-      "importCredentialsWarning": "This file contains unencrypted credentials. The credentials category is off by default and is only imported when you explicitly select it.",
-      "importCredentialsConfirmTitle": "Confirm Credential Import",
-      "importCredentialsConfirmDescription": "The selected credentials will overwrite current built-in API keys, the Agnes key, custom provider keys, and image-host login credentials.",
-      "importCredentialsConfirmAction": "Import and Overwrite Credentials",
       "noChanges": "No changes",
       "toggleCategory": "Include {{category}}",
       "before": "Before",
       "after": "After",
-      "credentialConfigured": "Configured fields: {{count}}",
-      "credentialMissing": "Not configured",
       "categories": {
         "general": "General & Interaction",
         "appearance": "Appearance",
         "prompts": "Prompts & Text Agents",
         "models": "Models & Audio",
         "providers": "Custom Providers",
-        "imageHosting": "Image Hosting",
-        "credentials": "Unencrypted Credentials"
+        "imageHosting": "Image Hosting"
       },
       "status": {
         "add": "Add",
@@ -1955,18 +2817,6 @@
       "preset": "Image Model Preset Configuration",
       "fullCustom": "Fully Custom Image Model Configuration"
     },
-    "addProviders": {
-      "title": "Add Provider",
-      "description": "Choose a generation type. Presets cover common protocols; full custom builds any declarative image request.",
-      "tabs": {
-        "imagePreset": "Common Images, Gemini, Fal, and related protocols",
-        "imageCustom": "Custom routes, fields, images, geometry, and polling",
-        "videoLabel": "Video Generation",
-        "chatLabel": "Text Chat",
-        "video": "OpenAI Videos API-compatible provider configuration",
-        "chat": "Responses, Chat Completions, Anthropic, and Gemini"
-      }
-    },
     "comfyui": {
       "description": "Choose a common workflow template or import your own API-format workflow. Local and cloud servers are supported.",
       "newConnection": "New connection",
@@ -1977,10 +2827,22 @@
       "connectionDescription": "Choose a template and enter the server address. Templates use built-in ComfyUI nodes; custom workflows can output images or video.",
       "chooseWorkflow": "Choose a workflow",
       "templates": {
-        "text-to-image": { "title": "Basic text to image", "description": "Prompt, size and seed are filled into the workflow automatically." },
-        "image-to-image": { "title": "Reference image redraw", "description": "Upload one reference image and regenerate it with a prompt." },
-        "minimax-h3-local": {"title": "MiniMax H3 local video", "description": "Import a working H3 API workflow with duration and canvas mapping."},
-        "custom": { "title": "Custom workflow", "description": "Import API-format JSON for image or video output." }
+        "text-to-image": {
+          "title": "Basic text to image",
+          "description": "Prompt, size and seed are filled into the workflow automatically."
+        },
+        "image-to-image": {
+          "title": "Reference image redraw",
+          "description": "Upload one reference image and regenerate it with a prompt."
+        },
+        "minimax-h3-local": {
+          "title": "MiniMax H3 local video",
+          "description": "Import a working H3 API workflow with duration and canvas mapping."
+        },
+        "custom": {
+          "title": "Custom workflow",
+          "description": "Import API-format JSON for image or video output."
+        }
       },
       "h3LocalHelp": "Install local H3 models and nodes in ComfyUI and verify video generation, then import API JSON containing MiniMaxH3ImageToVideo or MiniMaxH3ReferenceToVideo and a video saver. Durations of 5–15 seconds align at 24fps. No MiniMax API key is needed. Comfy Partner billing nodes are not supported here; use the direct provider instead.",
       "h3WorkflowRequired": "Import an API workflow containing local MiniMax H3 nodes. Comfy Partner/API nodes are not supported by this entry.",
@@ -1996,7 +2858,11 @@
       "displayTitle": "Appearance on the canvas",
       "displayDescription": "Give this workflow a recognizable name so you can select it from the canvas model list.",
       "canvasName": "Workflow name",
-      "steps": { "connection": "Workflow and connection", "capabilities": "Canvas display", "review": "Review and save" }
+      "steps": {
+        "connection": "Workflow and connection",
+        "capabilities": "Canvas display",
+        "review": "Review and save"
+      }
     },
     "customProviders": {
       "assistant": {
@@ -2204,49 +3070,37 @@
     "keybindings": "Keybindings",
     "keybindingsDesc": "Configure mouse actions, canvas pan, and WASD movement habits",
     "imageHosting": {
-      "title": "Image Hosting",
-      "desc": "Configure PiXhost or a private image host. Image hosting is used only when enabled.",
-      "enable": "Enable image hosting",
-      "enableDesc": "When off, the configuration is kept but upload and save flows will not use image hosting.",
-      "provider": "Image host",
-      "providerDesc": "Choose the host to use when image hosting is enabled.",
-      "providers": {
-        "pixhost": "PiXhost",
-        "seedvault": "Private host"
-      },
-      "apiBaseUrl": "API base URL / domain",
-      "restoreDefaults": "Reset",
-      "pixhost": {
-        "title": "PiXhost",
-        "desc": "Change the API base URL here when PiXhost rotates domains.",
-        "contentType": "Content type",
-        "contentTypes": {
-          "family": "Family safe",
-          "adult": "Adult"
-        },
-        "maxThumbnailSize": "Max thumbnail size"
-      },
-      "seedvault": {
-        "title": "Private Image Host",
-        "desc": "On save, /tokens is called with email and password, then the returned token overwrites the current token.",
-        "email": "Account email",
-        "password": "Password",
-        "strategyId": "Upload strategy ID",
-        "strategyIdPlaceholder": "Leave empty for default strategy",
-        "token": "Token",
-        "tokenPlaceholder": "Generated after saving credentials, or paste manually",
-        "tokenHint": "After account or password is re-entered, saving refreshes the token.",
-        "tokenWillRefresh": "Account or password changed. Saving will generate a new token."
+      "title": "Custom image host",
+      "desc": "Connect your own upload endpoint. Disabled by default; each reference upload requires confirmation.",
+      "uploadUrl": "Upload URL (POST)",
+      "uploadUrlPlaceholder": "Enter the complete upload URL from your service",
+      "uploadHelp": "Uploads the image as multipart/form-data. No path is appended and no account login is performed.",
+      "fileField": "Image file field",
+      "responseUrlPath": "Response image URL field",
+      "responseHelp": "For {\"data\":{\"url\":\"https://…\"}}, enter data.url. Arrays support paths such as data.images[0].url.",
+      "headers": "Headers and credentials (optional)",
+      "addHeader": "Add header",
+      "headerName": "Name",
+      "headerValue": "Value / credential",
+      "removeHeader": "Remove header",
+      "headersHelp": "Follow your service documentation, for example Authorization → Bearer your-token. Header values are stored in the credential vault. Leave Content-Type to the uploader.",
+      "enable": "Enable my configured upload endpoint",
+      "enableDesc": "Saving does not upload anything. Images are sent to this address only after you confirm a reference upload.",
+      "previousEndpoint": "Previous endpoint:",
+      "migration": {
+        "retired-provider": "The bundled host has been retired. Existing media is retained. Configure and enable your own endpoint to upload new images.",
+        "custom-endpoint": "Your previous custom endpoint is kept as a disabled draft. Check the full URL, fields, and credentials before enabling it. Old account credentials will not log in automatically.",
+        "imported": "Imported hosting stays disabled. Check the endpoint and local credentials before explicitly enabling it."
       },
       "errors": {
-        "missingSeedvaultCredentials": "Enter the private host account email and password first.",
-        "tokenRequestFailed": "Failed to fetch private host token. Check the account, password, and API base URL.",
-        "invalidTokenResponse": "The private host response did not contain a usable token.",
-        "saveFailed": "Failed to save image hosting settings."
+        "uploadUrl": "Enter a complete HTTP(S) upload URL without account credentials or a # fragment.",
+        "fileField": "Enter a valid image file field name.",
+        "responsePath": "Enter a JSON field path such as data.url or data.images[0].url.",
+        "headers": "Invalid header name or value. Content-Type, Content-Length, and Host are managed by the uploader.",
+        "duplicateHeader": "Header names must be unique.",
+        "disabled": "Configure and explicitly enable your custom image host in Settings first.",
+        "saveFailed": "Failed to save image host settings."
       }
-    },
-    "audioModels": {
-      "title": "Audio Models"
     },
     "canvasInteraction": {
       "title": "Canvas Operation Habits",
@@ -2634,5 +3488,195 @@
         "desc": " flashback to 5 seconds ago"
       }
     }
+  },
+  "channelModes": {
+    "mode": "Generation mode",
+    "addToSlot": "Add to \"{{slot}}\"",
+    "removeFromSlot": "Remove from \"{{slot}}\"",
+    "wrongKind": "\"{{slot}}\" only accepts its declared media type",
+    "noFreeSlot": "The \"{{mode}}\" mode has no free slot for this media",
+    "advanced": "Advanced",
+    "on": "On",
+    "off": "Off",
+    "connectForSlot": "Connect a media node, then pick it for \"{{slot}}\"",
+    "editor": {
+      "hint": "Each mode sends only the parameters and slots it declares; edit endpoint overrides in JSON and check the request preview before saving.",
+      "legacy": "Single mode (uses the model's operations and reference counts). Add modes to split it into text / first frame / first+last / multi-reference.",
+      "addMode": "Add mode",
+      "newMode": "Mode {{index}}",
+      "count": "{{count}} modes",
+      "single": "Single mode",
+      "label": "Label",
+      "id": "Mode ID",
+      "operation": "Operation",
+      "description": "Description",
+      "slots": "Reference slots",
+      "addSlot": "Add slot",
+      "slotKey": "Slot key",
+      "kindLabel": "Media type",
+      "kind": {
+        "image": "Image",
+        "video": "Video",
+        "audio": "Audio"
+      },
+      "min": "Min",
+      "max": "Max",
+      "step": "Step",
+      "params": "Parameters",
+      "addParam": "Add parameter",
+      "newParam": "New parameter",
+      "paramKey": "Parameter key",
+      "type": "Type",
+      "types": {
+        "enum": "Options",
+        "number": "Number",
+        "boolean": "Switch",
+        "text": "Text"
+      },
+      "group": "Group",
+      "basic": "Basic",
+      "default": "Default",
+      "options": "Options",
+      "optionsHint": "One per line: label=value, e.g. 720p=\"720p\" or 5 s=5"
+    }
+  },
+  "secrets": {
+    "state": {
+      "missing": "Not configured",
+      "present": "Stored securely",
+      "locked": "Vault locked or unavailable",
+      "error": "Vault operation failed"
+    },
+    "reveal": "Reveal secret",
+    "hide": "Hide secret",
+    "delete": "Delete saved secret",
+    "migrationError": "Credential migration failed; original data retained",
+    "desktopRequired": "The credential vault requires the desktop app",
+    "exportRefsOnly": "Exports never contain secrets; re-enter them on other devices.",
+    "deleteDraftNotice": "Saving will delete this key from the system vault; cancel or leave without saving to keep it."
+  },
+  "reference": {
+    "needsPublicUrl": "Slot {{slotKey}} requires an upstream-accessible HTTP(S) URL. Local media is never uploaded automatically.",
+    "uploadConfirmTitle": "Confirm reference image upload",
+    "uploadConfirmDescription": "Upload the images in slot {{slotKey}} ({{count}}) to your configured image host, replace the local media with their public URLs and submit again. Confirm that they contain no sensitive information.",
+    "uploadNotConfirmed": "Reference image upload requires explicit confirmation.",
+    "publicUrlRequiredForMedia": "The configured image host supports images only. Supply an accessible HTTP(S) URL for video or audio.",
+    "invalidHostedUrl": "The image host did not return a safe, valid HTTP(S) URL.",
+    "uploadAndRetry": "Upload to image host and retry",
+    "configureHost": "Set up image host",
+    "uploadConfirm": "Upload and retry",
+    "retryUnavailable": "The references in this slot are gone, so there is nothing to retry."
+  },
+  "mediaEdit": {
+    "errors": {
+      "aborted": "Media edit canceled",
+      "invalid-operation": "Unsupported media edit operation",
+      "invalid-range": "Invalid edit range or range exceeds media duration",
+      "wrong-node-kind": "This node does not support this media operation",
+      "missing-node": "Source node no longer exists",
+      "missing-source": "No media available to edit",
+      "stale-source": "Source media or project changed; start the edit again",
+      "no-webcodecs": "Required local media codec support is unavailable",
+      "no-video-encoder": "No supported target video encoder is available",
+      "no-video-decoder": "This video codec cannot be decoded here",
+      "no-audio-decoder": "This audio codec cannot be decoded here",
+      "no-audio-track": "Video has no audio track",
+      "no-video-track": "Media has no video track",
+      "unsupported-container": "Unsupported media container or track combination",
+      "no-canvas": "Image processing is unavailable here",
+      "read-failed": "Could not read source media",
+      "processing-failed": "Local media processing failed",
+      "persistence-failed": "Could not persist edited media"
+    },
+    "ratePitchNotice": "Changing speed also changes pitch",
+    "rotate": "Rotate 90° right",
+    "flipX": "Flip horizontally",
+    "flipY": "Flip vertically",
+    "done": "Created {{count}} edited node(s) (undoable)",
+    "audioSliced": "Trimmed audio created",
+    "videoTitle": "Edit video",
+    "audioTitle": "Edit audio",
+    "apply": "Create new node",
+    "useCurrentTime": "Use current time",
+    "addCurrentTime": "Add current time",
+    "tools": {
+      "captureFrame": "Capture frame",
+      "trim": "Trim",
+      "crop": "Crop",
+      "separateAudio": "Separate audio",
+      "slice": "Slice",
+      "split": "Split",
+      "rate": "Speed"
+    },
+    "duration": "Duration {{seconds}} s",
+    "time": "Time (s)",
+    "start": "Start (s)",
+    "end": "End (s)",
+    "splitPoints": "Split points (s)",
+    "splitHint": "Comma-separated; creates one audio node per segment",
+    "rate": "Speed factor",
+    "crop": {
+      "x": "Left (px)",
+      "y": "Top (px)",
+      "width": "Width (px)",
+      "height": "Height (px)"
+    },
+    "separateHint": "Creates a silent video node and an audio node; the original node is unchanged.",
+    "unsupported": "This local processing is not supported here"
+  },
+  "characters": {
+    "title": "Characters",
+    "subtitle": "Keep character images, references and voice links ready for @ mentions and canvas work. Profiles belong to your library, not one project.",
+    "create": "Create from image",
+    "upload": "Upload image",
+    "search": "Search characters or tags",
+    "all": "All",
+    "noMatches": "No matching characters",
+    "empty": "No characters yet",
+    "emptyHint": "Start with a character image. Add more angles, tags and a voice reference, then use @ to mention the character in an assistant conversation.",
+    "editTitle": "Edit character",
+    "name": "Name",
+    "description": "Character description",
+    "images": "Reference images",
+    "addImages": "Add images",
+    "imagesHint": "The star marks the main image. Image, order and main-image changes save immediately; name, tags and voice save with the Save button.",
+    "setMain": "Use as main image",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
+    "removeImage": "Remove image reference",
+    "tags": "Tags",
+    "tagsHint": "Separate with commas, e.g. lead, short hair, contemporary",
+    "voice": "Voice",
+    "voiceNone": "No voice reference",
+    "voiceSample": "Link an audio sample",
+    "voiceProvider": "Link a provider voice",
+    "chooseSample": "Choose audio sample",
+    "providerId": "Provider ID",
+    "voiceId": "Voice ID",
+    "voiceCloneUnavailable": "No voice-cloning adapter is configured. This only saves an audio-sample or existing provider-voice reference. It does not clone a voice or incur charges.",
+    "noImage": "No main image",
+    "apply": "Apply to canvas",
+    "sendMain": "Send main image to canvas",
+    "applied": "Added “{{name}}” to the canvas",
+    "imageCount": "{{count}} reference images",
+    "deleteNamed": "Delete character “{{name}}”",
+    "deleteTitle": "Delete character?",
+    "deleteDescription": "Only the profile for “{{name}}” will be removed. Images, audio and canvas nodes are not deleted.",
+    "storageWarning": "The character library is in memory only; reloading may lose changes: {{reason}}",
+    "migrationIssues": "{{count}} entries were repaired or skipped during migration",
+    "errors": {
+      "invalidInput": "Some character details are missing or invalid.",
+      "notFound": "This character no longer exists.",
+      "assetNotFound": "The referenced asset is missing. Choose another asset.",
+      "imageRequired": "Choose an image asset.",
+      "audioRequired": "Choose an audio asset.",
+      "invalidImageOrder": "The image list changed. Reorder it again.",
+      "mainImageRequired": "Choose a main image first.",
+      "mediaNotDurable": "This asset has not been saved locally. Import it again.",
+      "storage": "The character library could not be saved. Check storage and retry.",
+      "unknown": "The character operation failed. Please retry."
+    },
+    "createTitle": "Create a character from an image",
+    "createConfirm": "Create character"
   }
 }

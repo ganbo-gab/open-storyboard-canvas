@@ -20,11 +20,8 @@ describe('canvas agent panel store', () => {
       isOpen: false,
       projectId: null,
       activeView: 'conversation',
-      selectedModelId: null,
       selectedImageModelId: null,
       selectedVideoModelId: null,
-      executionMode: 'manual',
-      autoModeAcknowledged: false,
       showCompletedTools: false,
       panelWidth: CANVAS_AGENT_PANEL_DEFAULT_WIDTH,
       activeSessionId: null,
@@ -79,35 +76,30 @@ describe('canvas agent panel store', () => {
     expect(useCanvasAgentPanelStore.getState().panelWidth).toBe(CANVAS_AGENT_PANEL_DEFAULT_WIDTH);
   });
 
-  it('requires a fresh acknowledgement after returning from Auto to Manual', () => {
-    useCanvasAgentPanelStore.getState().setExecutionMode('auto');
-    expect(useCanvasAgentPanelStore.getState().executionMode).toBe('manual');
-    useCanvasAgentPanelStore.getState().acknowledgeAutoMode();
-    expect(useCanvasAgentPanelStore.getState()).toMatchObject({ executionMode: 'auto', autoModeAcknowledged: true });
-    useCanvasAgentPanelStore.getState().setExecutionMode('manual');
-    expect(useCanvasAgentPanelStore.getState()).toMatchObject({ executionMode: 'manual', autoModeAcknowledged: false });
-  });
-
   it('persists the compact completed-tool visibility preference', () => {
     useCanvasAgentPanelStore.getState().setShowCompletedTools(true);
     expect(useCanvasAgentPanelStore.getState().showCompletedTools).toBe(true);
   });
 
-  it('migrates legacy activity/runtime/context data without retaining it', () => {
+  it('migrates legacy activity/runtime/context/selection data without retaining it', () => {
     const migrated = migrateCanvasAgentPanelState({
       activeView: 'activity',
       selectedRuntimeId: 'codex',
       externalSessions: { secret: true },
       projectContexts: { project: { brief: 'legacy' } },
       panelWidth: 900,
+      selectedModelId: 'custom:legacy:model',
       executionMode: 'auto',
+      autoModeAcknowledged: true,
     });
     expect(migrated).toMatchObject({
       activeView: 'conversation',
       panelWidth: CANVAS_AGENT_PANEL_MAX_WIDTH,
-      executionMode: 'manual',
-      autoModeAcknowledged: false,
     });
+    // Chat model and approval mode now come from the conversation or global Agent defaults.
+    expect(migrated).not.toHaveProperty('selectedModelId');
+    expect(migrated).not.toHaveProperty('executionMode');
+    expect(migrated).not.toHaveProperty('autoModeAcknowledged');
     expect(migrated).not.toHaveProperty('selectedRuntimeId');
     expect(migrated).not.toHaveProperty('externalSessions');
     expect(migrated).not.toHaveProperty('projectContexts');

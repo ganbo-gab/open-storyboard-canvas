@@ -1,44 +1,40 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { PanelResizeHandle } from '@/components/ui/PanelResizeHandle';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Aperture,
   Box,
   Camera,
-  Check,
-  Crop,
   Eraser,
-  Eye,
-  EyeOff,
-  FileText,
-  FolderOpen,
-  Focus,
-  Grid3x3,
-  Image,
-  ImagePlus,
+  Film,
+  Hand,
   Keyboard,
-  Link2,
+  ImagePlus,
+  Layers3,
   Lightbulb,
-  Monitor,
+  MousePointer2,
   Move3d,
+  PenLine,
+  PersonStanding,
   Plus,
-  RotateCcw,
-  Save,
-  SlidersHorizontal,
+  Rotate3d,
+  Route,
+  Ruler,
+  Scaling,
   Trash2,
   Unlink,
   Upload,
   UserPlus,
   Users,
   X,
-  type LucideIcon,
 } from 'lucide-react';
 
 import {
   CANVAS_NODE_TYPES,
   type BlueprintActionPose,
   type BlueprintBodyControls,
-  type BlueprintBodyStyle,
   type BlueprintItem,
   type BlueprintNodeData,
   type BlueprintReferenceImageItem,
@@ -55,28 +51,32 @@ import {
   type DirectorStudioViewSettings,
 } from '@/features/canvas/domain/canvasNodes';
 import type { DirectorRecordedVideo } from '@/features/canvas/application/directorVideoRecording';
-import { normalizeDirectorMotionProject } from '@/features/canvas/application/directorMotion';
 import {
-  DIRECTOR_STUDIO_BODY_STYLES,
-  normalizeBlueprintBodyControls,
-} from '@/features/canvas/domain/directorStudioBodyControls';
+  DIRECTOR_CAMERA_PRESETS,
+  normalizeDirectorMotionProject,
+  type DirectorCameraPresetId,
+} from '@/features/canvas/application/directorMotion';
 import {
   DIRECTOR_STUDIO_MODEL_CATALOG,
   DIRECTOR_STUDIO_MODEL_CATEGORIES,
   type DirectorStudioModelCatalogItem,
   type DirectorStudioModelCategoryId,
 } from '@/features/canvas/domain/directorStudioModelCatalog';
-import type { BlueprintSceneExportOptions, BlueprintSceneHandle } from '@/features/canvas/ui/BlueprintScene';
+import type { BlueprintSceneHandle } from '@/features/canvas/ui/BlueprintScene';
+import { applyPersonPosePatch, normalizePersonPose, type PersonPoseJoint } from '@/features/canvas/domain/personPose';
+import { PersonPoseInspector } from '@/features/canvas/ui/PersonPoseInspector';
+import type { PersonPoseEdit } from '@/features/canvas/ui/personPoseEditor';
+import type { ImportedModelAsset } from '@/features/stage/domain/importedModel';
+import { deleteImportedModel, listImportedModels } from '@/features/stage/application/importedModelLibrary';
+import { importModelFile } from '@/features/stage/application/importModelFile';
 import { DirectorStudioModelThumbnail } from '@/features/canvas/ui/DirectorStudioModelThumbnail';
 import { prepareNodeImageFromFile, resolveImageDisplayUrl } from '@/features/canvas/application/imageData';
-import { persistImageSource } from '@/commands/image';
 import {
   importDirectorStudioPanorama,
   type DirectorStudioPanoramaImportStage,
 } from '@/features/canvas/application/directorStudioPanoramaImport';
 import type { BlueprintReferenceImage } from '@/features/canvas/application/blueprintPrompt';
 import { showErrorDialog } from '@/features/canvas/application/errorDialog';
-import { BlueprintCustomActionModal } from '@/features/canvas/ui/BlueprintCustomActionModal';
 import { DirectorActionLibrary } from '@/features/canvas/ui/DirectorActionLibrary';
 import { DirectorCameraPilotHud } from '@/features/canvas/ui/DirectorCameraPilotHud';
 import {
@@ -84,29 +84,50 @@ import {
   isDirectorSceneModuleLoadError,
 } from '@/features/canvas/ui/DirectorSceneErrorBoundary';
 import { DirectorTimeline } from '@/features/canvas/ui/DirectorTimeline';
-import { DirectorPrevisControls } from './DirectorPrevisControls';
-import { DirectorPrevisSidebar } from './DirectorPrevisSidebar';
+import { DirectorPrevisCameraInspector, DirectorPrevisItemMotion } from './DirectorPrevisMotion';
+import { DirectorItemInspector } from './DirectorItemInspector';
 import { DirectorVideoExportDialog } from '@/features/canvas/ui/DirectorVideoExportDialog';
 import { useDirectorStudioMotion } from '@/features/canvas/ui/useDirectorStudioMotion';
 import { useDirectorTooltips } from '@/features/canvas/ui/useDirectorTooltips';
 import type { CanvasEventMap } from '@/features/canvas/application/ports';
 import { ensurePos3d, genBlueprintItemId, pos3dToLegacy } from '@/features/canvas/ui/blueprintCoordinates';
 import { useCanvasStore } from '@/stores/canvasStore';
-import { registerStageViewport } from '@/features/stage/application/stageCommands';
-import { saveAsset } from '@/features/assets/application/assetCatalog';
+import { stageCommands } from '@/features/stage/application/stageCommands';
+import { appendSnapshotHistory, normalizeSnapshotHistory, persistSnapshotHistory, screenshotExportOptions, waitForNextStageFrame } from '@/features/stage/application/stageSnapshotMedia';
+import { useStageSnapshotActions } from '@/features/stage/ui/useStageSnapshotActions';
+import { useStageCaptureRegistration } from '@/features/stage/ui/useStageCaptureRegistration';
 import { useProjectStore } from '@/stores/projectStore';
 import { ScopedAgentPanel } from '@/features/agents/ui/ScopedAgentPanel';
 import { StageHeader } from '@/features/stage/ui/StageHeader';
-import { StageToolDock } from '@/features/stage/ui/StageToolDock';
+import { StageFlyout, StageToolRail, type StageRailTool } from '@/features/stage/ui/StageToolRail';
+import { AddFlyoutBody, CameraMotionFlyoutBody, LensFlyoutBody, LightingFlyoutBody } from '@/features/stage/ui/StageFlyouts';
+import { StageOutliner, type StageInspectorTarget } from '@/features/stage/ui/StageOutliner';
+import { StageSceneInspector } from '@/features/stage/ui/StageSceneInspector';
+import { StageSnapshotsPanel } from '@/features/stage/ui/StageSnapshotsPanel';
+import { useStageEditorSelection } from '@/features/stage/ui/useStageEditorSelection';
+import { StageSelectionBar } from '@/features/stage/ui/StageSelectionBar';
+import { StageCapturePanel } from '@/features/stage/ui/StageCapturePanel';
+import { assertStageEditUnlocked } from '@/features/stage/application/stageEditProtection';
+import type { StageSelectionOperation } from '@/features/stage/application/stageSelection';
+import { StageSceneBuilder } from '@/features/stage/ui/StageSceneBuilder';
+import {
+  StageCaptureToast,
+  StageGuideBar,
+  StageStatusPill,
+  StageViewBar,
+  readStageGuideDismissed,
+  writeStageGuideDismissed,
+} from '@/features/stage/ui/StageViewportChrome';
+import { StageProjectsMenu } from '@/features/stage/ui/StageProjectsMenu';
+import { StageDialog, StageImageTile } from '@/features/stage/ui/StageDialog';
+import { ScrubNumber, StageEmpty } from '@/features/stage/ui/stageKit';
+import { UiButton, UiConfirm, UiIconButton, UiInput, UiSegmented } from '@/components/ui';
 
 const loadBlueprintScene = () =>
   import('@/features/canvas/ui/BlueprintScene').then((m) => ({ default: m.BlueprintScene }));
 
-type PanelMode = 'projects' | 'elements';
-type ToolFloatingPanel = 'camera' | 'lighting' | 'grid' | 'frame' | 'resolution' | 'prompt';
-type FloatingPanel = ToolFloatingPanel | null;
-type SidePanel = 'inspector' | 'snapshot' | null;
-type FloatingSurface = 'tool' | 'side';
+type RailPanel = 'add' | 'camera' | 'lighting' | 'sceneBuilder';
+type DockTab = 'scene' | 'shots';
 type DirectorStudioDialog = 'modelLibrary' | 'pedestrians' | 'shortcuts' | null;
 type PedestrianMode = 'direct' | 'array' | 'random';
 type VectorAxis = 'x' | 'y' | 'z';
@@ -178,7 +199,6 @@ const DEFAULT_VIEW_SETTINGS: DirectorStudioViewSettings = {
 };
 
 const DEFAULT_INSERT_POSITION = { x: 0, y: 0, z: 0 };
-const MAX_SNAPSHOT_HISTORY = 10;
 
 const PEDESTRIAN_COLORS = [
   '#d1d5db',
@@ -191,10 +211,6 @@ const PEDESTRIAN_COLORS = [
   '#e5e7eb',
 ] as const;
 
-const DIRECTOR_FIELD_CLASS =
-  'director-studio-field rounded-sm border border-white/12 bg-[#090d10]/78 text-white outline-hidden placeholder:text-white/30 focus:border-accent/60 focus:bg-[#0c1115]';
-const DIRECTOR_EDITABLE_NAME_CLASS =
-  'rounded-sm border border-white/10 bg-white/4.5 px-1.5 py-1 transition-colors hover:border-white/24 hover:bg-white/7.5';
 
 const INSPECTOR_ACTION_PRESETS = [
   { id: 'stand', valueKey: 'directorStudio.actionValues.stand', labelKey: 'directorStudio.actionPresets.stand', legacyValues: ['站立', 'Stand'] },
@@ -229,16 +245,18 @@ const DIRECTOR_STUDIO_DISPLAY_COLLATOR = new Intl.Collator(undefined, {
 });
 
 const DEFAULT_DIRECTOR_STUDIO_SHORTCUTS: Record<DirectorStudioShortcutId, string> = {
-  transformMove: '1',
-  transformRotate: '2',
-  transformScale: '3',
+  selectTool: 'V',
+  orbitTool: 'B',
+  transformMove: 'G',
+  transformRotate: 'R',
+  transformScale: 'T',
   focus: 'F',
   fit: 'Z',
-  reset: 'R',
+  reset: 'Shift+R',
   screenshot: 'C',
   model: 'M',
   lighting: 'L',
-  grid: 'G',
+  grid: 'Shift+G',
   prompt: 'P',
   shortcuts: 'H',
   save: 'Cmd/Ctrl+S',
@@ -247,6 +265,21 @@ const DEFAULT_DIRECTOR_STUDIO_SHORTCUTS: Record<DirectorStudioShortcutId, string
   paste: 'Cmd/Ctrl+V',
   undo: 'Cmd/Ctrl+Z',
   redo: 'Cmd/Ctrl+Shift+Z',
+  advancedPedestrianTags: 'Shift+T',
+  poseEdit: 'O',
+};
+
+/**
+ * Bindings that earlier versions saved as defaults. They collided (G = move and grid,
+ * R = rotate and reset, T = scale and tags), so a stored legacy default means "use the
+ * current default"; only deliberate custom bindings survive.
+ */
+const LEGACY_DEFAULT_SHORTCUTS: Partial<Record<DirectorStudioShortcutId, string>> = {
+  transformMove: '1',
+  transformRotate: '2',
+  transformScale: '3',
+  reset: 'R',
+  grid: 'G',
   advancedPedestrianTags: 'T',
 };
 
@@ -269,7 +302,9 @@ const SHORTCUT_GROUPS: Array<{
   {
     titleKey: 'directorStudio.shortcuts.sections.view',
     entries: [
-      { defaultKeys: 'Mouse Left', labelKey: 'directorStudio.shortcuts.rows.viewOrbit' },
+      { shortcutId: 'selectTool', labelKey: 'ui.stage.selectTool' },
+      { shortcutId: 'orbitTool', labelKey: 'ui.stage.orbitTool' },
+      { defaultKeys: 'Alt + Mouse Left', labelKey: 'directorStudio.shortcuts.rows.viewOrbit' },
       { defaultKeys: 'Mouse Middle / Right / Shift Drag', labelKey: 'directorStudio.shortcuts.rows.viewPan' },
       { defaultKeys: 'Wheel', labelKey: 'directorStudio.shortcuts.rows.viewZoom' },
       { shortcutId: 'focus', labelKey: 'directorStudio.shortcuts.rows.focus' },
@@ -291,6 +326,7 @@ const SHORTCUT_GROUPS: Array<{
       { shortcutId: 'transformMove', labelKey: 'directorStudio.shortcuts.rows.transformMove' },
       { shortcutId: 'transformRotate', labelKey: 'directorStudio.shortcuts.rows.transformRotate' },
       { shortcutId: 'transformScale', labelKey: 'directorStudio.shortcuts.rows.transformScale' },
+      { shortcutId: 'poseEdit', labelKey: 'directorStudio.shortcuts.rows.poseEdit' },
       { defaultKeys: 'Esc', labelKey: 'directorStudio.shortcuts.rows.escape' },
       { shortcutId: 'delete', labelKey: 'directorStudio.shortcuts.rows.delete' },
       { shortcutId: 'copy', labelKey: 'directorStudio.shortcuts.rows.copy' },
@@ -442,7 +478,7 @@ function createBlueprintItemFromPreset(args: {
   label: string;
   color: string;
   category: NonNullable<BlueprintItem['category']>;
-  presetId: string;
+  presetId?: string;
   pos3d?: { x: number; y: number; z: number };
   directorStudioRole?: BlueprintItem['directorStudioRole'];
   directorStudioNumber?: number;
@@ -471,6 +507,8 @@ function createBlueprintItemFromPreset(args: {
 }
 
 interface DirectorStudioShellProps {
+  /** Workspace to enter on open (canvas "新建预演台" opens straight into previs). */
+  initialWorkspace?: 'director' | 'previs';
   sourceNodeId: string;
   data: BlueprintNodeData;
   referenceImages: BlueprintReferenceImageItem[];
@@ -558,34 +596,6 @@ function normalizeScreenshotResolution(value: unknown): DirectorStudioScreenshot
     : '1080p';
 }
 
-function normalizeSnapshotHistory(
-  snapshotUrl: string | null | undefined,
-  snapshotHistory: unknown,
-): string[] {
-  const seen = new Set<string>();
-  const urls: string[] = [];
-  const append = (url: unknown) => {
-    if (typeof url !== 'string' || url.length === 0 || seen.has(url)) return;
-    seen.add(url);
-    urls.push(url);
-  };
-
-  if (Array.isArray(snapshotHistory)) {
-    snapshotHistory.forEach(append);
-  }
-  append(snapshotUrl);
-  return urls.slice(-MAX_SNAPSHOT_HISTORY);
-}
-
-function appendSnapshotHistory(
-  snapshotHistory: unknown,
-  snapshotUrl: string | null | undefined,
-): string[] {
-  const previous = normalizeSnapshotHistory(null, snapshotHistory).filter((url) => url !== snapshotUrl);
-  if (!snapshotUrl) return previous.slice(-MAX_SNAPSHOT_HISTORY);
-  return [...previous, snapshotUrl].slice(-MAX_SNAPSHOT_HISTORY);
-}
-
 function normalizeDirectorSnapshot(
   snapshot: Partial<DirectorStudioProjectSnapshot> | null | undefined
 ): DirectorStudioProjectSnapshot {
@@ -637,10 +647,11 @@ function isEditableEventTarget(target: EventTarget | null): boolean {
 function normalizeDirectorStudioShortcuts(
   shortcuts: DirectorStudioShortcutBindings | null | undefined,
 ): Record<DirectorStudioShortcutId, string> {
-  return {
-    ...DEFAULT_DIRECTOR_STUDIO_SHORTCUTS,
-    ...(shortcuts ?? {}),
-  };
+  const result = { ...DEFAULT_DIRECTOR_STUDIO_SHORTCUTS };
+  (Object.entries(shortcuts ?? {}) as Array<[DirectorStudioShortcutId, string | undefined]>).forEach(([id, binding]) => {
+    if (binding && binding !== LEGACY_DEFAULT_SHORTCUTS[id]) result[id] = binding;
+  });
+  return result;
 }
 
 function normalizeShortcutKeyName(key: string): string {
@@ -812,24 +823,7 @@ function hasObjectKeys(value: object): boolean {
   return Object.keys(value).length > 0;
 }
 
-function isDataImageUrl(value: string | null | undefined): value is string {
-  return typeof value === 'string' && /^data:image\//i.test(value);
-}
 
-async function persistDirectorStudioImageSource(source: string): Promise<string> {
-  return isDataImageUrl(source) ? persistImageSource(source) : source;
-}
-
-async function waitForNextFrame(): Promise<void> {
-  if (typeof window === 'undefined') return;
-  await new Promise<void>((resolve) => {
-    const timeoutId = window.setTimeout(resolve, 50);
-    window.requestAnimationFrame(() => {
-      window.clearTimeout(timeoutId);
-      resolve();
-    });
-  });
-}
 
 function formatProjectTime(value: number): string {
   if (!Number.isFinite(value)) return '';
@@ -842,137 +836,9 @@ function formatProjectTime(value: number): string {
   }).format(new Date(value));
 }
 
-interface ToolButtonSpec {
-  key: string;
-  label: string;
-  title: string;
-  icon: LucideIcon;
-  disabled?: boolean;
-  active?: boolean;
-  onClick?: () => void;
-}
-
-interface TransformVectorBlockProps {
-  title: string;
-  values: { x: number; y: number; z: number };
-  step: number;
-  min: number;
-  max: number;
-  suffix?: string;
-  onChange: (axis: VectorAxis, value: number) => void;
-}
-
-function TransformVectorBlock({ title, values, step, min, max, suffix = '', onChange }: TransformVectorBlockProps) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/18 p-3">
-      <div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-white/42">{title}</div>
-      <div className="space-y-2">
-        {(['x', 'y', 'z'] as const).map((axis) => (
-          <label key={axis} className="grid grid-cols-[18px_minmax(0,1fr)_72px] items-center gap-2 text-xs text-white/70">
-            <span className="font-mono uppercase text-white/50">{axis}</span>
-            <input
-              type="range"
-              min={min}
-              max={max}
-              step={step}
-              value={values[axis]}
-              onChange={(event) => {
-                const next = Number(event.target.value);
-                if (Number.isFinite(next)) onChange(axis, next);
-              }}
-              className="min-w-0 accent-white"
-            />
-            <input
-              type="number"
-              min={min}
-              max={max}
-              step={step}
-              value={Number(values[axis].toFixed(step < 1 ? 2 : 0))}
-              onChange={(event) => {
-                const next = Number(event.target.value);
-                if (Number.isFinite(next)) onChange(axis, next);
-              }}
-              className="h-8 rounded-sm border border-white/12 bg-white/6 px-1.5 text-right font-mono text-[11px] text-white outline-hidden focus:border-white/30"
-              aria-label={`${axis.toUpperCase()} ${title}${suffix}`}
-            />
-          </label>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-interface BodyScalarControlProps {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  suffix?: string;
-  onChange: (value: number) => void;
-}
-
-function BodyScalarControl({ label, value, min, max, step, suffix = '', onChange }: BodyScalarControlProps) {
-  return (
-    <label className="grid grid-cols-[82px_minmax(0,1fr)_62px] items-center gap-2 text-xs text-white/70">
-      <span className="truncate text-white/58">{label}</span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(event) => {
-          const next = Number(event.target.value);
-          if (Number.isFinite(next)) onChange(next);
-        }}
-        className="min-w-0 accent-white"
-      />
-      <input
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={Number(value.toFixed(step < 1 ? 2 : 0))}
-        onChange={(event) => {
-          const next = Number(event.target.value);
-          if (Number.isFinite(next)) onChange(next);
-        }}
-        className="h-7 rounded-sm border border-white/12 bg-white/6 px-1.5 text-right font-mono text-[10px] text-white outline-hidden focus:border-white/30"
-        aria-label={`${label}${suffix}`}
-      />
-    </label>
-  );
-}
-
-interface DirectorSettingToggleProps {
-  label: string;
-  description?: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}
-
-function DirectorSettingToggle({ label, description, checked, onChange }: DirectorSettingToggleProps) {
-  return (
-    <label className="flex items-start justify-between gap-3 rounded-md border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/78">
-      <span className="min-w-0">
-        <span className="block text-white/82">{label}</span>
-        {description ? (
-          <span className="mt-0.5 block text-[10px] leading-4 text-white/42">{description}</span>
-        ) : null}
-      </span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="mt-0.5 h-4 w-4 shrink-0 accent-white"
-      />
-    </label>
-  );
-}
-
 export const DirectorStudioShell = memo(function DirectorStudioShell(props: DirectorStudioShellProps) {
   const {
+    initialWorkspace = 'director',
     sourceNodeId,
     data,
     referenceImages,
@@ -980,8 +846,8 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     imageAssets = [],
     selectedItemId,
     onSelectedItemChange,
-    onItemsChange,
-    onUpdateNodeData,
+    onItemsChange: commitItems,
+    onUpdateNodeData: commitNodeData,
     onAddSnapshotToCanvas,
     onAddVideoToCanvas,
     getLastRecordedVideoNodeId,
@@ -990,6 +856,23 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     onClose,
   } = props;
   const { t } = useTranslation();
+  const [editError, setEditError] = useState<string | null>(null);
+  const editDataRef = useRef(data); editDataRef.current = data;
+  const onUpdateNodeData = useCallback((patch: Partial<BlueprintNodeData>) => {
+    try {
+      if (!Object.hasOwn(patch, 'activeDirectorStudioProjectId')) assertStageEditUnlocked(editDataRef.current, patch);
+      setEditError(null); commitNodeData(patch);
+    } catch (error) { setEditError(t('ui.stage.selection.lockedHint', { name: error instanceof Error ? error.message : '' })); }
+  }, [commitNodeData, t]);
+  const onItemsChange = useCallback((items: BlueprintItem[]) => {
+    try { assertStageEditUnlocked(editDataRef.current, { items }); setEditError(null); commitItems(items); }
+    catch (error) { setEditError(t('ui.stage.selection.lockedHint', { name: error instanceof Error ? error.message : '' })); }
+  }, [commitItems, t]);
+  const stageSelection = useStageEditorSelection(sourceNodeId, data.items, selectedItemId, onSelectedItemChange);
+  const applySelection = useCallback((operation: StageSelectionOperation, targets?: string[]) => {
+    try { stageSelection.apply(operation, targets); setEditError(null); }
+    catch (error) { setEditError(error instanceof Error ? error.message : t('common.error')); }
+  }, [stageSelection.apply, t]);
   const { rootRef: tooltipsRootRef, tooltipRef } = useDirectorTooltips();
   const defaultElementLabelBase = t('directorStudio.defaultLabels.element');
   const copyLabelSuffix = t('directorStudio.defaultLabels.copySuffix');
@@ -1009,51 +892,85 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const elementImageInputRef = useRef<HTMLInputElement | null>(null);
   const copiedItemRef = useRef<BlueprintItem | null>(null);
-  const toolbarAnchorRefs = useRef<Record<string, HTMLElement | null>>({});
   const [studioMode, setStudioMode] = useState<'director' | 'previs'>('director');
   const projectId = useProjectStore((state) => state.currentProjectId);
   const [agentOpen, setAgentOpen] = useState(false);
-  const [previsSidebarOpen, setPrevisSidebarOpen] = useState(true);
+  const stageAgentPanelRef = useRef<HTMLElement>(null);
+  const stageAgentSize = useSettingsStore((state) => state.workspacePreferences.panelSizes.stageAgent);
+  const [dockOpen, setDockOpen] = useState(true);
+  const [dockTab, setDockTab] = useState<DockTab>('scene');
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [inspectorTarget, setInspectorTarget] = useState<StageInspectorTarget>('scene');
+  const [cameraSubjectId, setCameraSubjectId] = useState<string | null>(null);
   const [timelineHeightOverride, setTimelineHeightOverride] = useState<number | null>(null);
   const timelineOpen = studioMode === 'previs';
-  const [panelMode, setPanelMode] = useState<PanelMode>('projects');
-  const [floatingPanel, setFloatingPanel] = useState<FloatingPanel>(null);
-  const [topFloatingSurface, setTopFloatingSurface] = useState<FloatingSurface>('side');
+  const [railPanel, setRailPanel] = useState<RailPanel | null>(null);
+  const [sceneAssetError, setSceneAssetError] = useState('');
   const [activeDialog, setActiveDialog] = useState<DirectorStudioDialog>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    title: string;
+    tone: 'danger' | 'primary';
+    resolve: (confirmed: boolean) => void;
+  } | null>(null);
+  const requestConfirmation = useCallback((title: string, tone: 'danger' | 'primary' = 'primary') => (
+    new Promise<boolean>((resolve) => setPendingConfirmation({ title, tone, resolve }))
+  ), []);
   const [activeModelCategory, setActiveModelCategory] = useState<DirectorStudioModelCategoryId>('basic');
   const [pedestrianMode, setPedestrianMode] = useState<PedestrianMode>('direct');
+  const [myModels, setMyModels] = useState<ImportedModelAsset[]>([]);
+  const [modelImportState, setModelImportState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const modelFileInputRef = useRef<HTMLInputElement | null>(null);
   const [pedestrianCount, setPedestrianCount] = useState(8);
   const [pedestrianColumns, setPedestrianColumns] = useState(4);
   const [pedestrianXSpacing, setPedestrianXSpacing] = useState(1.2);
   const [pedestrianZSpacing, setPedestrianZSpacing] = useState(1.2);
   const [pedestrianRadius, setPedestrianRadius] = useState(4);
   const [importOpen, setImportOpen] = useState(false);
-  const [sidePanel, setSidePanel] = useState<SidePanel>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const [lightboxSnapshotUrl, setLightboxSnapshotUrl] = useState<string | null>(null);
   const [isUploadingPanorama, setIsUploadingPanorama] = useState(false);
   const [isUploadingElementImage, setIsUploadingElementImage] = useState(false);
   const [panoramaImportStage, setPanoramaImportStage] = useState<DirectorStudioPanoramaImportStage | null>(null);
-  const [isAddingSnapshotToCanvas, setIsAddingSnapshotToCanvas] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(true);
-  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
-  const [editingProjectName, setEditingProjectName] = useState('');
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const [editingItemName, setEditingItemName] = useState('');
+  const [sceneSize, setSceneSize] = useState(() => ({
+    width: typeof window === 'undefined' ? 1100 : Math.max(320, window.innerWidth - 304),
+    height: typeof window === 'undefined' ? 760 : Math.max(240, window.innerHeight - 52),
+  }));
   const [assetPickerItemId, setAssetPickerItemId] = useState<string | null>(null);
   const [assetQuery, setAssetQuery] = useState('');
   const [followSelectedItem, setFollowSelectedItem] = useState(false);
+  const [shotPipVisible, setShotPipVisible] = useState(true);
+  /** Points placed in the active route draft (status pill: "已 N 点 · 回车结束"). */
+  const [routeDraftPointCount, setRouteDraftPointCount] = useState(0);
+  // First-visit guide; dismissal is a per-device UI preference, not project data.
+  const [guideDismissed, setGuideDismissed] = useState(readStageGuideDismissed);
+  const dismissGuide = useCallback(() => {
+    setGuideDismissed(true);
+    writeStageGuideDismissed();
+  }, []);
   const [activeTransformMode, setActiveTransformMode] = useState<DirectorStudioTransformMode | null>(null);
+  const [orbitTool, setOrbitTool] = useState(false);
   const [editingShortcutId, setEditingShortcutId] = useState<DirectorStudioShortcutId | null>(null);
-  const [customActionModalOpen, setCustomActionModalOpen] = useState(false);
-  const [customActionName, setCustomActionName] = useState('');
-  const [customActionPose, setCustomActionPose] = useState<BlueprintActionPose>({});
+  const [poseEditActive, setPoseEditActive] = useState(false);
+  const [poseJoint, setPoseJoint] = useState<PersonPoseJoint | null>(null);
+  /** Pose read back from the viewport for the inspector (it includes sampled motion). */
+  const [poseSnapshot, setPoseSnapshot] = useState<BlueprintActionPose | null>(null);
   const [viewportSize, setViewportSize] = useState(() => ({
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
     height: typeof window === 'undefined' ? 900 : window.innerHeight,
   }));
-  const compactLayout = viewportSize.width < 1100;
-  const mobileLayout = viewportSize.width < 640;
-  const [toolbarLayoutVersion, setToolbarLayoutVersion] = useState(0);
+  useLayoutEffect(() => {
+    const element = viewportRef.current;
+    if (!element) return undefined;
+    const measure = () => {
+      const rect = element.getBoundingClientRect();
+      const next = { width: Math.max(320, Math.round(rect.width)), height: Math.max(240, Math.round(rect.height)) };
+      setSceneSize((current) => current.width === next.width && current.height === next.height ? current : next);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const [sceneLoadAttempt, setSceneLoadAttempt] = useState(0);
   const BlueprintSceneComponent = useMemo(() => lazy(loadBlueprintScene), [sceneLoadAttempt]);
   const retryBlueprintScene = useCallback((error: Error) => {
@@ -1072,7 +989,6 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   const latestBasePromptRef = useRef(data.basePrompt ?? '');
   const onItemsChangeRef = useRef(onItemsChange);
   const onUpdateNodeDataRef = useRef(onUpdateNodeData);
-  const onAddSnapshotToCanvasRef = useRef(onAddSnapshotToCanvas);
   const onCloseRef = useRef(onClose);
   const basePromptDraftRef = useRef(basePromptDraft);
   const basePromptDirtyRef = useRef(false);
@@ -1095,9 +1011,6 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     onUpdateNodeDataRef.current = onUpdateNodeData;
   }, [onUpdateNodeData]);
 
-  useEffect(() => {
-    onAddSnapshotToCanvasRef.current = onAddSnapshotToCanvas;
-  }, [onAddSnapshotToCanvas]);
 
 
   useEffect(() => {
@@ -1164,6 +1077,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   );
 
   const updateItem = useCallback((itemId: string, patch: Partial<BlueprintItem>) => {
+    if (latestItemsRef.current.find((item) => item.id === itemId)?.locked && !(Object.keys(patch).length === 1 && patch.locked === false)) return;
     const nextItems = latestItemsRef.current.map((item) =>
       item.id === itemId ? { ...item, ...patch } : item
     );
@@ -1194,6 +1108,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
 
   const {
     motionProject,
+    previewProject: motionPreviewProject,
     motionTimeSource,
     playbackSource,
     playbackRate,
@@ -1223,15 +1138,26 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     videoExportResult,
     availableVideoFormat,
     updateMotionProject,
+    splitAtTime,
+    copyMotionTrack,
+    editCameraRigSegment,
+    retimeCameraRig,
     patchMotionKeyframe,
+    patchMotionKeyframes,
+    copyMotionKeyframe,
+    deleteMotionKeyframes,
     moveMotionKeyframe,
     retimeMotionTrack,
+    toggleMotionRouteClosed,
+    setCameraLookAt,
     duplicateMotionKeyframe,
     deleteMotionKeyframe,
     addCameraMotionKeyframe,
     recordPilotCamera,
     addObjectMotionKeyframe,
     addActionMotionKeyframe,
+    recordPersonPose,
+    clearPersonPoseAt,
     updateMotionDuration,
     applyMotionActionState,
     saveMotionClip,
@@ -1239,6 +1165,11 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     duplicateMotionClip,
     deleteMotionClip,
     applyCameraPreset,
+    addCameraRig,
+    previewCameraRig,
+    updateCameraRig,
+    deleteCameraRig,
+    bakeCameraRig,
     startMotionRouteDraft,
     finishMotionRouteDraft,
     cancelMotionRouteDraft,
@@ -1301,7 +1232,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
 
     const currentItems = latestItemsRef.current;
     const currentItem = currentItems.find((item) => item.id === draft.itemId);
-    if (!currentItem) {
+    if (!currentItem || currentItem.locked) {
       inspectorTextDraftDirtyRef.current = false;
       return false;
     }
@@ -1461,45 +1392,27 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     [data.items],
   );
 
-  const bringFloatingSurfaceToFront = useCallback((surface: FloatingSurface) => {
-    setTopFloatingSurface(surface);
-  }, []);
-
-  const showSidePanel = useCallback((panel: SidePanel) => {
-    setTopFloatingSurface('side');
-    setSidePanel(panel);
-    if (compactLayout && panel) setPanelOpen(false);
-  }, [compactLayout]);
-
-  const toggleSidePanel = useCallback((panel: Exclude<SidePanel, null>) => {
-    setTopFloatingSurface('side');
-    const nextPanel = sidePanel === panel ? null : panel;
-    setSidePanel(nextPanel);
-    if (compactLayout && nextPanel) setPanelOpen(false);
-  }, [compactLayout, sidePanel]);
-
-  useEffect(() => {
-    if (compactLayout && sidePanel) setPanelOpen(false);
-  }, [compactLayout, sidePanel]);
-
-  useEffect(() => {
-    if (compactLayout) setPanelOpen(false);
-  }, [compactLayout]);
-
   const selectItemForEditing = useCallback((itemId: string | null) => {
+    setOrbitTool(false);
     commitPendingTextDrafts();
     setMotionSelection(null);
     if (timelineOpen) cancelMotionRouteDraft();
-    onSelectedItemChange(itemId);
+    stageSelection.select(itemId ? [itemId] : [], 'outliner');
     setFollowSelectedItem(false);
     if (!itemId) {
       setActiveTransformMode(null);
       return;
     }
     setActiveTransformMode('move');
-    if (!timelineOpen) showSidePanel('inspector');
-    setPanelMode('elements');
-  }, [cancelMotionRouteDraft, commitPendingTextDrafts, onSelectedItemChange, setMotionSelection, showSidePanel, timelineOpen]);
+    setDockTab('scene');
+  }, [cancelMotionRouteDraft, commitPendingTextDrafts, stageSelection.select, setMotionSelection, timelineOpen]);
+
+  /** Nothing selected: the dock shows the world (scene) or, in Previs, the shot camera. */
+  const selectInspectorTarget = useCallback((target: StageInspectorTarget) => {
+    selectItemForEditing(null);
+    setInspectorTarget(target);
+    setDockTab('scene');
+  }, [selectItemForEditing]);
 
   const handleClose = useCallback(() => {
     commitPendingTextDrafts();
@@ -1507,58 +1420,47 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     onCloseRef.current();
   }, [commitPendingTextDrafts, stopMotionActivity]);
 
+  const showCameraInspector = timelineOpen && !selectedItem && (inspectorTarget === 'camera' || motionSelection?.kind === 'camera');
+
   useEffect(() => {
-    if (!selectedItem && activeTransformMode) {
+    if ((!selectedItem && !(showCameraInspector && activeTransformMode === 'rotate') || selectedItem?.locked || selectedItem?.hidden) && activeTransformMode) {
       setActiveTransformMode(null);
     }
-  }, [activeTransformMode, selectedItem]);
+  }, [activeTransformMode, selectedItem, showCameraInspector]);
+
+  // Pose mode and transform gizmos are exclusive; pose mode needs a selected person.
+  useEffect(() => {
+    if (activeTransformMode) setPoseEditActive(false);
+  }, [activeTransformMode]);
+  useEffect(() => {
+    if (selectedItem?.category !== 'person' || selectedItem.locked || selectedItem.hidden) setPoseEditActive(false);
+    setPoseJoint(null);
+  }, [selectedItem?.id, selectedItem?.category, selectedItem?.locked, selectedItem?.hidden]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (pendingConfirmation) return;
       if (isEditableEventTarget(event.target)) return;
       if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (event.target instanceof Element && event.target.closest('[data-previs-help]')) return;
-      if (motionRouteDraft) {
-        cancelMotionRouteDraft();
-        event.preventDefault();
-        return;
-      }
-      if (pilotActive || actionLibraryOpen || videoExportOpen || customActionModalOpen) return;
-      if (activeTransformMode) {
-        setActiveTransformMode(null);
-        event.preventDefault();
-        return;
-      }
-      if (activeDialog) {
-        setActiveDialog(null);
-        event.preventDefault();
-        return;
-      }
-      if (importOpen) {
-        setImportOpen(false);
-        event.preventDefault();
-        return;
-      }
-      if (assetPickerItemId) {
-        setAssetPickerItemId(null);
-        event.preventDefault();
-        return;
-      }
-      if (lightboxSnapshotUrl) {
-        setLightboxSnapshotUrl(null);
-        event.preventDefault();
-        return;
-      }
-      if (sidePanel) {
-        setSidePanel(null);
-        event.preventDefault();
-        return;
-      }
-      handleClose();
+      // Open popovers (frame menu, projects) close themselves; Esc must not also peel a layer.
+      if (document.querySelector('.director-studio-shell [data-stage-popover]')) return;
+      const claim = () => event.preventDefault();
+      if (motionRouteDraft) return claim(), cancelMotionRouteDraft();
+      if (pilotActive || actionLibraryOpen || videoExportOpen) return;
+      // Topmost surface first; Esc never leaves the stage (that is the back button's job).
+      if (activeDialog) return claim(), setActiveDialog(null);
+      if (importOpen) return claim(), setImportOpen(false);
+      if (assetPickerItemId) return claim(), setAssetPickerItemId(null);
+      if (lightboxSnapshotUrl) return claim(), setLightboxSnapshotUrl(null);
+      if (railPanel) return claim(), setRailPanel(null);
+      if (poseEditActive) return claim(), setPoseEditActive(false);
+      if (orbitTool) return claim(), setOrbitTool(false);
+      if (selectedItemId) return claim(), selectItemForEditing(null);
+      if (activeTransformMode) return claim(), setActiveTransformMode(null);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [actionLibraryOpen, activeDialog, activeTransformMode, assetPickerItemId, cancelMotionRouteDraft, customActionModalOpen, handleClose, importOpen, lightboxSnapshotUrl, motionRouteDraft, pilotActive, sidePanel, videoExportOpen]);
+  }, [actionLibraryOpen, activeDialog, activeTransformMode, assetPickerItemId, cancelMotionRouteDraft, importOpen, lightboxSnapshotUrl, motionRouteDraft, orbitTool, pendingConfirmation, pilotActive, poseEditActive, railPanel, selectItemForEditing, selectedItemId, videoExportOpen]);
 
   const camera = useMemo(() => normalizeCamera(data.camera), [data.camera]);
   const lighting = useMemo(() => normalizeLighting(data.lighting), [data.lighting]);
@@ -1628,43 +1530,19 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     [activeModelCategory],
   );
 
-  const computeScreenshotExportOptions = useCallback((): BlueprintSceneExportOptions => {
-    const ratio = selectedAspect.ratio;
-    const resolution = SCREENSHOT_RESOLUTIONS.find((item) => item.value === screenshotResolution)
-      ?? SCREENSHOT_RESOLUTIONS[0];
-    const base = resolution.base;
-    if (!ratio) {
-      const viewportWidth = Math.max(320, viewportSize.width);
-      const viewportHeight = Math.max(320, viewportSize.height);
-      const sceneRatio = viewportWidth / viewportHeight;
-      return {
-        targetWidth: Math.max(1, Math.round(base * sceneRatio)),
-        targetHeight: base,
-      };
-    }
-    const targetWidth = ratio >= 1 ? Math.round(base * ratio) : base;
-    const targetHeight = ratio >= 1 ? base : Math.round(base / ratio);
-    return {
-      frameAspect: ratio,
-      targetWidth,
-      targetHeight,
-    };
-  }, [screenshotResolution, selectedAspect.ratio, viewportSize.height, viewportSize.width]);
-
-  const persistSnapshotHistory = useCallback(async (history: string[]) => {
-    return await Promise.all(history.map((snapshotUrl) => persistDirectorStudioImageSource(snapshotUrl)));
-  }, []);
-
-  const capturePersistedSceneSnapshot = useCallback(async (fallbackUrl: string | null | undefined) => {
-    const rawSnapshotUrl = editorRef.current?.exportPng(computeScreenshotExportOptions()) ?? fallbackUrl ?? null;
-    if (!rawSnapshotUrl) return null;
-    return await persistDirectorStudioImageSource(rawSnapshotUrl);
-  }, [computeScreenshotExportOptions]);
+  const computeScreenshotExportOptions = useCallback(() => screenshotExportOptions(
+    selectedAspect.ratio, (SCREENSHOT_RESOLUTIONS.find((item) => item.value === screenshotResolution) ?? SCREENSHOT_RESOLUTIONS[0]).base, sceneSize,
+  ), [sceneSize, screenshotResolution, selectedAspect.ratio]);
+  const { captureScreenshot, capturePersistedSceneSnapshot, selectSnapshot, deleteSnapshot, clearCurrentSnapshot, clearAllSnapshots,
+    addSnapshotToCanvas, addAllSnapshotsToCanvas, isAddingSnapshotToCanvas, captureToast, setCaptureToast, captureFlashKey } = useStageSnapshotActions({
+    nodeId: sourceNodeId, data, editorRef, exportOptions: computeScreenshotExportOptions, commitPendingTextDrafts,
+    onUpdateNodeData, onAddSnapshotToCanvas, onClose: handleClose,
+  });
 
   const saveProject = useCallback(async () => {
     const hadDraftWrites = commitPendingTextDrafts();
     if (hadDraftWrites) {
-      await waitForNextFrame();
+      await waitForNextStageFrame();
     }
 
     try {
@@ -1727,13 +1605,12 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     commitPendingTextDrafts,
     getDirectorDataWithTextDrafts,
     onUpdateNodeData,
-    persistSnapshotHistory,
     t,
   ]);
 
   const restoreProject = useCallback(async (project: DirectorStudioProjectRecord) => {
     if (project.id === data.activeDirectorStudioProjectId) return;
-    if (hasUnsavedChanges && window.confirm(t('directorStudio.confirmSaveBeforeSwitch'))) {
+    if (hasUnsavedChanges && await requestConfirmation(t('directorStudio.confirmSaveBeforeSwitch'))) {
       const saved = await saveProject();
       if (!saved) return;
     }
@@ -1747,20 +1624,21 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     data.activeDirectorStudioProjectId,
     hasUnsavedChanges,
     onUpdateNodeData,
+    requestConfirmation,
     saveProject,
     selectItemForEditing,
     t,
   ]);
 
-  const deleteProject = useCallback((project: DirectorStudioProjectRecord) => {
-    if (!window.confirm(t('directorStudio.confirmDeleteProject', { name: project.name }))) return;
+  const deleteProject = useCallback(async (project: DirectorStudioProjectRecord) => {
+    if (!await requestConfirmation(t('directorStudio.confirmDeleteProject', { name: project.name }), 'danger')) return;
     const nextProjects = (data.directorStudioProjects ?? []).filter((item) => item.id !== project.id);
     onUpdateNodeData({
       directorStudioProjects: nextProjects,
       activeDirectorStudioProjectId:
         data.activeDirectorStudioProjectId === project.id ? null : data.activeDirectorStudioProjectId ?? null,
     });
-  }, [data.activeDirectorStudioProjectId, data.directorStudioProjects, onUpdateNodeData, t]);
+  }, [data.activeDirectorStudioProjectId, data.directorStudioProjects, onUpdateNodeData, requestConfirmation, t]);
 
   const updateProjectCover = useCallback(async (project: DirectorStudioProjectRecord) => {
     try {
@@ -1768,7 +1646,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         data.snapshotUrl ?? normalizeDirectorSnapshot(project.snapshot).snapshotUrl ?? null
       );
       if (!coverUrl) {
-        window.alert(t('directorStudio.noSnapshotForCover'));
+        void requestConfirmation(t('directorStudio.noSnapshotForCover'));
         return;
       }
       onUpdateNodeData({
@@ -1784,31 +1662,23 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         t('common.error'),
       );
     }
-  }, [capturePersistedSceneSnapshot, data.directorStudioProjects, data.snapshotUrl, onUpdateNodeData, t]);
+  }, [capturePersistedSceneSnapshot, data.directorStudioProjects, data.snapshotUrl, onUpdateNodeData, requestConfirmation, t]);
 
-  const beginEditProjectName = useCallback((project: DirectorStudioProjectRecord) => {
-    setEditingProjectId(project.id);
-    setEditingProjectName(project.name);
-  }, []);
-
-  const commitProjectName = useCallback(() => {
-    if (!editingProjectId) return;
-    const nextName = editingProjectName.trim() || t('directorStudio.untitledProject');
+  const renameProject = useCallback((projectIdToRename: string, name: string) => {
+    const nextName = name.trim() || t('directorStudio.untitledProject');
     onUpdateNodeData({
       directorStudioProjects: (data.directorStudioProjects ?? []).map((project) =>
-        project.id === editingProjectId
+        project.id === projectIdToRename
           ? { ...project, name: nextName, updatedAt: Date.now() }
           : project
       ),
     });
-    setEditingProjectId(null);
-    setEditingProjectName('');
-  }, [data.directorStudioProjects, editingProjectId, editingProjectName, onUpdateNodeData, t]);
+  }, [data.directorStudioProjects, onUpdateNodeData, t]);
 
   const createBlankWorkspace = useCallback(async () => {
     let nextProjects = data.directorStudioProjects ?? [];
     if (hasUnsavedChanges) {
-      if (!window.confirm(t('directorStudio.confirmSaveBeforeNew'))) return;
+      if (!await requestConfirmation(t('directorStudio.confirmSaveBeforeNew'))) return;
       const saved = await saveProject();
       if (!saved) return;
       nextProjects = saved.projects;
@@ -1820,27 +1690,13 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       directorStudioProjects: nextProjects,
       activeDirectorStudioProjectId: null,
     });
-  }, [data.directorStudioProjects, hasUnsavedChanges, onUpdateNodeData, saveProject, selectItemForEditing, t]);
+  }, [data.directorStudioProjects, hasUnsavedChanges, onUpdateNodeData, requestConfirmation, saveProject, selectItemForEditing, t]);
 
   const deleteSelectedItem = useCallback(() => {
     if (!selectedItem) return;
     setActiveTransformMode(null);
-    const nextItems = data.items.filter((item) => item.id !== selectedItem.id);
-    if (data.motionProject === undefined) {
-      onItemsChange(nextItems);
-    } else {
-      const nextMotionProject = normalizeDirectorMotionProject(data.motionProject);
-      const objectTracks = { ...nextMotionProject.objectTracks };
-      const actionTracks = { ...nextMotionProject.actionTracks };
-      delete objectTracks[selectedItem.id];
-      delete actionTracks[selectedItem.id];
-      onUpdateNodeData({
-        items: nextItems,
-        motionProject: { ...nextMotionProject, objectTracks, actionTracks },
-      });
-    }
-    selectItemForEditing(null);
-  }, [data.items, data.motionProject, onItemsChange, onUpdateNodeData, selectItemForEditing, selectedItem]);
+    applySelection({ type: 'remove' });
+  }, [applySelection, selectedItem]);
 
   const copySelectedItem = useCallback(() => {
     if (!selectedItem) return false;
@@ -1867,7 +1723,6 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     };
     onItemsChange([...data.items, nextItem]);
     selectItemForEditing(nextItem.id);
-    setPanelMode('elements');
     copiedItemRef.current = nextItem;
     return true;
   }, [copyLabelSuffix, data.items, defaultElementLabelBase, onItemsChange, selectItemForEditing]);
@@ -1881,40 +1736,83 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     });
   }, [commitInspectorTextDraft, data.customActionPresets, onUpdateNodeData, selectedActionValue]);
 
-  const openCustomActionEditor = useCallback(() => {
-    if (!selectedItem || selectedItem.category !== 'person') return;
+  const poseEditItemId = poseEditActive && selectedItem?.category === 'person' ? selectedItem.id : null;
+
+  const togglePoseEdit = useCallback(() => {
+    setOrbitTool(false);
+    if (selectedItem?.category !== 'person') return;
     commitInspectorTextDraft();
-    const actionName = selectedActionValue || t('directorStudio.inspector.customActionDefaultName');
-    setCustomActionName(actionName);
-    setCustomActionPose(cloneJson(data.customActionPoses?.[actionName] ?? {}));
-    setCustomActionModalOpen(true);
-  }, [commitInspectorTextDraft, data.customActionPoses, selectedActionValue, selectedItem, t]);
+    setActiveTransformMode(null);
+    // Pose edits happen in the inspector side panel (director) or the previs sidebar.
+    if (!poseEditActive) {
+      setDockOpen(true);
+      setDockTab('scene');
+      setRailPanel(null);
+    }
+    setPoseEditActive(!poseEditActive);
+  }, [commitInspectorTextDraft, poseEditActive, selectedItem?.category, timelineOpen]);
 
-  const saveCustomActionPose = useCallback(() => {
-    if (!selectedItem) return;
-    const actionName = customActionName.trim() || t('directorStudio.inspector.customActionDefaultName');
+  // The inspector shows what the viewport shows: read the applied pose after the scene has re-posed.
+  const refreshPoseSnapshot = useCallback(() => {
+    if (!poseEditItemId) {
+      setPoseSnapshot(null);
+      return;
+    }
+    if (playbackSource.getSnapshot()) return;
+    requestAnimationFrame(() => setPoseSnapshot(editorRef.current?.getPersonPose(poseEditItemId) ?? null));
+  }, [playbackSource, poseEditItemId]);
+  useEffect(() => { refreshPoseSnapshot(); }, [data.items, motionProject, refreshPoseSnapshot, timelineOpen]);
+  useEffect(() => {
+    if (!poseEditItemId) return undefined;
+    const unsubscribe = motionTimeSource.subscribe(refreshPoseSnapshot);
+    return () => { unsubscribe(); };
+  }, [motionTimeSource, poseEditItemId, refreshPoseSnapshot]);
+
+  /** Director: the person's own pose layer. Previs: the action keyframe under the playhead. */
+  const commitPoseEdit = useCallback((itemId: string, edit: PersonPoseEdit) => {
+    if (timelineOpen) {
+      recordPersonPose(itemId, edit);
+      return;
+    }
+    const item = latestItemsRef.current.find((candidate) => candidate.id === itemId);
+    if (item) updateItem(itemId, { pose: applyPersonPosePatch(normalizePersonPose(item.pose), edit.patch) });
+  }, [recordPersonPose, timelineOpen, updateItem]);
+
+  const resetPoseEdits = useCallback(() => {
+    if (!poseEditItemId) return;
+    if (timelineOpen) clearPersonPoseAt(poseEditItemId);
+    else updateItem(poseEditItemId, { pose: undefined });
+  }, [clearPersonPoseAt, poseEditItemId, timelineOpen, updateItem]);
+
+  const saveCustomPose = useCallback((name: string, pose: BlueprintActionPose) => {
+    if (selectedItem?.category !== 'person') return;
     onUpdateNodeData({
-      customActionPresets: getUniqueActionPresets([...(data.customActionPresets ?? []), actionName]),
-      customActionPoses: {
-        ...(data.customActionPoses ?? {}),
-        [actionName]: customActionPose,
-      },
+      customActionPresets: getUniqueActionPresets([...(data.customActionPresets ?? []), name]),
+      customActionPoses: { ...(data.customActionPoses ?? {}), [name]: pose },
     });
-    updateItemActionImmediately(selectedItem, actionName);
-    setCustomActionModalOpen(false);
-  }, [
-    customActionName,
-    customActionPose,
-    data.customActionPoses,
-    data.customActionPresets,
-    onUpdateNodeData,
-    selectedItem,
-    t,
-    updateItemActionImmediately,
-  ]);
+    // Director: the saved pose becomes the person's action. Previs keeps its keyframes untouched.
+    if (!timelineOpen) updateItemActionImmediately(selectedItem, name);
+  }, [data.customActionPoses, data.customActionPresets, onUpdateNodeData, selectedItem, timelineOpen, updateItemActionImmediately]);
 
-  const deleteCustomActionPreset = useCallback((preset: string) => {
-    if (!window.confirm(t('directorStudio.inspector.confirmDeleteActionPreset', { name: preset }))) return;
+  const poseInspector = poseEditItemId && poseSnapshot ? (
+    <PersonPoseInspector
+      pose={poseSnapshot}
+      joint={poseJoint}
+      onJointChange={setPoseJoint}
+      onPreview={(pose) => editorRef.current?.previewPersonPose(poseEditItemId, pose)}
+      onCommit={(edit) => commitPoseEdit(poseEditItemId, edit)}
+      onResetAll={resetPoseEdits}
+      onSaveCustomPose={saveCustomPose}
+      onExit={() => setPoseEditActive(false)}
+      targetLabel={timelineOpen
+        ? t('directorStudio.pose.targetKeyframe', { time: motionTimeSource.getSnapshot().toFixed(2) })
+        : t('directorStudio.pose.targetItem')}
+      defaultPoseName={t('directorStudio.inspector.customActionDefaultName')}
+    />
+  ) : null;
+
+  const deleteCustomActionPreset = useCallback(async (preset: string) => {
+    if (!await requestConfirmation(t('directorStudio.inspector.confirmDeleteActionPreset', { name: preset }), 'danger')) return;
     const normalizedPreset = normalizeActionValue(preset);
     const nextCustomActionPoses = { ...(data.customActionPoses ?? {}) };
     Object.keys(nextCustomActionPoses).forEach((poseName) => {
@@ -1928,20 +1826,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       ),
       customActionPoses: nextCustomActionPoses,
     });
-  }, [data.customActionPoses, data.customActionPresets, onUpdateNodeData, t]);
-
-  const beginRenameItem = useCallback((item: BlueprintItem) => {
-    setEditingItemId(item.id);
-    setEditingItemName(item.label);
-  }, []);
-
-  const commitRenameItem = useCallback(() => {
-    if (!editingItemId) return;
-    const nextName = editingItemName.trim();
-    if (nextName) updateItem(editingItemId, { label: nextName });
-    setEditingItemId(null);
-    setEditingItemName('');
-  }, [editingItemId, editingItemName, updateItem]);
+  }, [data.customActionPoses, data.customActionPresets, onUpdateNodeData, requestConfirmation, t]);
 
   const openElementAssetPicker = useCallback((itemId: string) => {
     setAssetPickerItemId(itemId);
@@ -2078,9 +1963,7 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     if (itemsToAdd.length === 0) return;
     onItemsChange([...data.items, ...itemsToAdd]);
     selectItemForEditing(itemsToAdd[0].id);
-    setPanelMode('elements');
-    if (!compactLayout) setPanelOpen(true);
-  }, [compactLayout, data.items, onItemsChange, selectItemForEditing]);
+  }, [data.items, onItemsChange, selectItemForEditing]);
 
   const getSuggestedInsertPosition = useCallback(() => (
     editorRef.current?.getSuggestedInsertPosition() ?? DEFAULT_INSERT_POSITION
@@ -2102,6 +1985,45 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     appendAndSelectItems([item]);
     setActiveDialog(null);
   }, [appendAndSelectItems, data.items, defaultPersonAction, getSuggestedInsertPosition, t]);
+
+  useEffect(() => {
+    if (activeDialog !== 'modelLibrary') return;
+    let cancelled = false;
+    void listImportedModels()
+      .then((models) => { if (!cancelled) setMyModels(models); })
+      .catch((error: unknown) => { if (!cancelled) setModelImportState({ busy: false, error: error instanceof Error ? error.message : String(error) }); });
+    return () => { cancelled = true; };
+  }, [activeDialog]);
+
+  const importMyModel = useCallback(async (file: File) => {
+    setModelImportState({ busy: true, error: null });
+    try {
+      const asset = await importModelFile(file);
+      setMyModels((current) => [asset, ...current.filter((model) => model.id !== asset.id)]);
+      setActiveModelCategory('mine');
+      setModelImportState({ busy: false, error: null });
+    } catch (error) {
+      setModelImportState({ busy: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  }, []);
+
+  const insertMyModel = useCallback((asset: ImportedModelAsset) => {
+    const item = createBlueprintItemFromPreset({
+      label: `${asset.name}${getNextLabelIndex(data.items, asset.name, [])}`,
+      color: '#94a3b8',
+      category: 'object',
+      pos3d: getSuggestedInsertPosition(),
+      defaultPersonAction,
+    });
+    appendAndSelectItems([{ ...item, importedModelId: asset.id }]);
+    setActiveDialog(null);
+  }, [appendAndSelectItems, data.items, defaultPersonAction, getSuggestedInsertPosition]);
+
+  const deleteMyModel = useCallback(async (asset: ImportedModelAsset) => {
+    if (!await requestConfirmation(t('directorStudio.modelLibrary.confirmDeleteMine', { name: asset.name }), 'danger')) return;
+    await deleteImportedModel(asset.id);
+    setMyModels((current) => current.filter((model) => model.id !== asset.id));
+  }, [requestConfirmation, t]);
 
   const addPedestrians = useCallback((mode: PedestrianMode) => {
     const count = mode === 'direct'
@@ -2197,175 +2119,6 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     });
   }, [data.aspectRatio, onUpdateNodeData]);
 
-  const captureScreenshot = useCallback(async () => {
-    const rawSnapshotUrl = editorRef.current?.exportPng(computeScreenshotExportOptions());
-    if (!rawSnapshotUrl) {
-      await showErrorDialog(t('directorStudio.addToCanvasNoSnapshot'), t('common.error'));
-      return;
-    }
-    try {
-      const snapshotUrl = await persistDirectorStudioImageSource(rawSnapshotUrl);
-      const persistedHistory = await persistSnapshotHistory(snapshotHistory);
-      onUpdateNodeData({
-        snapshotUrl,
-        snapshotHistory: appendSnapshotHistory(persistedHistory, snapshotUrl),
-      });
-      showSidePanel('snapshot');
-    } catch (error) {
-      await showErrorDialog(
-        error instanceof Error ? error.message : t('directorStudio.addToCanvasFailed'),
-        t('common.error'),
-      );
-    }
-  }, [computeScreenshotExportOptions, onUpdateNodeData, persistSnapshotHistory, showSidePanel, snapshotHistory, t]);
-
-  const selectSnapshot = useCallback(async (snapshotUrl: string) => {
-    try {
-      const persistedSnapshotUrl = await persistDirectorStudioImageSource(snapshotUrl);
-      const persistedHistory = await persistSnapshotHistory(snapshotHistory);
-      onUpdateNodeData({
-        snapshotUrl: persistedSnapshotUrl,
-        snapshotHistory: persistedHistory.map((item) => item === snapshotUrl ? persistedSnapshotUrl : item),
-      });
-    } catch (error) {
-      await showErrorDialog(
-        error instanceof Error ? error.message : t('directorStudio.addToCanvasFailed'),
-        t('common.error'),
-      );
-    }
-  }, [onUpdateNodeData, persistSnapshotHistory, snapshotHistory, t]);
-
-  const deleteSnapshot = useCallback(async (snapshotUrl: string) => {
-    try {
-      const nextHistory = await persistSnapshotHistory(snapshotHistory.filter((url) => url !== snapshotUrl));
-      const rawNextCurrent = data.snapshotUrl === snapshotUrl
-        ? nextHistory[nextHistory.length - 1] ?? null
-        : data.snapshotUrl ?? nextHistory[nextHistory.length - 1] ?? null;
-      const nextCurrent = rawNextCurrent
-        ? await persistDirectorStudioImageSource(rawNextCurrent)
-        : null;
-      onUpdateNodeData({
-        snapshotUrl: nextCurrent,
-        snapshotHistory: nextHistory,
-      });
-      if (!nextCurrent) {
-        setSidePanel((value) => value === 'snapshot' ? null : value);
-      }
-    } catch (error) {
-      await showErrorDialog(
-        error instanceof Error ? error.message : t('directorStudio.addToCanvasFailed'),
-        t('common.error'),
-      );
-    }
-  }, [data.snapshotUrl, onUpdateNodeData, persistSnapshotHistory, snapshotHistory, t]);
-
-  const clearCurrentSnapshot = useCallback(() => {
-    if (!data.snapshotUrl) return;
-    void deleteSnapshot(data.snapshotUrl);
-  }, [data.snapshotUrl, deleteSnapshot]);
-
-  const clearAllSnapshots = useCallback(() => {
-    onUpdateNodeData({
-      snapshotUrl: null,
-      snapshotHistory: [],
-    });
-    setSidePanel((value) => value === 'snapshot' ? null : value);
-  }, [onUpdateNodeData]);
-
-  const addSnapshotToCanvas = useCallback(async () => {
-    if (!onAddSnapshotToCanvas || isAddingSnapshotToCanvas) return;
-    const hadDraftWrites = commitPendingTextDrafts();
-    setIsAddingSnapshotToCanvas(true);
-    try {
-      const rawSnapshotUrl = data.snapshotUrl ?? editorRef.current?.exportPng(computeScreenshotExportOptions());
-      if (!rawSnapshotUrl) {
-        await showErrorDialog(t('directorStudio.addToCanvasNoSnapshot'), t('common.error'));
-        return;
-      }
-      const snapshotUrl = await persistDirectorStudioImageSource(rawSnapshotUrl);
-      const persistedHistory = await persistSnapshotHistory(snapshotHistory);
-      const historyChanged = persistedHistory.some((historyUrl, index) => historyUrl !== snapshotHistory[index]);
-      if (snapshotUrl !== data.snapshotUrl || isDataImageUrl(rawSnapshotUrl) || historyChanged) {
-        onUpdateNodeData({
-          snapshotUrl,
-          snapshotHistory: appendSnapshotHistory(persistedHistory, snapshotUrl),
-        });
-      }
-      if (hadDraftWrites) {
-        await waitForNextFrame();
-      }
-      const result = await onAddSnapshotToCanvasRef.current?.(snapshotUrl);
-      if (result === false) return;
-      setSidePanel((value) => value === 'snapshot' ? null : value);
-      handleClose();
-    } catch (error) {
-      await showErrorDialog(
-        error instanceof Error ? error.message : t('directorStudio.addToCanvasFailed'),
-        t('common.error'),
-      );
-    } finally {
-      setIsAddingSnapshotToCanvas(false);
-    }
-  }, [
-    commitPendingTextDrafts,
-    computeScreenshotExportOptions,
-    data.snapshotUrl,
-    handleClose,
-    isAddingSnapshotToCanvas,
-    onAddSnapshotToCanvas,
-    onUpdateNodeData,
-    persistSnapshotHistory,
-    snapshotHistory,
-    t,
-  ]);
-
-  const addAllSnapshotsToCanvas = useCallback(async () => {
-    if (!onAddSnapshotToCanvas || isAddingSnapshotToCanvas || snapshotHistory.length === 0) return;
-    const hadDraftWrites = commitPendingTextDrafts();
-    setIsAddingSnapshotToCanvas(true);
-    try {
-      const persistedHistory = await persistSnapshotHistory(snapshotHistory);
-      const currentSnapshotUrl = data.snapshotUrl
-        ? await persistDirectorStudioImageSource(data.snapshotUrl)
-        : persistedHistory[persistedHistory.length - 1] ?? null;
-      if (
-        currentSnapshotUrl !== data.snapshotUrl ||
-        persistedHistory.some((snapshotUrl, index) => snapshotUrl !== snapshotHistory[index])
-      ) {
-        onUpdateNodeData({
-          snapshotUrl: currentSnapshotUrl,
-          snapshotHistory: persistedHistory,
-        });
-      }
-      if (hadDraftWrites) {
-        await waitForNextFrame();
-      }
-      for (const snapshotUrl of persistedHistory) {
-        const result = await onAddSnapshotToCanvasRef.current?.(snapshotUrl);
-        if (result === false) return;
-      }
-      setSidePanel((value) => value === 'snapshot' ? null : value);
-      handleClose();
-    } catch (error) {
-      await showErrorDialog(
-        error instanceof Error ? error.message : t('directorStudio.addToCanvasFailed'),
-        t('common.error'),
-      );
-    } finally {
-      setIsAddingSnapshotToCanvas(false);
-    }
-  }, [
-    commitPendingTextDrafts,
-    data.snapshotUrl,
-    handleClose,
-    isAddingSnapshotToCanvas,
-    onAddSnapshotToCanvas,
-    onUpdateNodeData,
-    persistSnapshotHistory,
-    snapshotHistory,
-    t,
-  ]);
-
   const importPanorama = useCallback(async (url: string | null | undefined, label?: string) => {
     if (!url) {
       await showErrorDialog(t('directorStudio.importErrors.missingSource'), t('common.error'));
@@ -2433,15 +2186,10 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
     }
   }, [importPanorama, t]);
 
-  const previsSidebarWidth = previsSidebarOpen ? viewportSize.width < 1000 ? 280 : 312 : 0;
-  const sceneWidth = Math.max(320, viewportSize.width - (timelineOpen ? previsSidebarWidth : 0));
-  const maxMotionTimelineHeight = Math.max(180, viewportSize.height - 360);
-  const defaultMotionTimelineHeight = Math.min(maxMotionTimelineHeight, viewportSize.height < 760 ? 220 : 250);
-  const motionTimelineHeight = timelineOpen
-    ? Math.max(180, Math.min(maxMotionTimelineHeight, timelineHeightOverride ?? defaultMotionTimelineHeight))
-    : 0;
-  const motionToolbarHeight = mobileLayout ? 168 : compactLayout ? 120 : 96;
-  const sceneHeight = Math.max(240, viewportSize.height - motionTimelineHeight - (timelineOpen ? 56 : 0));
+  const dockWidth = viewportSize.width < 1100 ? 280 : 304;
+  const maxMotionTimelineHeight = Math.max(180, viewportSize.height - 52 - 260);
+  const defaultMotionTimelineHeight = Math.min(maxMotionTimelineHeight, viewportSize.height < 760 ? 210 : 248);
+  const motionTimelineHeight = Math.max(180, Math.min(maxMotionTimelineHeight, timelineHeightOverride ?? defaultMotionTimelineHeight));
   const rawPanoramaUrl = data.backgroundPanoramaUrl ?? data.backgroundImageUrl ?? null;
   const panoramaUrl = rawPanoramaUrl ? resolveImageDisplayUrl(rawPanoramaUrl) ?? rawPanoramaUrl : null;
   const panoramaImportStageLabel = panoramaImportStage
@@ -2450,64 +2198,25 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   const safeFrameStyle = useMemo(() => {
     const ratio = selectedAspect.ratio;
     if (!ratio) return null;
-    const sceneRatio = sceneWidth / sceneHeight;
-    const width = sceneRatio > ratio ? sceneHeight * ratio : sceneWidth;
-    const height = sceneRatio > ratio ? sceneHeight : sceneWidth / ratio;
+    const sceneRatio = sceneSize.width / sceneSize.height;
+    const width = sceneRatio > ratio ? sceneSize.height * ratio : sceneSize.width;
+    const height = sceneRatio > ratio ? sceneSize.height : sceneSize.width / ratio;
     return {
       width,
       height,
-      left: (sceneWidth - width) / 2,
-      top: (sceneHeight - height) / 2,
+      left: (sceneSize.width - width) / 2,
+      top: (sceneSize.height - height) / 2,
     };
-  }, [sceneHeight, sceneWidth, selectedAspect.ratio]);
-
-  const openFloatingPanel = useCallback((panel: ToolFloatingPanel) => {
-    setTopFloatingSurface('tool');
-    setFloatingPanel((value) => value === panel ? null : panel);
-    requestAnimationFrame(() => setToolbarLayoutVersion((value) => value + 1));
-  }, []);
-
-  const toolFloatingPanelStyle = useMemo(() => {
-    if (!floatingPanel) return undefined;
-    const anchorKeyByPanel: Record<ToolFloatingPanel, string> = {
-      camera: 'cameraPreset',
-      lighting: 'lighting',
-      grid: 'grid',
-      frame: 'frame',
-      resolution: 'resolution',
-      prompt: 'prompt',
-    };
-    const panelWidth = 320;
-    const anchor = toolbarAnchorRefs.current[anchorKeyByPanel[floatingPanel]];
-    const rect = anchor?.getBoundingClientRect();
-    if (!rect) {
-      return {
-        left: panelOpen ? 352 : 88,
-        bottom: 80,
-      };
-    }
-    const left = Math.min(
-      Math.max(16, rect.left + rect.width / 2 - panelWidth / 2),
-      Math.max(16, viewportSize.width - panelWidth - 16),
-    );
-    return {
-      left,
-      bottom: Math.max(78, viewportSize.height - rect.top + 10),
-    };
-  }, [floatingPanel, panelOpen, toolbarLayoutVersion, viewportSize.height, viewportSize.width]);
-
-  const showSidePanelSwitcher = Boolean(selectedItem && data.snapshotUrl);
-  const toolFloatingPanelZIndex = topFloatingSurface === 'tool' ? 58 : 34;
-  const sidePanelZIndex = topFloatingSurface === 'side' ? 58 : 34;
+  }, [sceneSize.height, sceneSize.width, selectedAspect.ratio]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
+      if (pendingConfirmation) return;
       const claimShortcut = () => {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
       };
-      if (event.target instanceof Element && event.target.closest('[data-previs-help]')) return;
       if (pilotActive) return;
       if (actionLibraryOpen) {
         if (event.key === 'Escape') {
@@ -2523,7 +2232,6 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         }
         return;
       }
-      if (customActionModalOpen) return;
       if (activeDialog === 'shortcuts') {
         if (editingShortcutId) {
           if (event.key === 'Escape') {
@@ -2575,6 +2283,8 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         return;
       }
       if (shortcutMatchesEvent(event, shortcuts.delete)) {
+        // Inside the timeline, Delete acts on its (multi-)selection; the timeline handles it.
+        if (event.target instanceof Element && event.target.closest('[data-stage-timeline]')) return;
         if (motionSelection) {
           deleteMotionKeyframe(motionSelection);
           claimShortcut();
@@ -2590,21 +2300,50 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         claimShortcut();
         return;
       }
-      if (shortcutMatchesEvent(event, shortcuts.transformMove) || shortcutMatchesEvent(event, 'g')) {
+      if (shortcutMatchesEvent(event, shortcuts.orbitTool)) {
+        if (motionRouteDraft) cancelMotionRouteDraft();
+        setActiveTransformMode(null);
+        setPoseEditActive(false);
+        setRailPanel(null);
+        setOrbitTool(value => !value);
+        claimShortcut();
+        return;
+      }
+      // Selection and orbit use the same editable bindings as the rail/help.
+      if (shortcutMatchesEvent(event, shortcuts.selectTool)) {
+        if (motionRouteDraft) cancelMotionRouteDraft();
+        setOrbitTool(false);
+        setActiveTransformMode(null);
+        setPoseEditActive(false);
+        claimShortcut();
+        return;
+      }
+      if (shortcutMatchesEvent(event, shortcuts.transformMove) || shortcutMatchesEvent(event, '1')) {
         if (!selectedItem) return;
+        setOrbitTool(false);
         setActiveTransformMode('move');
         claimShortcut();
         return;
       }
-      if (shortcutMatchesEvent(event, shortcuts.transformRotate) || shortcutMatchesEvent(event, 'r')) {
-        if (!selectedItem) return;
+      if (shortcutMatchesEvent(event, shortcuts.transformRotate) || shortcutMatchesEvent(event, '2')) {
+        if (!selectedItem && !showCameraInspector) return;
+        setOrbitTool(false);
+        if (showCameraInspector) setPreviewModeAndApply('route');
         setActiveTransformMode('rotate');
         claimShortcut();
         return;
       }
-      if (shortcutMatchesEvent(event, shortcuts.transformScale) || shortcutMatchesEvent(event, 't')) {
+      if (shortcutMatchesEvent(event, shortcuts.transformScale) || shortcutMatchesEvent(event, '3')) {
         if (!selectedItem) return;
+        setOrbitTool(false);
         setActiveTransformMode('scale');
+        claimShortcut();
+        return;
+      }
+      if (shortcutMatchesEvent(event, shortcuts.poseEdit)) {
+        if (selectedItem?.category !== 'person') return;
+        setOrbitTool(false);
+        togglePoseEdit();
         claimShortcut();
         return;
       }
@@ -2643,17 +2382,18 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         return;
       }
       if (shortcutMatchesEvent(event, shortcuts.lighting)) {
-        openFloatingPanel('lighting');
+        setRailPanel((value) => value === 'lighting' ? null : 'lighting');
         claimShortcut();
         return;
       }
       if (shortcutMatchesEvent(event, shortcuts.grid)) {
-        openFloatingPanel('grid');
+        updateGrid({ visible: !grid.visible });
         claimShortcut();
         return;
       }
       if (shortcutMatchesEvent(event, shortcuts.prompt)) {
-        openFloatingPanel('prompt');
+        selectInspectorTarget('scene');
+        setDockOpen(true);
         claimShortcut();
         return;
       }
@@ -2668,23 +2408,30 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
   }, [
     actionLibraryOpen,
     activeDialog,
+    cancelMotionRouteDraft,
     captureScreenshot,
     copySelectedItem,
-    customActionModalOpen,
+    togglePoseEdit,
     data.directorStudioShortcuts,
     deleteMotionKeyframe,
     deleteSelectedItem,
     editingShortcutId,
+    grid.visible,
+    showCameraInspector,
+    setPreviewModeAndApply,
+    motionRouteDraft,
     onUpdateNodeData,
-    openFloatingPanel,
     pasteCopiedItem,
+    pendingConfirmation,
     pilotActive,
     motionSelection,
     redoCanvas,
     saveProject,
+    selectInspectorTarget,
     selectedItem,
     shortcuts,
     undoCanvas,
+    updateGrid,
     updateViewSettings,
     videoExportOpen,
     videoExportRecording,
@@ -2701,1634 +2448,745 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
       setMotionSelection(null);
     } else {
       setMotionShowRoutes(true);
-      setSidePanel(null);
-      setFloatingPanel(null);
       setActiveTransformMode(null);
+      if (!selectedItem) setInspectorTarget('camera');
     }
+    if (nextMode === 'director') setInspectorTarget('scene');
+    setRailPanel(null);
     setPreviewModeAndApply('route');
     setStudioMode(nextMode);
   };
   const workspaceTransitionRef = useRef(switchStudioMode);
   workspaceTransitionRef.current = switchStudioMode;
-  useEffect(() => registerStageViewport(sourceNodeId, {
-    setWorkspace: (mode) => workspaceTransitionRef.current(mode),
-    capture: async () => {
-      const raw = editorRef.current?.exportPng(computeScreenshotExportOptions());
-      if (!raw) throw new Error(t('directorStudio.addToCanvasNoSnapshot'));
-      const snapshotUrl = await persistDirectorStudioImageSource(raw);
-      const asset = await saveAsset({ kind: 'image', source: snapshotUrl, name: `${t('directorStudio.title')} · ${t('directorStudio.toolbar.screenshot')}`, origin: 'generated', projectId: projectId ?? undefined, nodeId: sourceNodeId, metadata: { stageNodeId: sourceNodeId } });
-      return { assetId: asset.id };
-    },
-  }), [sourceNodeId, projectId, computeScreenshotExportOptions, t]);
+  // Enter the requested workspace once on open, through the same transition as the mode switch.
+  useEffect(() => {
+    if (initialWorkspace === 'previs') workspaceTransitionRef.current('previs');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open-time only
+  }, []);
+  useStageCaptureRegistration({ nodeId: sourceNodeId, projectId, data, editorRef, motionProject, motionPreviewProject,
+    timelineOpen, camera, lighting, panoramaUrl, exportOptions: computeScreenshotExportOptions, timeSource: motionTimeSource,
+    setWorkspace: switchStudioMode });
 
-  const toolbarButtons: ToolButtonSpec[] = [
-    { key: 'model', label: t('directorStudio.toolbar.addModel'), title: t('directorStudio.toolbar.addModel'), icon: Box, active: activeDialog === 'modelLibrary', onClick: () => setActiveDialog('modelLibrary') },
-    { key: 'pedestrian', label: t('directorStudio.toolbar.addPedestrian'), title: t('directorStudio.toolbar.addPedestrian'), icon: Users, active: activeDialog === 'pedestrians', onClick: () => setActiveDialog('pedestrians') },
-    { key: 'defaultPedestrian', label: t('directorStudio.toolbar.defaultPedestrian'), title: t('directorStudio.toolbar.defaultPedestrian'), icon: UserPlus, onClick: () => addPedestrians('direct') },
-    { key: 'delete', label: t('directorStudio.toolbar.delete'), title: selectedItem ? t('directorStudio.toolbar.delete') : t('directorStudio.selectElementFirst'), icon: Trash2, disabled: !selectedItem, onClick: deleteSelectedItem },
-    { key: 'prompt', label: t('directorStudio.toolbar.prompt'), title: t('directorStudio.prompt.title'), icon: FileText, active: floatingPanel === 'prompt', onClick: () => openFloatingPanel('prompt') },
-    {
-      key: 'focus',
-      label: t('directorStudio.toolbar.focus'),
-      title: selectedItem ? t('directorStudio.toolbar.focus') : t('directorStudio.selectElementFirst'),
-      icon: Focus,
-      disabled: !selectedItem,
-      active: followSelectedItem,
-      onClick: () => {
-        if (!selectedItem) return;
-        const next = !followSelectedItem;
-        setFollowSelectedItem(next);
-        if (next) {
-          editorRef.current?.focusItem(selectedItem.id);
-        }
+  const toggleRailPanel = (panel: RailPanel) => setRailPanel((value) => value === panel ? null : panel);
+  const cancelTools = () => {
+    setOrbitTool(false);
+    if (motionRouteDraft) cancelMotionRouteDraft();
+    setActiveTransformMode(null);
+    setPoseEditActive(false);
+  };
+  const chooseTransform = (mode: DirectorStudioTransformMode) => {
+    if (!selectedItem && !(showCameraInspector && mode === 'rotate')) return;
+    setOrbitTool(false);
+    if (showCameraInspector && mode === 'rotate') setPreviewModeAndApply('route');
+    if (motionRouteDraft) cancelMotionRouteDraft();
+    setActiveTransformMode((value) => value === mode ? null : mode);
+  };
+  // Routes belong to people or, with nothing selected, to the shot camera.
+  const routePerson = selectedItem?.category === 'person' ? selectedItem : null;
+  const routeAllowed = !selectedItem || Boolean(routePerson);
+  const routeTargetLabel = routePerson?.label ?? t('directorStudio.motion.timeline.camera');
+  const startRoute = (method: 'draw' | 'points' | 'line') => {
+    setOrbitTool(false);
+    setActiveTransformMode(null);
+    setPoseEditActive(false);
+    setRailPanel(null);
+    startMotionRouteDraft({ kind: routePerson ? 'object' : 'camera', trackId: routePerson?.id ?? 'camera', method });
+  };
+  const openCameraPanel = () => {
+    if (railPanel === 'camera') {
+      setRailPanel(null);
+      return;
+    }
+    if (timelineOpen) {
+      // Templates aim at the person that was selected when the panel opened.
+      setCameraSubjectId(selectedItem?.category === 'person' ? selectedItem.id : null);
+      selectInspectorTarget('camera');
+    }
+    setRailPanel('camera');
+  };
+  const cameraSubject = cameraSubjectId ? data.items.find((item) => item.id === cameraSubjectId) ?? null : null;
+  const cameraSubjectHasRoute = Boolean(cameraSubject && (motionProject.objectTracks[cameraSubject.id]?.length ?? 0) >= 2);
+  const selectFirstReason = t('directorStudio.previs.selectFirst');
+
+  const railGroups: StageRailTool[][] = [
+    [
+      { key: 'select', label: t('directorStudio.previs.select'), description: t('directorStudio.previs.selectHelp'), keys: shortcuts.selectTool, icon: MousePointer2, active: !orbitTool && !activeTransformMode && !motionRouteDraft && !poseEditActive, onClick: cancelTools },
+      { key: 'orbit', label: t('ui.stage.orbitTool'), description: t('ui.stage.orbitToolHint'), keys: shortcuts.orbitTool, icon: Hand, active: orbitTool, onClick: () => { cancelTools(); setRailPanel(null); setOrbitTool(!orbitTool); } },
+      { key: 'move', label: t('directorStudio.previs.move'), description: t('directorStudio.previs.moveHelp'), keys: shortcuts.transformMove, icon: Move3d, active: activeTransformMode === 'move', disabled: !selectedItem, disabledReason: selectFirstReason, onClick: () => chooseTransform('move') },
+      { key: 'rotate', label: t('directorStudio.previs.rotate'), description: t('directorStudio.previs.rotateHelp'), keys: shortcuts.transformRotate, icon: Rotate3d, active: activeTransformMode === 'rotate', disabled: !selectedItem && !showCameraInspector, disabledReason: selectFirstReason, onClick: () => chooseTransform('rotate') },
+      { key: 'scale', label: t('directorStudio.previs.scale'), description: t('directorStudio.previs.scaleHelp'), keys: shortcuts.transformScale, icon: Scaling, active: activeTransformMode === 'scale', disabled: !selectedItem, disabledReason: selectFirstReason, onClick: () => chooseTransform('scale') },
+    ],
+    [
+      { key: 'pose', label: t('directorStudio.pose.enter'), description: t('directorStudio.pose.viewportHint'), keys: shortcuts.poseEdit, icon: PersonStanding, active: poseEditActive, disabled: selectedItem?.category !== 'person', disabledReason: t('directorStudio.motion.library.selectPerson'), onClick: togglePoseEdit },
+      ...(timelineOpen ? [
+        { key: 'draw', label: t('directorStudio.previs.draw'), description: t('directorStudio.previs.drawHelp', { name: routeTargetLabel }), icon: PenLine, active: motionRouteDraft?.method === 'draw', disabled: !routeAllowed, disabledReason: t('directorStudio.previs.routePersonOnly'), onClick: () => startRoute('draw') },
+        { key: 'points', label: t('directorStudio.previs.points'), description: t('directorStudio.previs.pointsHelp', { name: routeTargetLabel }), icon: Route, active: motionRouteDraft?.method === 'points', disabled: !routeAllowed, disabledReason: t('directorStudio.previs.routePersonOnly'), onClick: () => startRoute('points') },
+        { key: 'line', label: t('directorStudio.previs.line'), description: t('directorStudio.previs.lineHelp', { name: routeTargetLabel }), icon: Ruler, active: motionRouteDraft?.method === 'line', disabled: !routeAllowed, disabledReason: t('directorStudio.previs.routePersonOnly'), onClick: () => startRoute('line') },
+      ] : []),
+    ],
+    [
+      { key: 'add', label: t('directorStudio.rail.add'), description: t('directorStudio.rail.addHelp'), icon: Plus, menu: true, open: railPanel === 'add', onClick: () => toggleRailPanel('add') },
+      { key: 'sceneBuilder', label: t('rework.stage.sceneBuilder.title'), description: t('rework.stage.sceneBuilder.help'), icon: ImagePlus, menu: true, open: railPanel === 'sceneBuilder', onClick: () => toggleRailPanel('sceneBuilder') },
+      {
+        key: 'camera',
+        label: t(timelineOpen ? 'directorStudio.previs.camera' : 'directorStudio.rail.lens'),
+        description: t(timelineOpen ? 'directorStudio.previs.cameraHelp' : 'directorStudio.rail.lensHelp'),
+        icon: Camera,
+        menu: true,
+        open: railPanel === 'camera',
+        onClick: openCameraPanel,
       },
-    },
-    {
-      key: 'transform',
-      label: t('directorStudio.toolbar.transform'),
-      title: selectedItem
-        ? activeTransformMode
-          ? t('directorStudio.transform.cancelTitle')
-          : t('directorStudio.transform.help')
-        : t('directorStudio.selectElementFirst'),
-      icon: Move3d,
-      disabled: !selectedItem,
-      active: Boolean(activeTransformMode),
-      onClick: () => setActiveTransformMode((value) => value ? null : 'move'),
-    },
-    { key: 'params', label: t('directorStudio.toolbar.params'), title: t('directorStudio.toolbar.params'), icon: SlidersHorizontal, active: sidePanel === 'inspector', onClick: () => toggleSidePanel('inspector') },
-    { key: 'cameraPreset', label: t('directorStudio.toolbar.cameraPreset'), title: t('directorStudio.toolbar.cameraPreset'), icon: Camera, active: floatingPanel === 'camera', onClick: () => openFloatingPanel('camera') },
-    { key: 'lighting', label: t('directorStudio.toolbar.lighting'), title: t('directorStudio.toolbar.lighting'), icon: Lightbulb, active: floatingPanel === 'lighting', onClick: () => openFloatingPanel('lighting') },
-    {
-      key: 'reset',
-      label: t('directorStudio.toolbar.reset'),
-      title: t('directorStudio.toolbar.reset'),
-      icon: RotateCcw,
-      onClick: () => {
-        editorRef.current?.resetCamera();
-        setFollowSelectedItem(false);
-      },
-    },
-    { key: 'grid', label: t('directorStudio.toolbar.grid'), title: t('directorStudio.toolbar.grid'), icon: Grid3x3, active: floatingPanel === 'grid', onClick: () => openFloatingPanel('grid') },
-    { key: 'frame', label: t('directorStudio.toolbar.frame'), title: t('directorStudio.toolbar.frame'), icon: Crop, active: floatingPanel === 'frame', onClick: () => openFloatingPanel('frame') },
-    { key: 'resolution', label: t('directorStudio.toolbar.resolution'), title: t('directorStudio.toolbar.resolution'), icon: Monitor, active: floatingPanel === 'resolution', onClick: () => openFloatingPanel('resolution') },
-    { key: 'screenshot', label: t('directorStudio.toolbar.screenshot'), title: t('directorStudio.toolbar.screenshot'), icon: Aperture, active: sidePanel === 'snapshot', onClick: () => { void captureScreenshot(); } },
-    { key: 'shortcuts', label: t('directorStudio.toolbar.shortcuts'), title: t('directorStudio.shortcuts.title'), icon: Keyboard, active: activeDialog === 'shortcuts', onClick: () => setActiveDialog('shortcuts') },
+      ...(timelineOpen ? [{
+        key: 'actions',
+        label: t('directorStudio.previs.actions'),
+        description: t('directorStudio.previs.actionsHelp'),
+        icon: Film,
+        active: actionLibraryOpen,
+        disabled: selectedItem?.category !== 'person',
+        disabledReason: t('directorStudio.motion.library.selectPerson'),
+        onClick: () => setActionLibraryOpen(true),
+      }] : []),
+      { key: 'lighting', label: t('directorStudio.toolbar.lighting'), description: t('directorStudio.previs.lightingHelp'), keys: shortcuts.lighting, icon: Lightbulb, menu: true, open: railPanel === 'lighting', onClick: () => toggleRailPanel('lighting') },
+    ],
   ];
+  const railFooter: StageRailTool[] = [
+    { key: 'help', label: t('directorStudio.rail.help'), description: t('directorStudio.rail.helpHint'), keys: shortcuts.shortcuts, icon: Keyboard, active: activeDialog === 'shortcuts', onClick: () => setActiveDialog('shortcuts') },
+  ];
+  const closeRailPanel = () => setRailPanel(null);
+  const railPanelNode = railPanel === 'add' ? (
+    <StageFlyout title={t('directorStudio.rail.add')} closeLabel={t('common.close')} onClose={closeRailPanel}>
+      <AddFlyoutBody entries={[
+        { key: 'person', icon: UserPlus, label: t('directorStudio.rail.addPerson'), hint: t('directorStudio.previs.addPersonHelp'), onClick: () => { closeRailPanel(); addPedestrians('direct'); } },
+        { key: 'crowd', icon: Users, label: t('directorStudio.toolbar.addPedestrian'), hint: t('directorStudio.rail.addCrowdHelp'), onClick: () => { closeRailPanel(); setActiveDialog('pedestrians'); } },
+        { key: 'models', icon: Box, label: t('directorStudio.previs.models'), hint: t('directorStudio.previs.openModelsHelp'), keys: shortcuts.model, onClick: () => { closeRailPanel(); setActiveDialog('modelLibrary'); } },
+        { key: 'mine', icon: Upload, label: t('directorStudio.rail.myModels'), hint: t('directorStudio.modelLibrary.uploadHint'), onClick: () => { closeRailPanel(); setActiveModelCategory('mine'); setActiveDialog('modelLibrary'); } },
+      ]} />
+    </StageFlyout>
+  ) : railPanel === 'camera' ? (
+    <StageFlyout title={t(timelineOpen ? 'directorStudio.previs.camera' : 'directorStudio.rail.lens')} closeLabel={t('common.close')} onClose={closeRailPanel}>
+      {timelineOpen ? (
+        <CameraMotionFlyoutBody
+          presets={DIRECTOR_CAMERA_PRESETS.map((preset) => ({
+            id: preset.id,
+            label: t(preset.labelKey),
+            disabled: preset.id === 'follow-actor-route' && !cameraSubjectHasRoute,
+            disabledReason: t('directorStudio.previs.followHelp'),
+          }))}
+          subjectLabel={cameraSubject?.label ?? null}
+          pilotActive={pilotActive}
+          onPreset={(id) => {
+            applyCameraPreset(id as DirectorCameraPresetId, cameraSubjectId);
+            onSelectedItemChange(null);
+            closeRailPanel();
+          }}
+          onTogglePilot={() => { toggleCameraPilot(); closeRailPanel(); }}
+          onAddKey={addCameraMotionKeyframe}
+        />
+      ) : (
+        <LensFlyoutBody camera={camera} presets={CAMERA_PRESETS} onFov={updateFov} onDistance={(lensDistance) => updateCamera({ lensDistance })} onPreset={selectCameraPreset} />
+      )}
+    </StageFlyout>
+  ) : railPanel === 'lighting' ? (
+    <StageFlyout title={t('directorStudio.toolbar.lighting')} closeLabel={t('common.close')} onClose={closeRailPanel}>
+      <LightingFlyoutBody lighting={lighting} onChange={updateLighting} />
+    </StageFlyout>
+  ) : null;
+
+  const motionEditing = {
+    project: motionProject,
+    items: data.items,
+    selection: motionSelection,
+    onSelectionChange: setMotionSelection,
+    onTimeChange: setMotionTimeAndApply,
+    onRetimeTrack: retimeMotionTrack,
+    onPatchKeyframe: patchMotionKeyframe,
+    onDuplicateKeyframe: duplicateMotionKeyframe,
+    onDeleteKeyframe: deleteMotionKeyframe,
+  };
+
+  const selectedText = selectedItem
+    ? inspectorTextDraft.itemId === selectedItem.id ? inspectorTextDraft : createInspectorTextDraft(selectedItem)
+    : null;
+  const inspectorNode = selectedItem && selectedText ? (
+    <DirectorItemInspector
+      key={selectedItem.id}
+      item={selectedItem}
+      text={selectedText}
+      actionPresets={timelineOpen ? null : inspectorActionPresets.map((preset) => ({
+        id: preset.id,
+        value: preset.value,
+        labelKey: preset.labelKey,
+        selected: isInspectorActionPresetSelected(selectedItem.action, preset),
+      }))}
+      customActionPresets={customActionPresets.map((value) => ({ value, selected: normalizeActionValue(selectedItem.action) === normalizeActionValue(value) }))}
+      motion={timelineOpen ? <DirectorPrevisItemMotion {...motionEditing} item={selectedItem} onOpenActions={() => setActionLibraryOpen(true)} /> : undefined}
+      poseInspector={poseInspector}
+      poseShortcut={shortcuts.poseEdit}
+      onTextChange={updateInspectorTextDraft}
+      onTextCommit={commitInspectorTextDraft}
+      onUpdate={(patch) => updateItem(selectedItem.id, patch)}
+      onPosition={(axis, value) => updateItemPosition(selectedItem, axis, value)}
+      onRotationDegrees={(axis, value) => updateItemRotationDegrees(selectedItem, axis, value)}
+      onScale={(axis, value) => updateItemScale(selectedItem, axis, value)}
+      onAction={(value) => updateItemActionImmediately(selectedItem, value)}
+      onDeleteActionPreset={(value) => { void deleteCustomActionPreset(value); }}
+      onSaveActionPreset={saveCurrentActionPreset}
+      onStartPose={togglePoseEdit}
+      onBodyControls={(patch) => updateItemBodyControls(selectedItem, patch)}
+      onBodySection={(section, patch) => updateItemBodySection(selectedItem, section, patch)}
+      onLinkImage={() => openElementAssetPicker(selectedItem.id)}
+      onClearImage={() => clearElementAsset(selectedItem.id)}
+      onDelete={deleteSelectedItem}
+    />
+  ) : showCameraInspector ? (
+    <DirectorPrevisCameraInspector
+      {...motionEditing}
+      previewProject={motionPreviewProject}
+      onAddCameraKeyframe={addCameraMotionKeyframe}
+      rigActions={{
+        onAddRig: addCameraRig,
+        onPreviewRig: previewCameraRig,
+        onUpdateRig: updateCameraRig,
+        onDeleteRig: deleteCameraRig,
+        onBakeRig: bakeCameraRig,
+        onTimeChange: setMotionTimeAndApply,
+        onEditSegment: editCameraRigSegment,
+      }}
+    />
+  ) : (
+    <StageSceneInspector
+      counts={{
+        person: displayItems.filter((entry) => entry.displayCategory === 'person').length,
+        object: displayItems.filter((entry) => entry.displayCategory === 'object').length,
+        scene: displayItems.filter((entry) => entry.displayCategory === 'scene').length,
+      }}
+      prompt={basePromptDraft}
+      onPromptChange={updateBasePromptDraft}
+      onPromptCommit={commitBasePromptDraft}
+      grid={grid}
+      onGrid={updateGrid}
+      resolution={screenshotResolution}
+      resolutionOptions={SCREENSHOT_RESOLUTIONS.map((resolution) => ({ value: resolution.value, label: t(resolution.labelKey) }))}
+      onResolution={(value) => onUpdateNodeData({ screenshotResolution: value })}
+      viewSettings={viewSettings}
+      onViewSettings={updateViewSettings}
+      hasPanorama={Boolean(rawPanoramaUrl)}
+      panoramaBusyLabel={panoramaImportStageLabel ?? (isUploadingPanorama ? t('directorStudio.importing') : null)}
+      onImportPanorama={() => setImportOpen(true)}
+      onClearPanorama={clearPanorama}
+    />
+  );
+
+  const routeDraftStatus = timelineOpen && motionRouteDraft ? {
+    targetLabel: motionRouteDraft.kind === 'object'
+      ? data.items.find((item) => item.id === motionRouteDraft.trackId)?.label ?? ''
+      : t('directorStudio.motion.timeline.camera'),
+    hint: motionRouteDraft.method === 'draw'
+      ? t('directorStudio.motion.route.hintDraw')
+      : motionRouteDraft.method === 'line'
+        ? t(routeDraftPointCount === 0 ? 'directorStudio.motion.route.lineStart' : 'directorStudio.motion.route.lineEnd')
+        : routeDraftPointCount === 0
+          ? t('directorStudio.motion.route.pointsStart')
+          : t('directorStudio.motion.route.pointsCount', { count: routeDraftPointCount }),
+    canFinish: motionRouteDraft.method === 'points' && routeDraftPointCount >= 2,
+  } : null;
+  const poseStatus = poseEditItemId && selectedItem ? {
+    targetLabel: selectedItem.label,
+    jointLabel: poseJoint ? t(`directorStudio.pose.joints.${poseJoint}`) : null,
+  } : null;
+  const selectionStatus = selectedItem ? {
+    label: selectedItem.label,
+    color: selectedItem.color || '#9ca3af',
+    kindLabel: t(`directorStudio.category.${getDirectorStudioDisplayCategory(selectedItem)}`),
+    isPerson: selectedItem.category === 'person',
+  } : null;
+
   const content = (
     <div
       ref={tooltipsRootRef}
-      className="director-studio-shell nodrag nopan fixed inset-0 z-8600 overflow-hidden bg-[#071012] text-white"
+      // The portal still bubbles React events through the canvas tree: `nokey` stops React Flow from
+      // treating Shift-drag here as a canvas rubber-band selection or keys as canvas shortcuts.
+      className="director-studio-shell dark nodrag nopan nokey fixed inset-0 z-8600 flex flex-col overflow-hidden bg-bg text-text-dark"
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
     >
-      <StageHeader mode={studioMode} dirty={hasUnsavedChanges} agentOpen={agentOpen} canRecord={motionProject.cameraTrack.length >= 2}
-        onBack={handleClose} onMode={switchStudioMode} onSave={() => { void saveProject(); }} onCapture={() => { void captureScreenshot(); }}
-        onRecord={openVideoExport} onImport={() => setImportOpen(true)} onUndo={undoCanvas} onSidebar={() => setPrevisSidebarOpen((value) => !value)}
-        onAgent={() => setAgentOpen((value) => !value)} onClearPanorama={rawPanoramaUrl ? clearPanorama : undefined} />
-      {agentOpen && projectId && <aside className="absolute bottom-3 right-3 top-16 z-[90] w-[380px] max-w-[calc(100%-24px)] overflow-hidden rounded-2xl border border-white/15 bg-surface-dark text-text-dark shadow-2xl"><div className="absolute right-2 top-2 z-10"><button type="button" aria-label={t('common.close')} onClick={() => setAgentOpen(false)} className="rounded-md bg-bg-dark p-1.5 text-text-muted"><X className="h-3.5 w-3.5" /></button></div><ScopedAgentPanel scope="stage" projectId={projectId} compact /></aside>}
+      <StageHeader
+        mode={studioMode}
+        dirty={hasUnsavedChanges}
+        projectName={activeProject?.name ?? t('directorStudio.untitledProject')}
+        projectsOpen={projectsOpen}
+        projectsMenu={(
+          <StageProjectsMenu
+            projects={projects.map((project) => {
+              const cover = getProjectCover(project);
+              return { id: project.id, name: project.name, coverUrl: cover ? resolveImageDisplayUrl(cover) ?? cover : null, updatedAt: project.updatedAt };
+            })}
+            activeId={data.activeDirectorStudioProjectId ?? null}
+            formatTime={(value) => t('directorStudio.updatedAt', { time: formatProjectTime(value) })}
+            onOpen={(id) => {
+              const project = projects.find((entry) => entry.id === id);
+              setProjectsOpen(false);
+              if (project) void restoreProject(project);
+            }}
+            onRename={renameProject}
+            onCover={(id) => {
+              const project = projects.find((entry) => entry.id === id);
+              if (project) void updateProjectCover(project);
+            }}
+            onDelete={(id) => {
+              const project = projects.find((entry) => entry.id === id);
+              if (project) void deleteProject(project);
+            }}
+            onCreate={() => { setProjectsOpen(false); void createBlankWorkspace(); }}
+            onClose={() => setProjectsOpen(false)}
+          />
+        )}
+        agentOpen={agentOpen}
+        dockOpen={dockOpen}
+        canRecord={motionProject.cameraTrack.length >= 2}
+        shortcuts={{ undo: shortcuts.undo, redo: shortcuts.redo, save: shortcuts.save, screenshot: shortcuts.screenshot }}
+        onBack={handleClose}
+        onMode={switchStudioMode}
+        onToggleProjects={() => setProjectsOpen((value) => !value)}
+        onSave={() => { void saveProject(); }}
+        onCapture={() => { void captureScreenshot(); }}
+        onCaptureOptions={() => { setDockOpen(true); setDockTab('shots'); }}
+        onRecord={openVideoExport}
+        onUndo={undoCanvas}
+        onRedo={redoCanvas}
+        onToggleDock={() => setDockOpen((value) => !value)}
+        onAgent={() => setAgentOpen((value) => !value)}
+      />
 
-      <div className="absolute inset-0 z-0 overflow-hidden bg-[#071012]">
-        {!timelineOpen && (panelOpen ? (
-        <aside
-          className="absolute top-16 z-30 flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/12 bg-[#0d0f11]/84 shadow-[0_18px_60px_rgba(0,0,0,0.36)] backdrop-blur-xl"
-          style={{
-            left: compactLayout ? 12 : 16,
-            width: compactLayout ? Math.min(360, viewportSize.width - 24) : 320,
-            bottom: motionTimelineHeight + motionToolbarHeight,
-          }}
-        >
-          <div className="flex items-center gap-1 border-b border-white/10 p-2">
-            {([
-              ['projects', FolderOpen, t('directorStudio.projects')],
-              ['elements', ImagePlus, t('directorStudio.elements')],
-            ] as const).map(([mode, Icon, label]) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setPanelMode(mode)}
-                className={`flex h-9 min-w-0 flex-1 items-center justify-center gap-2 rounded-md text-xs ${
-                  panelMode === mode
-                    ? 'bg-white text-black'
-                    : 'bg-white/6 text-white/65 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setPanelOpen(false)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-white/50 hover:bg-white/10 hover:text-white"
-              aria-label={t('directorStudio.collapsePanel')}
-              title={t('directorStudio.collapsePanel')}
+      <div className="relative flex min-h-0 flex-1">
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden bg-[#0e1013]">
+            <DirectorSceneErrorBoundary
+              key={sceneLoadAttempt}
+              title={t('directorStudio.sceneError.title')}
+              description={t('directorStudio.sceneError.description')}
+              retryLabel={t('directorStudio.sceneError.retry')}
+              closeLabel={t('common.close')}
+              onRetry={retryBlueprintScene}
+              onClose={onClose}
             >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          {panelMode === 'projects' ? (
-            <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
-              <div className="space-y-2">
-                {projects.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-white/12 px-3 py-8 text-center text-xs leading-5 text-white/42">
-                    {t('directorStudio.noProjects')}
+              <Suspense
+                fallback={
+                  <div className="flex h-full items-center justify-center text-sm text-text-muted">
+                    {t('directorStudio.loadingScene')}
                   </div>
-                ) : null}
-                {projects.map((project) => {
-                    const isActive = project.id === data.activeDirectorStudioProjectId;
-                    const coverUrl = getProjectCover(project);
-                    const coverDisplayUrl = coverUrl ? resolveImageDisplayUrl(coverUrl) ?? coverUrl : null;
-                    const createdAt = Number.isFinite(project.createdAt) ? project.createdAt : project.updatedAt;
-                    return (
-                    <div
-                      key={project.id}
-                      className={`rounded-lg border bg-black/18 p-2 transition-colors ${
-                        isActive ? 'border-accent/70' : 'border-white/10 hover:border-white/25'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => { void restoreProject(project); }}
-                        className="block w-full overflow-hidden rounded-md bg-white/5 text-left"
-                        title={t('directorStudio.openProject')}
-                      >
-                        <div className="aspect-video bg-black/40">
-                          {coverDisplayUrl ? (
-                            <img src={coverDisplayUrl} alt={project.name} className="h-full w-full object-cover" draggable={false} />
-                          ) : (
-                            <div className="flex h-full items-center justify-center text-[11px] text-white/32">
-                              {t('directorStudio.noCover')}
-                            </div>
-                          )}
-                        </div>
-                      </button>
-                      <div className="mt-2 flex items-start gap-2">
-                        <div className="min-w-0 flex-1">
-                          {editingProjectId === project.id ? (
-                            <input
-                              value={editingProjectName}
-                              onChange={(event) => setEditingProjectName(event.target.value)}
-                              onBlur={commitProjectName}
-                              onKeyDown={(event) => {
-                                event.stopPropagation();
-                                if (event.key === 'Enter') commitProjectName();
-                                if (event.key === 'Escape') {
-                                  setEditingProjectId(null);
-                                  setEditingProjectName('');
-                                }
-                              }}
-                              autoFocus
-                              className={`h-7 w-full px-2 text-xs ${DIRECTOR_FIELD_CLASS}`}
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              onDoubleClick={() => beginEditProjectName(project)}
-                              className={`block max-w-full truncate text-left text-xs font-medium text-white/85 ${DIRECTOR_EDITABLE_NAME_CLASS}`}
-                              title={t('directorStudio.renameHint')}
-                            >
-                              {project.name}
-                            </button>
-                            )}
-                            <div className="mt-1 space-y-0.5 text-[10px] leading-4 text-white/38">
-                              <div>{t('directorStudio.createdAt', { time: formatProjectTime(createdAt) })}</div>
-                              <div>{t('directorStudio.updatedAt', { time: formatProjectTime(project.updatedAt) })}</div>
-                            </div>
-                          </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => { void updateProjectCover(project); }}
-                            className="rounded-sm p-1 text-white/45 hover:bg-white/10 hover:text-white"
-                            title={t('directorStudio.changeCover')}
-                          >
-                            <Camera className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteProject(project)}
-                            className="rounded-sm p-1 text-white/45 hover:bg-red-500/16 hover:text-red-200"
-                            title={t('common.delete')}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                <button
-                  type="button"
-                  onClick={() => { void createBlankWorkspace(); }}
-                  className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-white/16 bg-white/3 text-white/45 hover:border-white/30 hover:text-white"
-                  title={t('directorStudio.newProject')}
-                >
-                  <Plus className="h-7 w-7" />
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
-              <div className="mb-2 text-[11px] text-white/42">
-                {t('directorStudio.elementCount', { count: data.items.length })}
-              </div>
-              <div className="space-y-1.5">
-                {data.items.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-white/12 px-3 py-8 text-center text-xs leading-5 text-white/42">
-                    {t('directorStudio.noElements')}
-                  </div>
-                ) : null}
-                {displayItems.map(({ item, displayCategory }, itemIndex) => {
-                  const isSelected = selectedItemId === item.id;
-                  const showCategoryHeading = displayCategory !== displayItems[itemIndex - 1]?.displayCategory;
-                  const CategoryIcon = displayCategory === 'person' ? Users : displayCategory === 'scene' ? Image : Box;
-                  const categoryLabel = displayCategory === 'person'
-                    ? t('directorStudio.category.person')
-                    : displayCategory === 'scene'
-                      ? t('directorStudio.category.scene')
-                      : t('directorStudio.category.object');
-                  return (
-                    <div
-                      key={item.id}
-                      className={showCategoryHeading ? 'pt-2 first:pt-0' : undefined}
-                    >
-                      {showCategoryHeading ? (
-                        <div className="mb-1 flex items-center gap-1.5 px-1 text-[10px] font-medium text-white/36">
-                          <CategoryIcon className="h-3 w-3 text-white/28" />
-                          <span>{categoryLabel}</span>
-                        </div>
-                      ) : null}
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => {
-                          selectItemForEditing(item.id);
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key !== 'Enter' && event.key !== ' ') return;
-                          event.preventDefault();
-                          selectItemForEditing(item.id);
-                        }}
-                        className={`flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left text-xs ${
-                          isSelected
-                            ? 'border-accent/70 bg-accent/12 text-white'
-                            : 'border-white/10 bg-black/18 text-white/68 hover:border-white/24 hover:text-white'
-                        }`}
-                      >
-                        <span className="h-2.5 w-2.5 shrink-0 rounded-xs" style={{ backgroundColor: item.color || '#9ca3af' }} />
-                        <CategoryIcon className="h-3.5 w-3.5 shrink-0 text-white/45" />
-                        <div className="min-w-0 flex-1">
-                          {editingItemId === item.id ? (
-                            <input
-                              value={editingItemName}
-                              onChange={(event) => setEditingItemName(event.target.value)}
-                              onClick={(event) => event.stopPropagation()}
-                              onDoubleClick={(event) => event.stopPropagation()}
-                              onKeyDown={(event) => {
-                                event.stopPropagation();
-                                if (event.key === 'Enter') commitRenameItem();
-                                if (event.key === 'Escape') {
-                                  setEditingItemId(null);
-                                  setEditingItemName('');
-                                }
-                              }}
-                              onBlur={commitRenameItem}
-                              autoFocus
-                              className={`h-7 w-full px-2 text-xs ${DIRECTOR_FIELD_CLASS}`}
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                selectItemForEditing(item.id);
-                              }}
-                              onDoubleClick={(event) => {
-                                event.stopPropagation();
-                                beginRenameItem(item);
-                              }}
-                              className={`block max-w-full truncate text-left font-medium text-white/86 ${DIRECTOR_EDITABLE_NAME_CLASS}`}
-                              title={t('directorStudio.renameElementHint')}
-                            >
-                              {item.label}
-                            </button>
-                          )}
-                          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-white/38">
-                            <span>{categoryLabel}</span>
-                            {item.refImageName ? (
-                              <span className="min-w-0 truncate text-accent/80">@{item.refImageName}</span>
-                            ) : null}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openElementAssetPicker(item.id);
-                          }}
-                          className={`shrink-0 rounded p-1.5 ${
-                            item.refImageUrl
-                              ? 'bg-accent/18 text-accent hover:bg-accent/25'
-                              : 'bg-white/[0.07] text-white/48 hover:bg-white/12 hover:text-white'
-                          }`}
-                          title={item.refImageUrl ? t('directorStudio.linkedImage.change') : t('directorStudio.linkedImage.choose')}
-                        >
-                          <Link2 className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            updateItem(item.id, { showLabel: item.showLabel === false });
-                          }}
-                          className="shrink-0 rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
-                          title={item.showLabel === false ? t('directorStudio.inspector.showLabel') : t('directorStudio.inspector.hideLabel')}
-                        >
-                          {item.showLabel === false ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </aside>
-        ) : (
-          <div className="absolute left-4 top-16 z-30 flex flex-col gap-2 rounded-lg border border-white/12 bg-[#0d0f11]/78 p-1.5 shadow-[0_14px_40px_rgba(0,0,0,0.32)] backdrop-blur-xl">
-            {([
-              ['projects', FolderOpen, t('directorStudio.projects'), t('directorStudio.openProjectsPanel')],
-              ['elements', ImagePlus, t('directorStudio.elements'), t('directorStudio.openElementsPanel')],
-            ] as const).map(([mode, Icon, label, title]) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => {
-                  if (compactLayout) setSidePanel(null);
-                  setPanelMode(mode);
-                  setPanelOpen(true);
-                }}
-                className={`flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
-                  panelMode === mode
-                    ? 'bg-white text-black'
-                    : 'text-white/58 hover:bg-white/10 hover:text-white'
-                }`}
-                aria-label={title}
-                title={title}
+                }
               >
-                <Icon className="h-4 w-4" />
-                <span className="sr-only">{label}</span>
-              </button>
-            ))}
-          </div>
-        ))}
-
-        <main className="absolute inset-0 z-0 h-full min-h-0 overflow-hidden bg-[#071012]">
-          <div className="absolute left-0 overflow-hidden" style={{ top: timelineOpen ? 56 : 0, width: sceneWidth, height: sceneHeight }}>
-          <DirectorSceneErrorBoundary
-            key={sceneLoadAttempt}
-            title={t('directorStudio.sceneError.title')}
-            description={t('directorStudio.sceneError.description')}
-            retryLabel={t('directorStudio.sceneError.retry')}
-            closeLabel={t('common.close')}
-            onRetry={retryBlueprintScene}
-            onClose={onClose}
-          >
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center text-sm text-white/45">
-                  {t('directorStudio.loadingScene')}
-                </div>
-              }
-            >
-              <BlueprintSceneComponent
-                ref={editorRef}
-                items={data.items}
-                onItemsChange={onItemsChange}
-                referenceImages={referenceImages}
-                mode={data.mode === 'panorama' ? 'panorama' : 'flat'}
-                panoramaUrl={panoramaUrl}
-                width={sceneWidth}
-                height={sceneHeight}
-                fullBleed
-                selectedItemId={selectedItemId}
-                followSelectedItem={followSelectedItem}
-                transformMode={selectedItem ? activeTransformMode : null}
-                onSelectedItemChange={selectItemForEditing}
-                customActionPoses={data.customActionPoses}
-                cameraFov={camera.fov}
-                cameraDistance={camera.lensDistance}
-                lighting={lighting}
-                grid={grid}
-                viewSettings={viewSettings}
-                keyboardShortcutsEnabled={activeDialog !== 'shortcuts'}
-                motionProject={timelineOpen ? motionProject : undefined}
-                motionRoutesVisible={timelineOpen && motionShowRoutes}
-                motionRouteSelection={timelineOpen && motionSelection && motionSelection.kind !== 'action'
-                  ? {
-                      kind: motionSelection.kind,
-                      trackId: motionSelection.trackId,
-                      keyframeId: motionSelection.keyframeId,
-                    }
-                  : null}
-                onMotionRoutePointSelect={(selection, time) => {
-                  selectMotionRouteKeyframe(selection, time);
-                  onSelectedItemChange(selection.kind === 'object' ? selection.trackId : null);
-                }}
-                onMotionRoutePointMove={moveMotionRouteKeyframe}
-                onMotionRoutePointInsert={(kind, trackId, time, position) => {
-                  insertMotionRouteKeyframe(kind, trackId, time, position);
-                  onSelectedItemChange(kind === 'object' ? trackId : null);
-                }}
-                motionRouteDraft={timelineOpen ? motionRouteDraft : null}
-                onMotionRouteDraftComplete={completeMotionRouteDraft}
-                onMotionRouteDraftCancel={cancelMotionRouteDraft}
-                pilotActive={timelineOpen && pilotActive}
-                onPilotActiveChange={setPilotActive}
-                onPilotRecordCamera={recordPilotCamera}
-                onPilotTargetChange={setPilotTargetId}
-              />
-            </Suspense>
-          </DirectorSceneErrorBoundary>
-
-          {safeFrameStyle && (!timelineOpen || motionPreviewMode === 'shot') ? (
-            <div
-              className="pointer-events-none absolute z-10 border border-white/75 shadow-[0_0_0_9999px_rgba(0,0,0,0.22)]"
-              style={safeFrameStyle}
-            >
-              <div className="absolute left-2 top-2 rounded-sm bg-black/60 px-2 py-0.5 text-[10px] text-white/80">
-                {t('directorStudio.safeFrame')} · {selectedAspect.value}
-              </div>
-            </div>
-          ) : null}
-
-          </div>
-
-          {floatingPanel ? (
-            <div
-              className="absolute bottom-20 z-30 w-[320px] rounded-lg border border-white/12 bg-[#101316]/92 p-3 shadow-[0_18px_60px_rgba(0,0,0,0.34)] backdrop-blur-xl"
-              style={{ ...(timelineOpen ? { top: 120, left: 138, bottom: 'auto', maxHeight: sceneHeight - 100, overflowY: 'auto' as const } : toolFloatingPanelStyle ?? {}), zIndex: toolFloatingPanelZIndex }}
-              onPointerDownCapture={() => bringFloatingSurfaceToFront('tool')}
-            >
-              <div className="mb-3 flex items-center justify-between">
-                <div className="text-xs font-medium text-white/86">
-                  {floatingPanel === 'camera'
-                    ? t('directorStudio.toolbar.cameraPreset')
-                    : floatingPanel === 'lighting'
-                      ? t('directorStudio.toolbar.lighting')
-                      : floatingPanel === 'grid'
-                        ? t('directorStudio.toolbar.grid')
-                        : floatingPanel === 'frame'
-                          ? t('directorStudio.toolbar.frame')
-                          : floatingPanel === 'resolution'
-                            ? t('directorStudio.toolbar.resolution')
-                            : t('directorStudio.prompt.title')}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setFloatingPanel(null)}
-                  className="rounded-sm p-1 text-white/45 hover:bg-white/10 hover:text-white"
-                  aria-label={t('common.close')}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-
-              {floatingPanel === 'prompt' ? (
-                <label className="block text-xs text-white/68">
-                  <span className="mb-2 block text-white/82">{t('directorStudio.prompt.title')}</span>
-                  <textarea
-                    value={basePromptDraft}
-                    onChange={(event) => updateBasePromptDraft(event.target.value)}
-                    onBlur={commitBasePromptDraft}
-                    onKeyUp={(event) => {
-                      if (event.key === 'Enter') {
-                        commitBasePromptDraft();
+                <BlueprintSceneComponent
+                  ref={editorRef}
+                  items={data.items}
+                  onAssetLoadError={setSceneAssetError}
+                  onItemsChange={onItemsChange}
+                  referenceImages={referenceImages}
+                  mode={data.mode === 'panorama' ? 'panorama' : 'flat'}
+                  panoramaUrl={panoramaUrl}
+                  width={sceneSize.width}
+                  height={sceneSize.height}
+                  fullBleed
+                  orbitNavigation={orbitTool && !poseEditActive && !motionRouteDraft}
+                  selectedItemId={selectedItemId}
+                  selectedItemIds={stageSelection.ids}
+                  onSelectionChange={(ids, toggle) => { commitPendingTextDrafts(); stageSelection.select(ids, 'viewport', toggle); setMotionSelection(null); setActiveTransformMode(ids.length ? 'move' : null); }}
+                  followSelectedItem={followSelectedItem}
+                  transformMode={!orbitTool && ((selectedItem && !selectedItem.locked && !selectedItem.hidden) || showCameraInspector) ? activeTransformMode : null}
+                  cameraSelected={showCameraInspector}
+                  onCameraLookAt={setCameraLookAt}
+                  onCameraTargetSelect={(itemId) => { selectInspectorTarget('camera'); setCameraLookAt({ mode: 'target', targetId: itemId, bodyPart: 'torso' }); }}
+                  onSelectedItemChange={selectItemForEditing}
+                  customActionPoses={data.customActionPoses}
+                  cameraFov={camera.fov}
+                  cameraDistance={camera.lensDistance}
+                  lighting={lighting}
+                  grid={grid}
+                  viewSettings={viewSettings}
+                  keyboardShortcutsEnabled={activeDialog !== 'shortcuts' && !pendingConfirmation}
+                  motionProject={timelineOpen ? motionProject : undefined}
+                  motionRoutesVisible={timelineOpen && motionShowRoutes}
+                  motionRouteSelection={timelineOpen && motionSelection && motionSelection.kind !== 'action'
+                    ? {
+                        kind: motionSelection.kind,
+                        trackId: motionSelection.trackId,
+                        keyframeId: motionSelection.keyframeId,
                       }
-                    }}
-                    rows={7}
-                    className="nodrag nowheel w-full resize-none rounded-md border border-white/12 bg-black/30 px-3 py-2 text-xs leading-5 text-white outline-hidden placeholder:text-white/30 focus:border-white/30"
-                    placeholder={t('directorStudio.prompt.placeholder')}
-                  />
-                  <span className="mt-2 block text-[10px] leading-4 text-white/42">
-                    {t('directorStudio.prompt.hint')}
-                  </span>
-                </label>
-              ) : null}
+                    : null}
+                  onMotionRoutePointSelect={(selection, time) => {
+                    selectMotionRouteKeyframe(selection, time);
+                    onSelectedItemChange(selection.kind === 'object' ? selection.trackId : null);
+                  }}
+                  onMotionRoutePointMove={moveMotionRouteKeyframe}
+                  onMotionRouteRetime={retimeMotionTrack}
+                  onMotionRouteToggleClosed={toggleMotionRouteClosed}
+                  onMotionRoutePointInsert={(kind, trackId, time, position) => {
+                    insertMotionRouteKeyframe(kind, trackId, time, position);
+                    onSelectedItemChange(kind === 'object' ? trackId : null);
+                  }}
+                  motionRouteDraft={timelineOpen ? motionRouteDraft : null}
+                  onMotionRouteDraftComplete={completeMotionRouteDraft}
+                  onMotionRouteDraftCancel={cancelMotionRouteDraft}
+                  onMotionRouteDraftProgress={setRouteDraftPointCount}
+                  pilotActive={timelineOpen && pilotActive}
+                  onPilotActiveChange={setPilotActive}
+                  onPilotRecordCamera={recordPilotCamera}
+                  onPilotTargetChange={setPilotTargetId}
+                  poseEditItemId={pilotActive ? null : poseEditItemId}
+                  poseEditJoint={poseJoint}
+                  onPoseEditJointChange={setPoseJoint}
+                  onPoseEditCommit={commitPoseEdit}
+                  shotPreview={timelineOpen && motionPreviewMode === 'route' && shotPipVisible
+                    ? {
+                        aspect: selectedAspect.ratio ?? 2,
+                        cameraLabel: t('directorStudio.motion.timeline.camera'),
+                        aspectLabel: selectedAspect.ratio ? selectedAspect.value : t(selectedAspect.labelKey),
+                      }
+                    : null}
+                  onShotPreviewActivate={() => setPreviewModeAndApply('shot')}
+                />
+              </Suspense>
+            </DirectorSceneErrorBoundary>
 
-              {floatingPanel === 'camera' ? (
-                <div className="space-y-3">
-                  <label className="block text-[11px] text-white/62">
-                    <span className="mb-1 flex justify-between">
-                      <span>{t('directorStudio.camera.fov')}</span>
-                      <span className="font-mono text-white/82">{camera.fov.toFixed(1)}</span>
-                    </span>
-                    <input
-                      type="range"
-                      min={10}
-                      max={150}
-                      step={0.1}
-                      value={camera.fov}
-                      onChange={(event) => updateFov(Number(event.target.value))}
-                      className="w-full accent-white"
-                    />
-                  </label>
-                  <label className="block text-[11px] text-white/62">
-                    <span className="mb-1 flex justify-between">
-                      <span>{t('directorStudio.camera.lensDistance')}</span>
-                      <span className="font-mono text-white/82">{camera.lensDistance.toFixed(1)}</span>
-                    </span>
-                    <input
-                      type="range"
-                      min={2}
-                      max={40}
-                      step={0.1}
-                      value={camera.lensDistance}
-                      onChange={(event) => updateCamera({ lensDistance: Number(event.target.value) })}
-                      className="w-full accent-white"
-                    />
-                  </label>
-                  <div className="border-t border-white/10 pt-3">
-                    <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-white/42">
-                      {t('directorStudio.toolbar.cameraPreset')}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {CAMERA_PRESETS.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => selectCameraPreset(preset.id, preset.fov)}
-                        className={`flex items-center justify-between rounded-md border px-2.5 py-2 text-xs ${
-                          camera.activePreset === preset.id
-                            ? 'border-accent/70 bg-accent/18 text-white'
-                            : 'border-white/10 bg-white/6 text-white/68 hover:border-white/25 hover:text-white'
-                        }`}
-                      >
-                        <span>{t(preset.labelKey)}</span>
-                        <span className="font-mono text-[10px] text-white/48">{preset.fov}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="space-y-2 border-t border-white/10 pt-3">
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-white/42">
-                      {t('directorStudio.viewSettings.title')}
-                    </div>
-                    <DirectorSettingToggle
-                      label={t('directorStudio.viewSettings.wheelZoomEnabled')}
-                      description={t('directorStudio.viewSettings.wheelZoomEnabledHint')}
-                      checked={viewSettings.wheelZoomEnabled}
-                      onChange={(checked) => updateViewSettings({ wheelZoomEnabled: checked })}
-                    />
-                    <DirectorSettingToggle
-                      label={t('directorStudio.viewSettings.reverseWheelZoom')}
-                      description={t('directorStudio.viewSettings.reverseWheelZoomHint')}
-                      checked={viewSettings.reverseWheelZoom}
-                      onChange={(checked) => updateViewSettings({ reverseWheelZoom: checked })}
-                    />
-                    <DirectorSettingToggle
-                      label={t('directorStudio.viewSettings.showAdvancedPedestrianTags')}
-                      description={t('directorStudio.viewSettings.showAdvancedPedestrianTagsHint')}
-                      checked={viewSettings.showAdvancedPedestrianTags}
-                      onChange={(checked) => updateViewSettings({ showAdvancedPedestrianTags: checked })}
-                    />
-                  </div>
-                </div>
-              ) : null}
-
-              {floatingPanel === 'lighting' ? (
-                <div className="space-y-3">
-                  <label className="flex items-center justify-between rounded-md border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/78">
-                    <span>{t('directorStudio.lighting.enabled')}</span>
-                    <input
-                      type="checkbox"
-                      checked={lighting.enabled}
-                      onChange={(event) => updateLighting({ enabled: event.target.checked })}
-                      className="h-4 w-4 accent-white"
-                    />
-                  </label>
-                  {([
-                    ['mainIntensity', 'directorStudio.lighting.mainIntensity', 0, 4, 0.05],
-                    ['mainYaw', 'directorStudio.lighting.mainYaw', -180, 180, 1],
-                    ['mainPitch', 'directorStudio.lighting.mainPitch', -20, 89, 1],
-                    ['ambientIntensity', 'directorStudio.lighting.ambientIntensity', 0, 3, 0.05],
-                  ] as const).map(([key, labelKey, min, max, step]) => (
-                    <label key={key} className="block text-[11px] text-white/62">
-                      <span className="mb-1 flex justify-between">
-                        <span>{t(labelKey)}</span>
-                        <span className="font-mono text-white/82">{Number(lighting[key]).toFixed(step < 1 ? 2 : 0)}</span>
-                      </span>
-                      <input
-                        type="range"
-                        min={min}
-                        max={max}
-                        step={step}
-                        value={Number(lighting[key])}
-                        onChange={(event) => updateLighting({ [key]: Number(event.target.value) } as Partial<DirectorStudioLightingSettings>)}
-                        className="w-full accent-white"
-                      />
-                    </label>
-                  ))}
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="text-[11px] text-white/62">
-                      <span>{t('directorStudio.lighting.mainColor')}</span>
-                      <input
-                        type="color"
-                        value={lighting.mainColor}
-                        onChange={(event) => updateLighting({ mainColor: event.target.value })}
-                        className="mt-1 h-9 w-full rounded-sm border border-white/10 bg-transparent"
-                      />
-                    </label>
-                    <label className="text-[11px] text-white/62">
-                      <span>{t('directorStudio.lighting.ambientColor')}</span>
-                      <input
-                        type="color"
-                        value={lighting.ambientColor}
-                        onChange={(event) => updateLighting({ ambientColor: event.target.value })}
-                        className="mt-1 h-9 w-full rounded-sm border border-white/10 bg-transparent"
-                      />
-                    </label>
-                  </div>
-                </div>
-              ) : null}
-
-              {floatingPanel === 'grid' ? (
-                <div className="space-y-3">
-                  <label className="flex items-center justify-between rounded-md border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/78">
-                    <span>{t('directorStudio.grid.visible')}</span>
-                    <input
-                      type="checkbox"
-                      checked={grid.visible}
-                      onChange={(event) => updateGrid({ visible: event.target.checked })}
-                      className="h-4 w-4 accent-white"
-                    />
-                  </label>
-                  <label className="block text-[11px] text-white/62">
-                    <span className="mb-1 flex justify-between">
-                      <span>{t('directorStudio.grid.height')}</span>
-                      <span className="font-mono text-white/82">{grid.height.toFixed(1)}</span>
-                    </span>
-                    <input
-                      type="range"
-                      min={-3}
-                      max={5}
-                      step={0.1}
-                      value={grid.height}
-                      onChange={(event) => updateGrid({ height: Number(event.target.value) })}
-                      className="w-full accent-white"
-                    />
-                  </label>
-                </div>
-              ) : null}
-
-              {floatingPanel === 'frame' ? (
-                <div className="grid grid-cols-3 gap-2">
-                  {ASPECT_FRAMES.map((frame) => (
-                    <button
-                      key={frame.value}
-                      type="button"
-                      onClick={() => updateAspectFrame(frame.value)}
-                      className={`rounded-md border px-2 py-2 text-xs ${
-                        aspectFrame === frame.value
-                          ? 'border-accent/70 bg-accent/18 text-white'
-                          : 'border-white/10 bg-white/6 text-white/68 hover:border-white/25 hover:text-white'
-                      }`}
-                    >
-                      {t(frame.labelKey)}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              {floatingPanel === 'resolution' ? (
-                <div className="grid grid-cols-3 gap-2">
-                  {SCREENSHOT_RESOLUTIONS.map((resolution) => (
-                    <button
-                      key={resolution.value}
-                      type="button"
-                      onClick={() => onUpdateNodeData({ screenshotResolution: resolution.value })}
-                      className={`rounded-md border px-2 py-2 text-xs ${
-                        screenshotResolution === resolution.value
-                          ? 'border-accent/70 bg-accent/18 text-white'
-                          : 'border-white/10 bg-white/6 text-white/68 hover:border-white/25 hover:text-white'
-                      }`}
-                    >
-                      {t(resolution.labelKey)}
-                    </button>
-                  ))}
-                  <div className="col-span-3 text-[10px] leading-4 text-white/42">
-                    {t('directorStudio.resolutionNote')}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {!timelineOpen && showSidePanelSwitcher && !compactLayout ? (
-            <div
-              className="absolute right-[364px] top-20 z-40 flex flex-col gap-1 rounded-full border border-white/12 bg-[#151618]/92 p-1 shadow-xl backdrop-blur-xl"
-              style={{ zIndex: sidePanelZIndex + 1 }}
-              onPointerDownCapture={() => bringFloatingSurfaceToFront('side')}
-            >
-              {([
-                ['inspector', SlidersHorizontal, t('directorStudio.sidePanels.inspector')],
-                ['snapshot', Aperture, t('directorStudio.sidePanels.snapshot')],
-              ] as const).map(([panel, Icon, label]) => (
-                <button
-                  key={panel}
-                  type="button"
-                  onClick={() => showSidePanel(panel)}
-                  className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${
-                    sidePanel === panel
-                      ? 'bg-accent text-black'
-                      : 'text-white/52 hover:bg-white/10 hover:text-white'
-                  }`}
-                  aria-label={label}
-                  title={label}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          {!timelineOpen && sidePanel === 'inspector' ? (
-            <aside
-              className="absolute top-16 z-30 flex flex-col rounded-lg border border-white/12 bg-[#151618]/96 shadow-2xl"
-              style={{
-                zIndex: sidePanelZIndex,
-                right: compactLayout ? 12 : 16,
-                width: compactLayout ? Math.min(360, viewportSize.width - 24) : 336,
-                bottom: motionTimelineHeight + motionToolbarHeight,
-              }}
-              onPointerDownCapture={() => bringFloatingSurfaceToFront('side')}
-            >
-              <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
-                <div>
-                  <div className="text-sm font-medium text-white/88">{t('directorStudio.inspector.title')}</div>
-                  <div className="text-[10px] text-white/38">
-                    {selectedItem ? selectedItem.label : t('directorStudio.inspector.noSelection')}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSidePanel(null)}
-                  className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
-                  aria-label={t('common.close')}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              {selectedItem ? (
-                <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
-                  <div className="space-y-4">
-                    <div className="rounded-lg border border-white/10 bg-black/18 p-3">
-                      <div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-white/42">
-                        {t('directorStudio.inspector.basic')}
-                      </div>
-                      <label className="mb-3 grid grid-cols-[40px_minmax(0,1fr)] items-center gap-2">
-                        <input
-                          type="color"
-                          value={selectedItem.color || '#9ca3af'}
-                          onChange={(event) => updateItem(selectedItem.id, { color: event.target.value })}
-                          className="h-9 w-10 rounded-sm border border-white/10 bg-transparent"
-                          aria-label={t('directorStudio.inspector.color')}
-                        />
-                        <input
-                          value={inspectorTextDraft.itemId === selectedItem.id ? inspectorTextDraft.label : selectedItem.label}
-                          onChange={(event) => updateInspectorTextDraft('label', event.target.value)}
-                          onBlur={commitInspectorTextDraft}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                              commitInspectorTextDraft();
-                              event.currentTarget.blur();
-                            }
-                          }}
-                          className={`h-9 px-2.5 text-xs ${DIRECTOR_FIELD_CLASS}`}
-                          aria-label={t('directorStudio.inspector.name')}
-                        />
-                      </label>
-                      <label className="flex items-center justify-between rounded-md border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/78">
-                        <span>{t('directorStudio.inspector.showLabel')}</span>
-                        <input
-                          type="checkbox"
-                          checked={selectedItem.showLabel !== false}
-                          onChange={(event) => updateItem(selectedItem.id, { showLabel: event.target.checked })}
-                          className="h-4 w-4 accent-white"
-                        />
-                      </label>
-                    </div>
-
-                    <div className="rounded-lg border border-white/10 bg-black/18 p-3">
-                      <div className="mb-3 flex items-center justify-between">
-                        <div className="text-[11px] font-medium uppercase tracking-wide text-white/42">
-                          {t('directorStudio.linkedImage.title')}
-                        </div>
-                        {selectedItem.refImageUrl ? (
-                          <button
-                            type="button"
-                            onClick={() => clearElementAsset(selectedItem.id)}
-                            className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] text-red-100 hover:bg-red-500/15"
-                          >
-                            <Unlink className="h-3 w-3" />
-                            {t('directorStudio.linkedImage.clear')}
-                          </button>
-                        ) : null}
-                      </div>
-                      {selectedItem.refImageUrl ? (
-                        <div className="mb-3 flex items-center gap-2 rounded-md border border-white/10 bg-white/6 p-2">
-                          <img
-                            src={resolveImageDisplayUrl(selectedItem.refImageUrl) ?? selectedItem.refImageUrl}
-                            alt={selectedItem.refImageName ?? selectedItem.label}
-                            className="h-12 w-12 rounded-sm object-cover"
-                            draggable={false}
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-xs text-white/82">{selectedItem.refImageName}</div>
-                            <div className="text-[10px] text-white/38">{t('directorStudio.linkedImage.associated')}</div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="mb-3 rounded-md border border-dashed border-white/12 px-3 py-4 text-center text-xs text-white/42">
-                          {t('directorStudio.linkedImage.empty')}
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => openElementAssetPicker(selectedItem.id)}
-                        className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 bg-white/6 text-xs text-white/74 hover:bg-white/12 hover:text-white"
-                      >
-                        <Link2 className="h-3.5 w-3.5" />
-                        {selectedItem.refImageUrl ? t('directorStudio.linkedImage.change') : t('directorStudio.linkedImage.choose')}
-                      </button>
-                    </div>
-
-                    <label className="block rounded-lg border border-white/10 bg-black/18 p-3">
-                      <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-white/42">
-                        {t('directorStudio.inspector.relation')}
-                      </span>
-                      <textarea
-                        value={inspectorTextDraft.itemId === selectedItem.id ? inspectorTextDraft.relation : selectedItem.relation ?? ''}
-                        onChange={(event) => updateInspectorTextDraft('relation', event.target.value)}
-                        onBlur={commitInspectorTextDraft}
-                        onKeyUp={(event) => {
-                          if (event.key === 'Enter') {
-                            commitInspectorTextDraft();
-                          }
-                        }}
-                        rows={3}
-                        className="w-full resize-none rounded-sm border border-white/12 bg-white/6 px-2.5 py-2 text-xs leading-5 text-white outline-hidden placeholder:text-white/30 focus:border-white/30"
-                        placeholder={t('directorStudio.inspector.relationPlaceholder')}
-                      />
-                    </label>
-
-                    <label className="block rounded-lg border border-white/10 bg-black/18 p-3">
-                      <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-white/42">
-                        {t('directorStudio.inspector.note')}
-                      </span>
-                      <textarea
-                        value={inspectorTextDraft.itemId === selectedItem.id ? inspectorTextDraft.note : selectedItem.note ?? ''}
-                        onChange={(event) => updateInspectorTextDraft('note', event.target.value)}
-                        onBlur={commitInspectorTextDraft}
-                        onKeyUp={(event) => {
-                          if (event.key === 'Enter') {
-                            commitInspectorTextDraft();
-                          }
-                        }}
-                        rows={3}
-                        className="w-full resize-none rounded-sm border border-white/12 bg-white/6 px-2.5 py-2 text-xs leading-5 text-white outline-hidden placeholder:text-white/30 focus:border-white/30"
-                        placeholder={t('directorStudio.inspector.notePlaceholder')}
-                      />
-                    </label>
-
-                    <TransformVectorBlock
-                      title={t('directorStudio.inspector.position')}
-                      values={ensurePos3d(selectedItem)}
-                      step={0.1}
-                      min={-20}
-                      max={20}
-                      onChange={(axis, value) => updateItemPosition(selectedItem, axis, value)}
-                    />
-                    <TransformVectorBlock
-                      title={t('directorStudio.inspector.rotation')}
-                      values={{
-                        x: ((selectedItem.rotation3d?.x ?? 0) * 180) / Math.PI,
-                        y: ((selectedItem.rotation3d?.y ?? 0) * 180) / Math.PI,
-                        z: ((selectedItem.rotation3d?.z ?? 0) * 180) / Math.PI,
-                      }}
-                      step={1}
-                      min={-180}
-                      max={180}
-                      suffix="°"
-                      onChange={(axis, value) => updateItemRotationDegrees(selectedItem, axis, value)}
-                    />
-                    <TransformVectorBlock
-                      title={t('directorStudio.inspector.scale')}
-                      values={selectedItem.scale3d ?? { x: 1, y: 1, z: 1 }}
-                      step={0.05}
-                      min={0.1}
-                      max={5}
-                      onChange={(axis, value) => updateItemScale(selectedItem, axis, value)}
-                    />
-
-                    {selectedItem.category === 'person' ? (() => {
-                      const bodyControls = normalizeBlueprintBodyControls(selectedItem.bodyControls);
-                      return (
-                        <>
-                          <div className="rounded-lg border border-white/10 bg-black/18 p-3">
-                            <div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-white/42">
-                              {t('directorStudio.inspector.action')}
-                            </div>
-                            <div className="grid grid-cols-3 gap-1.5">
-                              {inspectorActionPresets.map((preset) => (
-                                <button
-                                  key={preset.id}
-                                  type="button"
-                                  onClick={() => updateItemActionImmediately(selectedItem, preset.value)}
-                                  className={`h-8 rounded-md border text-xs ${
-                                    isInspectorActionPresetSelected(selectedItem.action, preset)
-                                      ? 'border-accent/70 bg-accent/18 text-white'
-                                      : 'border-white/10 bg-white/6 text-white/62 hover:border-white/25 hover:text-white'
-                                  }`}
-                                >
-                                  {t(preset.labelKey)}
-                                </button>
-                              ))}
-                            </div>
-                            {customActionPresets.length > 0 ? (
-                              <div className="mt-2 flex flex-wrap gap-1.5">
-                                {customActionPresets.map((preset) => {
-                                  const isSelected = normalizeActionValue(selectedItem.action) === normalizeActionValue(preset);
-                                  return (
-                                    <div
-                                      key={preset}
-                                      className={`flex h-8 max-w-full overflow-hidden rounded-md border text-xs ${
-                                        isSelected
-                                          ? 'border-accent/70 bg-accent/18 text-white'
-                                          : 'border-white/10 bg-white/6 text-white/62 hover:border-white/25 hover:text-white'
-                                      }`}
-                                    >
-                                      <button
-                                        type="button"
-                                        onClick={() => updateItemActionImmediately(selectedItem, preset)}
-                                        className="min-w-0 px-2 text-left"
-                                      >
-                                        <span className="block max-w-28 truncate">{preset}</span>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => deleteCustomActionPreset(preset)}
-                                        className="flex w-7 items-center justify-center border-l border-white/10 text-white/42 hover:bg-white/10 hover:text-white"
-                                        title={t('directorStudio.inspector.deleteActionPreset', { name: preset })}
-                                        aria-label={t('directorStudio.inspector.deleteActionPreset', { name: preset })}
-                                      >
-                                        <X className="h-3.5 w-3.5" />
-                                      </button>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            ) : null}
-                            <div className="mt-3 flex items-center gap-1.5">
-                              <input
-                                value={inspectorTextDraft.itemId === selectedItem.id ? inspectorTextDraft.action : selectedItem.action ?? ''}
-                                onChange={(event) => updateInspectorTextDraft('action', event.target.value)}
-                                onBlur={commitInspectorTextDraft}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter') {
-                                    commitInspectorTextDraft();
-                                    event.currentTarget.blur();
-                                  }
-                                }}
-                                className="h-9 min-w-0 flex-1 rounded-sm border border-white/12 bg-white/6 px-2.5 text-xs text-white outline-hidden placeholder:text-white/30 focus:border-white/30"
-                                placeholder={t('directorStudio.inspector.actionPlaceholder')}
-                              />
-                              <button
-                                type="button"
-                                onClick={saveCurrentActionPreset}
-                                disabled={!selectedActionValue}
-                                className="flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-white/12 bg-white/8 px-2.5 text-xs text-white/72 hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-                              >
-                                <Save className="h-3.5 w-3.5" />
-                                {t('directorStudio.inspector.saveActionPreset')}
-                              </button>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={openCustomActionEditor}
-                              className="mt-2 flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-accent/30 bg-accent/12 px-2.5 text-xs text-accent hover:bg-accent/18"
-                            >
-                              <SlidersHorizontal className="h-3.5 w-3.5" />
-                              {t('directorStudio.inspector.editCustomActionPose')}
-                            </button>
-                          </div>
-
-                          <div className="rounded-lg border border-white/10 bg-black/18 p-3">
-                            <div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-white/42">
-                              {t('directorStudio.inspector.body')}
-                            </div>
-                            <div className="mb-3 grid grid-cols-5 gap-1.5">
-                              {DIRECTOR_STUDIO_BODY_STYLES.map((style) => (
-                                <button
-                                  key={style.value}
-                                  type="button"
-                                  onClick={() => updateItemBodyControls(selectedItem, { style: style.value as BlueprintBodyStyle })}
-                                  className={`h-8 rounded-md border text-[11px] ${
-                                    bodyControls.style === style.value
-                                      ? 'border-accent/70 bg-accent/18 text-white'
-                                      : 'border-white/10 bg-white/6 text-white/62 hover:border-white/25 hover:text-white'
-                                  }`}
-                                >
-                                  {t(style.labelKey)}
-                                </button>
-                              ))}
-                            </div>
-                            <label className="mb-3 flex items-center justify-between rounded-md border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/78">
-                              <span>{t('directorStudio.inspector.showControls')}</span>
-                              <input
-                                type="checkbox"
-                                checked={bodyControls.showControls}
-                                onChange={(event) => updateItemBodyControls(selectedItem, { showControls: event.target.checked })}
-                                className="h-4 w-4 accent-white"
-                              />
-                            </label>
-                            <div className="space-y-4">
-                              <div>
-                                <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-white/35">
-                                  {t('directorStudio.inspector.bodyCore')}
-                                </div>
-                                <div className="space-y-2">
-                                  <BodyScalarControl
-                                    label={t('directorStudio.inspector.bodyHeight')}
-                                    value={bodyControls.core.height}
-                                    min={0.45}
-                                    max={1.8}
-                                    step={0.01}
-                                    onChange={(value) => updateItemBodySection(selectedItem, 'core', { height: value })}
-                                  />
-                                  <BodyScalarControl
-                                    label={t('directorStudio.inspector.torsoWidth')}
-                                    value={bodyControls.core.torsoWidth}
-                                    min={0.45}
-                                    max={2}
-                                    step={0.01}
-                                    onChange={(value) => updateItemBodySection(selectedItem, 'core', { torsoWidth: value })}
-                                  />
-                                  <BodyScalarControl
-                                    label={t('directorStudio.inspector.headScale')}
-                                    value={bodyControls.core.headScale}
-                                    min={0.55}
-                                    max={1.8}
-                                    step={0.01}
-                                    onChange={(value) => updateItemBodySection(selectedItem, 'core', { headScale: value })}
-                                  />
-                                  <BodyScalarControl
-                                    label={t('directorStudio.inspector.torsoLean')}
-                                    value={bodyControls.core.torsoLeanDeg}
-                                    min={-45}
-                                    max={45}
-                                    step={1}
-                                    suffix="°"
-                                    onChange={(value) => updateItemBodySection(selectedItem, 'core', { torsoLeanDeg: value })}
-                                  />
-                                </div>
-                              </div>
-
-                              <div>
-                                <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-white/35">
-                                  {t('directorStudio.inspector.bodyArms')}
-                                </div>
-                                <div className="space-y-2">
-                                  <BodyScalarControl
-                                    label={t('directorStudio.inspector.armLength')}
-                                    value={bodyControls.arms.length}
-                                    min={0.45}
-                                    max={1.8}
-                                    step={0.01}
-                                    onChange={(value) => updateItemBodySection(selectedItem, 'arms', { length: value })}
-                                  />
-                                  <BodyScalarControl
-                                    label={t('directorStudio.inspector.armThickness')}
-                                    value={bodyControls.arms.thickness}
-                                    min={0.45}
-                                    max={2}
-                                    step={0.01}
-                                    onChange={(value) => updateItemBodySection(selectedItem, 'arms', { thickness: value })}
-                                  />
-                                  <BodyScalarControl
-                                    label={t('directorStudio.inspector.armSpread')}
-                                    value={bodyControls.arms.spreadDeg}
-                                    min={-35}
-                                    max={35}
-                                    step={1}
-                                    suffix="°"
-                                    onChange={(value) => updateItemBodySection(selectedItem, 'arms', { spreadDeg: value })}
-                                  />
-                                </div>
-                              </div>
-
-                              <div>
-                                <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-white/35">
-                                  {t('directorStudio.inspector.bodyLegs')}
-                                </div>
-                                <div className="space-y-2">
-                                  <BodyScalarControl
-                                    label={t('directorStudio.inspector.legLength')}
-                                    value={bodyControls.legs.length}
-                                    min={0.45}
-                                    max={1.8}
-                                    step={0.01}
-                                    onChange={(value) => updateItemBodySection(selectedItem, 'legs', { length: value })}
-                                  />
-                                  <BodyScalarControl
-                                    label={t('directorStudio.inspector.legThickness')}
-                                    value={bodyControls.legs.thickness}
-                                    min={0.45}
-                                    max={2}
-                                    step={0.01}
-                                    onChange={(value) => updateItemBodySection(selectedItem, 'legs', { thickness: value })}
-                                  />
-                                  <BodyScalarControl
-                                    label={t('directorStudio.inspector.legSpread')}
-                                    value={bodyControls.legs.spreadDeg}
-                                    min={-25}
-                                    max={35}
-                                    step={1}
-                                    suffix="°"
-                                    onChange={(value) => updateItemBodySection(selectedItem, 'legs', { spreadDeg: value })}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </>
-                      );
-                    })() : null}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center text-xs leading-5 text-white/42">
-                  {t('directorStudio.inspector.empty')}
-                </div>
-              )}
-            </aside>
-          ) : null}
-
-            {sidePanel === 'snapshot' && data.snapshotUrl ? (
-              <aside
-                className="absolute top-16 z-30 flex flex-col rounded-lg border border-white/12 bg-[#151618]/96 p-3 shadow-2xl"
-                style={{
-                  zIndex: timelineOpen ? 60 : sidePanelZIndex,
-                  right: timelineOpen ? previsSidebarWidth + 16 : compactLayout ? 12 : 16,
-                  width: compactLayout ? Math.min(360, viewportSize.width - 24) : 340,
-                  bottom: motionTimelineHeight + motionToolbarHeight,
-                }}
-                onPointerDownCapture={() => bringFloatingSurfaceToFront('side')}
+            {safeFrameStyle && (!timelineOpen || motionPreviewMode === 'shot') ? (
+              <div
+                className="pointer-events-none absolute z-10 rounded-[2px] shadow-[0_0_0_9999px_rgb(0_0_0/0.32),inset_0_0_0_1px_rgb(255_255_255/0.55)]"
+                style={safeFrameStyle}
               >
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="text-xs font-medium text-white/86">{t('directorStudio.snapshotPreview')}</div>
-                  <button
-                  type="button"
-                  onClick={() => setSidePanel(null)}
-                  className="rounded-sm p-1 text-white/45 hover:bg-white/10 hover:text-white"
-                  aria-label={t('common.close')}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+                {(['left-0 top-0 border-l-2 border-t-2', 'right-0 top-0 border-r-2 border-t-2', 'bottom-0 left-0 border-b-2 border-l-2', 'bottom-0 right-0 border-b-2 border-r-2'] as const).map((corner) => (
+                  <span key={corner} className={`absolute h-3.5 w-3.5 border-white/90 ${corner}`} />
+                ))}
+                <div className="absolute bottom-2 right-2.5 font-mono text-[10px] tracking-wide text-white/70">
+                  {t('directorStudio.safeFrame')} · {selectedAspect.value}
+                </div>
               </div>
-                <button
-                  type="button"
-                  onClick={() => setLightboxSnapshotUrl(data.snapshotUrl ?? null)}
-                  className="min-h-0 flex-1 overflow-hidden rounded-md bg-black/35"
-                  title={t('directorStudio.openSnapshotLightbox')}
-                >
-                  <img
-                    src={resolveImageDisplayUrl(data.snapshotUrl) ?? data.snapshotUrl}
-                    alt={t('directorStudio.snapshotPreview')}
-                    className="h-full w-full object-contain"
-                    draggable={false}
-                  />
-                </button>
-                <div className="mt-3">
-                  <div className="mb-1.5 flex items-center justify-between text-[10px] text-white/42">
-                    <span>{t('directorStudio.snapshotHistory')}</span>
-                    <span>{t('directorStudio.snapshotCount', { count: snapshotHistory.length })}</span>
-                  </div>
-                  <div className="ui-scrollbar grid max-h-[92px] grid-cols-5 gap-1.5 overflow-y-auto pr-1">
-                      {snapshotHistory.map((snapshotUrl, index) => {
-                        const isCurrent = snapshotUrl === data.snapshotUrl;
-                        return (
-                          <div
-                            key={`${snapshotUrl.slice(0, 48)}-${index}`}
-                            className={`group relative aspect-video overflow-hidden rounded border bg-black/35 ${
-                              isCurrent ? 'border-emerald-300/80 ring-1 ring-emerald-300/35' : 'border-white/10 hover:border-white/35'
-                            }`}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => { void selectSnapshot(snapshotUrl); }}
-                              className="block h-full w-full"
-                              title={t('directorStudio.selectSnapshot')}
-                            >
-                              <img
-                                src={resolveImageDisplayUrl(snapshotUrl) ?? snapshotUrl}
-                                alt={t('directorStudio.snapshotThumbnail', { count: index + 1 })}
-                                className="h-full w-full object-cover"
-                                draggable={false}
-                              />
-                              <span className="absolute left-1 top-1 rounded-sm bg-black/60 px-1 text-[9px] text-white/72">{index + 1}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void deleteSnapshot(snapshotUrl);
-                              }}
-                              className="absolute right-1 top-1 rounded-sm bg-black/70 p-0.5 text-white/70 opacity-0 transition-opacity hover:bg-red-500/80 hover:text-white group-hover:opacity-100 group-focus-within:opacity-100"
-                              aria-label={t('directorStudio.deleteSnapshot')}
-                              title={t('directorStudio.deleteSnapshot')}
-                            >
-                              <X className="h-2.5 w-2.5" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={clearCurrentSnapshot}
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-white/6 text-xs text-white/72 hover:bg-white/12 hover:text-white"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    {t('directorStudio.clearCurrentSnapshot')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={clearAllSnapshots}
-                    disabled={snapshotHistory.length === 0}
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-white/6 text-xs text-white/72 hover:bg-white/12 hover:text-white disabled:text-white/32"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    {t('directorStudio.clearAllSnapshots')}
-                  </button>
-                  <button
-                    type="button"
-                  onClick={addSnapshotToCanvas}
-                  disabled={!data.snapshotUrl || !onAddSnapshotToCanvas || isAddingSnapshotToCanvas}
-                  title={t('directorStudio.addToCanvasTitle')}
-                  className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-emerald-400/30 bg-emerald-400/16 text-xs font-medium text-emerald-100 hover:bg-emerald-400/24 disabled:border-white/10 disabled:bg-white/6 disabled:text-white/32"
-                >
-                    <Plus className="h-3.5 w-3.5" />
-                    {t('directorStudio.addToCanvas')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={addAllSnapshotsToCanvas}
-                    disabled={snapshotHistory.length === 0 || !onAddSnapshotToCanvas || isAddingSnapshotToCanvas}
-                    title={t('directorStudio.addAllToCanvasTitle')}
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-emerald-400/30 bg-emerald-400/16 text-xs font-medium text-emerald-100 hover:bg-emerald-400/24 disabled:border-white/10 disabled:bg-white/6 disabled:text-white/32"
-                  >
-                    <ImagePlus className="h-3.5 w-3.5" />
-                    {t('directorStudio.addAllToCanvas')}
-                  </button>
-                </div>
-              </aside>
             ) : null}
 
-          {lightboxSnapshotUrl ? (
-            <div className="absolute inset-0 z-65 flex items-center justify-center bg-black/78 p-8">
-              <button
-                type="button"
-                onClick={() => setLightboxSnapshotUrl(null)}
-                className="absolute right-5 top-5 inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/12 bg-white/8 text-white/70 hover:bg-white/14 hover:text-white"
-                aria-label={t('common.close')}
-              >
-                <X className="h-4 w-4" />
-              </button>
-              <img
-                src={resolveImageDisplayUrl(lightboxSnapshotUrl) ?? lightboxSnapshotUrl}
-                alt={t('directorStudio.snapshotPreview')}
-                className="max-h-full max-w-full rounded-lg border border-white/12 bg-black/45 object-contain shadow-2xl"
-                draggable={false}
+            {captureFlashKey ? <div key={captureFlashKey} className="stage-flash pointer-events-none absolute inset-0 z-20 bg-white" /> : null}
+
+            <StageToolRail groups={railGroups} footer={railFooter} openKey={railPanel} panel={railPanelNode} label={t('directorStudio.rail.label')} />
+            <div className="pointer-events-none absolute left-1/2 top-3 z-20 flex max-w-[90%] -translate-x-1/2 flex-col items-center gap-2">
+              <StageSelectionBar count={stageSelection.ids.length} locked={stageSelection.ids.some((id) => data.items.find((item) => item.id === id)?.locked)} onApply={applySelection} />
+              {editError ? <div role="alert" className="pointer-events-auto rounded-lg bg-elevated px-3 py-2 text-xs text-danger shadow-lg"><button type="button" onClick={() => setEditError(null)}>{editError} ×</button></div> : null}
+            </div>
+            <StageSceneBuilder
+              key={sourceNodeId}
+              open={railPanel === 'sceneBuilder'}
+              nodeId={sourceNodeId}
+              projectId={projectId ?? undefined}
+              onClose={closeRailPanel}
+              onOpen={() => setRailPanel('sceneBuilder')}
+              onApplied={(ids) => {
+                const items = stageCommands.query(sourceNodeId).data.items;
+                const item = items.find((entry) => ids.includes(entry.id));
+                if (item) selectItemForEditing(item.id);
+              }}
+            />
+            {sceneAssetError && <div role="alert" className="stage-glass absolute bottom-16 left-[68px] z-40 flex max-w-[min(420px,calc(100%-90px))] items-start gap-2 rounded-xl p-3 text-xs text-danger">
+              <p className="min-w-0 flex-1 break-words">{sceneAssetError}</p>
+              <UiIconButton size="sm" aria-label={t('common.close')} onClick={() => setSceneAssetError('')}><X /></UiIconButton>
+            </div>}
+
+            <StageViewBar
+              previs={timelineOpen ? { previewMode: motionPreviewMode, showRoutes: motionShowRoutes, showPip: shotPipVisible } : null}
+              frame={aspectFrame}
+              frames={ASPECT_FRAMES.map((frame) => ({ value: frame.value, label: t(frame.labelKey) }))}
+              hasSelection={Boolean(selectedItem)}
+              following={followSelectedItem}
+              keys={{ focus: shortcuts.focus, fit: shortcuts.fit, reset: shortcuts.reset }}
+              onPreviewMode={setPreviewModeAndApply}
+              onShowRoutes={setMotionShowRoutes}
+              onShowPip={setShotPipVisible}
+              onFrame={(value) => updateAspectFrame(normalizeAspectFrame(value))}
+              onFocus={() => {
+                if (!selectedItem) return;
+                const next = !followSelectedItem;
+                setFollowSelectedItem(next);
+                if (next) editorRef.current?.focusItem(selectedItem.id);
+              }}
+              onFit={() => { editorRef.current?.fitCamera(); setFollowSelectedItem(false); }}
+              onReset={() => { editorRef.current?.resetCamera(); setFollowSelectedItem(false); }}
+            />
+
+            <div className="pointer-events-none absolute inset-0 z-40">
+              <DirectorCameraPilotHud
+                active={timelineOpen && pilotActive}
+                recording={false}
+                currentTime={motionTimeSource.getSnapshot()}
+                timeSource={motionTimeSource}
+                bottomOffset={16}
+                targetLabel={data.items.find((item) => item.id === pilotTargetId)?.label ?? null}
+                onExit={() => editorRef.current?.exitPilot()}
               />
             </div>
-          ) : null}
 
-          {!timelineOpen ? (
-            <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center" style={{ bottom: motionTimelineHeight + 20 }}>
-              <StageToolDock tools={toolbarButtons} onAnchor={(key,element) => { toolbarAnchorRefs.current[key] = element; }} transformMode={activeTransformMode} canTransform={!!selectedItem} onTransform={setActiveTransformMode} />
-            </div>
-          ) : null}
+            {!guideDismissed && !pilotActive ? (
+              <div className="pointer-events-none absolute left-[68px] top-3 z-30">
+                <StageGuideBar
+                  hasPerson={data.items.some((item) => item.category === 'person')}
+                  hasRoute={data.items.some((item) => item.category === 'person' && (motionProject.objectTracks[item.id]?.length ?? 0) >= 2)}
+                  playback={playbackSource}
+                  onAddPerson={() => setRailPanel('add')}
+                  onDrawRoute={() => {
+                    const person = selectedItem?.category === 'person' ? selectedItem : data.items.find((item) => item.category === 'person');
+                    if (!person) {
+                      setRailPanel('add');
+                      return;
+                    }
+                    if (!timelineOpen) switchStudioMode('previs');
+                    if (selectedItem?.id !== person.id) selectItemForEditing(person.id);
+                    setActiveTransformMode(null);
+                    setPoseEditActive(false);
+                    setRailPanel(null);
+                    startMotionRouteDraft({ kind: 'object', trackId: person.id, method: 'draw' });
+                  }}
+                  onPlay={() => {
+                    if (!timelineOpen) switchStudioMode('previs');
+                    setMotionPlaying(true);
+                  }}
+                  onClose={dismissGuide}
+                />
+              </div>
+            ) : null}
 
-          <div className="pointer-events-none absolute left-0 z-42" style={{ top: timelineOpen ? 56 : 0, width: sceneWidth, height: sceneHeight }}>
-          <DirectorCameraPilotHud
-            active={timelineOpen && pilotActive}
-            recording={false}
-            currentTime={motionTimeSource.getSnapshot()}
-            timeSource={motionTimeSource}
-            bottomOffset={44}
-            targetLabel={data.items.find((item) => item.id === pilotTargetId)?.label ?? null}
-            onExit={() => editorRef.current?.exitPilot()}
-          />
+            {pilotActive ? null : (
+              <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex justify-center px-16">
+                <StageStatusPill
+                  routeDraft={routeDraftStatus}
+                  pose={poseStatus}
+                  selection={selectionStatus}
+                  keys={{ pose: shortcuts.poseEdit, duplicate: '', delete: shortcuts.delete }}
+                  onFinishRoute={finishMotionRouteDraft}
+                  onCancelRoute={cancelMotionRouteDraft}
+                  onExitPose={() => setPoseEditActive(false)}
+                  onPose={togglePoseEdit}
+                  onDuplicate={() => { if (copySelectedItem()) pasteCopiedItem(); }}
+                  onDelete={deleteSelectedItem}
+                  onDeselect={() => selectItemForEditing(null)}
+                />
+              </div>
+            )}
+
+            {!selectedItem && !routeDraftStatus && !pilotActive ? (
+              <div className="pointer-events-none absolute bottom-4 left-[68px] z-20 text-[11px] text-text-subtle">
+                {t(orbitTool ? 'ui.stage.orbitToolHint' : 'directorStudio.previs.navigationHint')}
+              </div>
+            ) : null}
+
+            {captureToast ? (
+              <StageCaptureToast
+                url={captureToast}
+                onOpen={() => { setDockOpen(true); setDockTab('shots'); setCaptureToast(null); }}
+                onDismiss={() => setCaptureToast(null)}
+              />
+            ) : null}
           </div>
 
           {timelineOpen ? (
-            <>
-              <div className="pointer-events-none absolute left-0 z-30" style={{ top: 56, width: sceneWidth, height: sceneHeight }}>
-                <DirectorPrevisControls
-                  selectedItem={selectedItem}
-                  transformMode={activeTransformMode}
-                  routeDraft={motionRouteDraft}
-                  routeTargetLabel={motionRouteDraft?.kind === 'object' ? data.items.find((item) => item.id === motionRouteDraft.trackId)?.label ?? '' : t('directorStudio.motion.timeline.camera')}
-                  previewMode={motionPreviewMode}
-                  showRoutes={motionShowRoutes}
-                  pilotActive={pilotActive}
-                  hasPersonRoute={Boolean(selectedItem?.category === 'person' && (motionProject.objectTracks[selectedItem.id]?.length ?? 0) >= 2)}
-                  onTransformMode={setActiveTransformMode}
-                  onStartRoute={startMotionRouteDraft}
-                  onFinishRoute={finishMotionRouteDraft}
-                  onCancelRoute={cancelMotionRouteDraft}
-                  onAddPerson={() => addPedestrians('direct')}
-                  onOpenModels={() => setActiveDialog('modelLibrary')}
-                  onSelectCamera={() => { cancelMotionRouteDraft(); onSelectedItemChange(null); setMotionSelection(null); }}
-                  onOpenActions={() => setActionLibraryOpen(true)}
-                  onOpenLighting={() => openFloatingPanel('lighting')}
-                  onPreviewMode={setPreviewModeAndApply}
-                  onShowRoutes={setMotionShowRoutes}
-                  onResetView={() => editorRef.current?.resetCamera()}
-                  onFitView={() => editorRef.current?.fitCamera()}
-                  onFocusItem={() => selectedItem && editorRef.current?.focusItem(selectedItem.id)}
-                  onTogglePilot={toggleCameraPilot}
-                  onCameraPreset={(preset, targetItemId) => {
-                    applyCameraPreset(preset, targetItemId);
-                    onSelectedItemChange(null);
-                  }}
-                />
-              </div>
-              <div className="absolute bottom-0 left-0 z-40" style={{ width: sceneWidth, height: motionTimelineHeight }}>
-                <DirectorTimeline
-                  height={motionTimelineHeight}
-                  maxHeight={maxMotionTimelineHeight}
-                  onHeightChange={setTimelineHeightOverride}
-                  project={motionProject}
-                  items={data.items}
-                  selectedItemId={selectedItemId}
-                  timeSource={motionTimeSource}
-                  playbackSource={playbackSource}
-                  playbackRate={playbackRate}
-                  onPlaybackRateChange={setPlaybackRate}
-                  selection={motionSelection}
-                  onTimeChange={setMotionTimeAndApply}
-                  onTogglePlayback={() => setMotionPlaying((value) => !value)}
-                  onGoToStart={() => { setMotionPlaying(false); setMotionTimeAndApply(0); }}
-                  onLoopChange={(loop) => updateMotionProject((project) => ({ ...project, loop }))}
-                  onDurationChange={updateMotionDuration}
-                  onSelectionChange={(selection) => {
-                    cancelMotionRouteDraft();
-                    setMotionSelection(selection);
-                    if (selection?.kind === 'object' || selection?.kind === 'action') onSelectedItemChange(selection.trackId);
-                    else if (selection?.kind === 'camera') onSelectedItemChange(null);
-                  }}
-                  onSelectItem={(id) => { cancelMotionRouteDraft(); onSelectedItemChange(id); setMotionSelection(null); }}
-                  onSelectCamera={() => { cancelMotionRouteDraft(); onSelectedItemChange(null); setMotionSelection(null); }}
-                  onMoveKeyframe={moveMotionKeyframe}
-                  onRetimeTrack={retimeMotionTrack}
-                  onAddCameraKeyframe={addCameraMotionKeyframe}
-                  onAddObjectKeyframe={addObjectMotionKeyframe}
-                  onAddActionKeyframe={(itemId) => addActionMotionKeyframe(itemId)}
-                />
-              </div>
-              {previsSidebarOpen ? <div className="absolute bottom-0 right-0 top-14 z-40 border-l border-white/10 bg-[#171a1f]" style={{ width: previsSidebarWidth }}>
-                <DirectorPrevisSidebar
-                  items={data.items}
-                  project={motionProject}
-                  selectedItemId={selectedItemId}
-                  selection={motionSelection}
-                  onSelectItem={(id) => { cancelMotionRouteDraft(); onSelectedItemChange(id); setMotionSelection(null); setActiveTransformMode(null); }}
-                  onSelectionChange={setMotionSelection}
-                  onTimeChange={setMotionTimeAndApply}
-                  onRetimeTrack={retimeMotionTrack}
-                  onPatchKeyframe={patchMotionKeyframe}
-                  onDuplicateKeyframe={duplicateMotionKeyframe}
-                  onDeleteKeyframe={deleteMotionKeyframe}
-                  onUpdateItem={updateItem}
-                  onAddPerson={() => addPedestrians('direct')}
-                  onAddCameraKeyframe={addCameraMotionKeyframe}
-                  onOpenModels={() => setActiveDialog('modelLibrary')}
-                  onOpenActions={() => setActionLibraryOpen(true)}
-                  onDeleteItem={() => deleteSelectedItem()}
-                />
-              </div> : null}
-            </>
+            <DirectorTimeline
+              height={motionTimelineHeight}
+              maxHeight={maxMotionTimelineHeight}
+              onHeightChange={setTimelineHeightOverride}
+              project={motionProject}
+              items={data.items}
+              selectedItemId={selectedItemId}
+              timeSource={motionTimeSource}
+              playbackSource={playbackSource}
+              playbackRate={playbackRate}
+              onPlaybackRateChange={setPlaybackRate}
+              selection={motionSelection}
+              onTimeChange={setMotionTimeAndApply}
+              onTogglePlayback={() => setMotionPlaying((value) => !value)}
+              onGoToStart={() => { setMotionPlaying(false); setMotionTimeAndApply(0); }}
+              onLoopChange={(loop) => updateMotionProject((project) => ({ ...project, loop }))}
+              onDurationChange={updateMotionDuration}
+              onSelectionChange={(selection) => {
+                cancelMotionRouteDraft();
+                setMotionSelection(selection);
+                if (selection?.kind === 'object' || selection?.kind === 'action') stageSelection.select([selection.trackId], 'timeline');
+                else if (selection?.kind === 'camera') {
+                  onSelectedItemChange(null);
+                  setInspectorTarget('camera');
+                }
+              }}
+              onSelectItem={(id) => { cancelMotionRouteDraft(); stageSelection.select([id], 'timeline'); setMotionSelection(null); setDockTab('scene'); }}
+              onSelectCamera={() => selectInspectorTarget('camera')}
+              onMoveKeyframe={moveMotionKeyframe}
+              onCopyKeyframe={copyMotionKeyframe}
+              onPatchKeyframes={patchMotionKeyframes}
+              onDeleteKeyframes={deleteMotionKeyframes}
+              onRetimeTrack={retimeMotionTrack}
+              onCopyTrack={copyMotionTrack}
+              onSplitAtTime={splitAtTime}
+              rigActions={{ edit: editCameraRigSegment, retime: retimeCameraRig }}
+              onAddCameraKeyframe={addCameraMotionKeyframe}
+              onAddObjectKeyframe={addObjectMotionKeyframe}
+              onAddActionKeyframe={(itemId) => addActionMotionKeyframe(itemId)}
+            />
           ) : null}
-        </main>
+        </div>
+
+          <aside
+            hidden={!dockOpen}
+            className={dockOpen ? "flex shrink-0 flex-col border-l border-[var(--line)] bg-surface" : "hidden"}
+            style={{ width: dockWidth }}
+            aria-label={t('directorStudio.previs.sceneAndProperties')}
+            onWheel={(event) => event.stopPropagation()}
+          >
+            <div className="flex h-11 shrink-0 items-center gap-2 border-b border-[var(--line)] px-2.5">
+              <UiSegmented
+                value={dockTab}
+                onChange={setDockTab}
+                size="sm"
+                className="min-w-0 flex-1"
+                aria-label={t('directorStudio.dock.label')}
+                options={[
+                  { value: 'scene', label: t('directorStudio.dock.layers'), icon: <Layers3 className="h-3.5 w-3.5" /> },
+                  { value: 'shots', label: snapshotHistory.length ? `${t('directorStudio.dock.shots')} · ${snapshotHistory.length}` : t('directorStudio.dock.shots'), icon: <Aperture className="h-3.5 w-3.5" /> },
+                ]}
+              />
+            </div>
+            {dockTab === 'scene' ? (
+              <>
+                <div className="ui-scrollbar max-h-[40%] shrink-0 overflow-y-auto border-b border-[var(--line)] pt-2">
+                  <StageOutliner
+                    entries={displayItems.map(({ item, displayCategory }) => ({ item, category: displayCategory }))}
+                    selectedItemId={selectedItemId}
+                    selectedItemIds={stageSelection.ids}
+                    target={timelineOpen ? inspectorTarget : 'scene'}
+                    showCamera={timelineOpen}
+                    cameraKeyCount={motionProject.cameraTrack.length}
+                    keyCountByItem={timelineOpen
+                      ? Object.fromEntries(data.items.map((item) => [item.id, (motionProject.objectTracks[item.id]?.length ?? 0) + (motionProject.actionTracks[item.id]?.length ?? 0)]))
+                      : undefined}
+                    onSelectTarget={selectInspectorTarget}
+                    onSelectItem={(id, toggle) => { commitPendingTextDrafts(); stageSelection.select([id], 'outliner', toggle); setMotionSelection(null); setDockTab('scene'); setActiveTransformMode('move'); }}
+                    onRename={(id, label) => updateItem(id, { label })}
+                    onToggleHidden={(item) => applySelection({ type: 'update', patch: { hidden: !item.hidden } }, [item.id])}
+                    onToggleLocked={(item) => applySelection({ type: 'update', patch: { locked: !item.locked } }, [item.id])}
+                    onLinkImage={timelineOpen ? undefined : (item) => openElementAssetPicker(item.id)}
+                  />
+                </div>
+                <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto pt-3">
+                  {selectedItem?.locked ? <div className="mx-3 mb-3 rounded-lg bg-warning/10 p-3 text-xs text-warning">{t('ui.stage.selection.lockedHint', { name: selectedItem.label })}<UiButton className="mt-2" size="sm" onClick={() => applySelection({ type: 'update', patch: { locked: false } }, [selectedItem.id])}>{t('ui.stage.selection.unlock')}</UiButton></div> : null}
+                  <fieldset disabled={selectedItem?.locked} className="min-w-0 border-0 p-0 disabled:opacity-60">{inspectorNode}</fieldset>
+                </div>
+              </>
+            ) : null}
+              <div hidden={dockTab !== 'shots'} className={dockTab === 'shots' ? "ui-scrollbar min-h-0 flex-1 overflow-y-auto pt-3" : "hidden"}>
+                <StageCapturePanel key={sourceNodeId} nodeId={sourceNodeId} duration={data.motionProject?.durationSeconds ?? 0} currentTime={motionTimeSource.getSnapshot} />
+                {(data.snapshotUrl || snapshotHistory.length > 0) ? <StageSnapshotsPanel
+                  current={data.snapshotUrl ?? null}
+                  history={snapshotHistory}
+                  resolveUrl={(url) => resolveImageDisplayUrl(url) ?? url}
+                  captureKeys={shortcuts.screenshot}
+                  canAddToCanvas={Boolean(onAddSnapshotToCanvas)}
+                  busy={isAddingSnapshotToCanvas}
+                  onCapture={() => { void captureScreenshot(); }}
+                  onSelect={(url) => { void selectSnapshot(url); }}
+                  onDelete={(url) => { void deleteSnapshot(url); }}
+                  onOpen={setLightboxSnapshotUrl}
+                  onClearCurrent={clearCurrentSnapshot}
+                  onClearAll={clearAllSnapshots}
+                  onAddCurrent={() => { void addSnapshotToCanvas(); }}
+                  onAddAll={() => { void addAllSnapshotsToCanvas(); }}
+                /> : null}
+              </div>
+          </aside>
+
+        {agentOpen && projectId ? (
+          <aside ref={stageAgentPanelRef} className="stage-glass stage-pop absolute right-3 top-3 z-[45] w-[440px] max-w-[calc(100%-24px)] overflow-hidden rounded-2xl text-text-dark" style={{ width: stageAgentSize?.width, height: stageAgentSize?.height ?? 'calc(100% - 24px)', maxHeight: 'calc(100% - 24px)' }}>
+            <ScopedAgentPanel scope="stage" projectId={projectId} compact onClose={() => setAgentOpen(false)} />
+            <PanelResizeHandle panelRef={stageAgentPanelRef} storageKey="stageAgent" edge="left" />
+          </aside>
+        ) : null}
+
+        {lightboxSnapshotUrl ? (
+          <div className="absolute inset-0 z-[65] flex items-center justify-center bg-black/70 p-8 backdrop-blur-sm" onPointerDown={(event) => { if (event.target === event.currentTarget) setLightboxSnapshotUrl(null); }}>
+            <UiIconButton size="sm" type="button" onClick={() => setLightboxSnapshotUrl(null)} className="absolute right-5 top-5" aria-label={t('common.close')}><X className="h-4 w-4" /></UiIconButton>
+            <img
+              src={resolveImageDisplayUrl(lightboxSnapshotUrl) ?? lightboxSnapshotUrl}
+              alt={t('directorStudio.snapshotPreview')}
+              className="stage-pop max-h-full max-w-full rounded-xl object-contain shadow-[0_30px_80px_rgb(0_0_0/0.6)]"
+              draggable={false}
+            />
+          </div>
+        ) : null}
       </div>
 
       {importOpen ? (
-        <div className="absolute inset-0 z-70 flex items-center justify-center bg-black/55 p-6">
-          <section className="flex max-h-[78vh] w-[620px] flex-col rounded-lg border border-white/12 bg-[#151618] shadow-2xl">
-            <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
-              <div className="min-w-0">
-                <div className="text-sm font-medium text-white/88">{t('directorStudio.panoramaImport')}</div>
-                <div className="mt-0.5 truncate text-[11px] text-white/42">{t('directorStudio.panoramaImportHint')}</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setImportOpen(false)}
-                className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
-                aria-label={t('common.close')}
-              >
-                <X className="h-4 w-4" />
-              </button>
+        <StageDialog title={t('directorStudio.panoramaImport')} subtitle={t('directorStudio.panoramaImportHint')} onClose={() => setImportOpen(false)}>
+          <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto p-5">
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadPanorama} />
+            <div className="mb-5 grid grid-cols-2 gap-2">
+              <UiButton variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={isUploadingPanorama} loading={isUploadingPanorama} className="h-11">
+                <Upload className="h-4 w-4" />{panoramaImportStageLabel ?? (isUploadingPanorama ? t('directorStudio.importing') : t('directorStudio.uploadPanorama'))}
+              </UiButton>
+              <UiButton variant="ghost" disabled={!rawPanoramaUrl || isUploadingPanorama} onClick={clearPanorama} className="h-11 text-danger hover:text-danger">
+                <Eraser className="h-4 w-4" />{t('directorStudio.clearPanorama')}
+              </UiButton>
             </div>
-            <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleUploadPanorama}
-              />
-              <div className="mb-4 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploadingPanorama}
-                  className="flex h-11 items-center justify-center gap-2 rounded-md border border-white/12 bg-white/8 text-sm text-white/78 hover:bg-white/14 hover:text-white"
-                >
-                  <Upload className="h-4 w-4" />
-                  {panoramaImportStageLabel ?? (isUploadingPanorama ? t('directorStudio.importing') : t('directorStudio.uploadPanorama'))}
-                </button>
-                <button
-                  type="button"
-                  disabled={!rawPanoramaUrl || isUploadingPanorama}
-                  onClick={clearPanorama}
-                  className={`flex h-11 items-center justify-center gap-2 rounded-md border text-sm ${
-                    rawPanoramaUrl && !isUploadingPanorama
-                      ? 'border-red-300/20 bg-red-500/10 text-red-100 hover:bg-red-500/18'
-                      : 'border-white/10 bg-white/5 text-white/30'
-                  }`}
-                >
-                  <Eraser className="h-4 w-4" />
-                  {t('directorStudio.clearPanorama')}
-                </button>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-subtle">{t('directorStudio.importFromAssets')}</div>
+            {panoramaImportAssets.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[var(--line-strong)] px-3 py-10 text-center text-xs text-text-subtle">{t('directorStudio.noImportAssets')}</div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
+                {panoramaImportAssets.map((image) => (
+                  <StageImageTile
+                    key={image.id}
+                    url={resolveImageDisplayUrl(image.url) ?? image.url}
+                    label={image.label}
+                    active={rawPanoramaUrl === image.url}
+                    disabled={isUploadingPanorama}
+                    onClick={() => { void importPanorama(image.url, image.label); }}
+                  />
+                ))}
               </div>
-
-              <div className="mb-2 text-xs text-white/58">{t('directorStudio.importFromAssets')}</div>
-              {panoramaImportAssets.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-white/12 px-3 py-10 text-center text-xs text-white/42">
-                  {t('directorStudio.noImportAssets')}
-                </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-3">
-                  {panoramaImportAssets.map((image) => {
-                    const displayUrl = resolveImageDisplayUrl(image.url) ?? image.url;
-                    const active = rawPanoramaUrl === image.url;
-                    return (
-                      <button
-                        key={image.id}
-                        type="button"
-                        onClick={() => void importPanorama(image.url, image.label)}
-                        disabled={isUploadingPanorama}
-                        className={`overflow-hidden rounded-lg border bg-black/22 text-left transition-colors ${
-                          active ? 'border-accent/80' : 'border-white/10 hover:border-white/28'
-                        }`}
-                      >
-                        <div className="relative aspect-video bg-black/30">
-                          <img src={displayUrl} alt={image.label} className="h-full w-full object-cover" draggable={false} />
-                          {active ? (
-                            <span className="absolute right-2 top-2 rounded-full bg-accent p-1 text-black">
-                              <Check className="h-3 w-3" />
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="flex items-center gap-2 px-2 py-2 text-xs text-white/74">
-                          <Image className="h-3.5 w-3.5 shrink-0 text-white/42" />
-                          <span className="min-w-0 flex-1 truncate">{image.label}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
+            )}
+          </div>
+        </StageDialog>
       ) : null}
 
       {assetPickerItem ? (
-        <div className="absolute inset-0 z-70 flex items-center justify-center bg-black/55 p-6">
-          <section className="flex max-h-[76vh] w-[620px] flex-col rounded-lg border border-white/12 bg-[#151618] shadow-2xl">
-            <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
-              <div>
-                <div className="text-sm font-medium text-white/88">{t('directorStudio.linkedImage.pickerTitle')}</div>
-                <div className="text-[10px] text-white/38">
-                  {t('directorStudio.linkedImage.pickerSubtitle', { name: assetPickerItem.label })}
-                </div>
+        <StageDialog
+          title={t('directorStudio.linkedImage.pickerTitle')}
+          subtitle={t('directorStudio.linkedImage.pickerSubtitle', { name: assetPickerItem.label })}
+          onClose={() => setAssetPickerItemId(null)}
+          footer={(
+            <>
+              <UiButton size="sm" variant="ghost" disabled={!assetPickerItem.refImageUrl} onClick={() => { clearElementAsset(assetPickerItem.id); setAssetPickerItemId(null); }} className="mr-auto text-danger hover:text-danger">
+                <Unlink className="h-3.5 w-3.5" />{t('directorStudio.linkedImage.clear')}
+              </UiButton>
+              <UiButton size="sm" variant="secondary" onClick={() => setAssetPickerItemId(null)}>{t('common.cancel')}</UiButton>
+            </>
+          )}
+        >
+          <div className="flex gap-2 border-b border-[var(--line)] px-5 py-3">
+            <input ref={elementImageInputRef} type="file" accept="image/*" className="hidden" onChange={uploadElementAsset} />
+            <UiInput value={assetQuery} onChange={(event) => setAssetQuery(event.target.value)} placeholder={t('directorStudio.linkedImage.search')} className="h-9 min-w-0 flex-1 px-3 text-xs" />
+            <UiButton size="sm" variant="secondary" onClick={() => elementImageInputRef.current?.click()} disabled={isUploadingElementImage} loading={isUploadingElementImage} className="h-9">
+              <Upload className="h-3.5 w-3.5" />{isUploadingElementImage ? t('directorStudio.linkedImage.uploading') : t('directorStudio.linkedImage.uploadAndLink')}
+            </UiButton>
+          </div>
+          <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto p-5">
+            {elementAssetOptions.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[var(--line-strong)] px-3 py-10 text-center text-xs text-text-subtle">{t('directorStudio.linkedImage.noAssets')}</div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
+                {elementAssetOptions.map((asset) => (
+                  <StageImageTile
+                    key={asset.id}
+                    url={resolveImageDisplayUrl(asset.url) ?? asset.url}
+                    label={asset.label}
+                    active={assetPickerItem.refImageUrl === asset.url}
+                    onClick={() => chooseElementAsset(asset)}
+                  />
+                ))}
               </div>
-              <button
-                type="button"
-                onClick={() => setAssetPickerItemId(null)}
-                className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
-                aria-label={t('common.close')}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="border-b border-white/10 p-4">
-              <input
-                ref={elementImageInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={uploadElementAsset}
-              />
-              <input
-                value={assetQuery}
-                onChange={(event) => setAssetQuery(event.target.value)}
-                placeholder={t('directorStudio.linkedImage.search')}
-                className={`h-9 w-full px-3 text-xs ${DIRECTOR_FIELD_CLASS}`}
-              />
-              <button
-                type="button"
-                onClick={() => elementImageInputRef.current?.click()}
-                disabled={isUploadingElementImage}
-                className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/12 bg-white/8 text-xs text-white/74 hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                <Upload className="h-3.5 w-3.5" />
-                {isUploadingElementImage
-                  ? t('directorStudio.linkedImage.uploading')
-                  : t('directorStudio.linkedImage.uploadAndLink')}
-              </button>
-            </div>
-            <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
-              {elementAssetOptions.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-white/12 px-3 py-10 text-center text-xs text-white/42">
-                  {t('directorStudio.linkedImage.noAssets')}
-                </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-3">
-                  {elementAssetOptions.map((asset) => {
-                    const displayUrl = resolveImageDisplayUrl(asset.url) ?? asset.url;
-                    const active = assetPickerItem.refImageUrl === asset.url;
-                    return (
-                      <button
-                        key={asset.id}
-                        type="button"
-                        onClick={() => chooseElementAsset(asset)}
-                        className={`overflow-hidden rounded-lg border bg-black/22 text-left transition-colors ${
-                          active ? 'border-accent/80' : 'border-white/10 hover:border-white/28'
-                        }`}
-                      >
-                        <div className="relative aspect-video bg-black/30">
-                          <img src={displayUrl} alt={asset.label} className="h-full w-full object-cover" draggable={false} />
-                          {active ? (
-                            <span className="absolute right-2 top-2 rounded-full bg-accent p-1 text-black">
-                              <Check className="h-3 w-3" />
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="flex items-center gap-2 px-2 py-2 text-xs text-white/74">
-                          <Image className="h-3.5 w-3.5 shrink-0 text-white/42" />
-                          <span className="min-w-0 flex-1 truncate">{asset.label}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <div className="flex justify-between gap-2 border-t border-white/10 px-4 py-3">
-              <button
-                type="button"
-                disabled={!assetPickerItem.refImageUrl}
-                onClick={() => {
-                  clearElementAsset(assetPickerItem.id);
-                  setAssetPickerItemId(null);
-                }}
-                className={`inline-flex h-9 items-center gap-2 rounded-md border px-3 text-xs ${
-                  assetPickerItem.refImageUrl
-                    ? 'border-red-300/20 bg-red-500/10 text-red-100 hover:bg-red-500/18'
-                    : 'border-white/10 bg-white/5 text-white/30'
-                }`}
-              >
-                <Unlink className="h-3.5 w-3.5" />
-                {t('directorStudio.linkedImage.clear')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setAssetPickerItemId(null)}
-                className="h-9 rounded-md border border-white/10 bg-white/6 px-3 text-xs text-white/68 hover:bg-white/12 hover:text-white"
-              >
-                {t('common.cancel')}
-              </button>
-            </div>
-          </section>
-        </div>
+            )}
+          </div>
+        </StageDialog>
       ) : null}
 
       <DirectorActionLibrary
@@ -4367,313 +3225,209 @@ export const DirectorStudioShell = memo(function DirectorStudioShell(props: Dire
         onClose={() => setVideoExportOpen(false)}
       />
 
-      <BlueprintCustomActionModal
-        isOpen={customActionModalOpen}
-        onClose={() => setCustomActionModalOpen(false)}
-        nameValue={customActionName}
-        poseValue={customActionPose}
-        onNameChange={setCustomActionName}
-        onPoseChange={setCustomActionPose}
-        onSave={saveCustomActionPose}
-      />
-
       {activeDialog === 'shortcuts' ? (
-        <div className="absolute inset-0 z-70 flex items-center justify-center bg-black/55 p-6">
-          <section className="flex max-h-[82vh] w-[760px] flex-col rounded-lg border border-white/12 bg-[#151618] shadow-2xl">
-            <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
-              <div className="text-sm font-medium text-white/88">{t('directorStudio.shortcuts.title')}</div>
-              <button
-                type="button"
-                onClick={() => setActiveDialog(null)}
-                className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
-                aria-label={t('common.close')}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="ui-scrollbar grid min-h-0 flex-1 gap-3 overflow-y-auto p-4 md:grid-cols-2">
-              <section className="rounded-lg border border-white/10 bg-black/18 p-3 md:col-span-2">
-                <div className="mb-3 text-xs font-medium text-white/82">{t('directorStudio.viewSettings.title')}</div>
-                <div className="grid gap-2 md:grid-cols-3">
-                  <DirectorSettingToggle
-                    label={t('directorStudio.viewSettings.wheelZoomEnabled')}
-                    description={t('directorStudio.viewSettings.wheelZoomEnabledHint')}
-                    checked={viewSettings.wheelZoomEnabled}
-                    onChange={(checked) => updateViewSettings({ wheelZoomEnabled: checked })}
-                  />
-                  <DirectorSettingToggle
-                    label={t('directorStudio.viewSettings.reverseWheelZoom')}
-                    description={t('directorStudio.viewSettings.reverseWheelZoomHint')}
-                    checked={viewSettings.reverseWheelZoom}
-                    onChange={(checked) => updateViewSettings({ reverseWheelZoom: checked })}
-                  />
-                  <DirectorSettingToggle
-                    label={t('directorStudio.viewSettings.showAdvancedPedestrianTags')}
-                    description={t('directorStudio.viewSettings.showAdvancedPedestrianTagsHint')}
-                    checked={viewSettings.showAdvancedPedestrianTags}
-                    onChange={(checked) => updateViewSettings({ showAdvancedPedestrianTags: checked })}
-                  />
-                </div>
+        <StageDialog title={t('directorStudio.shortcuts.title')} subtitle={t('directorStudio.shortcuts.editHint')} width={780} onClose={() => setActiveDialog(null)}>
+          <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto p-5">
+            {timelineOpen ? (
+              <section className="mb-5 rounded-xl bg-[rgb(var(--accent-rgb)/0.08)] p-4 shadow-[inset_0_0_0_1px_rgb(var(--accent-rgb)/0.22)]">
+                <div className="mb-3 text-xs font-semibold text-text-dark">{t('directorStudio.previs.helpTitle')}</div>
+                <ol className="grid gap-3 md:grid-cols-2">
+                  {([1, 2, 3, 4] as const).map((step) => (
+                    <li key={step} className="flex gap-2.5 text-xs leading-5 text-text-muted">
+                      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-accent font-mono text-[10px] font-semibold text-[var(--accent-fg)]">{step}</span>
+                      <span>{t(`directorStudio.previs.helpStep${step}`)}</span>
+                    </li>
+                  ))}
+                </ol>
               </section>
+            ) : null}
+            <div className="grid gap-x-8 gap-y-5 md:grid-cols-2">
               {SHORTCUT_GROUPS.map((group) => (
-                <section key={group.titleKey} className="rounded-lg border border-white/10 bg-black/18 p-3">
-                  <div className="mb-3 text-xs font-medium text-white/82">{t(group.titleKey)}</div>
-                  <div className="space-y-2">
+                <section key={group.titleKey}>
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-subtle">{t(group.titleKey)}</div>
+                  <div>
                     {group.entries.map((entry) => {
                       const keyText = (entry.shortcutId ? shortcuts[entry.shortcutId] : entry.defaultKeys) ?? '';
                       const isEditing = entry.shortcutId === editingShortcutId;
                       return (
-                      <div key={`${group.titleKey}-${entry.shortcutId ?? entry.defaultKeys}`} className="grid grid-cols-[132px_minmax(0,1fr)] gap-3 text-xs">
-                        <button
-                          type="button"
-                          disabled={!entry.shortcutId}
-                          onClick={() => entry.shortcutId && setEditingShortcutId(entry.shortcutId)}
-                          className={`rounded border px-2 py-1 text-center font-mono text-[11px] transition-colors ${
-                            isEditing
-                              ? 'border-accent bg-accent/20 text-accent'
-                              : entry.shortcutId
-                                ? 'border-white/12 bg-white/8 text-white/78 hover:border-white/28 hover:bg-white/12 hover:text-white'
-                                : 'cursor-default border-white/8 bg-white/4 text-white/42'
-                          }`}
-                        >
-                          {isEditing ? t('directorStudio.shortcuts.recording') : keyText}
-                        </button>
-                        <span className="leading-6 text-white/58">{t(entry.labelKey)}</span>
-                      </div>
+                        <div key={`${group.titleKey}-${entry.shortcutId ?? entry.defaultKeys}`} className="flex min-h-8 items-center justify-between gap-3 border-b border-[var(--line)] py-1 text-xs last:border-b-0">
+                          <span className="min-w-0 truncate text-text-muted">{t(entry.labelKey)}</span>
+                          {entry.shortcutId ? (
+                            <button
+                              type="button"
+                              onClick={() => entry.shortcutId && setEditingShortcutId(entry.shortcutId)}
+                              data-director-tooltip={t('directorStudio.shortcuts.clickToEdit')}
+                              className={`stage-kbd h-6 min-w-[56px] cursor-pointer justify-center px-2 transition-colors hover:text-text-dark ${isEditing ? 'animate-pulse !bg-accent !text-[var(--accent-fg)]' : ''}`}
+                            >
+                              {isEditing ? t('directorStudio.shortcuts.recording') : keyText}
+                            </button>
+                          ) : (
+                            <span className="stage-kbd h-6 min-w-[56px] justify-center px-2 opacity-70">{keyText}</span>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
                 </section>
               ))}
             </div>
-          </section>
-        </div>
+          </div>
+        </StageDialog>
       ) : null}
 
       {activeDialog === 'modelLibrary' ? (
-        <div className="absolute inset-0 z-70 flex items-center justify-center bg-black/55 p-6">
-          <section className="flex max-h-[82vh] w-[820px] flex-col rounded-lg border border-white/12 bg-[#151618] shadow-2xl">
-            <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
-              <div className="text-sm font-medium text-white/88">{t('directorStudio.modelLibrary.title')}</div>
-              <div className="flex items-center gap-2">
+        <StageDialog
+          title={t('directorStudio.modelLibrary.title')}
+          width={860}
+          onClose={() => setActiveDialog(null)}
+          actions={(
+            <>
+              <input ref={modelFileInputRef} type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) void importMyModel(file);
+                }} />
+              <UiButton size="sm" variant="secondary" disabled={modelImportState.busy} loading={modelImportState.busy}
+                data-director-tooltip={t('directorStudio.modelLibrary.uploadHint')}
+                onClick={() => modelFileInputRef.current?.click()}>
+                <Upload className="h-3.5 w-3.5" />{t('directorStudio.modelLibrary.uploadModel')}
+              </UiButton>
+            </>
+          )}
+        >
+          <div className="flex min-h-0 flex-1">
+            <nav className="w-40 shrink-0 space-y-0.5 border-r border-[var(--line)] p-2" aria-label={t('directorStudio.modelLibrary.title')}>
+              {DIRECTOR_STUDIO_MODEL_CATEGORIES.map((category) => (
                 <button
+                  key={category.id}
                   type="button"
-                  disabled
-                  title={t('directorStudio.modelLibrary.uploadDeferred')}
-                  className="inline-flex h-8 items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 text-xs text-white/32"
+                  onClick={() => setActiveModelCategory(category.id)}
+                  className="stage-row w-full"
+                  data-selected={activeModelCategory === category.id ? '' : undefined}
                 >
-                  <Upload className="h-3.5 w-3.5" />
-                  {t('directorStudio.modelLibrary.uploadModel')}
+                  <span className="min-w-0 flex-1 truncate text-left">{t(category.labelKey)}</span>
+                  {category.id === 'mine' && myModels.length ? <span className="font-mono text-[10px] text-text-subtle">{myModels.length}</span> : null}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveDialog(null)}
-                  className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
-                  aria-label={t('common.close')}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            <div className="flex min-h-0 flex-1">
-              <div className="w-36 shrink-0 border-r border-white/10 p-2">
-                <div className="space-y-1">
-                  {DIRECTOR_STUDIO_MODEL_CATEGORIES.map((category) => (
-                    <button
-                      key={category.id}
-                      type="button"
-                      onClick={() => setActiveModelCategory(category.id)}
-                      className={`flex h-9 w-full items-center rounded-md px-3 text-left text-xs ${
-                        activeModelCategory === category.id
-                          ? 'bg-white text-black'
-                          : 'bg-white/5 text-white/62 hover:bg-white/10 hover:text-white'
-                      }`}
-                    >
-                      {t(category.labelKey)}
+              ))}
+            </nav>
+            <div className="ui-scrollbar min-h-[360px] min-w-0 flex-1 overflow-y-auto p-4">
+              {modelImportState.error ? (
+                <div role="alert" className="mb-3 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs leading-5 text-danger">{modelImportState.error}</div>
+              ) : null}
+              {activeModelCategory === 'mine' ? myModels.length === 0 ? (
+                <StageEmpty
+                  icon={<Box className="h-5 w-5" />}
+                  title={t('directorStudio.modelLibrary.myModelsEmpty')}
+                  hint={t('directorStudio.modelLibrary.myModelsHint')}
+                  action={(
+                    <UiButton size="sm" variant="secondary" disabled={modelImportState.busy} onClick={() => modelFileInputRef.current?.click()}>
+                      <Upload className="h-3.5 w-3.5" />{t('directorStudio.modelLibrary.uploadModel')}
+                    </UiButton>
+                  )}
+                />
+              ) : (
+                <div className="grid grid-cols-3 gap-3 lg:grid-cols-4">
+                  {myModels.map((asset) => (
+                    <div key={asset.id} className="group relative">
+                      <button type="button" onClick={() => insertMyModel(asset)} className="stage-model-card w-full">
+                        <div className="flex aspect-4/3 items-center justify-center"><Box className="h-8 w-8 text-text-subtle transition-colors group-hover:text-text-muted" /></div>
+                        <div className="border-t border-[var(--line)] px-2.5 py-2 text-left">
+                          <div className="truncate text-xs font-medium text-text-dark">{asset.name}</div>
+                          <div className="mt-1 text-[10px] text-text-subtle">
+                            {t('directorStudio.modelLibrary.myModelMeta', {
+                              height: asset.defaultHeightMeters.toFixed(2),
+                              size: asset.sizeBytes >= 1048576 ? `${(asset.sizeBytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(asset.sizeBytes / 1024))} KB`,
+                            })}
+                          </div>
+                        </div>
+                      </button>
+                      <UiIconButton size="sm" onClick={() => { void deleteMyModel(asset); }}
+                        className="absolute right-1.5 top-1.5 text-danger opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                        data-director-tooltip={t('directorStudio.modelLibrary.deleteMine', { name: asset.name })}
+                        aria-label={t('directorStudio.modelLibrary.deleteMine', { name: asset.name })}><Trash2 className="h-3.5 w-3.5" /></UiIconButton>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-3 lg:grid-cols-4">
+                  {modelCards.map((model) => (
+                    <button key={model.id} type="button" onClick={() => insertModel(model)} className="stage-model-card group">
+                      <div className="flex aspect-4/3 items-center justify-center p-4">
+                        <DirectorStudioModelThumbnail model={model} />
+                      </div>
+                      <div className="flex items-center gap-1.5 border-t border-[var(--line)] px-2.5 py-2 text-left">
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: model.color }} />
+                        <span className="min-w-0 flex-1 truncate text-xs font-medium text-text-dark">{t(getModelNameKey(model), model.displayName)}</span>
+                        <span className="shrink-0 text-[10px] text-text-subtle">{t(`directorStudio.category.${model.itemCategory}`)}</span>
+                      </div>
                     </button>
                   ))}
                 </div>
-              </div>
-              <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
-                {activeModelCategory === 'mine' ? (
-                  <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-white/12 text-center">
-                    <Box className="mb-3 h-8 w-8 text-white/28" />
-                    <div className="text-sm text-white/58">{t('directorStudio.modelLibrary.myModelsEmpty')}</div>
-                    <div className="mt-1 max-w-[300px] text-xs leading-5 text-white/36">
-                      {t('directorStudio.modelLibrary.myModelsHint')}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-3 gap-3 md:grid-cols-4">
-                    {modelCards.map((model) => {
-                      const modelName = t(getModelNameKey(model), model.displayName);
-                      return (
-                        <button
-                          key={model.id}
-                          type="button"
-                          onClick={() => insertModel(model)}
-                          className="group overflow-hidden rounded-lg border border-white/10 bg-black/20 text-left transition-colors hover:border-white/28 hover:bg-white/[0.07]"
-                        >
-                          <div className="flex aspect-4/3 items-center justify-center bg-white/4 p-4">
-                            <DirectorStudioModelThumbnail model={model} />
-                          </div>
-                          <div className="border-t border-white/8 px-2.5 py-2">
-                            <div className="truncate text-xs font-medium text-white/82 group-hover:text-white">{modelName}</div>
-                            <div className="mt-1 flex items-center gap-1.5 text-[10px] text-white/38">
-                              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: model.color }} />
-                              <span>
-                                {model.itemCategory === 'person'
-                                  ? t('directorStudio.category.person')
-                                  : model.itemCategory === 'scene'
-                                    ? t('directorStudio.category.scene')
-                                    : t('directorStudio.category.object')}
-                              </span>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              )}
             </div>
-          </section>
-        </div>
+          </div>
+        </StageDialog>
       ) : null}
 
       {activeDialog === 'pedestrians' ? (
-        <div className="absolute inset-0 z-70 flex items-center justify-center bg-black/55 p-6">
-          <section className="w-[520px] rounded-lg border border-white/12 bg-[#151618] shadow-2xl">
-            <div className="flex h-12 items-center justify-between border-b border-white/10 px-4">
-              <div className="text-sm font-medium text-white/88">{t('directorStudio.pedestrians.title')}</div>
-              <button
-                type="button"
-                onClick={() => setActiveDialog(null)}
-                className="rounded-sm p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
-                aria-label={t('common.close')}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="p-4">
-              <div className="grid grid-cols-3 gap-2">
-                {([
-                  ['direct', 'directorStudio.pedestrians.modes.direct'],
-                  ['array', 'directorStudio.pedestrians.modes.array'],
-                  ['random', 'directorStudio.pedestrians.modes.random'],
-                ] as const).map(([mode, labelKey]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setPedestrianMode(mode)}
-                    className={`h-9 rounded-md border text-xs ${
-                      pedestrianMode === mode
-                        ? 'border-accent/70 bg-accent/18 text-white'
-                        : 'border-white/10 bg-white/6 text-white/65 hover:border-white/25 hover:text-white'
-                    }`}
-                  >
-                    {t(labelKey)}
-                  </button>
-                ))}
+        <StageDialog
+          title={t('directorStudio.pedestrians.title')}
+          width={460}
+          onClose={() => setActiveDialog(null)}
+          footer={(
+            <>
+              <UiButton size="sm" variant="secondary" onClick={() => setActiveDialog(null)}>{t('common.cancel')}</UiButton>
+              <UiButton size="sm" variant="primary" onClick={() => addPedestrians(pedestrianMode)}>
+                <Users className="h-3.5 w-3.5" />{pedestrianMode === 'direct' ? t('directorStudio.pedestrians.addOne') : t('directorStudio.pedestrians.addBatch')}
+              </UiButton>
+            </>
+          )}
+        >
+          <div className="space-y-4 p-5">
+            <UiSegmented
+              value={pedestrianMode}
+              onChange={setPedestrianMode}
+              size="sm"
+              className="w-full"
+              aria-label={t('directorStudio.pedestrians.title')}
+              options={([
+                ['direct', 'directorStudio.pedestrians.modes.direct'],
+                ['array', 'directorStudio.pedestrians.modes.array'],
+                ['random', 'directorStudio.pedestrians.modes.random'],
+              ] as const).map(([value, labelKey]) => ({ value, label: t(labelKey) }))}
+            />
+            {pedestrianMode === 'direct' ? (
+              <p className="rounded-xl bg-[var(--hover)] px-3 py-3 text-xs leading-5 text-text-muted">{t('directorStudio.pedestrians.directHint')}</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <ScrubNumber label={t('directorStudio.pedestrians.count')} value={pedestrianCount} min={1} max={200} step={1} onCommit={setPedestrianCount} />
+                {pedestrianMode === 'array' ? (
+                  <>
+                    <ScrubNumber label={t('directorStudio.pedestrians.columns')} value={pedestrianColumns} min={1} max={50} step={1} onCommit={setPedestrianColumns} />
+                    <ScrubNumber label={t('directorStudio.pedestrians.xSpacing')} value={pedestrianXSpacing} min={0.2} max={10} step={0.1} suffix="m" onCommit={setPedestrianXSpacing} />
+                    <ScrubNumber label={t('directorStudio.pedestrians.zSpacing')} value={pedestrianZSpacing} min={0.2} max={10} step={0.1} suffix="m" onCommit={setPedestrianZSpacing} />
+                  </>
+                ) : (
+                  <ScrubNumber label={t('directorStudio.pedestrians.radius')} value={pedestrianRadius} min={0.5} max={30} step={0.5} suffix="m" onCommit={setPedestrianRadius} />
+                )}
               </div>
-
-              {pedestrianMode !== 'direct' ? (
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <label className="text-[11px] text-white/62">
-                    <span>{t('directorStudio.pedestrians.count')}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={200}
-                      value={pedestrianCount}
-                      onChange={(event) => setPedestrianCount(Number(event.target.value))}
-                      className="mt-1 h-9 w-full rounded-sm border border-white/12 bg-black/30 px-2 text-xs text-white outline-hidden focus:border-white/30"
-                    />
-                  </label>
-                  {pedestrianMode === 'array' ? (
-                    <label className="text-[11px] text-white/62">
-                      <span>{t('directorStudio.pedestrians.columns')}</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={50}
-                        value={pedestrianColumns}
-                        onChange={(event) => setPedestrianColumns(Number(event.target.value))}
-                        className="mt-1 h-9 w-full rounded-sm border border-white/12 bg-black/30 px-2 text-xs text-white outline-hidden focus:border-white/30"
-                      />
-                    </label>
-                  ) : (
-                    <label className="text-[11px] text-white/62">
-                      <span>{t('directorStudio.pedestrians.radius')}</span>
-                      <input
-                        type="number"
-                        min={0.5}
-                        max={30}
-                        step={0.5}
-                        value={pedestrianRadius}
-                        onChange={(event) => setPedestrianRadius(Number(event.target.value))}
-                        className="mt-1 h-9 w-full rounded-sm border border-white/12 bg-black/30 px-2 text-xs text-white outline-hidden focus:border-white/30"
-                      />
-                    </label>
-                  )}
-                  {pedestrianMode === 'array' ? (
-                    <>
-                      <label className="text-[11px] text-white/62">
-                        <span>{t('directorStudio.pedestrians.xSpacing')}</span>
-                        <input
-                          type="number"
-                          min={0.2}
-                          max={10}
-                          step={0.1}
-                          value={pedestrianXSpacing}
-                          onChange={(event) => setPedestrianXSpacing(Number(event.target.value))}
-                          className="mt-1 h-9 w-full rounded-sm border border-white/12 bg-black/30 px-2 text-xs text-white outline-hidden focus:border-white/30"
-                        />
-                      </label>
-                      <label className="text-[11px] text-white/62">
-                        <span>{t('directorStudio.pedestrians.zSpacing')}</span>
-                        <input
-                          type="number"
-                          min={0.2}
-                          max={10}
-                          step={0.1}
-                          value={pedestrianZSpacing}
-                          onChange={(event) => setPedestrianZSpacing(Number(event.target.value))}
-                          className="mt-1 h-9 w-full rounded-sm border border-white/12 bg-black/30 px-2 text-xs text-white outline-hidden focus:border-white/30"
-                        />
-                      </label>
-                    </>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="mt-4 rounded-lg border border-white/10 bg-white/4 px-3 py-4 text-xs leading-5 text-white/52">
-                  {t('directorStudio.pedestrians.directHint')}
-                </div>
-              )}
-
-              <div className="mt-5 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setActiveDialog(null)}
-                  className="h-9 rounded-md border border-white/10 bg-white/6 px-3 text-xs text-white/64 hover:bg-white/10 hover:text-white"
-                >
-                  {t('common.cancel')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => addPedestrians(pedestrianMode)}
-                  className="h-9 rounded-md bg-white px-4 text-xs font-medium text-black hover:bg-white/90"
-                >
-                  {pedestrianMode === 'direct'
-                    ? t('directorStudio.pedestrians.addOne')
-                    : t('directorStudio.pedestrians.addBatch')}
-                </button>
-              </div>
-            </div>
-          </section>
-        </div>
+            )}
+          </div>
+        </StageDialog>
       ) : null}
-      <div ref={tooltipRef} hidden role="tooltip" className="pointer-events-none fixed z-9999 max-w-[260px] rounded-md border border-white/15 bg-[#102427] px-2.5 py-1.5 text-center text-[11px] font-medium leading-4 text-white shadow-xl" />
+      <UiConfirm
+        isOpen={pendingConfirmation !== null}
+        title={pendingConfirmation?.title ?? ''}
+        tone={pendingConfirmation?.tone}
+        containerClassName="dark z-[15000]"
+        onConfirm={() => pendingConfirmation?.resolve(true)}
+        onClose={() => {
+          pendingConfirmation?.resolve(false);
+          setPendingConfirmation(null);
+        }}
+      />
+      <div ref={tooltipRef} hidden role="tooltip" className="pointer-events-none fixed z-9999 max-w-[260px] rounded-md border border-[var(--line)] bg-surface px-2.5 py-1.5 text-center text-[11px] font-medium leading-4 text-text-dark shadow-[var(--shadow-pop)]" />
     </div>
   );
 

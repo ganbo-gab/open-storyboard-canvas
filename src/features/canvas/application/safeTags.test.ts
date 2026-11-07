@@ -397,7 +397,7 @@ describe('safe tag command transactions', () => {
     expect(collectInputReferences('consumer', useCanvasStore.getState().nodes, useCanvasStore.getState().edges)).toEqual([]);
   });
 
-  it('duplicates metadata without edges and cleans group membership and edges on delete', async () => {
+  it('duplicates tag configuration and every relation while deletion preserves the copy connections', async () => {
     useCanvasStore.getState().setCanvasData(
       [sourceNode(), tagNode(), tagGroupNode(), consumerNode()],
       [edge('source-tag', 'source', 'tag'), edge('tag-consumer', 'tag', 'consumer')],
@@ -410,11 +410,15 @@ describe('safe tag command transactions', () => {
     }, 'agent');
     expect(duplicate.ok).toBe(true);
     expect(useCanvasStore.getState().nodes.find((node) => node.id === 'tag-copy')?.data).toMatchObject({
+      displayName: 'Hero reference-副本',
       label: 'Hero reference',
       enabled: true,
       color: 'cyan',
     });
-    expect(useCanvasStore.getState().edges.some((item) => item.source === 'tag-copy' || item.target === 'tag-copy')).toBe(false);
+    expect(useCanvasStore.getState().edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'source', target: 'tag-copy' }),
+      expect.objectContaining({ source: 'tag-copy', target: 'consumer' }),
+    ]));
 
     const remove = await canvasCommandRegistry.execute({
       type: 'node.delete',
@@ -422,7 +426,11 @@ describe('safe tag command transactions', () => {
       input: { nodeIds: ['tag'] },
     }, 'agent');
     expect(remove.ok).toBe(true);
-    expect(useCanvasStore.getState().edges).toEqual([]);
+    expect(useCanvasStore.getState().edges).toHaveLength(2);
+    expect(useCanvasStore.getState().edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'source', target: 'tag-copy' }),
+      expect.objectContaining({ source: 'tag-copy', target: 'consumer' }),
+    ]));
     expect(useCanvasStore.getState().nodes.find((node) => node.id === 'tag-group')?.data).toMatchObject({ memberNodeIds: ['source'] });
   });
 
@@ -482,14 +490,16 @@ describe('legacy tag persistence migration', () => {
     expect(migrated.edges).toMatchObject([{ source: 'source', target: 'tag' }]);
     expect(migrated.nodes.find((node) => node.id === 'tag')?.data).not.toHaveProperty('sourceId');
 
-    useCanvasStore.getState().setCanvasData([sourceNode(), legacyTag], [], {
+    useCanvasStore.getState().setCanvasData([{ ...sourceNode(), position: { x: 25, y: 0 } }, legacyTag], [], {
       past: [{ nodes: [sourceNode(), legacyTag], edges: [] }],
       future: [],
     });
     const state = useCanvasStore.getState();
     expect(state.edges).toMatchObject([{ source: 'source', target: 'tag' }]);
     expect(state.nodes.find((node) => node.id === 'tag')?.data).not.toHaveProperty('sourceId');
-    expect(state.history.past[0].edges).toMatchObject([{ source: 'source', target: 'tag' }]);
+    expect(state.undo()).toBe(true);
+    expect(useCanvasStore.getState().edges).toMatchObject([{ source: 'source', target: 'tag' }]);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'tag')?.data).not.toHaveProperty('sourceId');
   });
 
   it('preserves real edges on conflicting legacy input instead of guessing', () => {

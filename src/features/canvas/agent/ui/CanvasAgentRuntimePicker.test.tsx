@@ -14,6 +14,7 @@ describe('CanvasAgentRuntimePicker', () => {
   it('renders all runtimes and an actionable unavailable status', () => {
     const markup = renderToStaticMarkup(React.createElement(CanvasAgentRuntimePicker, {
       value: 'codex',
+      externalSupported: true,
       diagnostics: {
         codex: { runtime: 'codex', availability: 'not-installed', detail: 'codex was not found' },
         claude: { runtime: 'claude', availability: 'ready', version: '1.2.3' },
@@ -34,6 +35,7 @@ describe('CanvasAgentRuntimePicker', () => {
   it('locks runtime switching and refresh while a turn or approval is active', () => {
     const markup = renderToStaticMarkup(React.createElement(CanvasAgentRuntimePicker, {
       value: 'builtin',
+      externalSupported: true,
       diagnostics: {},
       isRefreshing: false,
       disabled: true,
@@ -41,5 +43,20 @@ describe('CanvasAgentRuntimePicker', () => {
       onRefresh: vi.fn(),
     }));
     expect(markup.match(/disabled=""/g)).toHaveLength(4);
+  });
+
+  it('offers only the built-in runtime where external CLIs cannot run', () => {
+    const markup = renderToStaticMarkup(React.createElement(CanvasAgentRuntimePicker, {
+      value: 'builtin',
+      externalSupported: false,
+      diagnostics: { codex: { runtime: 'codex', availability: 'ready' } },
+      isRefreshing: false,
+      onChange: vi.fn(),
+      onRefresh: vi.fn(),
+    }));
+    expect(markup).toContain('canvasAgent.runtime.builtin');
+    expect(markup).toContain('canvasAgent.runtime.requiresDesktop');
+    expect(markup).not.toContain('canvasAgent.runtime.codex');
+    expect(markup).not.toContain('<button');
   });
 });

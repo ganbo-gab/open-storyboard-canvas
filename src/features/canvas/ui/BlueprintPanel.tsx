@@ -16,7 +16,9 @@ import {
   Layers,
 } from 'lucide-react';
 
+import { UiButton, UiChipButton, UiConfirm, UiIconButton, UiInput, UiSegmented, UiTextArea } from '@/components/ui';
 import type { BlueprintActionPose, BlueprintItem } from '@/features/canvas/domain/canvasNodes';
+import { applyPersonPosePatch, normalizePersonPose, type PersonPoseJoint } from '@/features/canvas/domain/personPose';
 import { BLUEPRINT_GENERIC_OBJECT_PRESET } from '@/features/canvas/domain/blueprintPresetCatalog';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -30,7 +32,9 @@ const BlueprintScene = lazy(() =>
 );
 import { BlueprintObjectConsole } from './BlueprintObjectConsole';
 import { BlueprintAssetPicker } from './BlueprintAssetPicker';
-import { BlueprintCustomActionModal } from './BlueprintCustomActionModal';
+import { PersonPoseInspector } from './PersonPoseInspector';
+import type { BlueprintSceneHandle } from './BlueprintScene';
+import type { PersonPoseEdit } from './personPoseEditor';
 import {
   buildBlueprintPrompt,
   type BlueprintConfig,
@@ -76,12 +80,18 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
   const [draftName, setDraftName] = useState('');
   const [draftColor, setDraftColor] = useState(BLUEPRINT_COLORS[0]);
   const [draftPresetId, setDraftPresetId] = useState<string>('man');
-  const [customActionDraft, setCustomActionDraft] = useState('');
-  const [customActionModalOpen, setCustomActionModalOpen] = useState(false);
-  const [customActionPose, setCustomActionPose] = useState<BlueprintActionPose>({});
+  const [poseEditActive, setPoseEditActive] = useState(false);
+  const [poseJoint, setPoseJoint] = useState<PersonPoseJoint | null>(null);
+  const [poseSnapshot, setPoseSnapshot] = useState<BlueprintActionPose | null>(null);
+  const sceneRef = useRef<BlueprintSceneHandle | null>(null);
   const [customActionPoses, setCustomActionPoses] = useState<Record<string, BlueprintActionPose>>({});
   const [customActions, setCustomActions] = useState<string[]>([]);
   const [followSelectedItem, setFollowSelectedItem] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<
+    { kind: 'item'; id: string; name: string } | { kind: 'action'; name: string } | null
+  >(null);
+  const [confirmIsDark, setConfirmIsDark] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
 
   const nodes = useCanvasStore((s) => s.nodes);
@@ -148,10 +158,11 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
       setDraftName('');
       setDraftColor(BLUEPRINT_COLORS[0]);
       setDraftPresetId('man');
-      setCustomActionDraft('');
-      setCustomActionModalOpen(false);
+      setPoseEditActive(false);
+      setPoseJoint(null);
       setFollowSelectedItem(false);
       setCustomActions([]);
+      setPendingDelete(null);
     }
   }, [allReferenceImages, isOpen]);
 
@@ -253,33 +264,38 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
 
   const deleteSelectedItem = useCallback(() => {
     if (!selectedItem) return;
-    if (!window.confirm(t('directorStudio.legacyPanel.confirmDeleteItem', { name: selectedItem.label }))) return;
-    setItems((current) => current.filter((item) => item.id !== selectedItem.id));
-    setSelectedItemId(null);
-  }, [selectedItem, t]);
+    setConfirmIsDark(Boolean(panelRef.current?.closest('.dark')));
+    setPendingDelete({ kind: 'item', id: selectedItem.id, name: selectedItem.label });
+  }, [selectedItem]);
 
-  const openCustomActionModal = useCallback(() => {
-    setCustomActionDraft('');
-    setCustomActionPose({});
-    setCustomActionModalOpen(true);
+  const poseEditItemId = poseEditActive && selectedItem?.category === 'person' ? selectedItem.id : null;
+
+  const togglePoseEdit = useCallback(() => {
+    if (selectedItem?.category !== 'person') return;
+    setPoseJoint(null);
+    setPoseEditActive((active) => !active);
+  }, [selectedItem?.category]);
+
+  useEffect(() => {
+    if (!poseEditItemId) {
+      setPoseSnapshot(null);
+      return;
+    }
+    const frame = requestAnimationFrame(() => setPoseSnapshot(sceneRef.current?.getPersonPose(poseEditItemId) ?? null));
+    return () => cancelAnimationFrame(frame);
+  }, [items, poseEditItemId]);
+
+  const commitPoseEdit = useCallback((itemId: string, edit: PersonPoseEdit) => {
+    setItems((current) => current.map((item) => item.id === itemId
+      ? { ...item, pose: applyPersonPosePatch(normalizePersonPose(item.pose), edit.patch) }
+      : item));
   }, []);
 
-  const saveCustomAction = useCallback(() => {
-    const name = customActionDraft.trim();
-    const hasPose = Object.keys(customActionPose).length > 0;
-    if (!name && !hasPose) return;
-    const action = name || t('directorStudio.legacyPanel.customActionFallback');
-    setCustomActions((current) => current.includes(action) ? current : [...current, action]);
-    if (hasPose) {
-      setCustomActionPoses((current) => ({ ...current, [action]: customActionPose }));
-    }
-    if (selectedItem && selectedItem.category === 'person') {
-      updateItem(selectedItem.id, { action });
-    }
-    setCustomActionDraft('');
-    setCustomActionPose({});
-    setCustomActionModalOpen(false);
-  }, [customActionDraft, customActionPose, selectedItem, t, updateItem]);
+  const saveCustomPose = useCallback((name: string, pose: BlueprintActionPose) => {
+    setCustomActions((current) => current.includes(name) ? current : [...current, name]);
+    setCustomActionPoses((current) => ({ ...current, [name]: pose }));
+    if (selectedItem?.category === 'person') updateItem(selectedItem.id, { action: name });
+  }, [selectedItem, updateItem]);
 
   /**
    * @-mention tokens drawn from imported reference images and current items.
@@ -324,9 +340,19 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
   }, [selectedItem, updateItem]);
 
   const removeCustomAction = useCallback((action: string) => {
-    if (!window.confirm(t('directorStudio.legacyPanel.confirmDeleteAction', { name: action }))) return;
-    setCustomActions((current) => current.filter((item) => item !== action));
-  }, [t]);
+    setConfirmIsDark(Boolean(panelRef.current?.closest('.dark')));
+    setPendingDelete({ kind: 'action', name: action });
+  }, []);
+
+  const confirmPendingDelete = useCallback(() => {
+    if (!pendingDelete) return;
+    if (pendingDelete.kind === 'item') {
+      setItems((current) => current.filter((item) => item.id !== pendingDelete.id));
+      setSelectedItemId(null);
+    } else {
+      setCustomActions((current) => current.filter((item) => item !== pendingDelete.name));
+    }
+  }, [pendingDelete]);
 
   const handleDraftSource = useCallback((id: 'new' | string) => {
     setDraftSourceId(id);
@@ -403,42 +429,43 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
 
   return (
     <div
-      className="fixed z-200 rounded-xl border border-white/12 bg-[#202020] shadow-2xl"
+      ref={panelRef}
+      className="fixed z-200 rounded-xl border border-[var(--line)] bg-elevated shadow-[var(--shadow-pop)]"
       style={{ left: panelLeft, top: panelTop, width: panelWidth }}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/8">
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--line)]">
         <div>
-          <div className="text-sm font-semibold text-white">{t('directorStudio.legacyPanel.title')}</div>
-          <div className="mt-0.5 text-[11px] text-white/42">
+          <div className="text-sm font-semibold text-text-dark">{t('directorStudio.legacyPanel.title')}</div>
+          <div className="mt-0.5 text-[11px] text-text-subtle">
             {t('directorStudio.legacyPanel.subtitle')}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <UiButton variant="primary" size="sm"
             type="button"
             onClick={handleSubmit}
             disabled={items.length === 0 && !basePrompt.trim()}
-            className="flex items-center gap-1 rounded-md bg-white px-3 py-1.5 text-xs text-black hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="gap-1 text-xs"
           >
             <Sparkles className="w-3 h-3" /> {t('directorStudio.legacyPanel.generate')}
-          </button>
+          </UiButton>
         </div>
-        <button
+        <UiIconButton size="sm" aria-label={t('common.close')}
           onClick={onClose}
-          className="flex items-center justify-center w-6 h-6 rounded-md text-white/50 hover:text-white hover:bg-white/10"
+          className="h-6 w-6"
           title={t('common.close')}
         >
           <X className="w-4 h-4" />
-        </button>
+        </UiIconButton>
       </div>
 
       <div className="grid grid-cols-[206px_minmax(0,1fr)_280px] gap-3 p-4">
-        <aside className="flex min-h-[560px] flex-col rounded-xl border border-white/10 bg-white/[0.035]">
-          <div className="border-b border-white/8 px-3 py-2">
-            <div className="text-xs font-semibold text-white/82">{t('directorStudio.legacyPanel.importImages')}</div>
-            <div className="mt-0.5 text-[10px] text-white/38">
+        <aside className="flex min-h-[560px] flex-col rounded-xl border border-[var(--line)] bg-[var(--field-bg)]">
+          <div className="border-b border-[var(--line)] px-3 py-2">
+            <div className="text-xs font-semibold text-text-dark">{t('directorStudio.legacyPanel.importImages')}</div>
+            <div className="mt-0.5 text-[10px] text-text-subtle">
               {t('directorStudio.legacyPanel.importedCount', {
                 imported: referenceImages.length,
                 total: allReferenceImages.length,
@@ -447,93 +474,82 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
           </div>
           <div className="ui-scrollbar flex-1 overflow-y-auto p-2">
             {referenceImages.length === 0 ? (
-              <div className="flex h-full min-h-40 flex-col items-center justify-center rounded-lg border border-dashed border-white/12 px-3 text-center">
-                <ImageIcon className="mb-2 h-6 w-6 text-white/25" />
-                <div className="text-[11px] text-white/55">{t('directorStudio.legacyPanel.emptyReferences')}</div>
+              <div className="flex h-full min-h-40 flex-col items-center justify-center rounded-lg border border-dashed border-[var(--line)] px-3 text-center">
+                <ImageIcon className="mb-2 h-6 w-6 text-text-subtle" />
+                <div className="text-[11px] text-text-muted">{t('directorStudio.legacyPanel.emptyReferences')}</div>
               </div>
             ) : (
               <div className="space-y-2">
                 {referenceImages.map((image, index) => {
                   const displayUrl = resolveImageDisplayUrl(image.url) ?? image.url;
                   return (
-                    <button
+                    <UiButton variant="ghost"
                       key={image.id}
                       type="button"
                       onClick={() => {
                         handleDraftSource(image.id);
                         setWorkflowMode('add');
                       }}
-                      className={`w-full rounded-lg border p-1.5 text-left transition-colors ${
-                        draftSourceId === image.id ? 'border-accent/70 bg-accent/10' : 'border-white/10 bg-black/18 hover:border-white/25'
+                      className={`block h-auto w-full rounded-lg border p-1.5 text-left ${
+                        draftSourceId === image.id ? 'border-accent/70 bg-accent/10' : 'border-[var(--line)] bg-[var(--field-bg)] hover:border-[var(--line-strong)]'
                       }`}
                     >
-                      <div className="aspect-square overflow-hidden rounded-sm bg-black/30">
+                      <div className="aspect-square overflow-hidden rounded-sm bg-[var(--field-bg)]">
                         <img src={displayUrl} alt={image.label} className="h-full w-full object-cover" draggable={false} />
                       </div>
                       <div className="mt-1 flex items-center gap-1">
                         <span className="h-2.5 w-2.5 rounded-xs" style={{ backgroundColor: image.color }} />
-                        <div className="min-w-0 flex-1 truncate text-[10px] text-white/78">
+                        <div className="min-w-0 flex-1 truncate text-[10px] text-text-muted">
                           {t('directorStudio.legacyPanel.referenceListItem', { index: index + 1, label: image.label })}
                         </div>
                       </div>
-                    </button>
+                    </UiButton>
                   );
                 })}
-                <button
+                <UiIconButton aria-label={t('directorStudio.legacyPanel.addFromAssets')}
                   type="button"
                   onClick={() => {
                     setDraftSelectedIds(importedReferenceIds);
                     setIsAssetPickerOpen(true);
                   }}
-                  className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-white/14 bg-black/12 text-white/42 hover:border-white/30 hover:text-white/70"
+                  className="aspect-square h-auto w-full rounded-lg border border-dashed border-[var(--line)]"
                   title={t('directorStudio.legacyPanel.addFromAssets')}
                 >
                   <Plus className="h-6 w-6" />
-                </button>
+                </UiIconButton>
               </div>
             )}
           </div>
-          <div className="border-t border-white/8 p-2">
-            <button
+          <div className="border-t border-[var(--line)] p-2">
+            <UiButton size="sm"
               type="button"
               onClick={() => {
                 setDraftSelectedIds(importedReferenceIds);
                 setIsAssetPickerOpen(true);
               }}
-              className="flex w-full items-center justify-center gap-1 rounded-md bg-white px-2 py-1.5 text-xs text-black hover:bg-gray-100"
+              className="w-full gap-1 text-xs"
             >
               <Plus className="h-3 w-3" /> {t('directorStudio.legacyPanel.manageImages')}
-            </button>
+            </UiButton>
           </div>
         </aside>
 
         <div className="flex min-w-0 flex-col gap-3">
           {/* Mode */}
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setMode('flat')}
-              className={`flex items-center justify-center gap-1 rounded-lg py-2 text-xs ${mode === 'flat' ? 'bg-white text-black' : 'bg-white/8 text-white/70 hover:bg-white/14'}`}
-              title={t('directorStudio.legacyPanel.flatModeTitle')}
-            >
-              <MapPin className="w-3 h-3" /> {t('directorStudio.legacyPanel.flatMode')}
-            </button>
-            <button
-              type="button"
-              disabled={!previewImageUrl}
-              onClick={() => setMode('panorama')}
-              className={`flex items-center justify-center gap-1 rounded-lg py-2 text-xs ${mode === 'panorama' ? 'bg-white text-black' : 'bg-white/8 text-white/70 hover:bg-white/14'} ${!previewImageUrl ? 'opacity-40 cursor-not-allowed' : ''}`}
-              title={t('directorStudio.legacyPanel.panoramaModeTitle')}
-            >
-              <Globe className="w-3 h-3" /> {t('directorStudio.legacyPanel.panoramaMode')}
-              {!previewImageUrl && t('directorStudio.legacyPanel.panoramaRequiresSelectionSuffix')}
-            </button>
-          </div>
+          <UiSegmented
+            value={mode}
+            onChange={setMode}
+            className="w-full"
+            options={[
+              { value: 'flat', icon: <MapPin className="h-3.5 w-3.5" />, label: <span title={t('directorStudio.legacyPanel.flatModeTitle')}>{t('directorStudio.legacyPanel.flatMode')}</span> },
+              { value: 'panorama', icon: <Globe className="h-3.5 w-3.5" />, disabled: !previewImageUrl, label: <span title={t('directorStudio.legacyPanel.panoramaModeTitle')}>{t('directorStudio.legacyPanel.panoramaMode')}{!previewImageUrl && t('directorStudio.legacyPanel.panoramaRequiresSelectionSuffix')}</span> },
+            ]}
+          />
 
           <Suspense
             fallback={
               <div
-                className="flex items-center justify-center rounded-xl border border-white/10 bg-black/18 text-xs text-white/50"
+                className="flex items-center justify-center rounded-xl border border-[var(--line)] bg-[var(--field-bg)] text-xs text-text-muted"
                 style={{ width: 760, height: 420 }}
               >
                 {t('directorStudio.legacyPanel.loadingEditor')}
@@ -541,6 +557,7 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
             }
           >
             <BlueprintScene
+              ref={sceneRef}
               items={items}
               onItemsChange={handleItemsChange}
               referenceImages={referenceImages}
@@ -552,26 +569,40 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
               followSelectedItem={followSelectedItem}
               onSelectedItemChange={handleEditorSelectionChange}
               customActionPoses={customActionPoses}
+              poseEditItemId={poseEditItemId}
+              poseEditJoint={poseJoint}
+              onPoseEditJointChange={setPoseJoint}
+              onPoseEditCommit={commitPoseEdit}
             />
           </Suspense>
 
-          <div className="rounded-xl border border-white/10 bg-black/18">
-            <div className="flex items-center gap-2 border-b border-white/8 px-3 py-2">
-              <button
-                type="button"
-                onClick={() => setWorkflowMode('add')}
-                className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs ${workflowMode === 'add' ? 'bg-white text-black' : 'bg-white/8 text-white/70 hover:bg-white/14'}`}
-              >
-                <Plus className="h-3 w-3" /> {t('directorStudio.legacyPanel.workflow.add')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setWorkflowMode('select')}
-                className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs ${workflowMode === 'select' ? 'bg-white text-black' : 'bg-white/8 text-white/70 hover:bg-white/14'}`}
-              >
-                <MousePointer2 className="h-3 w-3" /> {t('directorStudio.legacyPanel.workflow.select')}
-              </button>
-              <div className="ml-auto text-[10px] text-white/38">
+          {poseEditItemId && poseSnapshot ? (
+            <PersonPoseInspector
+              pose={poseSnapshot}
+              joint={poseJoint}
+              onJointChange={setPoseJoint}
+              onPreview={(pose) => sceneRef.current?.previewPersonPose(poseEditItemId, pose)}
+              onCommit={(edit) => commitPoseEdit(poseEditItemId, edit)}
+              onResetAll={() => updateItem(poseEditItemId, { pose: undefined })}
+              onSaveCustomPose={saveCustomPose}
+              onExit={() => setPoseEditActive(false)}
+              targetLabel={t('directorStudio.pose.targetItem')}
+              defaultPoseName={t('directorStudio.legacyPanel.customActionFallback')}
+            />
+          ) : null}
+
+          <div className="rounded-xl border border-[var(--line)] bg-[var(--field-bg)]">
+            <div className="flex items-center gap-2 border-b border-[var(--line)] px-3 py-2">
+              <UiSegmented
+                value={workflowMode}
+                onChange={setWorkflowMode}
+                size="sm"
+                options={[
+                  { value: 'add', icon: <Plus className="h-3.5 w-3.5" />, label: t('directorStudio.legacyPanel.workflow.add') },
+                  { value: 'select', icon: <MousePointer2 className="h-3.5 w-3.5" />, label: t('directorStudio.legacyPanel.workflow.select') },
+                ]}
+              />
+              <div className="ml-auto text-[10px] text-text-subtle">
                 {t('directorStudio.legacyPanel.workflow.itemSummary', {
                   subjects: items.filter((item) => item.category !== 'scene').length,
                   scenes: items.filter((item) => item.category === 'scene').length,
@@ -583,117 +614,112 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
               <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] gap-3 p-3">
                 <div className="min-w-0 space-y-2">
                   <div className="flex items-center gap-1 overflow-x-auto pb-1">
-                    <button
+                    <UiChipButton active={draftSourceId === 'new'}
                       type="button"
                       onClick={() => handleDraftSource('new')}
-                      className={`shrink-0 rounded-md px-2 py-1 text-xs ${draftSourceId === 'new' ? 'bg-white text-black' : 'bg-white/8 text-white/70 hover:bg-white/14'}`}
+                      className="h-7 shrink-0 rounded-md px-2 text-xs"
                     >
                       <Plus className="mr-1 inline h-3 w-3" /> {t('directorStudio.legacyPanel.workflow.newObject')}
-                    </button>
+                    </UiChipButton>
                     {referenceImages.map((image, index) => (
-                      <button
+                      <UiChipButton active={draftSourceId === image.id}
                         key={image.id}
                         type="button"
                         onClick={() => handleDraftSource(image.id)}
-                        className={`shrink-0 rounded-md px-2 py-1 text-xs ${draftSourceId === image.id ? 'bg-white text-black' : 'bg-white/8 text-white/70 hover:bg-white/14'}`}
+                        className="h-7 shrink-0 rounded-md px-2 text-xs"
                       >
                         {t('directorStudio.legacyPanel.referenceTokenName', { index: index + 1 })}
-                      </button>
+                      </UiChipButton>
                     ))}
                   </div>
                   <div className="flex items-center gap-2">
-                    <input
+                    <UiInput
                       type="color"
                       value={draftColor}
                       onChange={(event) => setDraftColor(event.target.value)}
-                      className="h-8 w-8 rounded-sm border border-white/10 bg-transparent"
+                      className="h-8 w-8 shrink-0 rounded-sm p-0.5"
                       title={t('directorStudio.legacyPanel.workflow.objectColor')}
                     />
-                    <input
+                    <UiInput
                       value={draftName}
                       onChange={(event) => setDraftName(event.target.value)}
                       placeholder={selectedRef
                         ? t('directorStudio.legacyPanel.workflow.objectNameFromImagePlaceholder')
                         : t('directorStudio.legacyPanel.workflow.newObjectNamePlaceholder')}
-                      className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-white/85 outline-hidden placeholder:text-white/30 focus:border-white/25"
+                      className="h-8 min-w-0 flex-1 px-2.5 text-xs"
                     />
                   </div>
                 </div>
                 <div className="min-w-0 space-y-2">
-                  <div className="grid grid-cols-3 gap-1">
-                    {categoryOptions.map(({ category: cat, label, Icon }) => (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => {
-                          setDraftCategory(cat);
-                          if (cat === 'person') setDraftPresetId(personPresets[0]?.id ?? 'man');
-                          if (cat === 'object') setDraftPresetId(objectPresets[0]?.id ?? 'generic-object');
-                          if (cat === 'scene') setDraftPresetId(SCENE_PRESETS[0].id);
-                        }}
-                        className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs ${draftCategory === cat ? 'bg-white text-black' : 'bg-white/8 text-white/70 hover:bg-white/14'}`}
-                      >
-                        <Icon className="h-3 w-3" /> {label}
-                      </button>
-                    ))}
-                  </div>
+                  <UiSegmented
+                    value={draftCategory}
+                    size="sm"
+                    className="w-full"
+                    options={categoryOptions.map(({ category, label, Icon }) => ({ value: category, label, icon: <Icon className="h-3.5 w-3.5" /> }))}
+                    onChange={(cat) => {
+                      setDraftCategory(cat);
+                      if (cat === 'person') setDraftPresetId(personPresets[0]?.id ?? 'man');
+                      if (cat === 'object') setDraftPresetId(objectPresets[0]?.id ?? 'generic-object');
+                      if (cat === 'scene') setDraftPresetId(SCENE_PRESETS[0].id);
+                    }}
+                  />
                   <div className="flex max-h-16 flex-wrap gap-1 overflow-y-auto pr-1">
                     {(draftCategory === 'person' ? personPresets : draftCategory === 'object' ? objectPresets : SCENE_PRESETS).map((preset) => (
-                      <button
+                      <UiChipButton active={draftPresetId === preset.id}
                         key={preset.id}
                         type="button"
                         onClick={() => {
                           setDraftPresetId(preset.id);
                           if (!draftName.trim()) setDraftName(preset.label);
                         }}
-                        className={`rounded-sm px-2 py-0.5 text-[10px] ${draftPresetId === preset.id ? 'bg-accent text-white' : 'bg-white/8 text-white/65 hover:bg-white/14'}`}
+                        className="h-6 rounded-sm px-2 text-[10px]"
                       >
                         {preset.label}
-                      </button>
+                      </UiChipButton>
                     ))}
                   </div>
                 </div>
                 <div className="col-span-2 flex justify-end gap-2">
-                  <button type="button" onClick={() => { setDraftSourceId('new'); setDraftName(''); }} className="rounded-md bg-white/8 px-3 py-1.5 text-xs text-white/70 hover:bg-white/14">
+                  <UiButton size="sm" type="button" onClick={() => { setDraftSourceId('new'); setDraftName(''); }}>
                     {t('common.cancel')}
-                  </button>
-                  <button type="button" onClick={addDraftItem} className="rounded-md bg-white px-3 py-1.5 text-xs text-black hover:bg-gray-100">
+                  </UiButton>
+                  <UiButton size="sm" type="button" onClick={addDraftItem}>
                     {t('directorStudio.legacyPanel.workflow.addToStudio')}
-                  </button>
+                  </UiButton>
                 </div>
               </div>
             ) : (
-              <div className="p-3 text-[11px] leading-5 text-white/50">
+              <div className="p-3 text-[11px] leading-5 text-text-muted">
                 {t('directorStudio.legacyPanel.workflow.selectHint')}
               </div>
             )}
           </div>
 
           {allReferenceImages.length === 0 && (
-            <div className="rounded-lg border border-dashed border-white/12 bg-white/3 px-3 py-2 text-[11px] leading-5 text-white/45">
+            <div className="rounded-lg border border-dashed border-[var(--line)] bg-[var(--field-bg)] px-3 py-2 text-[11px] leading-5 text-text-subtle">
               {t('directorStudio.legacyPanel.noAssetsHint')}
             </div>
           )}
 
-          <textarea
+          <UiTextArea
             value={basePrompt}
             onChange={(e) => {
               setBasePrompt(e.target.value);
               if (submitError) setSubmitError('');
             }}
             placeholder={t('directorStudio.legacyPanel.basePromptPlaceholder')}
-            className="h-16 w-full resize-none rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/85 outline-hidden placeholder:text-white/30 focus:border-white/25"
+            className="h-16 min-h-16 w-full resize-none px-3 py-2 text-sm"
           />
 
-          <details className="text-[11px] text-white/50">
-            <summary className="cursor-pointer hover:text-white/80">{t('directorStudio.legacyPanel.showFinalPrompt')}</summary>
-            <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-lg bg-black/20 p-2 text-white/60 text-[11px]">{composed}</pre>
+          <details className="text-[11px] text-text-muted">
+            <summary className="cursor-pointer hover:text-text-dark focus-visible:outline-2 focus-visible:outline-accent">{t('directorStudio.legacyPanel.showFinalPrompt')}</summary>
+            <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-lg bg-[var(--field-bg)] p-2 text-text-muted text-[11px]">{composed}</pre>
           </details>
 
           <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0 text-[11px] text-white/40">
+            <div className="min-w-0 text-[11px] text-text-subtle">
               {submitError ? (
-                <span className="inline-flex items-center gap-1 text-amber-300/90">
+                <span className="inline-flex items-center gap-1 text-warning">
                   <AlertTriangle className="h-3 w-3" /> {submitError}
                 </span>
               ) : referenceImages.length > 0 ? (
@@ -702,14 +728,14 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
                 t('directorStudio.legacyPanel.textOnlyHint')
               )}
             </div>
-            <button
+            <UiButton size="sm"
               type="button"
               onClick={handleCopyPrompt}
-              className="rounded-md bg-white/8 px-3 py-1.5 text-xs text-white/75 hover:bg-white/14"
+              className="text-xs"
             >
               {copyFlash ? <CheckCircle2 className="mr-1 inline h-3 w-3" /> : <Copy className="mr-1 inline h-3 w-3" />}
               {copyFlash ? t('directorStudio.legacyPanel.copied') : t('directorStudio.legacyPanel.copyPrompt')}
-            </button>
+            </UiButton>
           </div>
         </div>
 
@@ -735,7 +761,8 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
           actionPresets={activeActionPresets}
           customActions={customActions}
           onRemoveCustomAction={removeCustomAction}
-          onOpenCustomActionModal={openCustomActionModal}
+          poseEditActive={Boolean(poseEditItemId)}
+          onTogglePoseEdit={togglePoseEdit}
           followSelectedItem={followSelectedItem}
           onFollowChange={setFollowSelectedItem}
         />
@@ -754,14 +781,19 @@ export const BlueprintPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt,
         subtitle={t('directorStudio.legacyPanel.assetPickerSubtitle')}
       />
 
-      <BlueprintCustomActionModal
-        isOpen={customActionModalOpen}
-        onClose={() => setCustomActionModalOpen(false)}
-        nameValue={customActionDraft}
-        poseValue={customActionPose}
-        onNameChange={setCustomActionDraft}
-        onPoseChange={setCustomActionPose}
-        onSave={saveCustomAction}
+      <UiConfirm
+        isOpen={pendingDelete !== null}
+        containerClassName={confirmIsDark ? 'dark z-[15000]' : 'z-[15000]'}
+        title={t('common.delete')}
+        description={pendingDelete ? t(
+          pendingDelete.kind === 'item'
+            ? 'directorStudio.legacyPanel.confirmDeleteItem'
+            : 'directorStudio.legacyPanel.confirmDeleteAction',
+          { name: pendingDelete.name },
+        ) : undefined}
+        confirmLabel={t('common.delete')}
+        onConfirm={confirmPendingDelete}
+        onClose={() => setPendingDelete(null)}
       />
     </div>
   );

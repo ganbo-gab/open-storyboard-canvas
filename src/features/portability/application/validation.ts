@@ -204,57 +204,24 @@ export function validateSettingsBundle(value: unknown): SettingsBundlePayload {
   if (value.schemaVersion > SETTINGS_BUNDLE_SCHEMA_VERSION) {
     throw new PortabilityValidationError('future-schema', 'These settings were created by a newer application version.');
   }
-  if (value.schemaVersion !== SETTINGS_BUNDLE_SCHEMA_VERSION) {
+  if (value.schemaVersion !== 1 && value.schemaVersion !== SETTINGS_BUNDLE_SCHEMA_VERSION) {
     throw new PortabilityValidationError('unsupported-schema', 'Settings schema is unsupported.');
   }
   if (typeof value.appVersion !== 'string'
     || typeof value.createdAt !== 'string'
-    || typeof value.includesCredentials !== 'boolean'
+    || (value.includesCredentials !== undefined && typeof value.includesCredentials !== 'boolean')
     || !isPlainRecord(value.categories)
     || !Object.values(value.categories).every(isPlainRecord)) {
     throw new PortabilityValidationError('invalid-settings', 'Settings bundle is incomplete or invalid.');
   }
-  if (value.credentials !== undefined && !isPlainRecord(value.credentials)) {
-    throw new PortabilityValidationError('invalid-settings', 'Settings credentials section is invalid.');
-  }
-  if (value.includesCredentials === false && value.credentials !== undefined) {
-    throw new PortabilityValidationError('invalid-settings', 'Credential data is not allowed when includesCredentials is false.');
-  }
-  if (isPlainRecord(value.credentials)) {
-    const allowedCredentialFields = new Set([
-      'providerApiKeys',
-      'agnesApiKey',
-      'customProviderApiKeys',
-      'imageHost',
-    ]);
-    if (Object.keys(value.credentials).some((field) => !allowedCredentialFields.has(field))) {
-      throw new PortabilityValidationError('invalid-settings', 'Settings credentials contain an unknown field.');
-    }
-    const validateStringMap = (candidate: unknown, field: string): void => {
-      if (candidate === undefined) return;
-      if (!isPlainRecord(candidate) || !Object.values(candidate).every((item) => typeof item === 'string')) {
-        throw new PortabilityValidationError('invalid-settings', `${field} must be a string map.`);
-      }
-    };
-    validateStringMap(value.credentials.providerApiKeys, 'providerApiKeys');
-    validateStringMap(value.credentials.customProviderApiKeys, 'customProviderApiKeys');
-    if (value.credentials.agnesApiKey !== undefined && typeof value.credentials.agnesApiKey !== 'string') {
-      throw new PortabilityValidationError('invalid-settings', 'agnesApiKey must be a string.');
-    }
-    if (value.credentials.imageHost !== undefined) {
-      if (!isPlainRecord(value.credentials.imageHost)) {
-        throw new PortabilityValidationError('invalid-settings', 'imageHost credentials must be an object.');
-      }
-      if (Object.keys(value.credentials.imageHost).some((field) => !['email', 'password', 'token'].includes(field))) {
-        throw new PortabilityValidationError('invalid-settings', 'imageHost credentials contain an unknown field.');
-      }
-      for (const field of ['email', 'password', 'token']) {
-        const fieldValue = value.credentials.imageHost[field];
-        if (fieldValue !== undefined && typeof fieldValue !== 'string') {
-          throw new PortabilityValidationError('invalid-settings', `imageHost.${field} must be a string.`);
-        }
-      }
-    }
-  }
-  return value as unknown as SettingsBundlePayload;
+  // Old credential sections (including encoded provider backups) are deliberately discarded,
+  // not validated, previewed, migrated, or written into the vault.
+  return {
+    format: SETTINGS_BUNDLE_FORMAT,
+    schemaVersion: value.schemaVersion,
+    appVersion: value.appVersion,
+    createdAt: value.createdAt,
+    includesCredentials: false,
+    categories: value.categories as SettingsBundlePayload['categories'],
+  };
 }

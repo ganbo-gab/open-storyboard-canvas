@@ -8,8 +8,6 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Handle,
-  Position,
   useUpdateNodeInternals,
   useViewport,
   type NodeProps,
@@ -25,8 +23,7 @@ import {
   saveImageSourceToDirectory,
   type MergeStoryboardImagesResult,
 } from '@/commands/image';
-import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '@/features/canvas/ui/NodeHeader';
-import { NodeResizeHandle } from '@/features/canvas/ui/NodeResizeHandle';
+import { NodeFrame, resolveNodeBox } from '@/features/canvas/ui/NodeFrame';
 import { CanvasNodeImage } from '@/features/canvas/ui/CanvasNodeImage';
 import type {
   StoryboardExportOptions,
@@ -48,12 +45,7 @@ import {
   parseInputImageRefsSignature,
   selectInputImageRefsSignature,
 } from '@/features/canvas/application/canvasGraphSelectors';
-import { UiButton, UiCheckbox, UiChipButton, UiInput, UiPanel, UiSelect } from '@/components/ui';
-import {
-  NODE_CONTROL_CHIP_CLASS,
-  NODE_CONTROL_ICON_CLASS,
-  NODE_CONTROL_PRIMARY_BUTTON_CLASS,
-} from '@/features/canvas/ui/nodeControlStyles';
+import { MenuItem, UiButton, UiCheckbox, UiIconButton, UiInput, UiPanel, UiSelect, UiTextArea } from '@/components/ui';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useProjectStore } from '@/stores/projectStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -69,9 +61,6 @@ const STORYBOARD_NODE_MIN_HEIGHT_PX = 320;
 const STORYBOARD_GRID_GAP_PX = 1;
 const EXPORT_MAX_DIMENSION = 4096;
 const EXPORT_TRACE_PREFIX = '[StoryboardExport]';
-const STORYBOARD_SPLIT_HEADER_ADJUST = { x: 0, y: 0, scale: 1 };
-const STORYBOARD_SPLIT_ICON_ADJUST = { x: 0, y: 0, scale: 1 };
-const STORYBOARD_SPLIT_TITLE_ADJUST = { x: 0, y: 0, scale: 1 };
 
 function SplitResultIcon({ className }: { className?: string }) {
   return (
@@ -335,15 +324,15 @@ const FrameCard = memo(
           onSortHover(frame.id);
         }}
         onMouseDown={(event) => event.stopPropagation()}
-        className={`nodrag relative bg-bg-dark/85 transition-colors ${dragging
+        className={`nodrag relative bg-bg/85 transition-colors ${dragging
           ? 'z-10 opacity-55 ring-1 ring-accent/65'
           : asDropTarget
-            ? 'z-10 ring-1 ring-emerald-400/70'
+            ? 'z-10 ring-1 ring-success/70'
             : ''
           }`}
       >
         <div
-          className={`group/frame relative overflow-hidden bg-surface-dark ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+          className={`group/frame relative overflow-hidden bg-surface ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
           style={{ aspectRatio: frameAspectRatioCss }}
           onPointerDown={(event) => {
             if (event.button !== 0) {
@@ -369,34 +358,40 @@ const FrameCard = memo(
             </div>
           )}
 
-          <button
+          <UiIconButton
             type="button"
-            className="absolute right-1 top-1 rounded-sm bg-black/60 p-1 text-white opacity-0 transition-all duration-150 hover:bg-black/75 group-hover/frame:opacity-100"
+            size="sm"
+            variant="secondary"
+            className="absolute right-1 top-1 h-5 w-5 rounded-sm bg-elevated/90 p-1 opacity-0 transition-opacity duration-150 group-hover/frame:opacity-100 focus-visible:opacity-100"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
               onEditFrame(frame);
             }}
             title="单独编辑此格"
+            aria-label="单独编辑此格"
           >
             <SquareArrowOutUpRight className="h-3 w-3" />
-          </button>
+          </UiIconButton>
 
-          <button
+          <UiIconButton
             type="button"
-            className="absolute bottom-1 right-1 rounded-sm bg-black/60 p-1 text-white opacity-0 transition-all duration-150 hover:bg-black/75 group-hover/frame:opacity-100"
+            size="sm"
+            variant="secondary"
+            className="absolute bottom-1 right-1 h-5 w-5 rounded-sm bg-elevated/90 p-1 opacity-0 transition-opacity duration-150 group-hover/frame:opacity-100 focus-visible:opacity-100"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
               onTogglePicker(frame.id, event.clientX, event.clientY);
             }}
             title="从输入图片替换"
+            aria-label="从输入图片替换"
           >
             <ImagePlus className="h-3 w-3" />
-          </button>
+          </UiIconButton>
         </div>
 
-        <textarea
+        <UiTextArea
           value={frame.note}
           onChange={(event) => {
             const nextValue = event.target.value;
@@ -407,7 +402,7 @@ const FrameCard = memo(
           onMouseDown={(event) => event.stopPropagation()}
           onWheelCapture={(event) => event.stopPropagation()}
           placeholder={`分镜 ${String(index + 1).padStart(2, '0')} 描述`}
-          className="ui-scrollbar nodrag nowheel h-10 w-full resize-none overflow-y-auto border-0 border-t border-[rgba(255,255,255,0.12)] bg-bg-dark/90 px-2 py-1 text-[10px] text-text-dark outline-hidden focus:border-accent"
+          className="ui-scrollbar nodrag nowheel h-10 min-h-10 w-full resize-none overflow-y-auto rounded-none border-0 border-t border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-2 py-1 text-[10px] text-text-dark"
         />
       </div>
     );
@@ -468,10 +463,11 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
   const gridCols = Math.max(1, data.gridCols);
   const gridRows = Math.max(1, data.gridRows);
   const totalFrames = orderedFrames.length;
-  const resolvedNodeWidth = Math.max(STORYBOARD_NODE_WIDTH_PX, Math.round(width ?? STORYBOARD_NODE_WIDTH_PX));
-  const resolvedNodeHeight = Math.max(
-    STORYBOARD_NODE_MIN_HEIGHT_PX,
-    Math.round(height ?? STORYBOARD_NODE_MIN_HEIGHT_PX)
+  const { width: resolvedNodeWidth, height: resolvedNodeHeight } = resolveNodeBox(
+    CANVAS_NODE_TYPES.storyboardSplit,
+    width ?? STORYBOARD_NODE_WIDTH_PX,
+    height ?? STORYBOARD_NODE_MIN_HEIGHT_PX,
+    { minWidth: STORYBOARD_NODE_WIDTH_PX, minHeight: STORYBOARD_NODE_MIN_HEIGHT_PX },
   );
 
   useEffect(() => {
@@ -668,7 +664,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
         );
 
         if (createdNodeId) {
-          addEdge(id, createdNodeId);
+          addEdge(id, createdNodeId, { provenance: 'generationResult' });
         }
       } catch (error) {
         setExportError(error instanceof Error ? error.message : '创建编辑节点失败');
@@ -835,7 +831,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
       });
 
       if (createdNodeId) {
-        addEdge(id, createdNodeId);
+        addEdge(id, createdNodeId, { provenance: 'generationResult' });
       }
       console.info(`${EXPORT_TRACE_PREFIX} done`, {
         traceId,
@@ -988,34 +984,79 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
   );
 
   return (
-    <div
-      ref={rootRef}
-      className={`
-        group relative flex h-full flex-col overflow-visible rounded-(--node-radius) border bg-surface-dark/90 p-2 transition-colors duration-150
-        ${selected
-          ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[rgba(15,23,42,0.22)] hover:border-[rgba(15,23,42,0.34)] dark:border-[rgba(255,255,255,0.22)] dark:hover:border-[rgba(255,255,255,0.34)]'}
-      `}
-      style={{ width: `${resolvedNodeWidth}px`, height: `${resolvedNodeHeight}px` }}
-      onClick={() => setSelectedNode(id)}
+    <NodeFrame
+      type={CANVAS_NODE_TYPES.storyboardSplit}
+      selected={selected}
+      icon={<SplitResultIcon />}
+      title={resolvedTitle}
+      onRename={(displayName) => updateNodeData(id, { displayName })}
+      meta={`${gridRows} x ${gridCols} · ${totalFrames} 格 · ${frameAspectRatio}`}
+      status={exportError ? { kind: 'error', label: exportError } : null}
+      badges={isAnyExporting ? <span className="node-frame__badge">{isPackingSingleImages ? '打包中...' : '导出中...'}</span> : null}
+      actions={(
+        <>
+          <div ref={exportSettingsTriggerRef} className="nodrag relative flex">
+            <button
+              type="button"
+              className="nodrag"
+              aria-label="导出设置"
+              title="导出设置"
+              aria-expanded={isExportPanelOpen}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (isExportPanelOpen) {
+                  setIsExportPanelOpen(false);
+                  return;
+                }
+                setExportPanelAnchor(getPanelAnchor(exportSettingsTriggerRef.current));
+                setIsExportPanelOpen(true);
+              }}
+            >
+              <SlidersHorizontal />
+            </button>
+          </div>
+          <button
+            type="button"
+            className="nodrag"
+            aria-label={isPackingSingleImages ? '打包中...' : '打包下载'}
+            title={isPackingSingleImages ? '打包中...' : '打包下载'}
+            onClick={(event) => {
+              event.stopPropagation();
+              void handlePackSingleImages();
+            }}
+            disabled={isAnyExporting}
+          >
+            <FolderOpen />
+          </button>
+          <button
+            type="button"
+            className="nodrag"
+            aria-label={isExporting ? '导出中...' : '合并分镜'}
+            title={isExporting ? '导出中...' : '合并分镜'}
+            onClick={(event) => {
+              event.stopPropagation();
+              void handleExport();
+            }}
+            disabled={isAnyExporting}
+          >
+            <Download />
+          </button>
+        </>
+      )}
+      variant="media"
+      width={resolvedNodeWidth}
+      height={resolvedNodeHeight}
+      resize={{ minWidth: STORYBOARD_NODE_WIDTH_PX, minHeight: STORYBOARD_NODE_MIN_HEIGHT_PX, maxWidth: 1800, maxHeight: 1600 }}
+      className="group"
     >
-      <NodeHeader
-        className={NODE_HEADER_FLOATING_POSITION_CLASS}
-        icon={<SplitResultIcon className="h-3.5 w-3.5" />}
-        titleText={resolvedTitle}
-        headerAdjust={STORYBOARD_SPLIT_HEADER_ADJUST}
-        iconAdjust={STORYBOARD_SPLIT_ICON_ADJUST}
-        titleAdjust={STORYBOARD_SPLIT_TITLE_ADJUST}
-        editable
-        onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
-      />
+      <div ref={rootRef} className="flex h-full min-h-0 flex-col" onClick={() => setSelectedNode(id)}>
 
       <div
         className="ui-scrollbar nowheel min-h-0 flex-1 overflow-auto"
         onWheelCapture={(event) => event.stopPropagation()}
       >
         <div
-          className="grid overflow-hidden rounded-lg border border-[rgba(255,255,255,0.16)] bg-[rgba(255,255,255,0.14)]"
+          className="grid overflow-hidden rounded-lg border border-(--canvas-node-border) bg-(--line-strong)"
           style={{
             gap: `${STORYBOARD_GRID_GAP_PX}px`,
             gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
@@ -1047,7 +1088,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
         ? createPortal(
           <div
             ref={pickerMenuRef}
-            className="nowheel fixed z-140 w-[120px] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.16)] bg-surface-dark shadow-xl"
+            className="nowheel fixed z-140 w-[120px] overflow-hidden rounded-xl border border-(--canvas-node-border) bg-(--canvas-node-menu-bg) shadow-(--shadow-pop)"
             style={{ left: `${pickerState.x}px`, top: `${pickerState.y}px` }}
             onMouseDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
@@ -1058,26 +1099,28 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
                 onWheelCapture={(event) => event.stopPropagation()}
               >
                 {incomingImageItems.map((item) => (
-                  <button
+                  <MenuItem
                     key={`${pickerState.frameId}-${item.imageUrl}`}
-                    type="button"
-                    className="flex w-full items-center gap-2 border border-transparent bg-bg-dark/70 px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[rgba(255,255,255,0.18)]"
+                    className="flex w-full items-center gap-2 px-2 py-2 text-left text-sm"
                     onClick={(event) => {
                       event.stopPropagation();
                       handleReplaceFromInput(pickerState.frameId, item.imageUrl);
                     }}
                     title={item.label}
-                  >
-                    <CanvasNodeImage
-                      src={item.displayUrl}
-                      alt={item.label}
-                      viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl)}
-                      viewerImageList={incomingImageViewerList}
-                      className="h-8 w-8 rounded-sm object-cover"
-                      draggable={false}
-                    />
-                    <span className="truncate">{item.label}</span>
-                  </button>
+                    label={(
+                      <span className="flex items-center gap-2">
+                        <CanvasNodeImage
+                          src={item.displayUrl}
+                          alt={item.label}
+                          viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl)}
+                          viewerImageList={incomingImageViewerList}
+                          className="h-8 w-8 shrink-0 rounded-sm object-cover"
+                          draggable={false}
+                        />
+                        <span className="truncate">{item.label}</span>
+                      </span>
+                    )}
+                  />
                 ))}
               </div>
             ) : (
@@ -1090,61 +1133,6 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
         )
         : null}
 
-      <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <div ref={exportSettingsTriggerRef} className="nodrag relative flex">
-            <UiChipButton
-              active={isExportPanelOpen}
-              className={NODE_CONTROL_CHIP_CLASS}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (isExportPanelOpen) {
-                  setIsExportPanelOpen(false);
-                  return;
-                }
-                setExportPanelAnchor(getPanelAnchor(exportSettingsTriggerRef.current));
-                setIsExportPanelOpen(true);
-              }}
-            >
-              <SlidersHorizontal className={`${NODE_CONTROL_ICON_CLASS} shrink-0`} />
-              <span>导出设置</span>
-            </UiChipButton>
-          </div>
-
-          <div className="truncate text-[11px] text-text-muted/80">
-            {gridRows} x {gridCols} | {totalFrames} 格
-          </div>
-        </div>
-
-        <div className="flex min-w-0 items-center gap-2">
-          <UiButton
-            size="sm"
-            variant="muted"
-            className={`nodrag ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              void handlePackSingleImages();
-            }}
-            disabled={isAnyExporting}
-          >
-            <FolderOpen className={NODE_CONTROL_ICON_CLASS} />
-            {isPackingSingleImages ? '打包中...' : '打包下载'}
-          </UiButton>
-          <UiButton
-            size="sm"
-            variant="primary"
-            className={`nodrag ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              void handleExport();
-            }}
-            disabled={isAnyExporting}
-          >
-            <Download className={NODE_CONTROL_ICON_CLASS} />
-            {isExporting ? '导出中...' : '合并分镜'}
-          </UiButton>
-        </div>
-      </div>
 
       {typeof document !== 'undefined' && isExportPanelOpen && createPortal(
         <div
@@ -1250,20 +1238,20 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
               <div className="grid grid-cols-2 gap-2">
                 <label className="flex items-center gap-2">
                   <span>背景</span>
-                  <input
+                  <UiInput
                     type="color"
                     value={exportOptions.backgroundColor}
                     onChange={(event) => patchExportOptions({ backgroundColor: event.target.value })}
-                    className="h-7 w-full rounded-sm border border-[rgba(255,255,255,0.14)] bg-transparent"
+                    className="h-7 w-full rounded-sm border border-(--line-strong) bg-transparent"
                   />
                 </label>
                 <label className="flex items-center gap-2">
                   <span>文字</span>
-                  <input
+                  <UiInput
                     type="color"
                     value={exportOptions.textColor}
                     onChange={(event) => patchExportOptions({ textColor: event.target.value })}
-                    className="h-7 w-full rounded-sm border border-[rgba(255,255,255,0.14)] bg-transparent"
+                    className="h-7 w-full rounded-sm border border-(--line-strong) bg-transparent"
                   />
                 </label>
               </div>
@@ -1273,41 +1261,23 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
         document.body
       )}
 
-      {exportError && <div className="mt-2 shrink-0 text-xs text-red-400">{exportError}</div>}
+      {exportError && <div className="mt-2 shrink-0 text-xs text-danger">{exportError}</div>}
 
-      <Handle
-        type="target"
-        id="target"
-        position={Position.Left}
-        className="h-2! w-2! border-surface-dark! bg-accent!"
-      />
-      <Handle
-        type="source"
-        id="source"
-        position={Position.Right}
-        className="h-2! w-2! border-surface-dark! bg-accent!"
-      />
-      <NodeResizeHandle
-        minWidth={STORYBOARD_NODE_WIDTH_PX}
-        minHeight={STORYBOARD_NODE_MIN_HEIGHT_PX}
-        maxWidth={1800}
-        maxHeight={1600}
-      />
 
       {typeof document !== 'undefined' && isPackDoneDialogOpen
         ? createPortal(
           <div className="fixed inset-0 z-220 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/55" />
+            <div className="absolute inset-0 bg-(--scrim)" />
             <UiPanel className="relative w-[440px] p-4">
               <div className="text-sm font-medium text-text-dark">导出完成</div>
               <div className="mt-2 text-xs text-text-muted">图片已导出到以下路径：</div>
-              <div className="mt-1 break-all rounded-sm border border-[rgba(255,255,255,0.12)] bg-bg-dark/70 px-2 py-1.5 text-xs text-text-dark">
+              <div className="mt-1 break-all rounded-sm border border-(--canvas-node-field-border) bg-(--canvas-node-field-bg) px-2 py-1.5 text-xs text-text-dark">
                 {packOutputDir}
               </div>
               <div className="mt-4 flex justify-end gap-2">
                 <UiButton
                   size="sm"
-                  variant="muted"
+                  variant="secondary"
                   onClick={() => {
                     void handleOpenPackFolder();
                   }}
@@ -1327,7 +1297,8 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
           document.body
         )
         : null}
-    </div>
+      </div>
+    </NodeFrame>
   );
 });
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { buildCanvasAssetCatalog } from '@/features/canvas/application/canvasAssetCatalog';
 import { prepareNodeImageFromFile } from '@/features/canvas/application/imageData';
+import { selectCanvasContentNodes } from '@/features/canvas/application/canvasContentSelector';
 import { CANVAS_NODE_TYPES } from '@/features/canvas/domain/canvasNodes';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useProjectStore } from '@/stores/projectStore';
@@ -14,7 +15,7 @@ import type { AgentTurnMediaInput } from '../domain/agentModel';
 
 export function useCanvasAgentAttachments(projectId: string) {
   const { t } = useTranslation();
-  const canvasNodes = useCanvasStore((canvas) => canvas.nodes);
+  const canvasNodes = useCanvasStore((canvas) => selectCanvasContentNodes(canvas.nodes));
   const [attachments, setAttachments] = useState<AgentTurnMediaInput[]>([]);
   const [isPickerOpen, setPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +60,25 @@ export function useCanvasAgentAttachments(projectId: string) {
       return;
     }
     toggle(asset);
+  };
+
+  /** Attach each node's newest image (selection toolbar "add to chat"); stops at the attachment limit. */
+  const attachNodes = (nodeIds: readonly string[]) => {
+    const additions = nodeIds.flatMap((nodeId) => {
+      const asset = imageAssets
+        .filter((candidate) => candidate.nodeId === nodeId)
+        .sort((left, right) => right.order - left.order)[0];
+      return asset ? [createAgentCanvasMediaInput(asset)] : [];
+    });
+    if (!additions.length) {
+      setError(t('canvasAgent.noImageOnSelection'));
+      return;
+    }
+    setError(null);
+    setAttachments((current) => [
+      ...current,
+      ...additions.filter((item) => !current.some((attachment) => attachment.assetId === item.assetId)),
+    ].slice(0, MAX_AGENT_MEDIA_ATTACHMENTS));
   };
 
   const upload = async (files: File[]) => {
@@ -122,6 +142,7 @@ export function useCanvasAgentAttachments(projectId: string) {
     reset,
     toggle,
     attachSelectedNode,
+    attachNodes,
     upload,
     openPicker: () => {
       setError(null);

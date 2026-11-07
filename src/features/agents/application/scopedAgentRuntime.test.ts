@@ -18,15 +18,18 @@ describe('SDK scoped tool exposure', () => {
     };
     const runtime = createStoryboardAgentRuntime({ resolveModel: () => reference, transport });
     const agent = createCanvasAgent({ runtime, scope, modelName: reference.catalogId, supportsVision: true,
-      skillContext: { text: scope === 'canvas' ? '帮我创建图片节点并查询画布' : 'hello' },
+      skillContext: { text: scope === 'canvas' ? '帮我创建图片节点并查询知识库笔记' : 'hello' },
       context: { projectId: 'p', runId: `run-${scope}` },
     });
     const result = await runtime.runner.run(agent, 'hello');
     expect(result.finalOutput).toBe('ready');
     const names = captured?.tools.map((tool) => tool.name) ?? [];
+    for (const name of ['kb_search', 'kb_read', 'kb_write', 'kb_organize']) expect(names).toContain(name);
     if (scope === 'home') {
       expect(names).toContain('project_list');
       expect(names).toContain('canvas_open_plan');
+      expect(names).toContain('channel_preview');
+      expect(names).toContain('channel_create');
       expect(names).not.toContain('stage_command');
       expect(names).not.toContain('canvas_command');
     } else if (scope === 'stage') {
@@ -44,12 +47,13 @@ describe('SDK scoped tool exposure', () => {
     }
   });
 
-  it('filters calls against the exact surface allowlist including namespaces', () => {
+  it('preserves all unexposed calls for explicit SDK rejection without dropping their ids', () => {
     const calls = [
       { callId: 'home', name: 'project_list', arguments: '{}' },
       { callId: 'wrong', name: 'canvas_command', arguments: '{"type":"node.delete","input":{"nodeIds":["n"]}}' },
       { callId: 'forged', name: 'stage_command', namespace: 'storyboard_canvas', arguments: '{}' },
+      { callId: 'invented', name: 'invented_tool', arguments: '{}' },
     ];
-    expect(normalizeStoryboardAgentToolCalls(calls, [{ name: 'project_list' }])).toEqual([calls[0]]);
+    expect(normalizeStoryboardAgentToolCalls(calls)).toEqual(calls);
   });
 });

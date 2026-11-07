@@ -1,6 +1,8 @@
 import type { ComponentProps, RefObject } from 'react';
-import { Bot, CheckCheck, ChevronRight, Plus, Wrench, XCircle } from 'lucide-react';
+import { Bot, CheckCheck, ChevronRight, Plus, ShieldCheck, Wrench, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { UiButton } from '@/components/ui';
+import { AgentEmptyState } from '@/features/agents/ui/AgentThread';
 import { canvasAgentBudgetLedger } from '../application/agentBudget';
 import type { AgentPlanDraft } from '../application/agentPlan';
 import { AgentFeedCard } from './AgentFeedCard';
@@ -79,8 +81,33 @@ type Props = {
   onPlanConfirm: (item: Extract<AgentFeedItem, { kind: 'plan' }>) => void;
   onPlanCancel: (item: Extract<AgentFeedItem, { kind: 'plan' }>) => void;
   onRollback: (item: Extract<AgentFeedItem, { kind: 'tool' }>) => void;
+  onWithdrawTurn?: (item: Extract<AgentFeedItem, { kind: 'status' }>) => void;
   onJumpToLatest: () => void;
 };
+
+type ApprovalItem = Extract<AgentFeedItem, { kind: 'approval' }>;
+
+function approvalCommandType(item: ApprovalItem): string {
+  const args = item.arguments;
+  return args && typeof args === 'object' && 'type' in args && typeof args.type === 'string' ? args.type : '';
+}
+
+/**
+ * UI projection only: same run + tool + command type become one card; each approval is still resolved
+ * individually. Paid/external work stays one card per approval so cost and budget checks remain visible.
+ */
+function groupPendingApprovals(items: readonly ApprovalItem[]): ApprovalItem[][] {
+  const groups = new Map<string, ApprovalItem[]>();
+  for (const item of items) {
+    const key = item.impact.externalSideEffect || item.toolName === 'request_user_input'
+      ? item.id
+      : `${item.runtimeId ?? 'builtin'}\u0000${item.runId}\u0000${item.toolName}\u0000${approvalCommandType(item)}`;
+    const group = groups.get(key);
+    if (group) group.push(item);
+    else groups.set(key, [item]);
+  }
+  return [...groups.values()];
+}
 
 export function CanvasAgentFeedViewport({
   projectId,
@@ -106,14 +133,18 @@ export function CanvasAgentFeedViewport({
   onPlanConfirm,
   onPlanCancel,
   onRollback,
+  onWithdrawTurn,
   onJumpToLatest,
 }: Props) {
   const { t } = useTranslation();
   const pendingApprovals = displayedFeed.filter(
-    (item): item is Extract<AgentFeedItem, { kind: 'approval' }> => (
+    (item): item is ApprovalItem => (
       item.kind === 'approval' && item.status === 'pending' && item.expiresAt > Date.now()
     ),
   );
+  const actionableApprovals = pendingApprovals.filter(item => item.toolName !== 'request_user_input');
+  const onlyQuestions = pendingApprovals.length > 0 && actionableApprovals.length === 0;
+  const approvalGroups = groupPendingApprovals(pendingApprovals);
   const regularFeed = pendingApprovals.length
     ? displayedFeed.filter((item) => item.kind !== 'approval' || item.status !== 'pending' || item.expiresAt <= Date.now())
     : displayedFeed;
@@ -135,28 +166,29 @@ export function CanvasAgentFeedViewport({
         <div key={activeView} className="agent-view-enter">
           {activeView === 'history' ? (
             <div className="space-y-2">
-              <button
-                type="button"
+              <UiButton
+                variant="secondary"
                 disabled={isRunning || pendingCount > 0 || hasPendingPlan}
-                className="flex min-h-11 w-full items-center gap-2 rounded-[5px] border border-border-dark px-3 text-xs text-text-dark transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60"
+                className="min-h-11 w-full justify-start gap-2 text-xs"
                 onClick={onStartConversation}
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                 {t('canvasAgent.newConversation')}
-              </button>
+              </UiButton>
               {sessions.length ? sessions.map((session) => (
-                <button
+                <UiButton
+                  variant="ghost"
                   key={session.id}
                   type="button"
                   disabled={isRunning || pendingCount > 0 || hasPendingPlan}
-                  className="w-full rounded-[5px] border border-border-dark/60 px-3 py-2.5 text-left transition-[background-color,border-color,transform,translate,scale,rotate] duration-150 hover:border-border-dark hover:bg-text-dark/4 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60"
+                  className="h-auto w-full flex-col items-stretch rounded-[5px] border border-[var(--line)] px-3 py-2.5 text-left hover:border-[var(--line-strong)]"
                   onClick={() => onLoadSession(session.id)}
                 >
                   <div className="truncate text-xs text-text-dark">{session.title}</div>
                   <div className="mt-1 text-[10px] text-text-muted">
                     {new Date(session.updatedAt).toLocaleString()}
                   </div>
-                </button>
+                </UiButton>
               )) : (
                 <div className="px-3 py-8 text-center text-xs text-text-muted">
                   {t('canvasAgent.noHistory')}
@@ -164,15 +196,15 @@ export function CanvasAgentFeedViewport({
               )}
             </div>
           ) : displayedFeed.length ? (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               {visibleRegularFeed.map((item) => item.kind === 'tool-group' ? (
-                <details key={item.id} className="agent-feed-enter rounded-[6px] border border-sky-500/20 bg-sky-500/4.5 text-xs text-text-muted">
-                  <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-1.5 marker:content-none">
-                    <Wrench className="h-3.5 w-3.5 shrink-0 text-sky-600 dark:text-sky-300" aria-hidden="true" />
-                    <span>{t('canvasAgent.completedToolCount', { count: item.tools.length })}</span>
-                    <ChevronRight className="ml-auto h-3.5 w-3.5" aria-hidden="true" />
+                <details key={item.id} className="agent-feed-enter min-w-0 text-xs text-text-muted">
+                  <summary className="agent-step cursor-pointer list-none marker:content-none">
+                    <span className="agent-step__icon"><Wrench aria-hidden="true" /></span>
+                    <span className="agent-step__detail">{t('canvasAgent.completedToolCount', { count: item.tools.length })}</span>
+                    <ChevronRight className="agent-step__chevron" aria-hidden="true" />
                   </summary>
-                  <div className="space-y-1 border-t border-sky-500/15 p-1.5">
+                  <div className="agent-step-body flex flex-col gap-0.5">
                     {item.tools.map((tool) => (
                       <AgentFeedCard key={tool.id} item={tool} onApproval={onApproval} onLocate={onLocate} onRestoreDraft={onRestoreDraft} onDiagnose={onDiagnose} onPlanChange={onPlanChange} onPlanConfirm={onPlanConfirm} onPlanCancel={onPlanCancel} onBudgetLimitChange={(limit) => { canvasAgentBudgetLedger.setLimit(projectId, limit); }} onRollback={onRollback} />
                     ))}
@@ -194,21 +226,24 @@ export function CanvasAgentFeedViewport({
                     : undefined}
                   onBudgetLimitChange={(limit) => { canvasAgentBudgetLedger.setLimit(projectId, limit); }}
                   onRollback={onRollback}
+                  onWithdrawTurn={onWithdrawTurn}
+                  decisionsLocked={isRunning}
                 />
               ))}
               {pendingApprovals.length ? (
-                <section className="agent-feed-enter overflow-hidden rounded-[8px] border border-amber-500/35 bg-amber-500/4.5" aria-label={t('canvasAgent.approvalQueueTitle')}>
-                  <header className="flex items-center justify-between border-b border-amber-500/20 px-3 py-2.5">
-                    <div>
-                      <div className="text-xs font-semibold text-text-dark">{t('canvasAgent.approvalQueueTitle')}</div>
-                      <div className="mt-0.5 text-[10px] text-text-muted">{t('canvasAgent.approvalQueueCount', { count: pendingApprovals.length })}</div>
-                    </div>
-                  </header>
-                  <div className="ui-scrollbar max-h-[min(46vh,420px)] space-y-2 overflow-y-auto p-2.5">
-                    {pendingApprovals.map((item) => (
+                <section className={onlyQuestions ? 'agent-feed-enter' : 'agent-feed-enter rounded-[18px] bg-warning/[0.06] p-1.5'} aria-label={t(onlyQuestions ? 'canvasAgent.question.title' : 'canvasAgent.approvalQueueTitle')}>
+                  {!onlyQuestions ? <header className="flex items-center gap-2 px-2 pb-1.5 pt-1.5">
+                    <p className="agent-card__eyebrow text-warning">
+                      <ShieldCheck aria-hidden="true" />
+                      <span>{t(onlyQuestions ? 'canvasAgent.question.title' : 'canvasAgent.approvalQueueTitle')}</span>
+                    </p>
+                    {!onlyQuestions ? <span className="ml-auto text-[11px] text-text-subtle">{t('canvasAgent.approvalQueueCount', { count: actionableApprovals.length })}</span> : null}
+                  </header> : null}
+                  <div className={onlyQuestions ? 'flex flex-col gap-2' : 'ui-scrollbar flex max-h-[min(46vh,420px)] flex-col gap-2 overflow-y-auto'}>
+                    {approvalGroups.map((group) => group.length === 1 ? (
                       <AgentFeedCard
-                        key={item.id}
-                        item={item}
+                        key={group[0].id}
+                        item={group[0]}
                         onApproval={onApproval}
                         onLocate={onLocate}
                         onRestoreDraft={onRestoreDraft}
@@ -216,53 +251,73 @@ export function CanvasAgentFeedViewport({
                         onPlanChange={onPlanChange}
                         onPlanConfirm={onPlanConfirm}
                         onPlanCancel={onPlanCancel}
-                        budgetDecision={canvasAgentBudgetLedger.evaluate(projectId, item.impact)}
+                        budgetDecision={canvasAgentBudgetLedger.evaluate(projectId, group[0].impact)}
                         onBudgetLimitChange={(limit) => { canvasAgentBudgetLedger.setLimit(projectId, limit); }}
                         onRollback={onRollback}
+                        decisionsLocked={isRunning}
                       />
+                    ) : (
+                      <article key={group[0].id} className="agent-card" aria-label={t('canvasAgent.mergedApprovalTitle', { count: group.length })}>
+                        <div className="flex items-center gap-2">
+                          <h3 className="agent-card__title mt-0 min-w-0 flex-1">{group[0].summary}</h3>
+                          <span className="rounded-full bg-warning/15 px-1.5 text-[10px] text-warning">×{group.length}</span>
+                        </div>
+                        <p className="agent-card__body">{t('canvasAgent.mergedApprovalHint', { count: group.length })}</p>
+                        <ol className="ui-scrollbar mt-2 max-h-40 list-decimal space-y-1 overflow-y-auto pl-5 text-[11.5px] leading-4 text-text-muted">
+                          {group.map((item) => <li key={item.id} className="wrap-break-word">{item.impact.summary || item.summary}</li>)}
+                        </ol>
+                        <div className="agent-card__actions">
+                          <UiButton variant="secondary" disabled={isRunning} className="min-h-9 text-xs" onClick={() => onBatchApproval(group, false)}>
+                            {t('canvasAgent.rejectGroup', { count: group.length })}
+                          </UiButton>
+                          <UiButton variant="primary" disabled={isRunning} className="min-h-9 text-xs" onClick={() => onBatchApproval(group, true)}>
+                            {t('canvasAgent.approveGroup', { count: group.length })}
+                          </UiButton>
+                        </div>
+                      </article>
                     ))}
                   </div>
-                  <footer className="sticky bottom-0 grid grid-cols-2 gap-2 border-t border-amber-500/20 bg-(--ui-surface-panel) p-2.5 shadow-[0_-8px_20px_rgba(0,0,0,0.06)]">
-                    <button
-                      type="button"
+                  {actionableApprovals.length > 1 ? <footer className="sticky bottom-0 mt-1.5 grid grid-cols-2 gap-2 rounded-[14px] bg-elevated p-2 shadow-[var(--shadow-pop)]">
+                    <UiButton
+                      variant="primary"
                       disabled={isRunning}
-                      className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[6px] bg-accent px-3 text-xs font-semibold text-white transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-accent/85 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/70"
-                      onClick={() => onBatchApproval(pendingApprovals, true)}
+                      className="min-h-11 gap-1.5 text-xs"
+                      onClick={() => onBatchApproval(actionableApprovals, true)}
                     >
                       <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />
                       {t('canvasAgent.approveAll')}
-                    </button>
-                    <button
-                      type="button"
+                    </UiButton>
+                    <UiButton
+                      variant="secondary"
                       disabled={isRunning}
-                      className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[6px] border border-border-dark px-3 text-xs text-text-dark transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-text-dark/5 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60"
-                      onClick={() => onBatchApproval(pendingApprovals, false)}
+                      className="min-h-11 gap-1.5 text-xs"
+                      onClick={() => onBatchApproval(actionableApprovals, false)}
                     >
                       <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
                       {t('canvasAgent.rejectAll')}
-                    </button>
-                  </footer>
+                    </UiButton>
+                  </footer> : null}
                 </section>
               ) : null}
             </div>
           ) : (
-            <div className="flex min-h-56 flex-col items-center justify-center px-8 text-center">
-              <Bot className="mb-3 h-7 w-7 text-accent" aria-hidden="true" />
-              <div className="text-sm font-medium text-text-dark">{t('canvasAgent.emptyTitle')}</div>
-              <div className="mt-2 text-xs leading-5 text-text-muted">{t('canvasAgent.emptyDescription')}</div>
-            </div>
+            <AgentEmptyState
+              icon={<Bot className="h-7 w-7" />}
+              title={t('canvasAgent.emptyTitle')}
+              description={t('canvasAgent.emptyDescription')}
+            />
           )}
         </div>
       )}
 
       {activeView !== 'tasks' && showNewItems ? (
-        <button
-          type="button"
-          className="sticky bottom-2 left-1/2 z-10 mx-auto flex min-h-11 -translate-x-1/2 items-center rounded-full border border-accent/35 bg-bg-dark px-3 text-xs text-accent shadow-lg transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-accent/10 active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/60 sm:min-h-10"
+        <UiButton
+          variant="secondary"
+          className="sticky bottom-2 left-1/2 z-10 mx-auto flex min-h-11 -translate-x-1/2 rounded-full text-xs shadow-[var(--shadow-pop)] sm:min-h-10"
           onClick={onJumpToLatest}
         >
           {t('canvasAgent.newItems')}
-        </button>
+        </UiButton>
       ) : null}
     </div>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bot, CheckCircle2, Clipboard, Loader2, Sparkles } from 'lucide-react';
+import { Bot, CheckCircle2, Clipboard, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { UiButton, UiModal, UiSelect, UiTextArea } from '@/components/ui/primitives';
@@ -11,7 +11,7 @@ import {
   sanitizeProviderDocumentationForAi,
 } from '@/features/canvas/application/customImageProviderAiPrompt';
 import type { CustomImageProviderDraft } from '@/features/canvas/application/customImageProviderConfig';
-import { submitCustomChatCompletion } from '@/features/canvas/infrastructure/customProviderGateway';
+import { submitCustomChatCompletion } from '@/features/channels/runtime/channelChat';
 
 interface CustomProviderConfigAssistantDialogProps {
   isOpen: boolean;
@@ -120,7 +120,7 @@ export function CustomProviderConfigAssistantDialog({
             </UiButton>
           )}
           <div className="ml-auto flex gap-2">
-            <UiButton type="button" variant="muted" size="sm" onClick={onClose}>
+            <UiButton type="button" variant="secondary" size="sm" onClick={onClose}>
               {t('common.close')}
             </UiButton>
             {showExternalFallback && (
@@ -162,7 +162,7 @@ export function CustomProviderConfigAssistantDialog({
             ))}
           </UiSelect>
           {usableCatalog.length === 0 && (
-            <span className="mt-2 block text-[11px] leading-5 text-amber-300">
+            <span className="mt-2 block text-[11px] leading-5 text-warning">
               {t('settings.customProviders.assistant.noUsableModelHelp')}
             </span>
           )}
@@ -183,10 +183,11 @@ export function CustomProviderConfigAssistantDialog({
             type="button"
             variant="primary"
             size="sm"
-            disabled={loading || !selectedModelId || !documentation.trim()}
+            loading={loading}
+            icon={<Sparkles />}
+            disabled={!selectedModelId || !documentation.trim()}
             onClick={() => { void handleGenerate(); }}
           >
-            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
             {loading
               ? t('settings.customProviders.assistant.generating')
               : t('settings.customProviders.assistant.generate')}
@@ -194,8 +195,8 @@ export function CustomProviderConfigAssistantDialog({
         </div>
 
         {showExternalFallback && (
-          <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3">
-            <div className="text-xs font-medium text-amber-200">
+          <div className="rounded-lg border border-warning/25 bg-warning/8 p-3">
+            <div className="text-xs font-medium text-warning">
               {t('settings.customProviders.assistant.fallbackTitle')}
             </div>
             <p className="mt-1 text-[11px] leading-5 text-text-muted">
@@ -217,13 +218,13 @@ export function CustomProviderConfigAssistantDialog({
         )}
 
         {generated && (
-          <div className="flex items-center gap-1.5 text-xs text-emerald-400">
+          <div className="flex items-center gap-1.5 text-xs text-success">
             <CheckCircle2 className="h-3.5 w-3.5" />
             {t('settings.customProviders.assistant.appliedNotice')}
           </div>
         )}
         {error && (
-          <pre className="whitespace-pre-wrap rounded-lg border border-red-500/25 bg-red-500/5 p-3 text-[11px] leading-5 text-red-300">
+          <pre className="whitespace-pre-wrap rounded-lg border border-danger/25 bg-danger/8 p-3 text-[11px] leading-5 text-danger">
             {error}
           </pre>
         )}

@@ -9,7 +9,6 @@ import {
 } from '../domain/canvasCommands';
 import { CANVAS_NODE_TYPES } from '../domain/canvasNodes';
 import { canvasCommandRegistry } from './canvasCommandService';
-import { canvasEventBus } from './canvasServices';
 import { CanvasTransactionCoordinator } from './canvasTransactionCoordinator';
 
 function resetCanvas(): void {
@@ -49,7 +48,7 @@ function createAtomicGraphTransaction(expectedRevision = 0): CanvasTransaction {
         input: {
           nodeType: CANVAS_NODE_TYPES.imageEdit,
           nodeId: 'target-node',
-          position: { x: 400, y: 20 },
+          position: { x: 600, y: 20 },
           configuration: { prompt: 'Continuation' },
         },
       },
@@ -107,7 +106,7 @@ describe('CanvasCommandRegistry transactions', () => {
     });
     expect(useCanvasStore.getState()).toMatchObject({
       revision: 1,
-      history: { past: [{ nodes: [], edges: [] }], future: [] },
+      history: { past: [expect.objectContaining({ version: 1 })], future: [] },
     });
     expect(useCanvasStore.getState().nodes.map((node) => node.id)).toEqual(['source-node', 'target-node']);
     expect(useCanvasStore.getState().edges.map((edge) => edge.id)).toEqual(['stable-edge']);
@@ -550,6 +549,24 @@ describe('CanvasCommandRegistry transactions', () => {
       });
   });
 
+  it.each([CANVAS_NODE_TYPES.imageEdit, CANVAS_NODE_TYPES.aiVideo])('accepts agent mode/slot configuration for %s without submitting generation', async (nodeType) => {
+    const created = await canvasCommandRegistry.execute({ type: 'node.create', version: CANVAS_COMMAND_VERSION,
+      input: { nodeType, nodeId: 'mode-node', position: { x: 0, y: 0 }, configuration: {
+        modelId: 'custom:channel:model', prompt: 'Frames', modeId: 'frames', referenceSlots: { first_frame: ['/first.png'] },
+      } } }, 'agent');
+    expect(created.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes[0].data).toMatchObject({ channelModeId: 'frames', referenceSlots: { first_frame: ['/first.png'] } });
+    const changed = await canvasCommandRegistry.execute({ type: 'node.setModelConfig', version: CANVAS_COMMAND_VERSION,
+      input: { nodeId: 'mode-node', modelId: 'custom:channel:model', modeId: 'text', referenceSlots: {} } }, 'agent');
+    expect(changed.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes[0].data).toMatchObject({ channelModeId: 'text', referenceSlots: {} });
+    expect(useCanvasStore.getState().nodes[0].data.generationJobId).toBeUndefined();
+    const invalid = await canvasCommandRegistry.execute({ type: 'node.setModelConfig', version: CANVAS_COMMAND_VERSION,
+      input: { nodeId: 'mode-node', modelId: 'custom:channel:model', referenceSlots: { first_frame: [4] } } } as never, 'agent');
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'invalid_command' } });
+    expect(useCanvasStore.getState().nodes[0].data.referenceSlots).toEqual({});
+  });
+
   it('creates a Director Studio node in the requested mode through the shared command boundary', async () => {
     const result = await canvasCommandRegistry.execute({
       type: 'node.create',
@@ -588,6 +605,34 @@ describe('CanvasCommandRegistry transactions', () => {
         code: 'invalid_command',
         message: 'configuration.directorStudioMode must be flat or panorama.',
       },
+    });
+
+    const previs = await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: CANVAS_NODE_TYPES.blueprint,
+        nodeId: 'previs-director-node',
+        position: { x: 0, y: 0 },
+        configuration: { openDirectorStudio: true, directorStudioWorkspace: 'previs' },
+      },
+    }, 'ui');
+    expect(previs.ok).toBe(true);
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === 'previs-director-node')?.data)
+      .toMatchObject({ openDirectorStudioOnCreate: 'previs' });
+
+    const invalidWorkspace = await canvasCommandRegistry.execute({
+      type: 'node.create',
+      version: CANVAS_COMMAND_VERSION,
+      input: {
+        nodeType: CANVAS_NODE_TYPES.blueprint,
+        position: { x: 0, y: 0 },
+        configuration: { openDirectorStudio: true, directorStudioWorkspace: 'timeline' },
+      },
+    } as never, 'ui');
+    expect(invalidWorkspace).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_command', message: 'configuration.directorStudioWorkspace must be director or previs.' },
     });
   });
 
@@ -1046,33 +1091,27 @@ describe('CanvasCommandRegistry read and generation facades', () => {
     });
   });
 
-  it('reports generation dispatch as accepted without presenting a stale job id as a new receipt', async () => {
+  it('does not accept or dispatch a second generation for a busy node', async () => {
     useCanvasStore.getState().addNode(CANVAS_NODE_TYPES.imageEdit, { x: 0, y: 0 }, {
       generationJobId: 'job-42',
       isGenerating: true,
     });
     const nodeId = useCanvasStore.getState().nodes[0].id;
-    const triggered: string[] = [];
-    const unsubscribe = canvasEventBus.subscribe('generation-node/trigger', ({ nodeId: triggeredId }) => {
-      triggered.push(triggeredId);
-    });
 
     const result = await canvasCommandRegistry.execute({
       type: 'generation.submit',
       version: CANVAS_COMMAND_VERSION,
       input: { nodeIds: [nodeId] },
     }, 'ui');
-    unsubscribe();
 
     expect(result).toMatchObject({
       ok: true,
       output: {
-        references: { nodeIds: [nodeId] },
-        value: { acceptedNodeIds: [nodeId], status: 'accepted' },
+        references: { nodeIds: [] },
+        value: { acceptedNodeIds: [], status: 'accepted' },
       },
     });
     expect(result.ok ? result.output.references.jobIds : undefined).toBeUndefined();
-    expect(triggered).toEqual([nodeId]);
 
     const status = await canvasCommandRegistry.execute({
       type: 'generation.status',
@@ -1136,7 +1175,7 @@ describe('CanvasCommandRegistry read and generation facades', () => {
       node.type === CANVAS_NODE_TYPES.exportImage
     ))?.id as string;
     useCanvasStore.getState().updateNodeData(resultNodeId, { generationJobId: 'linked-job' });
-    useCanvasStore.getState().addEdge(sourceNodeId, resultNodeId);
+    useCanvasStore.getState().addEdge(sourceNodeId, resultNodeId, { provenance: 'generationResult' });
 
     const status = await canvasCommandRegistry.execute({
       type: 'generation.status',

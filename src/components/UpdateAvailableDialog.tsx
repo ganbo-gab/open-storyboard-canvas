@@ -52,7 +52,7 @@ export function UpdateAvailableDialog({
       title={t('update.dialogTitle')}
       footer={(
         <>
-          <UiButton variant="muted" onClick={onClose}>
+          <UiButton variant="secondary" onClick={onClose}>
             {t('common.cancel')}
           </UiButton>
           <UiButton variant="primary" onClick={handleOpenGithub} disabled={!GITHUB_RELEASES_URL}>

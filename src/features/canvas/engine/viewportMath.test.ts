@@ -31,6 +31,11 @@ describe('guessWheelDevice', () => {
     expect(guessWheelDevice(sample({ deltaY: 3, deltaMode: 1 }))).toBe('mouse');
   });
 
+  it('treats a notch shrunk by display scaling (125%) as a mouse', () => {
+    // Chromium at 1.25x reports -96 px and a legacy delta of 96, not a multiple of 120.
+    expect(guessWheelDevice(sample({ deltaY: -96, wheelDeltaY: 96 }))).toBe('mouse');
+  });
+
   it('keeps trackpad scrolls whose legacy delta happens to be a multiple of 120', () => {
     // macOS trackpads report wheelDeltaY === -3 * deltaY.
     expect(guessWheelDevice(sample({ deltaY: 40, wheelDeltaY: -120 }))).toBe('trackpad');

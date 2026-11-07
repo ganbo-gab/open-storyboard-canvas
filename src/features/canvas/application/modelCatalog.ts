@@ -2,33 +2,21 @@ import { useMemo } from 'react';
 
 import {
   isImageCustomProvider,
-  AGNES_PROVIDER_DEFAULTS,
-  useCustomProvidersStore,
   type CustomProviderConfig,
 } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { listImageModels, listModelProviders } from '@/features/canvas/models';
 import {
   DREAMINA_IMAGE_MODEL_CAPABILITIES,
   DREAMINA_IMAGE_RATIOS,
   DREAMINA_UPSCALE_RESOLUTIONS,
 } from './dreaminaCapabilities';
 import { hasConfiguredCustomProvider } from './providerAvailability';
+import { useChannelCatalogProviders, channelModelForProvider, channelParameterValues } from '@/features/channels/application/channelCatalog';
+import { listModelModes, type ResolvedMode } from '@/features/channels/application/modelModes';
+import { RATIO_PARAM_KEYS, SIZE_PARAM_KEYS } from '@/features/channels/domain/profile';
+import { readComfyUIWorkflows, type ComfyUIWorkflowDefinition } from '@/features/channels/application/comfyWorkflows';
 
-/**
- * Unified display-layer catalog of every image-generation target the user can
- * currently pick. Per product direction (fully-custom-provider era), the
- * picker surfaces:
- *   1. Entries defined in 我的配置 (`customProvidersStore`) — one row per
- *      (provider × model), only shown when the provider has an API key or
- *      explicitly declares that no key is required.
- *   2. Dreamina CLI subcommands — only when the local CLI login is active.
- *
- * Built-in KIE / FAL / GRSAI model rows are intentionally NOT surfaced here —
- * users are expected to add them as custom providers in 我的配置. The legacy
- * helpers (`listImageModels`, `listModelProviders`) remain imported so the
- * 内置 · GRSAI card on the settings page keeps working.
- */
+/** HTTP models come from channel profiles; independent local adapters keep their own catalogs. */
 export interface CatalogEntry {
   /** Compound id: `custom:<providerId>:<modelId>` | `dreamina:<sub>` | `agnes:image:<modelId>`. */
   id: string;
@@ -51,6 +39,8 @@ export interface CatalogEntry {
   /** Dreamina model_version choices (3.0 / 4.0 / 5.0). For custom
    *  providers this is populated from the user-configured list. */
   supportedModelVersions?: string[];
+  modes?: ResolvedMode[];
+  channelModelRef?: { profileId: string; modelId: string };
 }
 
 interface DreaminaProviderStatus {
@@ -60,7 +50,6 @@ interface DreaminaProviderStatus {
 interface ImageModelCatalogSnapshot {
   customProviders: readonly CustomProviderConfig[];
   dreaminaStatus?: DreaminaProviderStatus | null;
-  agnesApiKey?: string;
 }
 
 function normalizeSupportedRatios(rawRatios: unknown, fallback: string[] = ['auto', '16:9']): string[] {
@@ -81,41 +70,54 @@ function normalizeSupportedRatios(rawRatios: unknown, fallback: string[] = ['aut
 export function buildImageModelCatalog({
   customProviders,
   dreaminaStatus,
-  agnesApiKey,
 }: ImageModelCatalogSnapshot): CatalogEntry[] {
   const entries: CatalogEntry[] = [];
 
   // 1. Custom providers (我的配置) — one entry per provider × model.
   for (const cfg of customProviders) {
-    if (!isImageCustomProvider(cfg)) {
+    if (cfg.apiStyle !== 'comfyui' && !isImageCustomProvider(cfg)) {
       continue;
     }
+    let workflows: ComfyUIWorkflowDefinition[] | undefined;
+    let workflowError: string | undefined;
+    if (cfg.apiStyle === 'comfyui') {
+      try { workflows = readComfyUIWorkflows(cfg).workflows; }
+      catch (error) {
+        if (!isImageCustomProvider(cfg)) continue;
+        workflowError = error instanceof Error ? error.message : String(error);
+      }
+    }
     const ratios = normalizeSupportedRatios(
-      (cfg.extraParams as { supportedRatios?: unknown } | undefined)?.supportedRatios
+      cfg.extraParams?.supportedRatios
     );
     const hasBaseUrl = Boolean(cfg.baseUrl?.trim());
-    const hasReadyConfig = hasConfiguredCustomProvider(cfg);
+    const hasReadyConfig = hasConfiguredCustomProvider(cfg) && !workflowError;
     // Optional extra parameter dimensions the user can surface to the
     // picker (resolution sizes, model versions) — they live on the
     // provider config so each provider can advertise its own values.
     const resolutions = cfg.supportedResolutions;
     const modelVersions = cfg.supportedModelVersions;
-    for (const modelId of (cfg.models.length > 0 ? cfg.models : ['default'])) {
+    const models = workflows
+      ? workflows.filter((workflow) => workflow.mediaType === 'image').map((workflow) => workflow.id)
+      : (cfg.models.length > 0 ? cfg.models : ['default']);
+    for (const modelId of models) {
+      const channelModel = channelModelForProvider(cfg, modelId);
       entries.push({
         id: `custom:${cfg.id}:${modelId}`,
         kind: 'custom',
         providerId: cfg.id,
         providerLabel: cfg.label,
         modelId,
-        modelLabel: modelId,
-        supportedRatios: ratios,
+        modelLabel: channelModel?.label ?? workflows?.find((workflow) => workflow.id === modelId)?.name ?? modelId,
+        supportedRatios: channelParameterValues(channelModel, RATIO_PARAM_KEYS) ?? ratios,
         usable: hasReadyConfig,
         notReadyReason: hasReadyConfig
           ? undefined
-          : (hasBaseUrl ? '请在「我的配置」里填入 API Key' : '请在「我的配置」里填入 API 根地址'),
+          : workflowError ?? (hasBaseUrl ? '请在「我的配置」里填入 API Key' : '请在「我的配置」里填入 API 根地址'),
         supportsWebSearch: Boolean(cfg.supportsWebSearch),
-        supportedResolutions: (resolutions && resolutions.length > 0) ? resolutions : undefined,
-        supportedModelVersions: (modelVersions && modelVersions.length > 0) ? modelVersions : undefined,
+        supportedResolutions: channelParameterValues(channelModel, SIZE_PARAM_KEYS) ?? ((resolutions && resolutions.length > 0) ? resolutions : undefined),
+        supportedModelVersions: channelParameterValues(channelModel, ['modelVersion']) ?? ((modelVersions && modelVersions.length > 0) ? modelVersions : undefined),
+        ...(channelModel ? { modes: listModelModes(channelModel), channelModelRef: { profileId: String(cfg.extraParams?.channelProfileId), modelId } } : {}),
       });
     }
   }
@@ -161,52 +163,17 @@ export function buildImageModelCatalog({
     });
   }
 
-  if (agnesApiKey?.trim()) {
-    const supportedRatios = ['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9'];
-    entries.push(
-      {
-        id: `agnes:image:${AGNES_PROVIDER_DEFAULTS.models.image21Flash}`,
-        kind: 'agnes',
-        providerId: 'agnes',
-        providerLabel: 'Agnes',
-        modelId: AGNES_PROVIDER_DEFAULTS.models.image21Flash,
-        modelLabel: 'Agnes Image 2.1 Flash',
-        supportedRatios,
-        usable: true,
-        supportedResolutions: [...AGNES_PROVIDER_DEFAULTS.image21Resolutions],
-      },
-      {
-        id: `agnes:image:${AGNES_PROVIDER_DEFAULTS.models.image20Flash}`,
-        kind: 'agnes',
-        providerId: 'agnes',
-        providerLabel: 'Agnes',
-        modelId: AGNES_PROVIDER_DEFAULTS.models.image20Flash,
-        modelLabel: 'Agnes Image 2.0 Flash',
-        supportedRatios,
-        usable: true,
-        supportedResolutions: [...AGNES_PROVIDER_DEFAULTS.image20Resolutions],
-      }
-    );
-  }
 
   return entries;
 }
 
 export function useImageModelCatalog(): CatalogEntry[] {
-  const customProviders = useCustomProvidersStore((s) => s.providers);
+  const customProviders = useChannelCatalogProviders();
   const dreaminaStatus = useSettingsStore((s) => s.dreaminaStatus);
-  const agnesApiKey = useSettingsStore((s) => s.agnesApiKey);
-  // Force the hook to still subscribe to apiKeys so we re-render when the
-  // user toggles keys (keeps parity with prior behaviour).
-  useSettingsStore((s) => s.apiKeys);
-  // `listImageModels` / `listModelProviders` remain imported so Vite doesn't
-  // prune them and break the settings page that still references them.
-  void listImageModels;
-  void listModelProviders;
 
   return useMemo(
-    () => buildImageModelCatalog({ customProviders, dreaminaStatus, agnesApiKey }),
-    [agnesApiKey, customProviders, dreaminaStatus]
+    () => buildImageModelCatalog({ customProviders, dreaminaStatus }),
+    [customProviders, dreaminaStatus]
   );
 }
 

@@ -38,7 +38,7 @@ function greatestCommonDivisor(a: number, b: number): number {
   return x || 1;
 }
 
-const DEFAULT_PREVIEW_MAX_DIMENSION = 512;
+export const DEFAULT_PREVIEW_MAX_DIMENSION = 512;
 const LOCAL_PATH_PREFIX_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\|\/)/;
 const BASE64_IMAGE_PAYLOAD_PATTERN = /^[A-Za-z0-9+/_=\r\n\s-]+$/;
 
@@ -201,7 +201,8 @@ export function isLikelyLocalImagePath(imageUrl: string): boolean {
     return false;
   }
 
-  const lower = imageUrl.toLowerCase();
+  // Scheme checks only need the prefix; lowercasing a multi-megabyte data URL copies all of it.
+  const lower = imageUrl.slice(0, 8).toLowerCase();
   if (
     lower.startsWith('data:') ||
     lower.startsWith('http://') ||
@@ -218,7 +219,7 @@ export function isLikelyLocalImagePath(imageUrl: string): boolean {
 }
 
 export function resolveImageDisplayUrl(imageUrl: string): string {
-  const lower = imageUrl.toLowerCase();
+  const lower = imageUrl.slice(0, 8).toLowerCase();
   if (lower.startsWith('file://')) {
     if (!isTauri()) {
       return imageUrl;
@@ -516,16 +517,19 @@ export async function prepareNodeImage(
     const image = await loadImageElement(normalizedDataUrl);
     const safeMaxDimension = Math.max(64, Math.floor(maxPreviewDimension));
     const previewDataUrl = renderPreviewDataUrl(image, normalizedDataUrl, safeMaxDimension);
+    // In the browser nothing is written to disk: a `blob:` source dies with the page, so the node
+    // keeps the data URL (project storage externalizes it). Desktop keeps the persisted path.
+    const durableImage = persistedImagePath.startsWith('blob:') ? normalizedDataUrl : persistedImagePath;
     const previewImagePath =
       previewDataUrl === normalizedDataUrl
-        ? persistedImagePath
+        ? durableImage
         : await persistImageLocally(previewDataUrl);
 
     console.info(
       `[upload-perf][imageData] prepareNodeImage browser-fallback total=${Math.round(performance.now() - started)}ms`
     );
     return {
-      imageUrl: persistedImagePath,
+      imageUrl: durableImage,
       previewImageUrl: previewImagePath,
       aspectRatio: reduceAspectRatio(image.naturalWidth, image.naturalHeight),
     };

@@ -6,6 +6,7 @@ import {
   type ProjectRecord,
 } from '@/commands/projectState';
 import packageMetadata from '../../../../package.json';
+import { redactPortableCredentials } from '../application/credentialRedaction';
 import {
   collectProjectMediaSources,
   inferMediaType,
@@ -335,8 +336,9 @@ export async function exportWebProjectBundle(
   options: ProgressOptions = {}
 ): Promise<WebProjectExportResult> {
   report(options, 'reading', 0, 1);
-  const record = await getProjectRecord(projectId);
-  if (!record) throw new Error('Project not found.');
+  const storedRecord = await getProjectRecord(projectId);
+  if (!storedRecord) throw new Error('Project not found.');
+  const record = redactPortableCredentials(storedRecord);
   const sources = collectProjectMediaSources(record)
     .filter(({ source }) => !source.startsWith('__img_ref__:') && !source.startsWith('bundle://'));
   const replacements = new Map<string, string>();
@@ -435,6 +437,7 @@ export async function inspectWebProjectBundle(
     || manifest.project.nodeCount !== payload.record.nodeCount) {
     throw new PortabilityValidationError('summary-mismatch', 'Manifest and project summary do not match.');
   }
+  payload.record = redactPortableCredentials(payload.record);
   const warnings: ProjectBundleWarning[] = [];
   const declaredAssetPaths = new Set(manifest.assets.map((asset) => asset.path));
   const referencedBundlePaths = new Set(
@@ -503,7 +506,7 @@ export async function importWebProjectBundle(
   }
 
   const now = Date.now();
-  const source = replaceProjectMediaSources(inspected.payload.record, replacements);
+  const source = redactPortableCredentials(replaceProjectMediaSources(inspected.payload.record, replacements));
   let target: ProjectRecord;
   if (mode.kind === 'replace') {
     const existing = await getProjectRecord(mode.projectId);

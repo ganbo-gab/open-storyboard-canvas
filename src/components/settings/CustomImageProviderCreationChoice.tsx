@@ -1,7 +1,7 @@
 import { Bot, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { UiButton } from '@/components/ui/primitives';
+import { UiButton } from '@/components/ui';
 import type { CustomImageProviderCreationRoute } from './customImageProviderWorkbenchState';
 
 interface CustomImageProviderCreationChoiceProps {
@@ -25,8 +25,8 @@ export function CustomImageProviderCreationChoice({ onChoose }: CustomImageProvi
       <div className="grid gap-3 sm:grid-cols-2">
         <UiButton
           type="button"
-          variant="muted"
-          className="h-auto min-h-36 items-start justify-start border border-border-dark bg-surface-dark p-4 text-left hover:border-accent/45"
+          variant="secondary"
+          className="h-auto min-h-36 items-start justify-start whitespace-normal rounded-xl p-4 text-left"
           onClick={() => onChoose('ai')}
         >
           <Bot className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
@@ -42,8 +42,8 @@ export function CustomImageProviderCreationChoice({ onChoose }: CustomImageProvi
 
         <UiButton
           type="button"
-          variant="muted"
-          className="h-auto min-h-36 items-start justify-start border border-border-dark bg-surface-dark p-4 text-left hover:border-accent/45"
+          variant="secondary"
+          className="h-auto min-h-36 items-start justify-start whitespace-normal rounded-xl p-4 text-left"
           onClick={() => onChoose('manual')}
         >
           <SlidersHorizontal className="mt-0.5 h-5 w-5 shrink-0 text-accent" />

@@ -1,4 +1,6 @@
 import type { Edge, Node, XYPosition } from '@xyflow/react';
+import type { DepthRelief } from '@/features/stage/domain/depthRelief';
+import type { ProjectMediaReference } from './projectMedia';
 
 export const CANVAS_NODE_TYPES = {
   upload: 'uploadNode',
@@ -56,6 +58,14 @@ export type CanvasGenerationJobState =
 
 export interface NodeDisplayData {
   displayName?: string;
+  /** Missing means enabled; disabled nodes never submit generation or toolbox work. */
+  enabled?: boolean;
+  /** Sibling result stack; hidden members remain in the canonical graph. */
+  batchPrimary?: boolean;
+  batchCollapsed?: boolean;
+  assetId?: string;
+  /** Stable per-field asset ids; missing entries preserve the original URL and recovery reason. */
+  mediaReferences?: Record<string, ProjectMediaReference>;
   [key: string]: unknown;
 }
 
@@ -78,6 +88,26 @@ export type ExportImageNodeResultKind =
   | 'storyboardGenOutput'
   | 'storyboardSplitExport'
   | 'storyboardFrameEdit';
+
+/**
+ * The submit was rejected before any upstream call because a reference slot needs a public URL.
+ * Drives the explicit "host and retry" action on the failed result node.
+ */
+export interface GenerationReferenceFailure {
+  sourceNodeId: string;
+  slotKey: string;
+  /** Missing when the thrown error did not carry it; such failures offer no upload. */
+  slotKind?: 'image' | 'video' | 'audio';
+}
+
+/** Structural read of a node's `generationReferenceFailure`; persisted data is untrusted. */
+export function readGenerationReferenceFailure(data: unknown): GenerationReferenceFailure | null {
+  if (!data || typeof data !== 'object' || !('generationReferenceFailure' in data)) return null;
+  const value = data.generationReferenceFailure;
+  if (!value || typeof value !== 'object' || !('sourceNodeId' in value) || typeof value.sourceNodeId !== 'string' || !('slotKey' in value) || typeof value.slotKey !== 'string') return null;
+  const slotKind = 'slotKind' in value && (value.slotKind === 'image' || value.slotKind === 'video' || value.slotKind === 'audio') ? value.slotKind : undefined;
+  return { sourceNodeId: value.sourceNodeId, slotKey: value.slotKey, ...(slotKind ? { slotKind } : {}) };
+}
 
 export interface ExportImageNodeData extends NodeImageData {
   resultKind?: ExportImageNodeResultKind;
@@ -104,6 +134,7 @@ export interface ExportImageNodeData extends NodeImageData {
   generationClientSessionId?: string | null;
   generationError?: string | null;
   generationErrorDetails?: string | null;
+  generationReferenceFailure?: GenerationReferenceFailure | null;
   generationDebugContext?: unknown;
   generationRetryResultUrl?: string | null;
 }
@@ -216,6 +247,8 @@ export interface ImageEditNodeData extends NodeImageData {
   model: string;
   size: ImageSize;
   requestAspectRatio?: string;
+  channelModeId?: string;
+  referenceSlots?: Record<string, string[]>;
   modelConfig?: {
     entryId: string;
     ratio: string;
@@ -242,6 +275,8 @@ export interface ImageEditNodeData extends NodeImageData {
 
 export interface AiVideoNodeData extends NodeDisplayData {
   prompt: string;
+  channelModeId?: string;
+  referenceSlots?: Record<string, string[]>;
   modelConfig?: {
     entryId: string;
     duration: string;
@@ -276,6 +311,8 @@ export interface AiTextNodeData extends NodeDisplayData {
 export interface AiAudioNodeData extends NodeDisplayData {
   prompt: string;
   modelId?: string | null;
+  channelModeId?: string;
+  referenceSlots?: Record<string, string[]>;
   voiceId?: string | null;
   controlInstruction?: string | null;
   usePromptText?: boolean | null;
@@ -313,6 +350,7 @@ export interface VideoNodeData extends NodeDisplayData {
   generationClientSessionId?: string | null;
   generationError?: string | null;
   generationErrorDetails?: string | null;
+  generationReferenceFailure?: GenerationReferenceFailure | null;
   generationDebugContext?: unknown;
   generationRetryResultUrl?: string | null;
   generationRetryRequestedAt?: number | null;
@@ -337,6 +375,7 @@ export interface AudioNodeData extends NodeDisplayData {
   generationElapsedMs?: number | null;
   generationError?: string | null;
   generationErrorDetails?: string | null;
+  generationReferenceFailure?: GenerationReferenceFailure | null;
   sourcePrompt?: string;
   sourceTextLength?: number;
   sourceVoiceId?: string | null;
@@ -365,6 +404,19 @@ export interface StoryboardFrameItem {
   aspectRatio?: string;
   note: string;
   order: number;
+  sourceNodeId?: string;
+  sourceAssetId?: string;
+  sourceMetadata?: {
+    displayName?: string;
+    sourceFileName?: string;
+    modelId?: string;
+    providerId?: string;
+    requestModel?: string;
+    resolution?: string;
+    width?: number;
+    height?: number;
+    generationJobId?: string;
+  };
 }
 
 export interface StoryboardExportOptions {
@@ -394,7 +446,15 @@ export interface StoryboardSplitNodeData {
 export interface StoryboardGenFrameItem {
   id: string;
   description: string;
-  referenceIndex: number | null;
+  /** Legacy boards may still carry `referenceIndex`; references live in `description` as `@图N`. */
+}
+
+/** Frames in grid order, padded with empty shots or trimmed to `count`. */
+export function fitStoryboardFrames(frames: readonly StoryboardGenFrameItem[], count: number): StoryboardGenFrameItem[] {
+  return Array.from({ length: count }, (_, index) => frames[index] ?? {
+    id: `frame-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+    description: '',
+  });
 }
 
 export type StoryboardRatioControlMode = 'overall' | 'cell';
@@ -408,6 +468,8 @@ export interface StoryboardGenNodeData {
   model: string;
   size: ImageSize;
   requestAspectRatio: string;
+  channelModeId?: string;
+  referenceSlots?: Record<string, string[]>;
   modelConfig?: {
     entryId: string;
     ratio: string;
@@ -446,6 +508,7 @@ export interface PanoramaNodeData extends NodeDisplayData {
   generationClientSessionId?: string | null;
   generationError?: string | null;
   generationErrorDetails?: string | null;
+  generationReferenceFailure?: GenerationReferenceFailure | null;
   generationDebugContext?: unknown;
   generationRetryResultUrl?: string | null;
   [key: string]: unknown;
@@ -458,6 +521,10 @@ export interface BlueprintItem {
   y: number;
   color: string;
   showLabel?: boolean;
+  /** Missing in legacy projects means visible. Renderer integration is separate. */
+  hidden?: boolean;
+  /** Missing means editable; application mutations require an explicit unlock. */
+  locked?: boolean;
   refImageUrl?: string | null;
   refImageName?: string | null;
   note?: string;
@@ -476,10 +543,18 @@ export interface BlueprintItem {
    *  the 3D editor renders a detailed SVG sprite instead of the generic
    *  capsule/box. See `ui/blueprintPresets.ts` for the registry. */
   presetId?: string;
+  /** Persistent My Models asset; takes precedence over the built-in preset mesh. */
+  importedModelId?: string;
+  /** Image-driven 2.5D backdrop; valid only for category 'scene'. */
+  relief?: DepthRelief;
   // Freeform text capturing the relation to other items (@image tokens allowed).
   relation?: string;
-  // Optional pose/action instruction for person items.
+  // Optional pose/action label for person items: a built-in pose id, a
+  // saved custom pose name, or legacy free text such as "坐".
   action?: string;
+  // Explicit joint pose authored on this person. Takes precedence over
+  // `action` when rendering the static (director) pose.
+  pose?: BlueprintActionPose;
   // Director Studio-only marker for procedurally generated background people.
   // Labels can be renamed, so this keeps advanced pedestrian ID tags stable.
   directorStudioRole?: 'pedestrian';
@@ -519,31 +594,82 @@ export interface BlueprintReferenceImageItem {
   color?: string;
 }
 
+export interface BlueprintPoseRotation {
+  x?: number;
+  y?: number;
+  z?: number;
+}
+
+export interface BlueprintPoseHinge {
+  x?: number;
+}
+
+/** Finger shape. Every value is 0..1 and interpolates linearly. */
+export interface BlueprintHandPose {
+  /** Curl of all fingers: 0 = flat open hand, 1 = closed fist. */
+  curl?: number;
+  /** Index-finger curl override (point = curl 1 + index 0). Defaults to `curl`. */
+  index?: number;
+  /** Thumb fold across the palm. */
+  thumb?: number;
+  /** Finger fan. */
+  spread?: number;
+}
+
 /**
- * Per-bone rotation (radians) used by custom person-action poses. Every
- * field is optional and missing axes default to 0. Composed with the
- * keyword-driven preset mapping in `blueprintMeshFactory`'s
- * `applyPersonActionTransform` — when an item's `action` matches a custom
- * pose name in `BlueprintNodeData.customActionPoses`, that pose's bone
- * rotations override the keyword mapping for the same name.
+ * Person pose: joint rotations in radians on top of the natural standing
+ * pose. Every field is optional and missing values are 0. Side names are
+ * anatomical (the figure's own left/right; the figure faces +Z so its left
+ * is +X) and limb values are mirror symmetric: the same numbers on `left*`
+ * and `right*` give a symmetric pose.
+ *
+ * - spine / chest / neck / head: `x > 0` bends forward or looks down,
+ *   `y > 0` turns toward the figure's left, `z > 0` leans toward its right.
+ * - clavicle: `x > 0` shrugs up, `y > 0` rolls the shoulder forward.
+ * - upperArm / thigh: `x > 0` swings forward, `z > 0` lifts sideways away
+ *   from the body, `y > 0` twists inward.
+ * - forearm / shin: `x > 0` bends the elbow / knee.
+ * - wrist: `x > 0` bends the hand toward the palm, `z > 0` toward the thumb,
+ *   `y > 0` turns the palm backward. foot: `x > 0` points the toes down,
+ *   `y > 0` turns the toes inward, `z > 0` rolls the sole inward.
+ *   toes: `x > 0` bends the toes up.
+ * - fingers: 0..1 shape values (see `BlueprintHandPose`).
+ * - Whole body: the renderer keeps the lowest body point on the floor.
+ *   `groupY > 0` lifts above it (jumps); `groupRotX` pitches the body
+ *   (−π/2 lies on its back, +π/2 face down); `groupRotZ` rolls it;
+ *   `scaleY` squashes vertically.
+ *
+ * Poses saved before the anatomical rig (keys `torso`, `leftShoulder`,
+ * `leftElbow`, `leftHip`, `leftKnee` and right counterparts) are converted
+ * by `normalizePersonPose` in `personPose.ts`.
  */
 export interface BlueprintActionPose {
-  leftShoulder?: { x?: number; y?: number; z?: number };
-  rightShoulder?: { x?: number; y?: number; z?: number };
-  leftElbow?: { x?: number };
-  rightElbow?: { x?: number };
-  leftHip?: { x?: number; y?: number; z?: number };
-  rightHip?: { x?: number; y?: number; z?: number };
-  leftKnee?: { x?: number };
-  rightKnee?: { x?: number };
-  head?: { x?: number; y?: number; z?: number };
-  torso?: { x?: number };
-  /** Whole-figure scale Y (lets squats / stretches survive even custom poses). */
+  spine?: BlueprintPoseRotation;
+  chest?: BlueprintPoseRotation;
+  neck?: BlueprintPoseRotation;
+  head?: BlueprintPoseRotation;
+  leftClavicle?: BlueprintPoseRotation;
+  rightClavicle?: BlueprintPoseRotation;
+  leftUpperArm?: BlueprintPoseRotation;
+  rightUpperArm?: BlueprintPoseRotation;
+  leftForearm?: BlueprintPoseHinge;
+  rightForearm?: BlueprintPoseHinge;
+  leftWrist?: BlueprintPoseRotation;
+  rightWrist?: BlueprintPoseRotation;
+  leftFingers?: BlueprintHandPose;
+  rightFingers?: BlueprintHandPose;
+  leftThigh?: BlueprintPoseRotation;
+  rightThigh?: BlueprintPoseRotation;
+  leftShin?: BlueprintPoseHinge;
+  rightShin?: BlueprintPoseHinge;
+  leftFoot?: BlueprintPoseRotation;
+  rightFoot?: BlueprintPoseRotation;
+  leftToes?: BlueprintPoseHinge;
+  rightToes?: BlueprintPoseHinge;
   scaleY?: number;
-  /** Vertical offset on the whole figure (sit / jump / lie). */
   groupY?: number;
-  /** Whole-figure X rotation in radians (lie poses). */
   groupRotX?: number;
+  groupRotZ?: number;
 }
 
 export interface DirectorMotionVector3 {
@@ -607,6 +733,43 @@ export interface DirectorActionClip {
   keyframes: DirectorActionClipKeyframe[];
 }
 
+export type DirectorCameraRigKind = 'follow' | 'closeup';
+export type DirectorCameraRigBodyPart = 'head' | 'torso' | 'feet';
+
+/**
+ * Live camera rig (spec 05 §4.5 相对跟随 / 特写跟踪). While active it drives the camera from its
+ * subject's sampled motion instead of camera keyframes, so later route edits are followed automatically.
+ */
+export interface DirectorCameraRig {
+  id: string;
+  kind: DirectorCameraRigKind;
+  targetId: string;
+  bodyPart: DirectorCameraRigBodyPart;
+  /** Absolute scene seconds. */
+  start: number;
+  end: number;
+  /** Horizontal distance from the aim point, metres. */
+  distance: number;
+  /** Camera height above the aim point, metres. */
+  height: number;
+  /** Horizontal angle around the subject in degrees: 0 behind, 180 in front. */
+  azimuthDeg: number;
+  /** Aim tilt in degrees; positive looks above the aim point. */
+  pitchDeg: number;
+  fov: number;
+  /** Camera position lag: 0 rigid … 0.95 heavy. */
+  damping: number;
+  /** The azimuth turns with the subject's heading (relative position) instead of staying world-fixed. */
+  relative: boolean;
+  /** The camera keeps its start height instead of following the subject up and down. */
+  lockHorizon: boolean;
+  /**
+   * Explicit evaluation layer where rigs overlap (set by "bring to front"); higher wins.
+   * Absent = 0; equal layers fall back to the latest start, then the later rig.
+   */
+  priority?: number;
+}
+
 export interface DirectorMotionProjectV1 {
   schemaVersion: 1;
   durationSeconds: number;
@@ -615,6 +778,8 @@ export interface DirectorMotionProjectV1 {
   objectTracks: Record<string, DirectorObjectKeyframe[]>;
   actionTracks: Record<string, DirectorActionKeyframe[]>;
   customClips: DirectorActionClip[];
+  /** Live follow / close-up rigs; inside a rig's interval it overrides `cameraTrack`. */
+  cameraRigs: DirectorCameraRig[];
 }
 
 export interface DirectorStudioCameraSettings {
@@ -647,6 +812,8 @@ export interface DirectorStudioViewSettings {
 export type DirectorStudioTransformMode = 'move' | 'rotate' | 'scale';
 
 export type DirectorStudioShortcutId =
+  | 'selectTool'
+  | 'orbitTool'
   | 'transformMove'
   | 'transformRotate'
   | 'transformScale'
@@ -665,7 +832,8 @@ export type DirectorStudioShortcutId =
   | 'paste'
   | 'undo'
   | 'redo'
-  | 'advancedPedestrianTags';
+  | 'advancedPedestrianTags'
+  | 'poseEdit';
 
 export type DirectorStudioShortcutBindings = Partial<Record<DirectorStudioShortcutId, string>>;
 
@@ -744,9 +912,10 @@ export interface BlueprintNodeData extends NodeDisplayData {
   motionProject?: DirectorMotionProjectV1;
   directorStudioProjects?: DirectorStudioProjectRecord[];
   activeDirectorStudioProjectId?: string | null;
-  /** One-shot UI flag used by Director Studio shortcuts. Cleared after the
-   *  fullscreen shell opens so saved projects do not auto-open on reload. */
-  openDirectorStudioOnCreate?: boolean;
+  /** One-shot UI flag used by Director Studio shortcuts (`'previs'` opens straight into the
+   *  timeline workspace). Cleared after the fullscreen shell opens so saved projects do not
+   *  auto-open on reload. */
+  openDirectorStudioOnCreate?: boolean | 'previs';
   [key: string]: unknown;
 }
 

@@ -176,8 +176,10 @@ export function useCreateCanvasActions({
       generateSelection: () => {
         const nodes = useCanvasStore.getState().nodes;
         const selected = new Set(getSelectedNodeIds(nodes));
+        // Disabled generators are skipped here; the generation facade also refuses them (reason 'disabled').
         const nodeIds = nodes
-          .filter((node) => (selected.has(node.id) || (node.parentId && selected.has(node.parentId))) && GENERATION_TYPES.has(node.type))
+          .filter((node) => (selected.has(node.id) || (node.parentId && selected.has(node.parentId))) && GENERATION_TYPES.has(node.type)
+            && !('enabled' in node.data && node.data.enabled === false))
           .map((node) => node.id);
         if (nodeIds.length > 0) void canvasCommandRegistry.execute({ type: 'generation.submit', version, input: { nodeIds } }, 'ui');
       },

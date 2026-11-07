@@ -1,3 +1,6 @@
+import type { AgentScope } from '../domain/agentModel';
+import { useAgentSkillStore, type SkillSurface, type UserAgentSkill } from './userSkills';
+
 export interface SkillExample {
   input: string;
   outcome: string;
@@ -13,6 +16,11 @@ export interface SkillDefinitionV1 {
   examples: SkillExample[];
   evalCaseIds: string[];
   estimatedTokens: number;
+  source?: 'builtin' | 'user';
+  name?: string;
+  surface?: SkillSurface;
+  /** User-supplied restriction only; it cannot grant namespaces or scope access. */
+  tools?: string[];
 }
 
 export type AgentToolKind = 'canvas' | 'asset-read' | 'diagnostics' | 'config';
@@ -22,18 +30,19 @@ export interface AgentToolPolicy {
   toolKinds: AgentToolKind[];
   deferredToolKinds: AgentToolKind[];
   reason: string;
+  allowedToolNames?: string[];
 }
 
-const SAFE_NAMESPACES = new Set([
-  'canvas.read',
-  'canvas.write',
-  'canvas.navigate',
-  'generation',
-  'diagnostics',
-  'config',
-  'prompting',
-  'director',
-]);
+const SAFE_NAMESPACES: Readonly<Record<string, true>> = {
+  'canvas.read': true,
+  'canvas.write': true,
+  'canvas.navigate': true,
+  generation: true,
+  diagnostics: true,
+  config: true,
+  prompting: true,
+  director: true,
+};
 
 const SHARED_SKILL_RULES = [
   '所有读取、修改、配置写入和外部提交继续受代码层审批、schema、revision 和幂等回执约束。',
@@ -55,7 +64,7 @@ export const BUILTIN_AGENT_SKILLS: readonly SkillDefinitionV1[] = Object.freeze(
   defineSkill({
     id: 'canvas-orchestration',
     summary: '创建、修改、连接、布局和定位画布节点',
-    activation: ['画布', '节点', '连线', '布局', '选择', '标签', '标签组', 'canvas', 'node', 'connect', 'layout', 'rename', 'delete', 'move', 'tag'],
+    activation: ['画布', '节点', '连线', '布局', '选择', '标签', '标签组', '提示词', 'canvas', 'node', 'connect', 'layout', 'rename', 'delete', 'move', 'tag', 'prompt'],
     toolNamespaces: ['canvas.read', 'canvas.write', 'canvas.navigate'],
     instructions: '先读取最小必要范围并复述目标对象；涉及多步修改时输出可编辑计划，再用共享画布命令完成并返回定位引用。标签与标签组必须使用 node.create、node.rename、node.setEnabled、node.duplicate、tag.setColor、tagGroup.setMembers、edge.connect、edge.disconnect 和 viewport.focus，不得直接写 Store。',
     examples: [{ input: '把这三个节点横向排好并连起来', outcome: '读取节点 -> 计划布局/连线 -> 审批 -> 一次事务执行 -> 定位结果' }],
@@ -135,6 +144,48 @@ export const BUILTIN_AGENT_SKILLS: readonly SkillDefinitionV1[] = Object.freeze(
   }),
 ]);
 
+const BUILTIN_SURFACES: Readonly<Record<string, readonly AgentScope[]>> = {
+  'canvas-orchestration': ['canvas'],
+  'storyboard-planning': ['home', 'canvas'],
+  'image-prompt-director': ['home', 'canvas', 'stage'],
+  'video-prompt-director': ['home', 'canvas', 'stage'],
+  'director-studio': ['stage', 'canvas'],
+  'bulk-workflow': ['home', 'canvas'],
+  'generation-diagnostics': ['home', 'canvas', 'stage'],
+  'provider-configuration': ['home', 'canvas'],
+  'project-portability': ['home', 'canvas'],
+};
+
+export interface SkillPickerItem {
+  id: string;
+  name: string;
+  description: string;
+  surface: SkillSurface;
+  source: 'builtin' | 'user';
+  tools?: string[];
+}
+
+/** Initialize useAgentSkillStore before opening the picker or starting a turn. */
+export function listSkillsForSurface(surface: AgentScope): SkillPickerItem[] {
+  return [
+    ...BUILTIN_AGENT_SKILLS.filter((skill) => BUILTIN_SURFACES[skill.id]?.includes(surface)).map((skill) => ({
+      id: skill.id, name: skill.name ?? skill.id, description: skill.summary,
+      surface, source: 'builtin' as const,
+    })),
+    ...useAgentSkillStore.getState().skills.filter((skill) => skill.surface === 'all' || skill.surface === surface)
+      .map((skill) => ({ id: skill.id, name: skill.name, description: skill.description, surface: skill.surface, source: skill.source, tools: [...skill.tools] })),
+  ];
+}
+
+function userSkillDefinition(skill: UserAgentSkill): SkillDefinitionV1 {
+  return {
+    id: skill.id, version: 1, summary: skill.description, name: skill.name, surface: skill.surface, source: 'user',
+    activation: [skill.name, skill.description], instructions: `${skill.instructions}\n${SHARED_SKILL_RULES}`,
+    tools: [...skill.tools], toolNamespaces: [], examples: [], evalCaseIds: [],
+    estimatedTokens: Math.ceil((skill.instructions.length + SHARED_SKILL_RULES.length) / 3.7),
+  };
+}
+
 export interface SkillRoutingContext {
   text: string;
   /**
@@ -146,6 +197,8 @@ export interface SkillRoutingContext {
   attachmentKinds?: string[];
   selectedNodeTypes?: string[];
   errorCode?: string;
+  surface?: AgentScope;
+  explicitSkillIds?: string[];
 }
 
 export interface SkillSelection {
@@ -162,7 +215,7 @@ export function validateSkillDefinition(value: SkillDefinitionV1): string[] {
   if (!value.examples.length || value.examples.some((example) => !example.input.trim() || !example.outcome.trim())) issues.push('valid example required');
   if (!value.evalCaseIds.length || value.evalCaseIds.some((id) => !id.startsWith(`${value.id}:`))) issues.push('valid eval ids required');
   if (value.instructions.length > 18_000 || value.estimatedTokens > 5_000) issues.push('skill exceeds size budget');
-  if (value.toolNamespaces.some((namespace) => !SAFE_NAMESPACES.has(namespace))) issues.push('unknown or unsafe tool namespace');
+  if (value.toolNamespaces.some((namespace) => !Object.hasOwn(SAFE_NAMESPACES, namespace))) issues.push('unknown or unsafe tool namespace');
   if (/\b(?:use|execute|access|invoke|grant)\s+(?:a\s+)?(?:shell|filesystem|child_process)\b|eval\s*\(/i.test(value.instructions)) issues.push('skill contains forbidden capability or secret access');
   return issues;
 }
@@ -200,7 +253,15 @@ export function routeAgentSkills(context: SkillRoutingContext, max = 3): SkillSe
   const continuation = isLikelyTaskContinuation(context.text);
   const recentText = continuation ? context.recentUserText?.trim().toLocaleLowerCase() ?? '' : '';
   const text = recentText ? `${recentText}\n${currentText}` : currentText;
-  const scored = BUILTIN_AGENT_SKILLS.map((skill) => {
+  const surface = context.surface ?? 'canvas';
+  const explicitIds = new Set(context.explicitSkillIds ?? []);
+  const skills = [
+    ...BUILTIN_AGENT_SKILLS,
+    ...useAgentSkillStore.getState().skills.map(userSkillDefinition),
+  ].filter((skill) => explicitIds.has(skill.id) || (skill.source === 'user'
+    ? skill.surface === 'all' || skill.surface === surface
+    : BUILTIN_SURFACES[skill.id]?.includes(surface)));
+  const scored = skills.map((skill) => {
     const currentTermHits = skill.activation.filter((term) => currentText.includes(term.toLocaleLowerCase())).length;
     const termHits = skill.activation.filter((term) => text.includes(term.toLocaleLowerCase())).length;
     const errorBoost = context.errorCode && skill.id === 'generation-diagnostics' ? 4 : 0;
@@ -220,45 +281,63 @@ export function routeAgentSkills(context: SkillRoutingContext, max = 3): SkillSe
       reason: signals.length ? `匹配${signals.join('、')}。` : '未命中领域信号。',
     };
   });
-  return scored
-    .filter((item) => item.score > 0)
+  const explicit = scored.filter((item) => explicitIds.has(item.skill.id))
+    .map((item) => ({ ...item, reason: '用户显式选择。' }));
+  const routed = scored
+    .filter((item) => item.score > 0 && !explicitIds.has(item.skill.id))
     .sort((left, right) => right.score - left.score || left.skill.id.localeCompare(right.skill.id))
     .slice(0, Math.min(3, Math.max(1, max)));
+  return [...explicit, ...routed];
 }
 
-function isLikelyTaskContinuation(value: string): boolean {
+export function isLikelyTaskContinuation(value: string): boolean {
   const text = value.trim();
   if (!text || text.length > 160) return false;
   if (/^(?:继续|默认|确认|执行|开始|可以|好的?|行|就这样|按这个|同意|批准|yes|ok|okay|continue|go ahead)[！!。.\s]*$/i.test(text)) {
     return true;
   }
+  // Short action-only follow-ups carry their task from user history. They do
+  // not grant a new domain: without a previous task the router remains minimal.
+  if (/^(?:(?:请|你|麻烦|帮我|替我|给我|帮忙|直接|现在|马上|立刻|赶紧|就|先)\s*)*(?:开始|继续|执行|提交|生成|运行)(?:执行|提交|生成|任务)?(?:一下|一次)?(?:吧|呀|啊|呢|了)?[！!。.?？\s]*$/i.test(text)) return true;
+  if (/^(?:(?:我|现在|已经|模型|渠道|参数|都|也|已)\s*)*(?:(?:选|配置|接入|设置)好了?|可以了)(?:[，,\s]*(?:继续|开始|生成|提交))?[吧呀啊！!。\s]*$/i.test(text)) return true;
   return /(?:\b(?:1k|2k|4k|8k|fps)\b|\d+\s*(?::|比)\s*\d+|\d+\s*秒|上一步|刚才|上述|按前面|用这个|就这个|(?:看看|检查|查询).{0,8}(?:状态|进度|结果)|(?:现在)?(?:状态|进度|结果).{0,8}(?:怎么样|如何|呢|了|[？?])|(?:生成|任务|图片|视频|结果).{0,10}(?:完成|生成好|好了|成功|状态|进度|出来).{0,4}(?:吗|没有|没|了|[？?])?)/i.test(text);
 }
 
-export function buildSkillContext(context: SkillRoutingContext): {
+export interface SkillContext {
   index: string;
   selections: SkillSelection[];
   instructions: string;
   toolNamespaces: string[];
+  /** Intersection of selected user whitelists. Undefined preserves the existing policy. */
+  allowedToolNames?: string[];
   estimatedTokens: number;
-} {
+}
+
+export function buildSkillContext(context: SkillRoutingContext): SkillContext {
   const selections = routeAgentSkills(context);
-  const index = BUILTIN_AGENT_SKILLS.map((skill) => `${skill.id}: ${skill.summary}`).join('\n');
+  const index = listSkillsForSurface(context.surface ?? 'canvas')
+    .map((skill) => `${skill.id} [${skill.source}]: ${skill.description}`).join('\n');
   const instructions = selections.length
     ? selections.map((selection) => selection.skill.instructions).join('\n\n')
     : '本轮没有命中专用技能。只使用最小画布能力确认对象和意图；若目标仍不明确，先向用户提出一个具体澄清问题。';
   const toolNamespaces = Array.from(new Set(selections.flatMap((selection) => selection.skill.toolNamespaces)));
+  const whitelists = selections.flatMap((selection) => selection.skill.source === 'user' ? [selection.skill.tools ?? []] : []);
+  const missingExplicitSkill = context.explicitSkillIds?.some((id) => !selections.some((selection) => selection.skill.id === id));
+  const allowedToolNames = missingExplicitSkill ? [] : whitelists.length
+    ? whitelists[0].filter((name) => whitelists.every((tools) => tools.includes(name)))
+    : undefined;
   return {
     index,
     selections,
     instructions,
     toolNamespaces,
+    allowedToolNames,
     estimatedTokens: selections.reduce((sum, selection) => sum + selection.skill.estimatedTokens, 0),
   };
 }
 
 export function resolveAgentToolPolicy(input: {
-  skillContext: ReturnType<typeof buildSkillContext>;
+  skillContext: SkillContext;
   supportsVision: boolean;
   supportsToolSearch: boolean;
   protocol?: 'openai-responses' | 'openai-chat-completions' | 'anthropic-messages' | 'google-gemini';
@@ -270,6 +349,7 @@ export function resolveAgentToolPolicy(input: {
       toolKinds: [],
       deferredToolKinds: [],
       reason: '未命中画布任务信号，本轮作为普通对话或澄清轮次，不发送大型画布工具协议。',
+      allowedToolNames: input.skillContext.allowedToolNames,
     };
   }
 
@@ -290,7 +370,10 @@ export function resolveAgentToolPolicy(input: {
     ...(namespaces.has('diagnostics') ? ['diagnostics' as const] : []),
     ...(namespaces.has('config') ? ['config' as const] : []),
   ];
-  const uniqueToolKinds = Array.from(new Set(toolKinds));
+  const namesByKind: Record<AgentToolKind, string> = { canvas: 'canvas_command', 'asset-read': 'asset_read', diagnostics: 'diagnostics', config: 'config_patch' };
+  const allowedToolNames = input.skillContext.allowedToolNames;
+  const uniqueToolKinds = Array.from(new Set(toolKinds))
+    .filter((kind) => allowedToolNames === undefined || allowedToolNames.includes(namesByKind[kind]));
   const supportsNativeToolSearch = input.supportsToolSearch
     && input.protocol === 'openai-responses';
   return {
@@ -298,5 +381,6 @@ export function resolveAgentToolPolicy(input: {
     toolKinds: uniqueToolKinds,
     deferredToolKinds: supportsNativeToolSearch ? uniqueToolKinds.filter((kind) => kind !== 'canvas') : [],
     reason: `根据 ${input.skillContext.selections.map((selection) => selection.skill.id).join('、')} 裁剪为 ${uniqueToolKinds.length} 个工具入口。`,
+    allowedToolNames,
   };
 }

@@ -14,6 +14,9 @@ use crate::ai::error::AIError;
 use crate::ai::{
     AIProvider, GenerateRequest, ProviderTaskHandle, ProviderTaskPollResult, ProviderTaskSubmission,
 };
+use crate::commands::secrets::{
+    credential_ref_from_token, resolve_provider_credential, ResolvedCredential, SecretRef,
+};
 
 const TASK_BASE_URL: &str = "https://api.kie.ai";
 const FILE_BASE_URL: &str = "https://kieai.redpandaai.co";
@@ -61,14 +64,14 @@ struct KieTaskResultJson {
 
 pub struct KieProvider {
     client: Client,
-    api_key: Arc<RwLock<Option<String>>>,
+    credential_ref: Arc<RwLock<Option<SecretRef>>>,
 }
 
 impl KieProvider {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
-            api_key: Arc::new(RwLock::new(None)),
+            credential_ref: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -181,10 +184,11 @@ impl KieProvider {
 
     async fn upload_reference_image(
         &self,
-        api_key: &str,
+        credential: &mut ResolvedCredential,
         source: &str,
         index: usize,
     ) -> Result<String, AIError> {
+        let api_key = credential.value.as_str();
         if source.starts_with("http://") || source.starts_with("https://") {
             return Ok(source.to_string());
         }
@@ -209,10 +213,13 @@ impl KieProvider {
             .header("Authorization", format!("Bearer {}", api_key))
             .multipart(form)
             .send()
-            .await?;
+            .await
+            .map_err(|error| AIError::Network(error.without_url()))?;
 
         let status = response.status();
-        let raw_response = response.text().await.unwrap_or_default();
+        let raw_response = credential
+            .redactor
+            .redact_owned(response.text().await.unwrap_or_default());
         if !status.is_success() {
             return Err(AIError::Provider(format!(
                 "KIE file upload failed {}: {}",
@@ -256,7 +263,7 @@ impl KieProvider {
 
     async fn upload_reference_images(
         &self,
-        api_key: &str,
+        credential: &mut ResolvedCredential,
         model: &str,
         reference_images: &[String],
     ) -> Result<Vec<String>, AIError> {
@@ -264,18 +271,22 @@ impl KieProvider {
         let capped = reference_images.iter().take(limit).collect::<Vec<_>>();
         let mut uploaded_urls = Vec::with_capacity(capped.len());
         for (index, source) in capped.into_iter().enumerate() {
-            uploaded_urls.push(self.upload_reference_image(api_key, source, index).await?);
+            uploaded_urls.push(
+                self.upload_reference_image(credential, source, index)
+                    .await?,
+            );
         }
         Ok(uploaded_urls)
     }
 
     async fn create_task(
         &self,
-        api_key: &str,
+        credential: &mut ResolvedCredential,
         request: &GenerateRequest,
         model: &str,
         uploaded_images: Vec<String>,
     ) -> Result<String, AIError> {
+        let api_key = credential.value.as_str();
         if uploaded_images.iter().any(|url| !Self::is_http_url(url)) {
             return Err(AIError::InvalidRequest(
                 "KIE image_input contains non-http URL, upload step may have failed".to_string(),
@@ -310,6 +321,11 @@ impl KieProvider {
             "model": model,
             "input": input
         });
+        let mut body = body;
+        credential
+            .redactor
+            .resolve_json(&mut body)
+            .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
         let response = self
             .client
             .post(&endpoint)
@@ -317,10 +333,13 @@ impl KieProvider {
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
-            .await?;
+            .await
+            .map_err(|error| AIError::Network(error.without_url()))?;
 
         let status = response.status();
-        let raw_response = response.text().await.unwrap_or_default();
+        let raw_response = credential
+            .redactor
+            .redact_owned(response.text().await.unwrap_or_default());
         if !status.is_success() {
             return Err(AIError::Provider(format!(
                 "KIE createTask failed {}: {}",
@@ -355,20 +374,28 @@ impl KieProvider {
 
     async fn poll_task_once(
         &self,
-        api_key: &str,
+        credential: &mut ResolvedCredential,
         task_id: &str,
     ) -> Result<ProviderTaskPollResult, AIError> {
+        let api_key = credential.value.as_str();
+        let task_id = credential
+            .redactor
+            .resolve_markers(task_id, false)
+            .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
         let endpoint = format!("{}{}", TASK_BASE_URL, RECORD_INFO_PATH);
         let response = self
             .client
             .get(&endpoint)
             .header("Authorization", format!("Bearer {}", api_key))
-            .query(&[("taskId", task_id)])
+            .query(&[("taskId", task_id.as_ref())])
             .send()
-            .await?;
+            .await
+            .map_err(|error| AIError::Network(error.without_url()))?;
 
         let status = response.status();
-        let raw_response = response.text().await.unwrap_or_default();
+        let raw_response = credential
+            .redactor
+            .redact_owned(response.text().await.unwrap_or_default());
         if !status.is_success() {
             return Err(AIError::Provider(format!(
                 "KIE recordInfo failed {}: {}",
@@ -421,24 +448,6 @@ impl KieProvider {
             ))),
         }
     }
-
-    async fn poll_task_until_complete(
-        &self,
-        api_key: &str,
-        task_id: &str,
-    ) -> Result<String, AIError> {
-        loop {
-            match self.poll_task_once(api_key, task_id).await? {
-                ProviderTaskPollResult::Running => {
-                    sleep(Duration::from_millis(POLL_INTERVAL_MS)).await
-                }
-                ProviderTaskPollResult::Succeeded(url) => return Ok(url),
-                ProviderTaskPollResult::Failed(message) => {
-                    return Err(AIError::TaskFailed(message))
-                }
-            }
-        }
-    }
 }
 
 impl Default for KieProvider {
@@ -468,9 +477,14 @@ impl AIProvider for KieProvider {
     }
 
     async fn set_api_key(&self, api_key: String) -> Result<(), AIError> {
-        let mut key = self.api_key.write().await;
-        *key = Some(api_key);
+        let reference = credential_ref_from_token(&api_key)
+            .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
+        *self.credential_ref.write().await = Some(reference);
         Ok(())
+    }
+
+    async fn credential_ref(&self) -> Option<SecretRef> {
+        self.credential_ref.read().await.clone()
     }
 
     fn supports_task_resume(&self) -> bool {
@@ -481,26 +495,33 @@ impl AIProvider for KieProvider {
         &self,
         request: GenerateRequest,
     ) -> Result<ProviderTaskSubmission, AIError> {
-        let api_key = self
-            .api_key
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| AIError::InvalidRequest("API key not set".to_string()))?;
+        let reference = self.credential_ref().await;
+        let mut credential = resolve_provider_credential(
+            reference.as_ref(),
+            request
+                .extra_params
+                .as_ref()
+                .and_then(|params| params.get("credential_ref")),
+        )
+        .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
         let model = Self::sanitize_model(&request.model);
         let uploaded_images = self
             .upload_reference_images(
-                &api_key,
+                &mut credential,
                 &model,
                 request.reference_images.as_deref().unwrap_or(&[]),
             )
             .await?;
         let task_id = self
-            .create_task(&api_key, &request, &model, uploaded_images)
+            .create_task(&mut credential, &request, &model, uploaded_images)
             .await?;
         Ok(ProviderTaskSubmission::Queued(ProviderTaskHandle {
             task_id,
-            metadata: None,
+            metadata: Some(json!({
+                "credential_ref": request.extra_params.as_ref()
+                    .and_then(|params| params.get("credential_ref")).cloned()
+                    .or_else(|| reference.as_ref().and_then(|value| serde_json::to_value(value).ok()))
+            })),
         }))
     }
 
@@ -508,45 +529,34 @@ impl AIProvider for KieProvider {
         &self,
         handle: ProviderTaskHandle,
     ) -> Result<ProviderTaskPollResult, AIError> {
-        let api_key = self
-            .api_key
-            .read()
+        let reference = self.credential_ref().await;
+        let mut credential = resolve_provider_credential(
+            reference.as_ref(),
+            handle
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("credential_ref")),
+        )
+        .map_err(|error| AIError::InvalidRequest(error.to_string()))?;
+        self.poll_task_once(&mut credential, handle.task_id.as_str())
             .await
-            .clone()
-            .ok_or_else(|| AIError::InvalidRequest("API key not set".to_string()))?;
-        self.poll_task_once(&api_key, handle.task_id.as_str()).await
     }
 
     async fn generate(&self, request: GenerateRequest) -> Result<String, AIError> {
-        let api_key = self
-            .api_key
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| AIError::InvalidRequest("API key not set".to_string()))?;
-        let model = Self::sanitize_model(&request.model);
-        info!(
-            "[KIE Request] model: {}, size: {}, aspect_ratio: {}, refs: {}",
-            model,
-            request.size,
-            request.aspect_ratio,
-            request
-                .reference_images
-                .as_ref()
-                .map(|refs| refs.len())
-                .unwrap_or(0)
-        );
-
-        let uploaded_images = self
-            .upload_reference_images(
-                &api_key,
-                &model,
-                request.reference_images.as_deref().unwrap_or(&[]),
-            )
-            .await?;
-        let task_id = self
-            .create_task(&api_key, &request, &model, uploaded_images)
-            .await?;
-        self.poll_task_until_complete(&api_key, &task_id).await
+        let handle = match self.submit_task(request).await? {
+            ProviderTaskSubmission::Succeeded(result) => return Ok(result),
+            ProviderTaskSubmission::Queued(handle) => handle,
+        };
+        loop {
+            match self.poll_task(handle.clone()).await? {
+                ProviderTaskPollResult::Running => {
+                    sleep(Duration::from_millis(POLL_INTERVAL_MS)).await
+                }
+                ProviderTaskPollResult::Succeeded(url) => return Ok(url),
+                ProviderTaskPollResult::Failed(message) => {
+                    return Err(AIError::TaskFailed(message))
+                }
+            }
+        }
     }
 }

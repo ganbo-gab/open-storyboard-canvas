@@ -1,7 +1,7 @@
 import { AlertTriangle, Braces, CheckCircle2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { UiButton } from '@/components/ui/primitives';
+import { UiButton, UiTextArea } from '@/components/ui';
 import type { CustomImageProviderFieldIssue } from '@/features/canvas/application/customImageProviderConfig';
 
 interface CustomImageProviderContractEditorProps {
@@ -40,7 +40,7 @@ export function CustomImageProviderContractEditor({
 
       <div className="mt-3 space-y-3">
         {generatedByAi && (
-          <div className="flex items-center gap-1.5 rounded-md border border-emerald-500/25 bg-emerald-500/5 px-2.5 py-2 text-[11px] text-emerald-300">
+          <div className="flex items-center gap-1.5 rounded-md border border-success/25 bg-success/8 px-2.5 py-2 text-[11px] text-success">
             <CheckCircle2 className="h-3.5 w-3.5" />
             {t('settings.customProviders.contract.aiDraftNotice')}
           </div>
@@ -48,7 +48,7 @@ export function CustomImageProviderContractEditor({
 
         <div className="grid gap-2 sm:grid-cols-5">
           {sections.map((section) => (
-            <div key={section} className="rounded-md border border-border-dark bg-bg-dark px-2 py-2">
+            <div key={section} className="rounded-md border border-[var(--line)] bg-bg px-2 py-2">
               <div className="text-[10px] font-medium text-text-dark">
                 {t(`settings.customProviders.contract.sections.${section}.title`)}
               </div>
@@ -59,26 +59,25 @@ export function CustomImageProviderContractEditor({
           ))}
         </div>
 
-        <textarea
+        <UiTextArea
           value={value}
           onChange={(event) => onChange(event.target.value)}
           spellCheck={false}
-          className={`ui-scrollbar h-80 w-full resize-y rounded-md border bg-bg-dark px-3 py-2 font-mono text-[11px] leading-5 text-text-dark outline-hidden ${
-            issues.length > 0 ? 'border-red-500/45 focus:border-red-400' : 'border-border-dark focus:border-accent/50'
-          }`}
+          aria-invalid={issues.length > 0 || undefined}
+          className={`ui-scrollbar h-80 resize-y font-mono text-[11px] leading-5 ${issues.length > 0 ? 'border-danger/45' : ''}`}
           aria-label={t('settings.customProviders.contract.editorLabel')}
         />
 
         {issues.length > 0 && (
-          <div className="rounded-md border border-red-500/25 bg-red-500/5 p-2.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-red-300">
+          <div className="rounded-md border border-danger/25 bg-danger/8 p-2.5">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-danger">
               <AlertTriangle className="h-3.5 w-3.5" />
               {t('settings.customProviders.contract.validationTitle')}
             </div>
-            <ul className="mt-1.5 space-y-1 text-[10px] leading-4 text-red-300/90">
+            <ul className="mt-1.5 space-y-1 text-[10px] leading-4 text-danger/90">
               {issues.slice(0, 10).map((entry, index) => (
                 <li key={`${entry.path}-${index}`}>
-                  <code className="text-red-200">{entry.path}</code>: {entry.message}
+                  <code className="font-medium text-danger">{entry.path}</code>: {entry.message}
                 </li>
               ))}
             </ul>
@@ -87,7 +86,7 @@ export function CustomImageProviderContractEditor({
 
         <div className="flex items-center justify-between gap-3 text-[10px] leading-4 text-text-muted">
           <span>{t('settings.customProviders.contract.securityHint')}</span>
-          <UiButton type="button" variant="muted" size="sm" onClick={onApply}>
+          <UiButton type="button" variant="secondary" size="sm" onClick={onApply}>
             {t('settings.customProviders.contract.apply')}
           </UiButton>
         </div>

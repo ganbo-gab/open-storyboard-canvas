@@ -1,5 +1,6 @@
 import { memo, useState, useCallback, useRef, useEffect } from 'react';
 import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { UiIconButton } from '@/components/ui';
 
 export interface CameraSphericalPosition {
   horizontal: number;
@@ -25,18 +26,21 @@ function drawSphere(
 ) {
   ctx.clearRect(0, 0, w, h);
 
+  const theme = getComputedStyle(ctx.canvas);
+  const textRgb = theme.getPropertyValue('--text-rgb').trim();
+
   const cx = w / 2;
   const cy = h / 2;
   const R = Math.min(w, h) / 2 - 16;
 
   ctx.beginPath();
   ctx.roundRect(8, 8, w - 16, h - 16, 18);
-  ctx.fillStyle = '#343434';
+  ctx.fillStyle = `rgb(${theme.getPropertyValue('--raised-rgb').trim()})`;
   ctx.fill();
 
   ctx.beginPath();
   ctx.arc(cx, cy, R, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255,255,255,0.24)';
+  ctx.strokeStyle = `rgb(${textRgb} / 0.24)`;
   ctx.lineWidth = 1.2;
   ctx.stroke();
 
@@ -62,7 +66,7 @@ function drawSphere(
       0,
       Math.PI * 2
     );
-    ctx.strokeStyle = lat === 0 ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.1)';
+    ctx.strokeStyle = `rgb(${textRgb} / ${lat === 0 ? 0.18 : 0.1})`;
     ctx.lineWidth = lat === 0 ? 1.0 : 0.7;
     ctx.stroke();
   }
@@ -73,7 +77,7 @@ function drawSphere(
     const a = R * Math.abs(Math.cos(angle));
     ctx.beginPath();
     ctx.ellipse(cx, cy, Math.max(1, a), R, 0, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.strokeStyle = `rgb(${textRgb} / 0.1)`;
     ctx.lineWidth = 0.7;
     ctx.stroke();
   }
@@ -113,9 +117,9 @@ function drawSphere(
     const maxH = R * 0.9 * imageScale;
     const drawX = cx - maxW / 2;
     const drawY = cy - maxH / 2;
-    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillStyle = `rgb(${textRgb} / 0.06)`;
     ctx.fillRect(drawX, drawY, maxW, maxH);
-    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.strokeStyle = `rgb(${textRgb} / 0.2)`;
     ctx.lineWidth = 1;
     ctx.strokeRect(drawX, drawY, maxW, maxH);
   }
@@ -124,7 +128,7 @@ function drawSphere(
 
   ctx.beginPath();
   ctx.arc(cx, cy, 1.2, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.fillStyle = `rgb(${textRgb} / 0.3)`;
   ctx.fill();
 }
 
@@ -154,6 +158,9 @@ export const CameraSphereControl = memo(
 
     useEffect(() => {
       redraw();
+      const observer = new MutationObserver(redraw);
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme-tone'] });
+      return () => observer.disconnect();
     }, [redraw]);
 
     const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -219,11 +226,12 @@ export const CameraSphereControl = memo(
             width: `${lineLength}px`,
             height: '2px',
             transform: `translate(0, -50%) rotate(${lineAngle}deg)`,
-            background: 'linear-gradient(to right, rgba(207,176,84,0.55), rgba(207,176,84,0.08))',
+            background: 'linear-gradient(to right, rgb(var(--accent-rgb) / 0.55), rgb(var(--accent-rgb) / 0.08))',
             opacity: 0.5,
           }}
         />
 
+        {/* Physical camera illustration: retain its material, lens, and indicator colors. */}
         {/* camera marker */}
         <div
           className="absolute"
@@ -324,34 +332,42 @@ export const CameraSphereControl = memo(
           </div>
         </div>
 
-        <button
-          type="button"
-          className="absolute left-1/2 top-5 -translate-x-1/2 flex items-center justify-center w-5 h-5 text-white/45 hover:text-white/80 transition-colors"
+        <UiIconButton
+          size="sm"
+          className="absolute left-1/2 top-5 -translate-x-1/2 w-5 h-5"
+          aria-label="向上旋转"
+          title="向上旋转"
           onClick={(e) => { e.stopPropagation(); onPositionChange(horizontal, Math.min(90, vertical + 12)); }}
         >
           <ChevronUp className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          className="absolute left-1/2 bottom-5 -translate-x-1/2 flex items-center justify-center w-5 h-5 text-white/45 hover:text-white/80 transition-colors"
+        </UiIconButton>
+        <UiIconButton
+          size="sm"
+          className="absolute left-1/2 bottom-5 -translate-x-1/2 w-5 h-5"
+          aria-label="向下旋转"
+          title="向下旋转"
           onClick={(e) => { e.stopPropagation(); onPositionChange(horizontal, Math.max(-90, vertical - 12)); }}
         >
           <ChevronDown className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          className="absolute top-1/2 left-5 -translate-y-1/2 flex items-center justify-center w-5 h-5 text-white/45 hover:text-white/80 transition-colors"
+        </UiIconButton>
+        <UiIconButton
+          size="sm"
+          className="absolute top-1/2 left-5 -translate-y-1/2 w-5 h-5"
+          aria-label="向左旋转"
+          title="向左旋转"
           onClick={(e) => { e.stopPropagation(); onPositionChange((horizontal - 12 + 360) % 360, vertical); }}
         >
           <ChevronLeft className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          className="absolute top-1/2 right-5 -translate-y-1/2 flex items-center justify-center w-5 h-5 text-white/45 hover:text-white/80 transition-colors"
+        </UiIconButton>
+        <UiIconButton
+          size="sm"
+          className="absolute top-1/2 right-5 -translate-y-1/2 w-5 h-5"
+          aria-label="向右旋转"
+          title="向右旋转"
           onClick={(e) => { e.stopPropagation(); onPositionChange((horizontal + 12) % 360, vertical); }}
         >
           <ChevronRight className="w-3.5 h-3.5" />
-        </button>
+        </UiIconButton>
       </div>
     );
   }

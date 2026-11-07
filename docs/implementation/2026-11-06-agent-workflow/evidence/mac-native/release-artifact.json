@@ -1,0 +1,7 @@
+{
+  "path": "/path/to/storyboard-workspace/验收包-2026-11-06-Mac原生性能补验版/Open Storyboard Canvas_0.2.0-next.1_aarch64.dmg",
+  "sha256": "5ccda9d0532a4bc580f1ed8f153541222ca0aab70c4afbaf19c0ae215c6e5d9e",
+  "codeSign": "ad-hoc, strict verify passed",
+  "notarized": false,
+  "installed": false
+}

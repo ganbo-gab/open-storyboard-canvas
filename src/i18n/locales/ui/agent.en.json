@@ -1,0 +1,29 @@
+{
+  "showError": "Show full error (redacted)",
+  "hideError": "Hide error details",
+  "copyError": "Copy error details",
+  "invalidToolArguments": "This tool call had invalid parameters and was not applied. The assistant can correct it using the validation result.",
+  "newMessages": "Back to latest",
+  "homeTitle": "Turn an idea into a story",
+  "homeHint": "Start with a story, a character or a single shot. Review the plan before the assistant changes your canvas or generates media.",
+  "stageTitle": "Plan this scene together",
+  "stageHint": "Describe blocking, cameras and action. Preview the plan before applying it to the stage.",
+  "suggestStory": "Plan six shots for a story idea",
+  "suggestCharacter": "Develop a character’s appearance and personality",
+  "suggestStage": "Plan blocking and cameras for two people meeting",
+  "history": "Recent conversations",
+  "new": "New conversation",
+  "approvalDescriptions": {
+    "project_create": "Create and open an empty canvas named “{{name}}”.",
+    "project_open": "Open the selected existing canvas.",
+    "canvas_open_plan": "Place the storyboard plan below on the canvas. You can undo the change.",
+    "home_generation_submit": "Submit one generation using the model and parameters below.",
+    "channel_create": "Save this new channel configuration.",
+    "channel_update": "Update the existing channel. Review the changes below.",
+    "stage_command": "Apply this stage edit. You can undo the change."
+  },
+  "retrying": "Service temporarily unavailable. Reconnecting ({{attempt}} / {{total}})…",
+  "continueRemaining": "Continue unfinished work",
+  "continueHint": "Keep completed changes and check execution records before continuing.",
+  "continuePrompt": "Inspect the current project, scene and existing execution receipts first. Keep completed changes and continue only unfinished parts of the previous task. Check uncertain outcomes before acting. Do not recreate existing content or resubmit accepted or uncertain generation jobs."
+}

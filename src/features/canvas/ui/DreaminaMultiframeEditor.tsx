@@ -2,6 +2,7 @@ import { ArrowRight, Clock3 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { UiCheckbox, UiInput, UiTextArea } from '@/components/ui';
 import {
   DREAMINA_MULTIFRAME_CAPABILITY,
   resizeDreaminaTransitionSegments,
@@ -69,11 +70,10 @@ export function DreaminaMultiframeEditor({
           </div>
         </div>
         <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[10px] text-text-muted">
-          <input
-            type="checkbox"
+          <UiCheckbox
             checked={usesCustomDurations}
-            onChange={toggleCustomDurations}
-            className="nodrag nowheel h-3.5 w-3.5 accent-accent"
+            onCheckedChange={toggleCustomDurations}
+            className="nodrag nowheel h-3.5 w-3.5"
           />
           <Clock3 className="h-3 w-3" />
           {t('node.aiVideo.segmentDurations')}
@@ -92,7 +92,7 @@ export function DreaminaMultiframeEditor({
               <span>{t('node.aiVideo.frameLabel', { index: index + 2 })}</span>
             </div>
             <div className="flex items-start gap-2">
-              <textarea
+              <UiTextArea
                 value={segment.prompt}
                 rows={2}
                 onChange={(event) => {
@@ -109,12 +109,12 @@ export function DreaminaMultiframeEditor({
                   from: index + 1,
                   to: index + 2,
                 })}
-                className="nodrag nowheel min-h-[48px] min-w-0 flex-1 resize-y rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 py-1.5 text-[11px] leading-4 text-text-dark outline-hidden transition-colors placeholder:text-text-muted/70 focus:border-accent/60"
+                className="nodrag nowheel min-h-[48px] min-w-0 flex-1 resize-y rounded-md px-2 py-1.5 text-[11px] leading-4"
               />
               {usesCustomDurations && (
                 <label className="w-[66px] shrink-0 text-[10px] text-text-muted">
                   <span className="mb-1 block">{t('node.aiVideo.segmentSeconds')}</span>
-                  <input
+                  <UiInput
                     type="number"
                     min={DREAMINA_MULTIFRAME_CAPABILITY.segmentDuration.min}
                     max={DREAMINA_MULTIFRAME_CAPABILITY.segmentDuration.max}
@@ -134,7 +134,7 @@ export function DreaminaMultiframeEditor({
                         : defaultDuration;
                       commit(next);
                     }}
-                    className="nodrag nowheel h-8 w-full rounded-md border border-(--canvas-node-field-border) bg-(--canvas-node-button-bg) px-2 text-[11px] text-text-dark outline-hidden focus:border-accent/60"
+                    className="nodrag nowheel h-8 w-full rounded-md px-2 text-[11px]"
                   />
                 </label>
               )}

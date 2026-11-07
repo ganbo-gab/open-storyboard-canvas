@@ -51,8 +51,8 @@ export function GenerationJobStatus({
     <div
       className={`pointer-events-none absolute inset-x-2 bottom-2 z-20 flex min-h-8 items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px] shadow-lg backdrop-blur-md transition-colors duration-200 ${
         isPaused
-          ? 'border-amber-300/45 bg-amber-950/90 text-amber-100'
-          : 'border-white/15 bg-[rgba(15,23,42,0.84)] text-white'
+          ? 'border-warning/45 bg-elevated text-warning'
+          : 'border-(--canvas-node-border) bg-(--canvas-node-bg) text-text-dark'
       } ${className}`}
       role="status"
       aria-live="polite"

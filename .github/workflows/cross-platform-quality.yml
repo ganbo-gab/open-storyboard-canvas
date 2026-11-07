@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_INCREMENTAL: 0
+
 concurrency:
   group: cross-platform-quality-${{ github.ref }}
   cancel-in-progress: true

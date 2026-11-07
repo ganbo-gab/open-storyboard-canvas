@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState, useEffect } from 'react';
+import { memo, useMemo, useRef, useState, useEffect, useLayoutEffect } from 'react';
 import { Scissors } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -40,6 +40,9 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
   const { screenToFlowPosition } = useReactFlow();
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
   const leaveTimer = useRef<number | undefined>(undefined);
+  const hitPath = useRef<SVGPathElement>(null);
+  const cutButton = useRef<HTMLButtonElement>(null);
+  const renderedPaths = useRef<NodeListOf<SVGPathElement> | null>(null);
   useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
   const canvasEdgeRoutingMode = useSettingsStore((state) => state.canvasEdgeRoutingMode);
   const geometryIndex = useCanvasStore((state) => (
@@ -113,36 +116,42 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
     targetY,
   ]);
 
-  return (
+  const geometry = useRef<{ edgePath: string; labelX: number; labelY: number } | null>(null);
+  if (geometry.current === null) geometry.current = { edgePath, labelX, labelY };
+  const committedGeometry = geometry.current;
+  // React owns artwork, metadata and interactions; the layout effect owns only SVG d and label position.
+  // Reusing this element avoids rebuilding every edge subtree for every node-drag coordinate update.
+  const artwork = useMemo(() => (
     <>
       <BaseEdge
         id={id}
-        path={edgePath}
+        path={committedGeometry.edgePath}
         markerEnd={markerEnd}
         className={isProcessingEdge ? 'canvas-edge__base is-processing' : 'canvas-edge__base'}
         style={style}
       />
       {/* Flowing highlight: always on while the target is generating, otherwise on hover/selection. */}
       <path
-        d={edgePath}
+        d={committedGeometry.edgePath}
         fill="none"
         className={isProcessingEdge ? 'canvas-edge__flow is-active' : 'canvas-edge__flow'}
         style={{ pointerEvents: 'none' }}
       />
       <path
-        d={edgePath}
+        ref={hitPath}
+        d={committedGeometry.edgePath}
         fill="none"
         stroke="transparent"
         strokeWidth={22}
         className="canvas-edge__hit"
-        style={{ pointerEvents: 'stroke' }}
         onPointerMove={(event) => {
+          if (event.buttons !== 0) return;
           window.clearTimeout(leaveTimer.current);
           // Scissors follow the pointer's projection on the curve, not a fixed midpoint.
           const pointer = screenToFlowPosition({ x: event.clientX, y: event.clientY });
           const path = event.currentTarget;
           const length = path.getTotalLength();
-          let closest = { x: labelX, y: labelY };
+          let closest = { x: committedGeometry.labelX, y: committedGeometry.labelY };
           let distance = Infinity;
           for (let index = 0; index <= 48; index++) {
             const point = path.getPointAtLength(length * index / 48);
@@ -157,8 +166,9 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
         <EdgeLabelRenderer>
           <button
             type="button"
+            ref={cutButton}
             className="nodrag nopan canvas-edge__cut"
-            style={{ transform: `translate(-50%, -50%) translate(${hoverPoint?.x ?? labelX}px, ${hoverPoint?.y ?? labelY}px) scale(var(--canvas-ui-scale, 1))` }}
+            style={{ transform: `translate(-50%, -50%) translate(${hoverPoint?.x ?? committedGeometry.labelX}px, ${hoverPoint?.y ?? committedGeometry.labelY}px) scale(var(--canvas-ui-scale, 1))` }}
             onPointerEnter={() => window.clearTimeout(leaveTimer.current)}
             onPointerLeave={() => setHoverPoint(null)}
             onPointerDown={(event) => event.stopPropagation()}
@@ -171,5 +181,24 @@ export const DisconnectableEdge = memo(function DisconnectableEdge(props: EdgePr
         </EdgeLabelRenderer>
       )}
     </>
-  );
+  ), [committedGeometry, deleteEdge, hoverPoint, id, isProcessingEdge, markerEnd, screenToFlowPosition, selected, style, t]);
+
+  useLayoutEffect(() => {
+    renderedPaths.current = hitPath.current?.parentElement?.querySelectorAll<SVGPathElement>(
+      '.react-flow__edge-path, .react-flow__edge-interaction, .canvas-edge__flow, .canvas-edge__hit',
+    ) ?? null;
+    return () => { renderedPaths.current = null; };
+  }, [artwork]);
+
+  useLayoutEffect(() => {
+    committedGeometry.edgePath = edgePath;
+    committedGeometry.labelX = labelX;
+    committedGeometry.labelY = labelY;
+    if (renderedPaths.current) for (const path of renderedPaths.current) path.setAttribute('d', edgePath);
+    if (cutButton.current && !hoverPoint) {
+      cutButton.current.style.transform = `translate(-50%, -50%) translate(${labelX}px, ${labelY}px) scale(var(--canvas-ui-scale, 1))`;
+    }
+  }, [artwork, committedGeometry, edgePath, hoverPoint, labelX, labelY]);
+
+  return artwork;
 });

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   useReactFlow,
   type Connection,
@@ -8,14 +8,12 @@ import {
 } from '@xyflow/react';
 
 import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
-import { validateCanvasConnection } from '@/features/canvas/application/canvasConnectionRules';
+import { explainConnection as explainNodeConnection, type ConnectionExplanation } from '@/features/canvas/application/canvasConnectionRules';
 import { clearBrowserTextSelection } from '@/features/canvas/application/textSelection';
 import { CANVAS_COMMAND_VERSION } from '@/features/canvas/domain/canvasCommands';
 import {
   getConnectMenuNodeTypes,
   nodeCanStartManualConnection,
-  nodeHasSourceHandle,
-  nodeHasTargetHandle,
 } from '@/features/canvas/domain/nodeRegistry';
 import { useCanvasUiStore, type FlowPoint } from '@/features/canvas/state/canvasUiStore';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -42,6 +40,45 @@ function canStartFrom(nodeId: string | null | undefined): boolean {
 export function useCanvasConnections(scheduleCanvasPersist: (delayMs?: number) => void) {
   const reactFlow = useReactFlow();
   const startRef = useRef<{ nodeId: string; handleType: 'source' | 'target'; fromClient: FlowPoint } | null>(null);
+  const stopHoverRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => stopHoverRef.current?.(), []);
+
+  /** While dragging, explain why the card under the pointer would refuse the connection. */
+  const trackRejectedTarget = useCallback(() => {
+    let frame = 0;
+    let point: FlowPoint | null = null;
+    const evaluate = () => {
+      frame = 0;
+      const start = startRef.current;
+      if (!start || !point) return;
+      const hoveredId = getNodeIdFromTarget(document.elementFromPoint(point.x, point.y));
+      const ui = useCanvasUiStore.getState();
+      if (!hoveredId || hoveredId === start.nodeId) {
+        ui.setConnectionReject(null);
+        return;
+      }
+      const { nodes, edges } = useCanvasStore.getState();
+      const [sourceId, targetId] = start.handleType === 'source' ? [start.nodeId, hoveredId] : [hoveredId, start.nodeId];
+      const explanation = explainNodeConnection(
+        nodes.find((node) => node.id === sourceId),
+        nodes.find((node) => node.id === targetId),
+        { nodes, edges },
+      );
+      const reason = !explanation.ok
+        ? explanation.reason
+        : canStartFrom(sourceId) ? null : { type: 'sourceNotConnectable' as const };
+      ui.setConnectionReject(reason ? { nodeId: hoveredId, reason } : null);
+    };
+    const onMove = (event: PointerEvent) => {
+      point = { x: event.clientX, y: event.clientY };
+      if (!frame) frame = requestAnimationFrame(evaluate);
+    };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
 
   const connect = useCallback(async (sourceId: string, targetId: string) => {
     const result = await canvasCommandRegistry.execute({
@@ -55,16 +92,30 @@ export function useCanvasConnections(scheduleCanvasPersist: (delayMs?: number) =
     return true;
   }, [scheduleCanvasPersist]);
 
-  const isValidConnection = useCallback((connection: Connection | Edge) => {
-    if (!connection.source || !connection.target || !canStartFrom(connection.source)) return false;
+  const explainConnection = useCallback((connection: Connection | Edge): ConnectionExplanation => {
     const { nodes, edges } = useCanvasStore.getState();
-    return validateCanvasConnection(connection.source, connection.target, nodes, edges).valid;
+    const source = nodes.find((node) => node.id === connection.source);
+    const target = nodes.find((node) => node.id === connection.target);
+    const explanation = explainNodeConnection(source, target, {
+      sourceHandle: connection.sourceHandle,
+      targetHandle: connection.targetHandle,
+      nodes,
+      edges,
+    });
+    if (explanation.ok && !canStartFrom(connection.source)) {
+      return { ok: false, reason: { type: 'sourceNotConnectable' } };
+    }
+    return explanation;
   }, []);
 
+  const isValidConnection = useCallback((connection: Connection | Edge) => (
+    explainConnection(connection).ok
+  ), [explainConnection]);
+
   const onConnect = useCallback((connection: Connection) => {
-    if (!connection.source || !connection.target || !canStartFrom(connection.source)) return;
+    if (!explainConnection(connection).ok) return;
     void connect(connection.source, connection.target);
-  }, [connect]);
+  }, [connect, explainConnection]);
 
   const onConnectStart = useCallback((event: MouseEvent | TouchEvent, params: OnConnectStartParams) => {
     clearBrowserTextSelection();
@@ -83,11 +134,15 @@ export function useCanvasConnections(scheduleCanvasPersist: (delayMs?: number) =
     if (!fromClient) return;
     startRef.current = { nodeId: params.nodeId, handleType: params.handleType, fromClient };
     ui.setConnecting({ nodeId: params.nodeId, handleType: params.handleType });
-  }, []);
+    stopHoverRef.current?.();
+    stopHoverRef.current = trackRejectedTarget();
+  }, [trackRejectedTarget]);
 
   const onConnectEnd = useCallback((event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
     const start = startRef.current;
     startRef.current = null;
+    stopHoverRef.current?.();
+    stopHoverRef.current = null;
     useCanvasUiStore.getState().setConnecting(null);
     clearBrowserTextSelection();
     requestAnimationFrame(() => clearBrowserTextSelection());
@@ -101,18 +156,13 @@ export function useCanvasConnections(scheduleCanvasPersist: (delayMs?: number) =
       ?? getNodeIdFromTarget(document.elementFromPoint(point.x, point.y));
     if (dropNodeId) {
       if (dropNodeId === start.nodeId) return;
-      const { nodes } = useCanvasStore.getState();
+      const { nodes, edges } = useCanvasStore.getState();
       const [sourceId, targetId] = start.handleType === 'source'
         ? [start.nodeId, dropNodeId]
         : [dropNodeId, start.nodeId];
       const source = nodes.find((node) => node.id === sourceId);
       const target = nodes.find((node) => node.id === targetId);
-      if (
-        source && target
-        && nodeCanStartManualConnection(source.type)
-        && nodeHasSourceHandle(source.type)
-        && nodeHasTargetHandle(target.type)
-      ) {
+      if (explainNodeConnection(source, target, { nodes, edges }).ok && canStartFrom(sourceId)) {
         void connect(sourceId, targetId);
       }
       return;
@@ -129,5 +179,5 @@ export function useCanvasConnections(scheduleCanvasPersist: (delayMs?: number) =
     });
   }, [connect, reactFlow]);
 
-  return { onConnect, onConnectStart, onConnectEnd, isValidConnection };
+  return { onConnect, onConnectStart, onConnectEnd, isValidConnection, explainConnection };
 }

@@ -1,0 +1,51 @@
+{
+  "selectTool": "Select tool",
+  "orbitTool": "Orbit view",
+  "orbitToolHint": "Left-drag to orbit; right-drag or Shift-drag to pan; scroll to zoom. Scene objects stay in place.",
+  "durationConflict": "Keyframes or actions extend past the new end. Move or remove the later content before shortening the timeline.",
+  "selection": {
+    "actions": "Selection actions",
+    "count": "{{count}} selected",
+    "hide": "Hide",
+    "show": "Show",
+    "lock": "Lock",
+    "unlock": "Unlock",
+    "lockedHint": "“{{name}}” is locked. Unlock it in the object list first.",
+    "help": "Drag empty space to select · Shift / ⌘ adds · Alt-drag orbits"
+  },
+  "capture": {
+    "title": "Capture & four views",
+    "current": "Current view",
+    "exact": "Exact time",
+    "time": "Time (seconds)",
+    "capture": "Capture image",
+    "four": "Capture four views",
+    "busy": "Capturing…",
+    "front": "Front",
+    "right": "Right",
+    "back": "Back",
+    "left": "Left",
+    "open": "View image",
+    "send": "Send to canvas",
+    "sent": "Added to canvas; undo is available",
+    "empty": "Capture the current view or an exact time. Your images will appear here.",
+    "cancel": "Stop capture",
+    "error": "Capture failed. Wait for the scene to load and try again."
+  },
+  "rig": {
+    "split": "Split at playhead",
+    "duplicate": "Duplicate camera segment",
+    "front": "Bring to front",
+    "priority": "Priority",
+    "editError": "Cannot apply this operation. Check the playhead and segment range."
+  },
+  "route": {
+    "duration": "Time",
+    "durationHint": "Route duration: drag the label or enter seconds",
+    "close": "Close route: return to its start",
+    "open": "Open route: remove its return endpoint"
+  },
+  "camera": {
+    "bakeFirst": "A camera rig controls this moment. Bake the rig to keyframes in the camera panel before editing its look target or rotation."
+  }
+}

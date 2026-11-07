@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   CANVAS_NODE_TYPES,
   type BlueprintItem,
@@ -7,12 +8,14 @@ import {
   type PanoramaNodeData,
   type StoryboardExportOptions,
   type StoryboardSplitNodeData,
+  type StoryboardFrameItem,
 } from '../domain/canvasNodes';
 import type {
   CanvasCommandImpact,
   CanvasCommandOutput,
   CanvasDirectorItemInput,
   UpdateDirectorCommand,
+  MergeStoryboardCommand,
   UpdatePanoramaCommand,
   UpdateStoryboardCommand,
 } from '../domain/canvasCommands';
@@ -22,6 +25,142 @@ import type {
   CanvasGraphCommandPreparation,
   CanvasGraphDraft,
 } from './canvasTransactionCoordinator';
+
+import type { NodeFactory } from './ports';
+import { isDurableCanvasImageSource } from '../domain/canvasMediaSources';
+import { findRelatedCanvasNodePositions } from './canvasNodePlacement';
+import { resolveAbsoluteNodePosition } from '../clipboard/clipboardIO';
+import type { ProjectMediaReference } from '../domain/projectMedia';
+import { normalizeAssetMetadata } from '@/features/assets/application/assetMetadata';
+
+const missingMediaReferenceSchema = z.object({
+  status: z.literal('missing'), source: z.string(),
+  reason: z.enum(['unavailable-blob', 'unresolved-image-pool', 'unresolved-asset-id', 'persistence-failed']),
+  message: z.string().optional(),
+});
+const mediaReferenceSchema = z.discriminatedUnion('status', [
+  missingMediaReferenceSchema,
+  z.object({ status: z.literal('ready'), source: z.string(), assetId: z.string().min(1),
+    legacyMissing: missingMediaReferenceSchema.optional() }),
+]);
+
+const storyboardImageSourceSchema = z.object({
+  imageUrl: z.string().refine(isDurableCanvasImageSource),
+  previewImageUrl: z.string().nullish(),
+  aspectRatio: z.string().optional(),
+  displayName: z.string().optional(),
+  sourceFileName: z.string().nullish(),
+  assetId: z.string().optional(),
+  mediaReferences: z.record(z.string(), z.unknown()).optional(),
+  generationProviderId: z.string().nullish(),
+  providerId: z.string().optional().catch(undefined),
+  requestModel: z.string().optional().catch(undefined),
+  generationDebugContext: z.object({
+    providerId: z.string().optional(), requestModel: z.string().optional(), requestSize: z.string().optional(),
+  }).nullish().catch(undefined),
+});
+
+const storyboardImageNodeTypes: Partial<Record<CanvasNode['type'], true>> = {
+  [CANVAS_NODE_TYPES.upload]: true,
+  [CANVAS_NODE_TYPES.exportImage]: true,
+  [CANVAS_NODE_TYPES.imageEdit]: true,
+  [CANVAS_NODE_TYPES.storyboardGen]: true,
+  [CANVAS_NODE_TYPES.panorama]: true,
+};
+
+/** Copy stable image references into a storyboard, never flatten or delete the source graph. */
+export function applyStoryboardMerge(
+  command: MergeStoryboardCommand,
+  draft: CanvasGraphDraft,
+  nodeFactory: NodeFactory,
+): CanvasGraphCommandPreparation {
+  const nodesById = new Map(draft.nodes.map((node) => [node.id, node]));
+  if (command.input.nodeId && nodesById.has(command.input.nodeId)) {
+    return { ok: false, error: { code: 'conflict', message: `Node ${command.input.nodeId} already exists.` } };
+  }
+  const frames: StoryboardFrameItem[] = [];
+  const mediaReferences: Record<string, ProjectMediaReference> = {};
+  const sources: CanvasNode[] = [];
+  for (const [index, nodeId] of command.input.nodeIds.entries()) {
+    const source = nodesById.get(nodeId);
+    if (!source) return { ok: false, error: { code: 'not_found', message: `Node ${nodeId} does not exist.` } };
+    const metadata = normalizeAssetMetadata(source.data);
+    const parsed = storyboardImageSourceSchema.safeParse({
+      ...metadata, generationDebugContext: source.data.generationDebugContext,
+    });
+    if (!storyboardImageNodeTypes[source.type] || !parsed.success) {
+      return reject(`Node ${nodeId} must contain a durable image to merge into a storyboard.`);
+    }
+    const data = parsed.data;
+    const debug = data.generationDebugContext;
+    const modelId = metadata.model;
+    const providerId = data.generationProviderId ?? debug?.providerId ?? data.providerId;
+    const requestModel = debug?.requestModel ?? data.requestModel;
+    const resolution = metadata.resolution ?? debug?.requestSize;
+    const generationJobId = metadata.jobId;
+    sources.push(source);
+    for (const field of ['imageUrl', 'previewImageUrl'] as const) {
+      if (field === 'previewImageUrl' && !isDurableCanvasImageSource(data.previewImageUrl)) continue;
+      const reference = mediaReferenceSchema.safeParse(data.mediaReferences?.[field]);
+      if (reference.success && reference.data.source === data[field]) {
+        mediaReferences[`frames[${index}].${field}`] = reference.data;
+      } else if (field === 'imageUrl' && data.assetId) {
+        mediaReferences[`frames[${index}].imageUrl`] = { status: 'ready', assetId: data.assetId, source: data.imageUrl };
+      }
+    }
+    frames.push({
+      id: `frame-${index + 1}`,
+      imageUrl: data.imageUrl,
+      ...(isDurableCanvasImageSource(data.previewImageUrl) ? { previewImageUrl: data.previewImageUrl } : {}),
+      ...(data.aspectRatio ? { aspectRatio: data.aspectRatio } : {}),
+      note: '', order: index,
+      sourceNodeId: nodeId,
+      sourceAssetId: `${nodeId}:image`,
+      sourceMetadata: {
+        ...(data.displayName ? { displayName: data.displayName } : {}),
+        ...(data.sourceFileName ? { sourceFileName: data.sourceFileName } : {}),
+        ...(modelId ? { modelId } : {}),
+        ...(providerId ? { providerId } : {}),
+        ...(requestModel ? { requestModel } : {}),
+        ...(resolution ? { resolution } : {}),
+        ...(metadata.width !== undefined ? { width: metadata.width } : {}),
+        ...(metadata.height !== undefined ? { height: metadata.height } : {}),
+        ...(generationJobId ? { generationJobId } : {}),
+      },
+    });
+  }
+  const columns = command.input.columns ?? Math.ceil(Math.sqrt(frames.length));
+  const definitionData: Partial<StoryboardSplitNodeData> = {
+    ...(command.input.displayName ? { displayName: command.input.displayName.trim() } : {}),
+    gridRows: Math.ceil(frames.length / columns), gridCols: columns, frames,
+    aspectRatio: frames[0]?.aspectRatio ?? '1:1',
+    frameAspectRatio: frames[0]?.aspectRatio ?? '1:1',
+    ...(Object.keys(mediaReferences).length ? { mediaReferences } : {}),
+  };
+  const source = sources[0];
+  const absoluteNodes = draft.nodes.map((node) => node.parentId
+    ? { ...node, position: resolveAbsoluteNodePosition(node, nodesById) } : node);
+  const desired = resolveAbsoluteNodePosition(source, nodesById);
+  const position = findRelatedCanvasNodePositions({
+    nodes: absoluteNodes, desired, relatedNodeId: source.id, count: 1, size: { width: 560, height: 360 },
+  })[0] ?? { x: desired.x + 600, y: desired.y };
+  const node = nodeFactory.createNode(CANVAS_NODE_TYPES.storyboardSplit, position, definitionData);
+  if (command.input.nodeId) node.id = command.input.nodeId;
+  if (nodesById.has(node.id)) {
+    return { ok: false, error: { code: 'conflict', message: `Node ${node.id} already exists.` } };
+  }
+  const affectedNodeIds = [...command.input.nodeIds, node.id];
+  return {
+    ok: true, changed: true,
+    draft: { ...draft, nodes: [...draft.nodes, node] },
+    impact: {
+      effect: 'graph', summary: `Create storyboard ${node.id} from ${frames.length} ordered images.`,
+      affectedNodeIds, affectedEdgeIds: [], creates: { nodes: 1, edges: 0, groups: 0 },
+      deletes: { nodes: 0, edges: 0, groups: 0 }, requiresExternalSideEffect: false,
+    },
+    output: { references: { nodeId: node.id, nodeIds: affectedNodeIds, assetIds: command.input.nodeIds.map((nodeId) => `${nodeId}:image`) } },
+  };
+}
 
 function success(
   draft: CanvasGraphDraft,

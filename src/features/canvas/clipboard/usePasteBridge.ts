@@ -1,14 +1,11 @@
 import { useEffect, useRef } from 'react';
 
-import { canvasEventBus } from '@/features/canvas/application/canvasServices';
-import { isAudioFile, isImageFile, isVideoFile } from '@/features/canvas/application/imageDragDrop';
-import { CANVAS_NODE_TYPES } from '@/features/canvas/domain/canvasNodes';
+import { isTauri } from '@tauri-apps/api/core';
+import type { ClipboardContentReadResult } from './clipboardIO';
+import { isAudioFile, isImageFile, isVideoFile, isMaterialFile } from '@/features/canvas/application/imageDragDrop';
 import { isEditableTarget } from '@/features/canvas/engine/domTargets';
-import { eventMatchesChord } from '@/features/canvas/engine/shortcuts';
+import { eventMatchesChord, matchShortcut } from '@/features/canvas/engine/shortcuts';
 import { useCanvasStore } from '@/stores/canvasStore';
-
-/** A native `paste` event normally follows ⌘V within a frame; past this, assume none is coming. */
-const NATIVE_PASTE_GRACE_MS = 40;
 
 function namedClipboardFile(file: File, mime: string, fallbackExtension: string, prefix: string): File {
   if (typeof file.name === 'string' && file.name.trim()) return file;
@@ -39,78 +36,45 @@ function resolveClipboardMediaFile(event: ClipboardEvent): File | null {
 }
 
 export interface PasteBridgeHandlers {
-  /** Paste the internal snapshot or read the system clipboard (no native event available). */
-  pasteFromShortcut: () => Promise<boolean>;
-  markSystemClipboardFresh: () => void;
-  /** Decide whether a native paste event carries newer content than the internal snapshot. */
-  shouldHandleClipboardEventPaste: (payload: { mediaFile: File | null; imageFile: File | null; text: string }) => Promise<boolean>;
-  pasteMediaFromClipboardEvent: (file: File) => void | Promise<void>;
-  pasteTextFromClipboardEvent: (text: string) => void | Promise<void>;
+  capturePosition(): { x: number; y: number } | Promise<{ x: number; y: number }>;
+  pasteFromShortcut(position?: { x: number; y: number } | Promise<{ x: number; y: number }>, content?: ClipboardContentReadResult): Promise<boolean>;
 }
 
-/**
- * Paste is the one shortcut driven by a DOM event rather than a keydown: the native `paste`
- * event carries files the async Clipboard API cannot read. Pasted media goes to a selected
- * upload node when there is one; ⌘V without a native event (WebView quirk) falls back to
- * `pasteFromShortcut`. Every other canvas shortcut lives in useCanvasHotkeys.
- */
+/** Desktop keyboard and context menus both read the native clipboard. Browser paste events
+ * supply the same pipeline with their clipboard snapshot, including binary media files. */
 export function usePasteBridge(handlers: PasteBridgeHandlers): void {
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
-
   useEffect(() => {
-    let nativePasteAt = 0;
-    const blocked = (target: EventTarget | null) => (
-      isEditableTarget(target) || Boolean(useCanvasStore.getState().activeDirectorStudioNodeId)
-    );
-
+    let suppressNativeUntil = 0;
+    const blocked = (target: EventTarget | null) => isEditableTarget(target)
+      || Boolean(useCanvasStore.getState().activeDirectorStudioNodeId)
+      || Boolean(document.querySelector('[aria-modal="true"], dialog[open], [data-canvas-shortcuts-disabled="true"]'));
     const handlePaste = (event: ClipboardEvent) => {
       if (blocked(event.target)) return;
-      const mediaFile = resolveClipboardMediaFile(event);
-      const imageFile = mediaFile && isImageFile(mediaFile) ? mediaFile : resolveClipboardImageFile(event);
-      const text = event.clipboardData?.getData('text/plain')?.trim() ?? '';
-      if (!mediaFile && !imageFile && !text) return;
       event.preventDefault();
-      nativePasteAt = Date.now();
-
-      void (async () => {
-        const current = handlersRef.current;
-        let fromEvent = true;
-        try {
-          fromEvent = await current.shouldHandleClipboardEventPaste({ mediaFile, imageFile, text });
-        } catch (error) {
-          console.warn('Failed to classify clipboard paste event', error);
-        }
-        if (!fromEvent) {
-          void current.pasteFromShortcut();
-          return;
-        }
-        current.markSystemClipboardFresh();
-
-        const material = mediaFile ?? imageFile;
-        const selected = useCanvasStore.getState().nodes.filter((node) => node.selected);
-        if (material && selected.length === 1 && selected[0].type === CANVAS_NODE_TYPES.upload) {
-          canvasEventBus.publish('upload-node/paste-material', { nodeId: selected[0].id, file: material });
-          return;
-        }
-        if (material) await current.pasteMediaFromClipboardEvent(material);
-        else await current.pasteTextFromClipboardEvent(text);
-      })();
+      if (Date.now() < suppressNativeUntil) return;
+      const position = handlersRef.current.capturePosition();
+      if (isTauri()) { void handlersRef.current.pasteFromShortcut(position); return; }
+      const files = Array.from(event.clipboardData?.files ?? []).filter(isMaterialFile);
+      const fallback = resolveClipboardMediaFile(event);
+      if (!files.length && fallback) files.push(fallback);
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      const content = { mediaFiles: files, mediaFile: files[0] ?? null,
+        imageFile: files.find(isImageFile) ?? null, text };
+      void handlersRef.current.pasteFromShortcut(position, content);
     };
-
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || !eventMatchesChord(event, 'mod+v') || blocked(event.target)) return;
-      const pressedAt = Date.now();
-      window.setTimeout(() => {
-        if (nativePasteAt < pressedAt) void handlersRef.current.pasteFromShortcut();
-      }, NATIVE_PASTE_GRACE_MS);
+      if (event.defaultPrevented || event.isComposing || matchShortcut(event) !== 'edit.paste' || blocked(event.target)) return;
+      // Browser standard paste must retain its native event (binary clipboard access).
+      if (!isTauri() && eventMatchesChord(event, 'mod+v')) return;
+      event.preventDefault();
+      // Some WebViews still dispatch a native event after handled keydown. Consume it once.
+      suppressNativeUntil = Date.now() + 500;
+      void handlersRef.current.pasteFromShortcut(handlersRef.current.capturePosition());
     };
-
     document.addEventListener('paste', handlePaste);
     document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('paste', handlePaste);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
+    return () => { document.removeEventListener('paste', handlePaste); document.removeEventListener('keydown', handleKeyDown); };
   }, []);
 }

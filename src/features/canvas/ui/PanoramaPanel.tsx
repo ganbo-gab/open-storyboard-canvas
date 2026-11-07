@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { X } from 'lucide-react';
 
+import { UiIconButton } from '@/components/ui';
 import { PanoramaSetupForm } from './PanoramaSetupForm';
 
 export type PanoramaProjection = 'spherical' | 'cylindrical';
@@ -42,21 +43,21 @@ export const PanoramaPanel = memo(({ isOpen, onClose, onGenerate, onCopyPrompt, 
 
   return (
     <div
-      className="fixed z-200 rounded-xl border border-white/12 bg-[#202020] shadow-2xl overflow-hidden"
+      className="fixed z-200 rounded-xl border border-[var(--line)] bg-elevated shadow-[var(--shadow-pop)] overflow-hidden"
       style={{ left: panelLeft, top: panelTop, width: panelWidth }}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/8">
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--line)]">
         <div>
-          <div className="text-sm font-semibold text-white">全景图生成</div>
-          <div className="mt-0.5 text-[11px] text-white/42">
+          <div className="text-sm font-semibold text-text-dark">全景图生成</div>
+          <div className="mt-0.5 text-[11px] text-text-subtle">
             左侧管理素材 · 中间写提示词与参数 · 右侧选择生成方式和比例兜底
           </div>
         </div>
-        <button onClick={onClose} className="flex items-center justify-center w-6 h-6 rounded-md text-white/50 hover:text-white hover:bg-white/10">
+        <UiIconButton onClick={onClose} aria-label="关闭">
           <X className="w-4 h-4" />
-        </button>
+        </UiIconButton>
       </div>
       <PanoramaSetupForm
         onSubmit={onGenerate}

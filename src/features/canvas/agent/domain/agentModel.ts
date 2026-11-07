@@ -1,3 +1,4 @@
+import type { AgentProviderContinuation } from '../application/agentProviderContinuation';
 export const CANVAS_AGENT_RUNTIME_VERSION = 1 as const;
 export const CANVAS_AGENT_DEFINITION_VERSION = 1 as const;
 export const EXTERNAL_AGENT_EVENT_VERSION = 1 as const;
@@ -69,6 +70,8 @@ export interface AgentModelCapabilities {
 }
 
 export interface AgentModelReference {
+  /** Local usage attribution only; never sent as a provider field. */
+  contextSessionId?: string;
   catalogId: string;
   providerId: string;
   modelId: string;
@@ -108,6 +111,8 @@ export type AgentSessionMediaAvailability = 'available' | 'missing';
 
 export interface AgentSessionMediaReferenceView extends AgentSessionMediaReference {
   availability: AgentSessionMediaAvailability;
+  /** Transient presentation source only. Never persist this view in session metadata or checkpoints. */
+  previewSource?: string;
 }
 
 export type AgentModelContentPart =
@@ -119,6 +124,8 @@ export type AgentModelInputItem =
       type: 'message';
       role: 'system' | 'user' | 'assistant';
       content: AgentModelContentPart[];
+      responseGroup?: string;
+      continuation?: AgentProviderContinuation;
     }
   | {
       type: 'function_call';
@@ -126,6 +133,8 @@ export type AgentModelInputItem =
       name: string;
       namespace?: string;
       arguments: string;
+      responseGroup?: string;
+      continuation?: AgentProviderContinuation;
     }
   | {
       type: 'function_call_result';
@@ -185,6 +194,7 @@ export interface AgentModelTurnResponse {
   requestId?: string;
   text?: string;
   reasoningSummary?: string;
+  continuation?: AgentProviderContinuation;
   toolCalls: AgentModelToolCall[];
   finishReason?: string;
   usage: AgentModelUsage;

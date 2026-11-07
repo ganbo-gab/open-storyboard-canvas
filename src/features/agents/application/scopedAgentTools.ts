@@ -7,10 +7,22 @@ import { canvasPlanSchema, openAgentCanvasPlan, openAgentProject, persistAgentPr
 import { getAssetPortableSource, listAssets, resolveAsset } from '@/features/assets/application/assetCatalog';
 import { useWorkbenchStore } from '@/features/workbench/store/workbenchStore';
 import { decodeScopedToolInput } from './scopedAgentSchemas';
+import { scopedAgentValidationMessage } from './scopedAgentValidationError';
 import { defineScopedAgentTool, type ScopedAgentTool } from './scopedAgentToolDefinition';
 import { stageAgentTools } from './stageAgentTools';
 import { createAgentMediaReference, prepareAgentMediaSource, toOpaqueAgentMediaReference } from '@/features/canvas/agent/application/agentMediaResolver';
 import { prepareAgentCanvasPlan, resolveAgentCanvasPlan } from './agentCanvasPlanRepository';
+import { getChannelCatalogProviders } from '@/features/channels/application/channelCatalog';
+import { summarizeModesForAgent } from '@/features/channels/application/modelModes';
+import { buildImageModelCatalog } from '@/features/canvas/application/modelCatalog';
+import { buildChannelAudioModelCatalog } from '@/features/channels/application/audioModelCatalog';
+import { useChannelStore } from '@/features/channels/store/channelStore';
+import { buildVideoModelCatalog } from '@/features/canvas/application/videoModelCatalog';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { useGenerationHistoryStore } from '@/features/library/history/historyStore';
+import { scopedKnowledgeTools } from './scopedKnowledgeTools';
+import { scopedChannelTools } from './scopedChannelTools';
+import { scopedIntegrationTools } from './scopedIntegrationTools';
 
 
 const text = z.string().trim().min(1);
@@ -57,7 +69,7 @@ const homeTools: ScopedAgentTool[] = [
     schema: z.object({ projectId: text.nullable(), planId: text }).strict(),
     async execute(input, context) {
       const plan = await resolveAgentCanvasPlan(input.planId, context);
-      return openAgentCanvasPlan({ projectId: input.projectId, plan });
+      return openAgentCanvasPlan({ projectId: input.projectId, plan, agentTurnId: JSON.stringify([context.projectId, context.runId]) });
     },
   }),
   defineScopedAgentTool({
@@ -75,11 +87,39 @@ const homeTools: ScopedAgentTool[] = [
     },
   }),
   defineScopedAgentTool({
+    name: 'generation_models', scope: 'home', risk: 'read',
+    description: 'List the real configured workbench models for one media kind: id (pass as home_generation_submit.model), usability, picker values and, for channel models, every declared mode with its slots and params. Use only these mode ids and slot keys; never guess them.',
+    schema: z.object({ kind: z.enum(['image', 'video', 'audio']) }).strict(),
+    async execute(input) {
+      const customProviders = getChannelCatalogProviders();
+      const dreaminaStatus = useSettingsStore.getState().dreaminaStatus;
+      if (input.kind === 'image') {
+        return buildImageModelCatalog({ customProviders, dreaminaStatus }).map((entry) => ({
+          id: entry.id, label: entry.modelLabel, provider: entry.providerLabel, usable: entry.usable, reason: entry.notReadyReason,
+          ratios: entry.supportedRatios, resolutions: entry.supportedResolutions ?? [], modes: summarizeModesForAgent(entry.modes),
+        }));
+      }
+      if (input.kind === 'video') {
+        return buildVideoModelCatalog(customProviders, dreaminaStatus).map((entry) => ({
+          id: entry.id, label: entry.modelLabel, provider: entry.providerLabel, usable: entry.usable, reason: entry.notReadyReason,
+          ratios: entry.supportedAspectRatios, resolutions: entry.supportedResolutions, durations: entry.supportedDurations,
+          modes: summarizeModesForAgent(entry.modes),
+        }));
+      }
+      return buildChannelAudioModelCatalog(useChannelStore.getState().channels).map((entry) => ({
+        id: entry.id, label: entry.modelLabel, provider: entry.providerLabel, usable: entry.usable, reason: entry.notReadyReason,
+        modes: summarizeModesForAgent(entry.modes),
+      }));
+    },
+  }),
+  defineScopedAgentTool({
     name: 'home_generation_submit', scope: 'home', risk: 'paid',
-    description: 'Submit one REAL workbench image/video/audio generation using an explicit selected model and prompt. May charge money; always requires explicit approval. Never retry an ambiguous submission.',
+    description: 'Submit one REAL workbench image/video/audio generation using an explicit selected model and prompt. Optional modeId selects a declared channel mode (default when omitted); referenceSlots maps declared slot keys to ordered media sources, in the same URL/path/asset-media/data URL form as reference images. Slot kinds and min/max counts are enforced; no automatic role guessing. May charge money; always requires explicit approval. Never retry an ambiguous submission.',
     schema: z.object({ kind: z.enum(['image', 'video', 'audio']), prompt: text.max(50_000), model: text,
       config: z.object({ size: z.string().nullable(), aspectRatio: z.string().nullable(), seconds: z.number().positive().nullable() }).strict(),
       referenceAssetIds: z.array(text).max(20).optional(),
+      modeId: text.optional().describe('Declared channel ModeSpec.id; omit for the default mode.'),
+      referenceSlots: z.record(text, z.array(text)).optional().describe('Declared slot key to ordered media sources (same source forms as reference images). Unknown slots, wrong media kinds and invalid counts fail before submission.'),
     }).strict(),
     async execute(input, context) {
       if (context.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
@@ -91,7 +131,9 @@ const homeTools: ScopedAgentTool[] = [
       if (context.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
       const taskId = await useWorkbenchStore.getState().submit({ kind: input.kind, model: input.model, prompt: input.prompt,
         references, config: { size: input.config.size ?? undefined, aspectRatio: input.config.aspectRatio ?? undefined, seconds: input.config.seconds ?? undefined },
+        channelModeId: input.modeId, referenceSlots: input.referenceSlots,
       });
+      void useGenerationHistoryStore.getState().markAgentTask(taskId).catch(() => { /* History store exposes storage errors independently of generation. */ });
       const task = useWorkbenchStore.getState().tasks[taskId];
       return redactSensitiveValue({ taskId, status: task.status, jobId: task.jobId, failure: task.failure, kind: input.kind, model: input.model,
         results: task.results.map(({ assetId, kind }) => ({ assetId, kind })),
@@ -131,7 +173,7 @@ const sharedMediaTools = (['home', 'stage'] as const).map((scope) => defineScope
   },
 }));
 export function getScopedAgentTools(scope: AgentScope): ScopedAgentTool[] {
-  return [...homeTools, ...stageAgentTools, ...sharedMediaTools,
+  return [...homeTools, ...stageAgentTools, ...sharedMediaTools, ...scopedKnowledgeTools, ...scopedChannelTools, ...scopedIntegrationTools,
     ...homeTools.filter((tool) => tool.name === 'asset_search').map((tool) => ({ ...tool, scope: 'stage' as const })),
   ].filter((tool) => tool.scope === scope);
 }
@@ -139,7 +181,7 @@ export function inspectScopedAgentTool(scope: AgentScope, name: string, input: u
   const tool = getScopedAgentTools(scope).find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`Tool ${name} is not available in ${scope} scope.`);
   const parsed = tool.schema.safeParse(decodeScopedToolInput(z.toJSONSchema(tool.schema), input));
-  if (!parsed.success) throw new Error(`Invalid ${name} arguments: ${parsed.error.message}`);
+  if (!parsed.success) throw new Error(scopedAgentValidationMessage(name, parsed.error.issues, input));
   return { tool, input: parsed.data, risk: typeof tool.risk === 'function' ? tool.risk(parsed.data) : tool.risk };
 }
 

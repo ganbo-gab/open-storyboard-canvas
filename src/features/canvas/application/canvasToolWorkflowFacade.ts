@@ -8,6 +8,7 @@ import { prepareNodeImage } from './imageData';
 import type { ToolProcessor } from './ports';
 import { getToolPlugin } from '../tools';
 import type { ToolOptions, ToolOptionPrimitive } from '../tools/types';
+import type { CanvasConnectionOptions } from './canvasConnectionRules';
 
 const AGENT_DETERMINISTIC_TOOL_TYPES = new Set<string>([
   'crop',
@@ -40,7 +41,7 @@ export interface CanvasToolWorkflowStorePort {
     frames: StoryboardFrameItem[],
     frameAspectRatio?: string,
   ) => string | null;
-  addEdge: (sourceNodeId: string, targetNodeId: string) => string | null;
+  addEdge: (sourceNodeId: string, targetNodeId: string, options?: CanvasConnectionOptions) => string | null;
 }
 
 export interface CanvasToolWorkflowResult {
@@ -81,7 +82,7 @@ export class CanvasToolWorkflowFacade {
 
   supports(node: CanvasNode, toolType: NodeToolType): boolean {
     const plugin = getToolPlugin(toolType);
-    return Boolean(isAgentCanvasToolType(toolType) && plugin && plugin.supportsNode(node) && sourceImageUrl(node));
+    return Boolean(node.data.enabled !== false && isAgentCanvasToolType(toolType) && plugin && plugin.supportsNode(node) && sourceImageUrl(node));
   }
 
   async run(input: {
@@ -93,6 +94,7 @@ export class CanvasToolWorkflowFacade {
     if (!node) {
       throw new Error(`Node ${input.nodeId} does not exist.`);
     }
+    if (node.data.enabled === false) throw new Error(`Node ${input.nodeId} is disabled.`);
     const plugin = getToolPlugin(input.toolType);
     const imageUrl = sourceImageUrl(node);
     if (!isAgentCanvasToolType(input.toolType) || !plugin || !imageUrl || !plugin.supportsNode(node)) {
@@ -137,7 +139,7 @@ export class CanvasToolWorkflowFacade {
     if (!resultNodeId) {
       throw new Error(`Tool ${input.toolType} completed without a canvas result.`);
     }
-    const edgeId = this.store.addEdge(node.id, resultNodeId);
+    const edgeId = this.store.addEdge(node.id, resultNodeId, { provenance: 'generationResult' });
     return {
       sourceNodeId: node.id,
       resultNodeId,

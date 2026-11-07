@@ -12,6 +12,7 @@ import {
 import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { UiButton } from '@/components/ui';
 import { ModelConfigPicker } from './ModelConfigPicker';
 import {
   resolvePromptTemplateText,
@@ -118,7 +119,7 @@ export const MultiFunctionPanel = memo(({ isOpen, onClose, onApply, buttonRect }
 
   return (
     <div
-      className="fixed z-100 min-w-[320px] rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-dark/95 p-2 shadow-2xl backdrop-blur-xs"
+      className="ui-popover fixed z-100 min-w-[320px] rounded-xl p-2"
       style={{
         left: `${buttonRect.left}px`,
         top: `${buttonRect.bottom + 4}px`,
@@ -131,36 +132,33 @@ export const MultiFunctionPanel = memo(({ isOpen, onClose, onApply, buttonRect }
           <Grid3x3 className="h-4 w-4 text-accent" />
           <span className="text-sm font-medium text-text-dark">{t('multiFunction.title')}</span>
         </div>
-        <button
-          onClick={onClose}
-          className="rounded-md p-1 text-text-muted hover:bg-bg-dark hover:text-text-dark transition-colors"
-        >
+        <UiButton variant="ghost" onClick={onClose} className="h-7 w-7 p-1">
           <X className="h-3.5 w-3.5" />
-        </button>
+        </UiButton>
       </div>
 
       <div className="px-2 pb-1">
         <ModelConfigPicker
           panelKey="multiFunction"
-          className="rounded-lg border border-white/10 bg-black/20 px-2 py-1.5"
+          className="rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-subtle-bg) px-2 py-1.5"
         />
       </div>
 
       {/* Divider */}
-      <div className="my-1.5 h-px bg-[rgba(255,255,255,0.1)]" />
+      <div className="my-1.5 h-px bg-(--canvas-node-divider)" />
 
       {/* Function list */}
       <div className="space-y-0.5">
         {MULTI_FUNCTION_ITEMS.map((item) => {
           const IconComponent = item.icon;
           return (
-            <button
+            <UiButton variant="ghost"
               key={item.id}
               type="button"
-              className="flex w-full items-start gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors hover:bg-bg-dark"
+              className="h-auto w-full items-start justify-start gap-3 rounded-lg px-2.5 py-2.5 text-left whitespace-normal"
               onClick={() => handleSelectFunction(item)}
             >
-              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-bg-dark/80">
+              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10">
                 <IconComponent className="h-4 w-4 text-accent" />
               </div>
               <div className="min-w-0 flex-1">
@@ -171,13 +169,13 @@ export const MultiFunctionPanel = memo(({ isOpen, onClose, onApply, buttonRect }
                   {t(item.descKey)}
                 </div>
               </div>
-            </button>
+            </UiButton>
           );
         })}
       </div>
 
       {/* Footer hint */}
-      <div className="mt-2 border-t border-[rgba(255,255,255,0.1)] px-2.5 py-2">
+      <div className="mt-2 border-t border-(--canvas-node-divider) px-2.5 py-2">
         <p className="text-xs text-text-muted">{t('multiFunction.hint')}</p>
       </div>
     </div>

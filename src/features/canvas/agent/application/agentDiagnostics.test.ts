@@ -3,6 +3,9 @@ import { CANVAS_NODE_TYPES, type CanvasNode } from '@/features/canvas/domain/can
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useCustomProvidersStore } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { removeChannelCredential, saveChannelRecord, setChannelCredential, useChannelStore } from '@/features/channels/store/channelStore';
+import type { ChannelProfileV2 } from '@/features/channels/domain/profile';
+import { useMemorySecretVault } from '@/features/secrets/testSupport';
 import { scanForSensitiveOutput } from './agentRedaction';
 import {
   buildDiagnosticBundlePreview,
@@ -19,6 +22,16 @@ import {
   serializeSafeDiagnosticBundlePreview,
 } from './agentDiagnostics';
 
+useMemorySecretVault();
+
+function chatChannel(id: string): ChannelProfileV2 {
+  return {
+    version: 2, id, name: id, baseUrl: 'https://example.test/v1', auth: { type: 'bearer' },
+    operations: { chat: { method: 'POST', path: '/chat/completions', body: 'json', template: { model: '{{model}}', messages: '{{messages}}' },
+      response: { mode: 'sync', outputs: [] } } },
+    models: [{ id: 'model-a', operations: ['chat'], params: [] }],
+  };
+}
 function canvasNode(input: Partial<CanvasNode> & Pick<CanvasNode, 'id' | 'type' | 'data'>): CanvasNode {
   return {
     position: { x: 0, y: 0 },
@@ -133,26 +146,20 @@ describe('agent diagnostics', () => {
     expect(report.evidence.find((item) => item.code === 'dangling-edges')?.edgeIds).toEqual(['duplicate-edge', 'duplicate-edge']);
   });
 
-  it('returns provider access state without exposing keys or secret-bearing configuration fields', () => {
-    useCustomProvidersStore.setState({
-      providers: [{
-        id: 'provider-1',
-        label: 'Provider',
-        mediaType: 'chat',
-        baseUrl: 'https://example.test/v1?api_key=should-not-escape',
-        endpointPath: '/chat/completions',
-        apiKey: 'sk-live-secret',
-        apiStyle: 'openai-compatible',
-        models: ['model-a'],
-        supportsWebSearch: false,
-        extraHeaders: { Authorization: 'Bearer should-not-escape' },
-      }],
-    });
+  it('reports vault-backed provider access state without exposing keys or secret-bearing configuration fields', async () => {
+    useChannelStore.setState({ channels: [], migratedLegacyIds: [] });
+    saveChannelRecord(chatChannel('keyed'));
+    saveChannelRecord(chatChannel('keyless'));
+    await setChannelCredential('keyed', 'sk-live-secret');
+    await removeChannelCredential('keyless');
     const result = inspectRedactedProviderConfig();
     const serialized = JSON.stringify(result);
-    expect(result).toEqual([expect.objectContaining({ accessState: 'configured' })]);
+    expect(result).toEqual([
+      expect.objectContaining({ label: expect.stringContaining('keyed'), accessState: 'configured' }),
+      expect.objectContaining({ label: expect.stringContaining('keyless'), accessState: 'missing' }),
+    ]);
     expect(serialized).not.toContain('sk-live-secret');
-    expect(serialized).not.toContain('should-not-escape');
+    expect(serialized).not.toContain('__SC_SECRET_');
     expect(scanForSensitiveOutput(result)).toEqual([]);
   });
 

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { CustomProviderConfig } from '@/stores/customProvidersStore';
+import { buildImageModelCatalog } from './modelCatalog';
+import { buildVideoModelCatalog } from './videoModelCatalog';
+import { buildCustomProviderRequestDebugPreviewForConfig } from '../infrastructure/providerGateway';
+import { useCustomProvidersStore } from '@/stores/customProvidersStore';
+import { resolveActiveModelForPanel } from './resolveActiveModelForPanel';
 import {
   createEmptyCustomImageProviderDraft,
   customImageProviderConfigToDraft,
@@ -63,6 +68,72 @@ describe('custom image provider config', () => {
     expect(secondDraft.mediaType).toBe('video');
     expect(secondSave.mediaType).toBe('video');
     expect(secondSave.extraParams?.mediaType).toBe('video');
+  });
+
+  it('retains unselected workflows when editing a selected workflow and routes each media model independently', () => {
+    const provider = legacyProvider({
+      apiStyle: 'comfyui', mediaType: 'image', apiKey: '', models: ['still', 'motion'],
+      extraParams: { auth: { mode: 'none' } },
+      comfyWorkflows: { version: 1, selectedWorkflowId: 'motion', workflows: [
+        { id: 'still', name: 'Storyboard still', mediaType: 'image', config: {
+          workflow: { '6': { class_type: 'CLIPTextEncode', inputs: { text: 'still original' } }, '9': { class_type: 'SaveImage', inputs: { images: ['6', 0] } } },
+          bindings: { prompt: { nodeId: '6', input: 'text' } }, outputNodeIds: ['9'],
+        } },
+        { id: 'motion', name: 'Motion shot', mediaType: 'video', config: {
+          workflow: { '1': { class_type: 'CustomVideo', inputs: { prompt: 'motion original', duration: 6 } }, '2': { class_type: 'SaveVideo', inputs: { video: ['1', 0] } } },
+          bindings: { prompt: { nodeId: '1', input: 'prompt' }, duration: { nodeId: '1', input: 'duration' } }, outputNodeIds: ['2'],
+        } },
+      ] },
+    });
+    const draft = customImageProviderConfigToDraft(provider);
+    draft.extraParams.comfyui = {
+      workflow: { '1': { class_type: 'CustomVideo', inputs: { prompt: 'edited motion', duration: 8 } }, '2': { class_type: 'SaveVideo', inputs: { video: ['1', 0] } } },
+      bindings: { prompt: { nodeId: '1', input: 'prompt' }, duration: { nodeId: '1', input: 'duration' } }, outputNodeIds: ['2'],
+    };
+    draft.mediaType = 'video';
+    const saved = customImageProviderDraftToConfig(draft, provider.id);
+    expect(saved.issues).toEqual([]);
+    if (!saved.value) throw new Error('Selected workflow could not be saved');
+    expect(saved.value.comfyWorkflows?.workflows[0]).toEqual(provider.comfyWorkflows?.workflows[0]);
+    expect(saved.value.comfyWorkflows?.workflows[1].config.workflow['1'].inputs).toMatchObject({ prompt: 'edited motion' });
+    expect(saved.value.comfyWorkflows?.selectedWorkflowId).toBe('motion');
+    const reopened = customImageProviderDraftToConfig(customImageProviderConfigToDraft(saved.value), provider.id).value;
+    expect(reopened?.comfyWorkflows).toEqual(saved.value.comfyWorkflows);
+
+    expect(buildImageModelCatalog({ customProviders: [saved.value] }).map((entry) => entry.modelId)).toEqual(['still']);
+    expect(buildVideoModelCatalog([saved.value]).map((entry) => entry.modelId)).toEqual(['motion']);
+    const request = { model: `custom:${provider.id}:still`, prompt: 'preview', size: 'auto', aspect_ratio: 'auto' };
+    expect(buildCustomProviderRequestDebugPreviewForConfig(saved.value, 'still', request).body).toMatchObject({ outputNodeIds: ['9'] });
+    expect(buildCustomProviderRequestDebugPreviewForConfig(saved.value, 'motion', { ...request, model: `custom:${provider.id}:motion`, extra_params: { seconds: 6 } }).body)
+      .toMatchObject({ outputNodeIds: ['2'] });
+    const previous = useCustomProvidersStore.getState().providers;
+    try {
+      useCustomProvidersStore.setState({ providers: [saved.value] });
+      expect(resolveActiveModelForPanel('mixed-workflow', { entryId: `custom:${provider.id}:still`, ratio: '16:9' }))
+        .toMatchObject({ entryId: `custom:${provider.id}:still`, usable: true, resolvedByFallback: false });
+    } finally { useCustomProvidersStore.setState({ providers: previous }); }
+  });
+
+  it('imports a canonical workflow collection without overwriting it with the old selected editor payload', () => {
+    const original = customImageProviderConfigToDraft(legacyProvider({
+      apiStyle: 'comfyui', models: ['old'], extraParams: { auth: { mode: 'none' }, comfyui: {
+        workflow: { old: { class_type: 'SaveImage', inputs: { marker: 'old editor' } } }, outputNodeIds: ['old'],
+      } },
+    }));
+    const collection = { version: 1 as const, selectedWorkflowId: 'imported', workflows: [{
+      id: 'imported', name: 'Imported movie', mediaType: 'video' as const,
+      config: { workflow: { fresh: { class_type: 'SaveVideo', inputs: { marker: 'imported graph' } } }, outputNodeIds: ['fresh'] },
+    }] };
+    const imported = customImageProviderDraftFromUnknown({
+      apiStyle: 'comfyui', mediaType: 'video', models: ['imported'],
+      extraParams: { auth: { mode: 'none' } }, comfyWorkflows: collection,
+    }, original);
+    expect(imported.issues).toEqual([]);
+    if (!imported.value) throw new Error('Canonical workflow import failed');
+    const saved = customImageProviderDraftToConfig(imported.value, 'imported-provider');
+    expect(saved.issues).toEqual([]);
+    expect(saved.value?.comfyWorkflows).toEqual(collection);
+    expect(customImageProviderConfigToDraft(saved.value!).models[0]).toBe('imported');
   });
 
   it('lazily derives a versioned contract from legacy fields without changing endpoints', () => {

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
 import { getAssetDisplaySource } from "../application/assetCatalog";
 import { resolveImageDisplayUrl } from "@/features/canvas/application/imageData";
+import { useAssetDisplaySource } from "./useAssetDisplaySource";
 
 type Props = {
   source: string;
@@ -9,6 +9,7 @@ type Props = {
   className?: string;
   controls?: boolean;
   onClick?: () => void;
+  draggable?: boolean;
 };
 export function AssetMedia({
   source,
@@ -17,33 +18,12 @@ export function AssetMedia({
   className = "",
   controls = false,
   onClick,
+  draggable,
 }: Props) {
-  const [url, setUrl] = useState(
-    source.startsWith("asset-media:") ? "" : resolveImageDisplayUrl(source),
-  );
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let active = true;
-    setError("");
-    if (!source.startsWith("asset-media:")) {
-      setUrl(resolveImageDisplayUrl(source));
-      return;
-    }
-    setUrl("");
-    void getAssetDisplaySource(source)
-      .then((value) => {
-        if (active) setUrl(resolveImageDisplayUrl(value));
-      })
-      .catch((cause: unknown) => {
-        if (active) setError(String(cause));
-      });
-    return () => {
-      active = false;
-    };
-  }, [source]);
+  const { url, error } = useAssetDisplaySource(source);
   if (error)
     return (
-      <span role="alert" className="block break-words p-3 text-xs text-red-400">
+      <span role="alert" className="block break-words p-3 text-xs text-danger">
         {error}
       </span>
     );
@@ -61,6 +41,7 @@ export function AssetMedia({
         preload="metadata"
         className={className}
         onClick={onClick}
+        draggable={draggable}
       />
     );
   if (kind === "audio")
@@ -79,6 +60,7 @@ export function AssetMedia({
       className={className}
       loading="lazy"
       onClick={onClick}
+      draggable={draggable}
     />
   );
 }
