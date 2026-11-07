@@ -2,6 +2,11 @@ name: Windows native regression
 
 on:
   workflow_dispatch:
+  push:
+    branches: [next]
+    paths:
+      - src-tauri/src/commands/knowledge*.rs
+      - src-tauri/src/commands/model.rs
 
 permissions:
   contents: read
