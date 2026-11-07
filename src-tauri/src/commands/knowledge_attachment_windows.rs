@@ -909,6 +909,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("vault");
         fs::create_dir(&root).unwrap();
+        // Windows TEMP may use an 8.3 ancestor such as RUNNER~1. These direct IO
+        // tests model an explicitly selected/canonical vault, like the public
+        // initialization path. Alias-rejection tests introduce aliases separately.
+        let root = fs::canonicalize(root).unwrap();
         (directory, root)
     }
 
@@ -1559,8 +1563,9 @@ mod tests {
     #[test]
     fn windows_junction_above_vault_and_restore_target_preserve_sources() {
         let (directory, root) = setup();
-        let alias = directory.path().join("alias");
-        junction(&alias, directory.path());
+        let canonical_parent = fs::canonicalize(directory.path()).unwrap();
+        let alias = canonical_parent.join("alias");
+        junction(&alias, &canonical_parent);
         assert_eq!(
             write(&alias.join("vault"), "attachments/new.bin", &[7], true)
                 .unwrap_err()
