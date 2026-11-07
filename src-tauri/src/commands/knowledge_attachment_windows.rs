@@ -1,6 +1,8 @@
-//! Windows attachment IO uses pinned, non-reparse directory handles. The complete drive-to-vault
-//! ancestor chain stays open without write/delete sharing, and commits rename the owned source
-//! handle relative to a pinned destination handle. There is deliberately no pathname fallback.
+//! Windows attachment IO opens one basename at a time relative to validated directory handles.
+//! Directory handles deny delete sharing, while write sharing permits the kernel's destination
+//! parent open during atomic rename. No later IO re-resolves a concatenated pathname: no-follow
+//! native opens and handle-relative rename retain the original directory object even if another
+//! writer adds reparse metadata. There is deliberately no pathname fallback.
 //!
 //! Only drive-rooted NTFS/ReFS volumes are supported. Other namespaces/filesystems fail closed;
 //! directory reparse points (including junctions and cloud placeholders) are never traversed.
@@ -8,7 +10,7 @@
 //! aliases are rejected. The .trash traversal is an explicit internal hop, never user input.
 
 use super::{KResult, KnowledgeError, MAX_ATTACHMENT_BYTES};
-use std::ffi::{c_void, OsString};
+use std::ffi::{c_void, OsStr, OsString};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::mem::{offset_of, size_of};
@@ -18,16 +20,18 @@ use std::path::{Component, Path, PathBuf, Prefix};
 use windows_sys::Win32::Foundation::{
     ERROR_CALL_NOT_IMPLEMENTED, ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER,
     ERROR_NOT_SUPPORTED, ERROR_SHARING_VIOLATION, GENERIC_READ, GENERIC_WRITE, HANDLE,
-    INVALID_HANDLE_VALUE,
+    INVALID_HANDLE_VALUE, OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE,
+    STATUS_REPARSE_ATTRIBUTE_CONFLICT, STATUS_REPARSE_POINT_ENCOUNTERED,
+    STATUS_REPARSE_POINT_NOT_RESOLVED, STATUS_STOPPED_ON_SYMLINK,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateDirectoryW, CreateFileW, FileAttributeTagInfo, FileDispositionInfo,
-    GetFileInformationByHandleEx, GetFileType, GetFinalPathNameByHandleW,
-    GetVolumeInformationByHandleW, SetFileInformationByHandle, CREATE_NEW, DELETE,
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
-    FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_SHARE_DELETE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK, OPEN_EXISTING, VOLUME_NAME_GUID,
+    CreateFileW, FileAttributeTagInfo, FileDispositionInfo, GetFileInformationByHandleEx,
+    GetFileType, GetFinalPathNameByHandleW, GetVolumeInformationByHandleW,
+    SetFileInformationByHandle, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_ATTRIBUTE_TAG_INFO, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK, OPEN_EXISTING,
+    SYNCHRONIZE, VOLUME_NAME_GUID,
 };
 
 // SetFileInformationByHandle's rename wrapper can convert its FileName through DOS
@@ -37,26 +41,94 @@ use windows_sys::Win32::Storage::FileSystem::{
 // sole namespace authority. FILE_RENAME_INFO has FILE_RENAME_INFORMATION's ABI for
 // the legacy ReplaceIfExists class on both 32-bit and 64-bit Windows.
 #[repr(C)]
-struct RenameIoStatus {
+struct NativeIoStatus {
     // IO_STATUS_BLOCK starts with a union of NTSTATUS and a pointer. Reserve the
     // full pointer-sized slot; synchronous handles do not require reading it back.
     status_or_pointer: *mut c_void,
     information: usize,
 }
 
+#[repr(C)]
+struct NativeUnicodeString {
+    length: u16,
+    maximum_length: u16,
+    buffer: *mut u16,
+}
+
+#[repr(C)]
+struct NativeObjectAttributes {
+    length: u32,
+    root_directory: HANDLE,
+    object_name: *const NativeUnicodeString,
+    attributes: u32,
+    security_descriptor: *const c_void,
+    security_quality_of_service: *const c_void,
+}
+
 #[link(name = "ntdll")]
 unsafe extern "system" {
+    fn NtCreateFile(
+        file: *mut HANDLE,
+        desired_access: u32,
+        object_attributes: *const NativeObjectAttributes,
+        io_status: *mut NativeIoStatus,
+        allocation_size: *const i64,
+        file_attributes: u32,
+        share_access: u32,
+        create_disposition: u32,
+        create_options: u32,
+        ea_buffer: *const c_void,
+        ea_length: u32,
+    ) -> i32;
     fn NtSetInformationFile(
         file: HANDLE,
-        io_status: *mut RenameIoStatus,
+        io_status: *mut NativeIoStatus,
         information: *const c_void,
         length: u32,
         information_class: i32,
     ) -> i32;
     fn RtlNtStatusToDosError(status: i32) -> u32;
+    #[cfg(test)]
+    fn NtFsControlFile(
+        file: HANDLE,
+        event: HANDLE,
+        apc_routine: *const c_void,
+        apc_context: *const c_void,
+        io_status: *mut NativeIoStatus,
+        control_code: u32,
+        input: *const c_void,
+        input_length: u32,
+        output: *mut c_void,
+        output_length: u32,
+    ) -> i32;
 }
 
 const FILE_RENAME_INFORMATION: i32 = 10;
+// NtCreateFile dispositions/options are distinct from CreateFileW's values.
+const NATIVE_FILE_OPEN: u32 = 1;
+const NATIVE_FILE_CREATE: u32 = 2;
+const NATIVE_FILE_OPEN_IF: u32 = 3;
+const NATIVE_DIRECTORY_FILE: u32 = 0x0000_0001;
+const NATIVE_SYNCHRONOUS_IO_NONALERT: u32 = 0x0000_0020;
+const NATIVE_NON_DIRECTORY_FILE: u32 = 0x0000_0040;
+const NATIVE_OPEN_FOR_BACKUP_INTENT: u32 = 0x0000_4000;
+const NATIVE_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+fn native_error(status: i32) -> KnowledgeError {
+    if matches!(
+        status,
+        STATUS_REPARSE_POINT_ENCOUNTERED
+            | STATUS_REPARSE_POINT_NOT_RESOLVED
+            | STATUS_REPARSE_ATTRIBUTE_CONFLICT
+            | STATUS_STOPPED_ON_SYMLINK
+    ) {
+        return unsafe_path();
+    }
+    // SAFETY: this pure ntdll mapping accepts the NTSTATUS returned by an API call.
+    win_error(io::Error::from_raw_os_error(unsafe {
+        RtlNtStatusToDosError(status) as i32
+    }))
+}
 
 fn unsafe_path() -> KnowledgeError {
     KnowledgeError::new("UNSAFE_PATH", "Unsafe attachment path or reparse point")
@@ -155,7 +227,8 @@ fn wide_path(path: &Path) -> KResult<Vec<u16>> {
 fn open_handle(path: &Path, access: u32, sharing: u32, disposition: u32) -> KResult<File> {
     let wide = wide_path(path)?;
     // SAFETY: the path is NUL-terminated; null security attributes make the new handle
-    // non-inheritable. All pathname ancestors have already been pinned by the caller.
+    // non-inheritable. Production uses this only for the drive root; all subsequent
+    // components use open_relative and never re-resolve a pathname ancestor.
     let handle = unsafe {
         CreateFileW(
             wide.as_ptr(),
@@ -199,12 +272,12 @@ fn attributes(file: &File) -> KResult<u32> {
 }
 
 fn open_directory(path: &Path) -> KResult<File> {
-    // Metadata-only access does not participate in share-access accounting. Request
-    // directory read-data access so denying WRITE/DELETE sharing actually pins it.
+    // Keep the root object from being renamed/deleted. WRITE sharing is required
+    // by the kernel's target-parent open during a handle-relative rename.
     let file = open_handle(
         path,
         FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
-        FILE_SHARE_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
         OPEN_EXISTING,
     )?;
     if attributes(&file)? & FILE_ATTRIBUTE_DIRECTORY == 0 {
@@ -213,7 +286,129 @@ fn open_directory(path: &Path) -> KResult<File> {
     Ok(file)
 }
 
-fn validate_opened_name(file: &File, expected: &str) -> KResult<()> {
+fn component_units(name: &OsStr) -> KResult<Vec<u16>> {
+    let units: Vec<_> = name.encode_wide().collect();
+    if units.is_empty()
+        || units.len() > 255
+        || units
+            .iter()
+            .any(|unit| [0, b'\\' as u16, b'/' as u16, b':' as u16].contains(unit))
+        || units == [b'.' as u16]
+        || units == [b'.' as u16, b'.' as u16]
+        || matches!(units.last(), Some(unit) if *unit == b'.' as u16 || *unit == b' ' as u16)
+    {
+        return Err(unsafe_path());
+    }
+    Ok(units)
+}
+
+/// Open or create exactly one component under this directory object. No drive,
+/// traversal, stream or multi-component name can reach NtCreateFile here.
+fn open_relative(
+    parent: &File,
+    name: &OsStr,
+    access: u32,
+    sharing: u32,
+    disposition: u32,
+    options: u32,
+) -> KResult<File> {
+    if attributes(parent)? & FILE_ATTRIBUTE_DIRECTORY == 0 {
+        return Err(unsafe_path());
+    }
+    open_relative_native(parent, name, access, sharing, disposition, options)
+}
+
+/// Native operation kept separate so Windows regressions can inject a parent reparse
+/// *after* the wrapper's preflight and verify that the primitive itself cannot follow it.
+fn open_relative_native(
+    parent: &File,
+    name: &OsStr,
+    access: u32,
+    sharing: u32,
+    disposition: u32,
+    options: u32,
+) -> KResult<File> {
+    let mut units = component_units(name)?;
+    let object_name = NativeUnicodeString {
+        length: (units.len() * size_of::<u16>()) as u16,
+        maximum_length: (units.len() * size_of::<u16>()) as u16,
+        buffer: units.as_mut_ptr(),
+    };
+    let object_attributes = NativeObjectAttributes {
+        length: size_of::<NativeObjectAttributes>() as u32,
+        root_directory: parent.as_raw_handle(),
+        object_name: &object_name,
+        attributes: OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE,
+        security_descriptor: std::ptr::null(),
+        security_quality_of_service: std::ptr::null(),
+    };
+    let mut io_status = NativeIoStatus {
+        status_or_pointer: std::ptr::null_mut(),
+        information: 0,
+    };
+    let mut handle = std::ptr::null_mut();
+    // SAFETY: all native structures are correctly aligned, name length is bounded
+    // in bytes, and their storage and the owned parent live through this synchronous
+    // call. OBJ_DONT_REPARSE forbids intermediate reparses; OPEN_REPARSE_POINT keeps
+    // a raced final reparse from being followed, and attributes() rejects that object.
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            access | SYNCHRONIZE | FILE_READ_ATTRIBUTES,
+            &object_attributes,
+            &mut io_status,
+            std::ptr::null(),
+            0,
+            sharing,
+            disposition,
+            options
+                | NATIVE_OPEN_REPARSE_POINT
+                | NATIVE_SYNCHRONOUS_IO_NONALERT
+                | NATIVE_OPEN_FOR_BACKUP_INTENT,
+            std::ptr::null(),
+            0,
+        )
+    };
+    if status < 0 {
+        return Err(native_error(status));
+    }
+    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+        return Err(unsupported());
+    }
+    // SAFETY: one successful, non-inheritable NtCreateFile handle is adopted once.
+    let file = unsafe { File::from_raw_handle(handle) };
+    let validated = attributes(&file).and_then(|_| validate_opened_name(&file, name));
+    if let Err(error) = validated {
+        if disposition == NATIVE_FILE_CREATE {
+            // An exclusive new stage belongs to this call even if later validation
+            // fails. Never leave it behind, and never apply cleanup to OPEN_IF.
+            set_delete(&file, true)?;
+        }
+        return Err(error);
+    }
+    Ok(file)
+}
+
+fn open_relative_directory(parent: &File, name: &OsStr, create: bool) -> KResult<File> {
+    let file = open_relative(
+        parent,
+        name,
+        FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        if create {
+            NATIVE_FILE_OPEN_IF
+        } else {
+            NATIVE_FILE_OPEN
+        },
+        NATIVE_DIRECTORY_FILE,
+    )?;
+    if attributes(&file)? & FILE_ATTRIBUTE_DIRECTORY == 0 {
+        return Err(unsafe_path());
+    }
+    Ok(file)
+}
+
+fn validate_opened_name(file: &File, expected: &OsStr) -> KResult<()> {
     // FILE_NAME_NORMALIZED (zero) resolves a short-name open to its long name.
     // Inspect the handle, never a second pathname lookup that could name another object.
     let mut local = [0u16; 1024];
@@ -272,7 +467,7 @@ fn validate_opened_name(file: &File, expected: &str) -> KResult<()> {
         .iter()
         .copied()
         .map(ascii_fold)
-        .eq(expected.encode_utf16().map(ascii_fold))
+        .eq(expected.encode_wide().map(ascii_fold))
     {
         // Reject aliases altogether, not just aliases whose supplied spelling resembles
         // .obsidian/.trash/.knowledge-. Ordinary ASCII case differences remain accepted.
@@ -282,9 +477,9 @@ fn validate_opened_name(file: &File, expected: &str) -> KResult<()> {
 }
 
 struct Root {
-    path: PathBuf,
-    // Keep EVERY ancestor open: holding only the final directory does not protect
-    // subsequent pathname opens against a rename/junction swap above that directory.
+    // Keep every directory object open and non-deletable. Unlike pathname pinning,
+    // each subsequent lookup uses the previous handle, not an ancestor's spelling.
+    volume: File,
     chain: Vec<File>,
 }
 
@@ -332,8 +527,9 @@ impl Root {
         {
             return Err(unsupported());
         }
-        // Use the opened volume's GUID namespace for every subsequent open, not the
-        // mutable per-session DOS drive mapping. UNC/remote roots cannot produce this form.
+        // Require the opened drive root to resolve to a local volume GUID. Every
+        // subsequent open uses this owned volume handle rather than the mutable
+        // per-session DOS drive mapping. UNC/remote roots cannot produce this form.
         let mut final_name = [0u16; 128];
         // SAFETY: the live volume handle and writable output buffer meet the API contract.
         let length = unsafe {
@@ -350,7 +546,7 @@ impl Root {
         if length as usize >= final_name.len() {
             return Err(unsupported());
         }
-        let mut path = PathBuf::from(OsString::from_wide(&final_name[..length as usize]));
+        let path = PathBuf::from(OsString::from_wide(&final_name[..length as usize]));
         let volume_name = path.as_os_str().to_string_lossy();
         if !volume_name
             .strip_prefix(r"\\?\Volume{")
@@ -359,15 +555,16 @@ impl Root {
         {
             return Err(unsupported());
         }
-        let mut chain = vec![volume];
+        let mut chain = Vec::new();
         for component in components {
-            match component {
-                Component::Normal(name) => path.push(name),
+            let name = match component {
+                Component::Normal(name) => name,
                 _ => return Err(unsafe_path()),
-            }
-            chain.push(open_directory(&path)?);
+            };
+            let parent = chain.last().unwrap_or(&volume);
+            chain.push(open_relative_directory(parent, name, false)?);
         }
-        Ok(Self { path, chain })
+        Ok(Self { volume, chain })
     }
 
     fn parent<'a>(&'a self, relative: &'a str, create: bool) -> KResult<Parent<'a>> {
@@ -385,7 +582,6 @@ impl Root {
         trash: bool,
     ) -> KResult<Parent<'a>> {
         let (folders, name) = relative.rsplit_once('/').unwrap_or(("", relative));
-        let mut path = self.path.clone();
         let mut chain = Vec::new();
         // Only this internal hop may enter .trash; relative always remains user input
         // without the prefix and is validated before any source/destination traversal.
@@ -394,32 +590,19 @@ impl Root {
             .into_iter()
             .chain(folders.split('/').filter(|part| !part.is_empty()))
         {
-            path.push(part);
-            let file = match open_directory(&path) {
-                Ok(file) => file,
-                Err(error) if create && error.code == "NOT_FOUND" => {
-                    let wide = wide_path(&path)?;
-                    // SAFETY: the complete parent chain is pinned; only this final directory
-                    // may race. The subsequent no-follow open rejects any substituted reparse.
-                    if unsafe { CreateDirectoryW(wide.as_ptr(), std::ptr::null()) } == 0 {
-                        let error = last_error();
-                        if error.code != "ALREADY_EXISTS" {
-                            return Err(error);
-                        }
-                    }
-                    open_directory(&path)?
-                }
-                Err(error) => return Err(error),
-            };
-            validate_opened_name(&file, part)?;
+            let parent = chain.last().unwrap_or_else(|| self.directory());
+            let file = open_relative_directory(parent, OsStr::new(part), create)?;
             chain.push(file);
         }
         Ok(Parent {
             root: self,
-            path,
             chain,
             name,
         })
+    }
+
+    fn directory(&self) -> &File {
+        self.chain.last().unwrap_or(&self.volume)
     }
 }
 
@@ -430,29 +613,30 @@ pub(crate) fn validate_root(root: &Path) -> KResult<()> {
 
 struct Parent<'a> {
     root: &'a Root,
-    path: PathBuf,
     chain: Vec<File>,
     name: &'a str,
 }
 
 impl Parent<'_> {
-    fn handle(&self) -> HANDLE {
+    fn directory(&self) -> &File {
         // Root::open always records the drive root even when the vault is the volume root.
-        self.chain
-            .last()
-            .unwrap_or_else(|| self.root.chain.last().expect("pinned volume"))
-            .as_raw_handle()
+        self.chain.last().unwrap_or_else(|| self.root.directory())
+    }
+
+    fn handle(&self) -> HANDLE {
+        self.directory().as_raw_handle()
     }
 
     fn open_source(&self, access: u32) -> KResult<(File, bool)> {
-        let file = open_handle(
-            &self.path.join(self.name),
-            access | FILE_READ_ATTRIBUTES,
+        let file = open_relative(
+            self.directory(),
+            OsStr::new(self.name),
+            access,
             FILE_SHARE_READ,
-            OPEN_EXISTING,
+            NATIVE_FILE_OPEN,
+            0,
         )?;
         let is_directory = attributes(&file)? & FILE_ATTRIBUTE_DIRECTORY != 0;
-        validate_opened_name(&file, self.name)?;
         Ok((file, is_directory))
     }
 }
@@ -468,9 +652,24 @@ fn require_file(is_directory: bool) -> KResult<()> {
 }
 
 fn rename(file: &File, destination: &Parent<'_>, replace: bool) -> KResult<()> {
+    // This catches an already changed parent, while the native relative-rename
+    // contract below (not this preflight check) prevents a later reparse race.
+    if attributes(destination.directory())? & FILE_ATTRIBUTE_DIRECTORY == 0 {
+        return Err(unsafe_path());
+    }
+    rename_relative(file, destination.handle(), destination.name, replace)
+}
+
+fn rename_relative(
+    file: &File,
+    directory: HANDLE,
+    name_to_rename: &str,
+    replace: bool,
+) -> KResult<()> {
+    component_units(OsStr::new(name_to_rename))?;
     let mut name = [0u16; 256];
     let mut length = 0;
-    for unit in destination.name.encode_utf16() {
+    for unit in name_to_rename.encode_utf16() {
         if length == 255 {
             return Err(unsafe_path());
         }
@@ -485,10 +684,10 @@ fn rename(file: &File, destination: &Parent<'_>, replace: bool) -> KResult<()> {
     let header = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
     let bytes = offset_of!(FILE_RENAME_INFO, FileName) + (length + 1) * size_of::<u16>();
     // SAFETY: storage is aligned and large enough for the header and <=256 WCHARs.
-    // destination owns the directory handle through the complete synchronous API call.
+    // The caller owns directory through this complete synchronous API call.
     unsafe {
         (*header).Anonymous.ReplaceIfExists = replace;
-        (*header).RootDirectory = destination.handle();
+        (*header).RootDirectory = directory;
         (*header).FileNameLength = (length * size_of::<u16>()) as u32;
         std::ptr::copy_nonoverlapping(
             name.as_ptr(),
@@ -499,7 +698,7 @@ fn rename(file: &File, destination: &Parent<'_>, replace: bool) -> KResult<()> {
                 .cast::<u16>(),
             length + 1,
         );
-        let mut io_status = RenameIoStatus {
+        let mut io_status = NativeIoStatus {
             status_or_pointer: std::ptr::null_mut(),
             information: 0,
         };
@@ -513,13 +712,7 @@ fn rename(file: &File, destination: &Parent<'_>, replace: bool) -> KResult<()> {
             FILE_RENAME_INFORMATION,
         );
         if status < 0 {
-            let dos_error = RtlNtStatusToDosError(status);
-            #[cfg(test)]
-            eprintln!(
-                "knowledge rename failure: NTSTATUS=0x{:08X}, Win32={dos_error}",
-                status as u32
-            );
-            return Err(win_error(io::Error::from_raw_os_error(dos_error as i32)));
+            return Err(native_error(status));
         }
     }
     Ok(())
@@ -550,15 +743,15 @@ struct Stage {
 
 impl Stage {
     fn create(parent: &Parent<'_>) -> KResult<Self> {
-        let path = parent
-            .path
-            .join(format!(".knowledge-{}", uuid::Uuid::new_v4()));
+        let name = format!(".knowledge-{}", uuid::Uuid::new_v4());
         let stage = Self {
-            file: open_handle(
-                &path,
+            file: open_relative(
+                parent.directory(),
+                OsStr::new(&name),
                 GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES,
                 0,
-                CREATE_NEW,
+                NATIVE_FILE_CREATE,
+                NATIVE_NON_DIRECTORY_FILE,
             )?,
             committed: false,
         };
@@ -616,15 +809,16 @@ pub(super) fn write(root: &Path, relative: &str, bytes: &[u8], create_only: bool
     // Reject an existing reparse/directory without following it. The check is NOT used
     // as the no-clobber guarantee: rename(false) below decides that atomically. A later
     // leaf swap cannot redirect the rename because its destination is one basename.
-    match open_handle(
-        &parent.path.join(parent.name),
+    match open_relative(
+        parent.directory(),
+        OsStr::new(parent.name),
         FILE_READ_ATTRIBUTES,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        OPEN_EXISTING,
+        NATIVE_FILE_OPEN,
+        0,
     ) {
         Ok(file) => {
             require_file(attributes(&file)? & FILE_ATTRIBUTE_DIRECTORY != 0)?;
-            validate_opened_name(&file, parent.name)?;
             if create_only {
                 return Err(KnowledgeError::new(
                     "ALREADY_EXISTS",
@@ -759,44 +953,220 @@ mod tests {
         no_staging(&root.join("attachments/destination"));
     }
 
-    #[test]
-    fn windows_rename_directory_sharing_diagnostic_preserves_every_source() {
-        // Diagnostic only: production open_directory is unchanged. Compare a single
-        // pinned target parent to isolate the kernel's target-directory open from
-        // path traversal and from the complete drive-to-vault chain.
-        for (label, sharing) in [
-            ("READ", FILE_SHARE_READ),
-            ("READ|WRITE", FILE_SHARE_READ | FILE_SHARE_WRITE),
-        ] {
-            let (_directory, path) = setup();
-            fs::write(path.join("source.bin"), b"keep").unwrap();
-            let pinned = Root {
-                path: path.clone(),
-                chain: vec![open_handle(
-                    &path,
-                    FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
-                    sharing,
-                    OPEN_EXISTING,
-                )
-                .unwrap()],
-            };
-            let (source, is_directory) = pinned
-                .parent("source.bin", false)
+    fn fs_control(file: &File, control: u32, input: &[u8]) -> KResult<()> {
+        let mut io_status = NativeIoStatus {
+            status_or_pointer: std::ptr::null_mut(),
+            information: 0,
+        };
+        // SAFETY: the owned CreateFileW handle is synchronous. The exact-size
+        // reparse payload, IO status and handle live throughout the control call.
+        let status = unsafe {
+            NtFsControlFile(
+                file.as_raw_handle(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+                &mut io_status,
+                control,
+                input.as_ptr().cast(),
+                input.len() as u32,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if status < 0 {
+            return Err(native_error(status));
+        }
+        Ok(())
+    }
+
+    struct ReparseMutation {
+        writer: File,
+        cleared: bool,
+    }
+
+    impl ReparseMutation {
+        fn install(path: &Path, target: &Path) -> Self {
+            let writer = open_handle(
+                path,
+                GENERIC_WRITE | FILE_READ_ATTRIBUTES,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                OPEN_EXISTING,
+            )
+            .unwrap();
+            let target = fs::canonicalize(target)
                 .unwrap()
-                .open_source(DELETE)
-                .unwrap();
-            assert!(!is_directory);
-            let destination = pinned.parent("destination.bin", false).unwrap();
-            let result = rename(&source, &destination, false);
-            eprintln!("knowledge parent sharing {label}: {result:?}");
-            drop(source);
-            if result.is_ok() {
-                assert!(!path.join("source.bin").exists());
-                assert_eq!(fs::read(path.join("destination.bin")).unwrap(), b"keep");
-            } else {
-                assert_eq!(fs::read(path.join("source.bin")).unwrap(), b"keep");
-                assert!(!path.join("destination.bin").exists());
+                .as_os_str()
+                .to_string_lossy()
+                .replace('/', "\\");
+            let print_name = target.strip_prefix(r"\\?\").unwrap_or(&target);
+            let substitute: Vec<u16> = format!(r"\??\{print_name}").encode_utf16().collect();
+            let print: Vec<u16> = print_name.encode_utf16().collect();
+            // Mount-point REPARSE_DATA_BUFFER: fixed 8-byte header, then four
+            // u16 name offsets/lengths and the two terminated UTF-16 names.
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&0xA000_0003u32.to_le_bytes());
+            payload.extend_from_slice(
+                &((8 + (substitute.len() + print.len() + 2) * 2) as u16).to_le_bytes(),
+            );
+            payload.extend_from_slice(&0u16.to_le_bytes());
+            payload.extend_from_slice(&0u16.to_le_bytes());
+            payload.extend_from_slice(&((substitute.len() * 2) as u16).to_le_bytes());
+            payload.extend_from_slice(&(((substitute.len() + 1) * 2) as u16).to_le_bytes());
+            payload.extend_from_slice(&((print.len() * 2) as u16).to_le_bytes());
+            for unit in substitute
+                .iter()
+                .copied()
+                .chain([0])
+                .chain(print)
+                .chain([0])
+            {
+                payload.extend_from_slice(&unit.to_le_bytes());
             }
+            // FSCTL_SET_REPARSE_POINT: mutate the already opened parent itself;
+            // mklink cannot model this race because it creates a new pathname.
+            fs_control(&writer, 0x0009_00A4, &payload).unwrap();
+            use std::os::windows::fs::MetadataExt;
+            assert_ne!(
+                writer.metadata().unwrap().file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT,
+                0
+            );
+            Self {
+                writer,
+                cleared: false,
+            }
+        }
+
+        fn clear(&mut self) -> KResult<()> {
+            let mut payload = Vec::from(0xA000_0003u32.to_le_bytes());
+            payload.extend_from_slice(&[0; 4]);
+            // FSCTL_DELETE_REPARSE_POINT preserves the original directory object.
+            fs_control(&self.writer, 0x0009_00AC, &payload)?;
+            self.cleared = true;
+            Ok(())
+        }
+    }
+
+    impl Drop for ReparseMutation {
+        fn drop(&mut self) {
+            if !self.cleared {
+                let _ = self.clear();
+            }
+        }
+    }
+
+    #[test]
+    fn windows_already_open_parent_reparse_never_redirects_native_opens_or_creation() {
+        let (_directory, root) = setup();
+        fs::create_dir_all(root.join("attachments/held")).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("secret.bin"), b"outside").unwrap();
+        let pinned = Root::open(&root).unwrap();
+        let parent = pinned.parent("attachments/held/secret.bin", false).unwrap();
+        let mut mutation = ReparseMutation::install(&root.join("attachments/held"), outside.path());
+        assert_eq!(
+            parent.open_source(GENERIC_READ).unwrap_err().code,
+            "UNSAFE_PATH"
+        );
+        assert_eq!(Stage::create(&parent).err().unwrap().code, "UNSAFE_PATH");
+        // Bypass the wrapper's attribute preflight, representing a mutation just
+        // after that check. The native operation must fail or use the held object,
+        // never reveal the outside-only file or create anything in its directory.
+        assert!(open_relative_native(
+            parent.directory(),
+            OsStr::new("secret.bin"),
+            GENERIC_READ,
+            FILE_SHARE_READ,
+            NATIVE_FILE_OPEN,
+            0
+        )
+        .is_err());
+        let created = open_relative_native(
+            parent.directory(),
+            OsStr::new("created.bin"),
+            GENERIC_WRITE | DELETE,
+            0,
+            NATIVE_FILE_CREATE,
+            NATIVE_NON_DIRECTORY_FILE,
+        );
+        let created_ok = created.is_ok();
+        if let Ok(mut file) = created {
+            file.write_all(b"inside").unwrap();
+        }
+        let folder = open_relative_native(
+            parent.directory(),
+            OsStr::new("created-folder"),
+            FILE_LIST_DIRECTORY,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            NATIVE_FILE_OPEN_IF,
+            NATIVE_DIRECTORY_FILE,
+        );
+        let folder_ok = folder.is_ok();
+        drop(folder);
+        assert_eq!(
+            fs::read(outside.path().join("secret.bin")).unwrap(),
+            b"outside"
+        );
+        assert!(!outside.path().join("created.bin").exists());
+        assert!(!outside.path().join("created-folder").exists());
+        mutation.clear().unwrap();
+        if created_ok {
+            assert_eq!(
+                fs::read(root.join("attachments/held/created.bin")).unwrap(),
+                b"inside"
+            );
+        }
+        if folder_ok {
+            assert!(root.join("attachments/held/created-folder").is_dir());
+        }
+        no_staging(&root.join("attachments/held"));
+    }
+
+    #[test]
+    fn windows_reparse_race_cannot_redirect_primitive_cross_directory_rename() {
+        let (_directory, root) = setup();
+        fs::create_dir_all(root.join("attachments/source")).unwrap();
+        fs::create_dir_all(root.join("attachments/destination")).unwrap();
+        fs::write(root.join("attachments/source/input.bin"), b"inside").unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("output.bin"), b"outside").unwrap();
+        let pinned = Root::open(&root).unwrap();
+        let source = pinned
+            .parent("attachments/source/input.bin", false)
+            .unwrap();
+        let (file, is_directory) = source.open_source(DELETE).unwrap();
+        assert!(!is_directory);
+        let destination = pinned
+            .parent("attachments/destination/output.bin", false)
+            .unwrap();
+        let mut mutation =
+            ReparseMutation::install(&root.join("attachments/destination"), outside.path());
+        assert_eq!(
+            rename(&file, &destination, true).unwrap_err().code,
+            "UNSAFE_PATH"
+        );
+        // Deliberately bypass the preflight: this is the primitive used after an
+        // attacker wins the check/rename race. Replace=true would destroy our
+        // external sentinel if the kernel followed the target parent's reparse.
+        let result = rename_relative(&file, destination.handle(), "output.bin", true);
+        drop(file);
+        assert_eq!(
+            fs::read(outside.path().join("output.bin")).unwrap(),
+            b"outside"
+        );
+        mutation.clear().unwrap();
+        if result.is_ok() {
+            assert!(!root.join("attachments/source/input.bin").exists());
+            assert_eq!(
+                fs::read(root.join("attachments/destination/output.bin")).unwrap(),
+                b"inside"
+            );
+        } else {
+            assert_eq!(
+                fs::read(root.join("attachments/source/input.bin")).unwrap(),
+                b"inside"
+            );
+            assert!(!root.join("attachments/destination/output.bin").exists());
         }
     }
 
@@ -1047,7 +1417,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_complete_ancestor_pins_deny_junction_swap_and_reparse_writers() {
+    fn windows_complete_ancestor_handles_deny_namespace_swap() {
         let (directory, root) = setup();
         write(&root, "attachments/nested/keep.bin", &[3], true).unwrap();
         let pinned_root = Root::open(&root).unwrap();
@@ -1066,13 +1436,18 @@ mod tests {
                 "unpinned ancestor: {}",
                 ancestor.display()
             );
-            assert!(open_handle(
-                &ancestor,
-                windows_sys::Win32::Foundation::GENERIC_WRITE,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                OPEN_EXISTING
-            )
-            .is_err());
+            // WRITE is deliberately shared for native rename. Deletion/rename is
+            // still denied; real reparse mutation tests above verify that WRITE
+            // cannot redirect our handle-relative operations outside the vault.
+            drop(
+                open_handle(
+                    &ancestor,
+                    windows_sys::Win32::Foundation::GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    OPEN_EXISTING,
+                )
+                .unwrap(),
+            );
         }
         assert_eq!(read(&root, "attachments/nested/keep.bin").unwrap(), [3]);
         drop(pinned_parent);
@@ -1085,7 +1460,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_directory_pins_deny_delete_and_write_access_until_released() {
+    fn windows_directory_handles_allow_rename_parent_write_but_deny_delete_until_released() {
         let (_directory, root) = setup();
         fs::create_dir_all(root.join("attachments/nested")).unwrap();
         let path = root.join("attachments/nested");
@@ -1099,9 +1474,8 @@ mod tests {
             let _parent = pinned_root
                 .parent("attachments/nested/item.bin", false)
                 .unwrap();
-            for access in [DELETE, GENERIC_WRITE] {
-                assert!(open_handle(&path, access, all_sharing, OPEN_EXISTING).is_err());
-            }
+            assert!(open_handle(&path, DELETE, all_sharing, OPEN_EXISTING).is_err());
+            drop(open_handle(&path, GENERIC_WRITE, all_sharing, OPEN_EXISTING).unwrap());
             assert!(fs::rename(&path, root.join("attachments/swapped")).is_err());
         }
         fs::rename(&path, root.join("attachments/swapped")).unwrap();
