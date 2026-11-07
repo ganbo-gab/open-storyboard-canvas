@@ -513,9 +513,13 @@ fn rename(file: &File, destination: &Parent<'_>, replace: bool) -> KResult<()> {
             FILE_RENAME_INFORMATION,
         );
         if status < 0 {
-            return Err(win_error(io::Error::from_raw_os_error(
-                RtlNtStatusToDosError(status) as i32,
-            )));
+            let dos_error = RtlNtStatusToDosError(status);
+            #[cfg(test)]
+            eprintln!(
+                "knowledge rename failure: NTSTATUS=0x{:08X}, Win32={dos_error}",
+                status as u32
+            );
+            return Err(win_error(io::Error::from_raw_os_error(dos_error as i32)));
         }
     }
     Ok(())
@@ -753,6 +757,47 @@ mod tests {
         assert!(!root.join("attachments/source/input.bin").exists());
         assert_eq!(fs::read(root.join(relative)).unwrap(), b"preserved");
         no_staging(&root.join("attachments/destination"));
+    }
+
+    #[test]
+    fn windows_rename_directory_sharing_diagnostic_preserves_every_source() {
+        // Diagnostic only: production open_directory is unchanged. Compare a single
+        // pinned target parent to isolate the kernel's target-directory open from
+        // path traversal and from the complete drive-to-vault chain.
+        for (label, sharing) in [
+            ("READ", FILE_SHARE_READ),
+            ("READ|WRITE", FILE_SHARE_READ | FILE_SHARE_WRITE),
+        ] {
+            let (_directory, path) = setup();
+            fs::write(path.join("source.bin"), b"keep").unwrap();
+            let pinned = Root {
+                path: path.clone(),
+                chain: vec![open_handle(
+                    &path,
+                    FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+                    sharing,
+                    OPEN_EXISTING,
+                )
+                .unwrap()],
+            };
+            let (source, is_directory) = pinned
+                .parent("source.bin", false)
+                .unwrap()
+                .open_source(DELETE)
+                .unwrap();
+            assert!(!is_directory);
+            let destination = pinned.parent("destination.bin", false).unwrap();
+            let result = rename(&source, &destination, false);
+            eprintln!("knowledge parent sharing {label}: {result:?}");
+            drop(source);
+            if result.is_ok() {
+                assert!(!path.join("source.bin").exists());
+                assert_eq!(fs::read(path.join("destination.bin")).unwrap(), b"keep");
+            } else {
+                assert_eq!(fs::read(path.join("source.bin")).unwrap(), b"keep");
+                assert!(!path.join("destination.bin").exists());
+            }
+        }
     }
 
     #[test]
