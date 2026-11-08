@@ -313,8 +313,8 @@ jobs:
           fi
           FIRST_LINE=$(head -n 1 release-notes.md)
           TITLE="Open Storyboard Canvas $TAG"
-          if [[ "$FIRST_LINE" == "# $TAG："* ]]; then
-            TITLE="$TITLE · ${FIRST_LINE#"# $TAG："}"
+          if [[ "$FIRST_LINE" == "# ${TAG}："* ]]; then
+            TITLE="$TITLE · ${FIRST_LINE#"# ${TAG}："}"
           fi
           gh release create "$TAG" release-assets/* --verify-tag --draft \
             --title "$TITLE" \
