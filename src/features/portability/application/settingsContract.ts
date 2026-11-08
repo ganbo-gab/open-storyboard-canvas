@@ -1,3 +1,4 @@
+import { canvasMouseBindingsSchema, canvasMouseBindingPresetSchema, canvasLeftDragModeSchema, legacyCanvasMouseBindingsSchema, hasModernCanvasMouseBindings, normalizeCanvasMousePreferences } from '@/features/settings/canvasMouseSettings';
 import { imageHostSettingsSchema, normalizeImageHostSettings } from '@/features/settings/imageHostSettings';
 import { z } from 'zod';
 import type { CustomProviderConfig } from '@/stores/customProvidersStore';
@@ -35,6 +36,7 @@ export const GENERAL_FIELDS = [
   'showStoryboardGenAdvancedRatioControls',
   'useLegacyPanoramaControlDirection',
   'panoramaControlSensitivity',
+  'canvasMouseBindings',
   'canvasLeftDragMode',
   'canvasWheelMode',
   'enableCanvasWasdPan',
@@ -347,6 +349,8 @@ function validateGeneralCategory(category: Record<string, unknown>): void {
     } else if (field === 'panoramaControlSensitivity'
       && !['low', 'medium', 'high'].includes(String(value))) {
       throw new Error(`general.${field} is invalid.`);
+    } else if (field === 'canvasMouseBindings') {
+      canvasMouseBindingsSchema.parse(value);
     } else if (field === 'canvasLeftDragMode'
       && (typeof value !== 'string' || !['select', 'pan'].includes(value))) {
       throw new Error(`general.${field} is invalid.`);
@@ -489,11 +493,22 @@ export function validatePortableSettingsPayload(input: unknown): SettingsBundleP
     };
   }
   if (payload.categories.general) {
-    payload.categories.general = Object.fromEntries(
-      Object.entries(payload.categories.general).filter(
-        ([field]) => !/^canvasMouse(?:BindingPreset|Bindings)$/.test(field)
-      )
-    );
+    const { canvasMouseBindingPreset, ...general } = payload.categories.general;
+    if (canvasMouseBindingPreset !== undefined) canvasMouseBindingPresetSchema.parse(canvasMouseBindingPreset);
+    if (Object.hasOwn(general, 'canvasLeftDragMode') && !canvasLeftDragModeSchema.safeParse(general.canvasLeftDragMode).success) {
+      throw new Error('general.canvasLeftDragMode is invalid.');
+    }
+    if (Object.hasOwn(general, 'canvasMouseBindings')) {
+      if (hasModernCanvasMouseBindings(general.canvasMouseBindings)) canvasMouseBindingsSchema.parse(general.canvasMouseBindings);
+      else legacyCanvasMouseBindingsSchema.parse(general.canvasMouseBindings);
+    }
+    // Keep absence meaningful: an unrelated older backup must not reset current mouse preferences.
+    if (Object.hasOwn(general, 'canvasMouseBindings') || canvasMouseBindingPreset !== undefined || Object.hasOwn(general, 'canvasLeftDragMode')) {
+      const converted = normalizeCanvasMousePreferences(payload.categories.general);
+      general.canvasMouseBindings = converted.canvasMouseBindings;
+      general.canvasLeftDragMode = converted.canvasLeftDragMode;
+    }
+    payload.categories.general = general;
   }
   if (payload.categories.models) {
     // Older bundles remain importable, but the retired adapters are not executable settings.

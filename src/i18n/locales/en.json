@@ -3104,7 +3104,7 @@
     },
     "canvasInteraction": {
       "title": "Canvas Operation Habits",
-      "desc": "Choose left-drag and wheel behavior; all other canvas gestures stay consistent.",
+      "desc": "Customize click, double-click and drag actions for each mouse button.",
       "leftDrag": "Left-drag empty canvas",
       "leftDragOptions": {
         "select": "Box select",
@@ -3117,21 +3117,60 @@
         "pan": "Pan"
       },
       "wheelAutoHelp": "Auto-detect: trackpad scrolling pans; the mouse wheel zooms.",
-      "gesturesTitle": "Fixed canvas gestures",
+      "gesturesTitle": "Always available shortcuts",
       "gestures": {
-        "panButtons": "Right- or middle-button drag: pan canvas (in any mode)",
-        "spacePan": "Space + left-drag: pan canvas",
-        "trackpad": "Two-finger trackpad scroll: pan; pinch: zoom",
+        "panButtons": "Pan and box select use the mouse buttons configured above",
+        "spacePan": "Hold Space + left drag to pan temporarily",
+        "trackpad": "In Auto mode, two-finger trackpad scrolling pans; pinch zooms",
         "modifierZoom": "⌘/Ctrl + wheel: zoom",
-        "shiftSelect": "Shift + left-drag empty canvas: box select (when left-drag is set to Pan)",
-        "contextMenu": "Right-click: open menu",
-        "addNode": "Double-click empty canvas: add node",
+        "shiftSelect": "Hold Shift while box selecting to add to selection; Shift + left drag empty canvas temporarily box selects",
+        "contextMenu": "The menu uses the click or double-click configured above",
+        "addNode": "Quick add uses the click or double-click configured above",
         "tools": "V: select tool; H: hand tool"
       },
       "wasdPan": "Enable WASD Canvas Pan",
       "wasdPanDesc": "When the canvas has focus and no input is active, W/A/S/D pans the view.",
       "wasdSensitivity": "WASD Pan Sensitivity",
-      "wasdSensitivityValue": "Sensitivity {{value}}"
+      "wasdSensitivityValue": "Sensitivity {{value}}",
+      "preset": "Mouse preset",
+      "presetHelp": "Changing any action selects Custom. Changes take effect when you save settings.",
+      "presets": {
+        "default": "Recommended: left drag pans · right drag selects",
+        "traditional": "Traditional: left drag selects · middle drag pans",
+        "custom": "Custom"
+      },
+      "scope": "Left-button settings apply to empty canvas. Selecting, double-click editing and dragging nodes work normally. Right and middle buttons also work over nodes; inputs, buttons and embedded editors keep their own controls.",
+      "button": "Button",
+      "buttons": {
+        "left": "Left",
+        "middle": "Middle",
+        "right": "Right"
+      },
+      "events": {
+        "click": "Click",
+        "doubleClick": "Double-click",
+        "drag": "Drag"
+      },
+      "slots": {
+        "leftClick": "Left click",
+        "leftDoubleClick": "Left double-click",
+        "leftDrag": "Left drag",
+        "middleClick": "Middle click",
+        "middleDoubleClick": "Middle double-click",
+        "middleDrag": "Middle drag",
+        "rightClick": "Right click",
+        "rightDoubleClick": "Right double-click",
+        "rightDrag": "Right drag"
+      },
+      "actions": {
+        "selectNode": "Select / clear selection",
+        "nodeMenu": "Open menu",
+        "quickCreate": "Quick add node",
+        "fitView": "Fit view",
+        "none": "No action",
+        "panCanvas": "Pan canvas",
+        "selectionBox": "Box select"
+      }
     },
     "promptManagement": {
       "title": "Prompt Management",

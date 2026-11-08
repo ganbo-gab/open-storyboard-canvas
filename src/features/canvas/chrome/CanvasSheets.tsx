@@ -16,6 +16,7 @@ import { ADD_NODE_CATALOG } from '@/features/canvas/menus/addNodeCatalog';
 import { useCanvasUiStore } from '@/features/canvas/state/canvasUiStore';
 import { openSettingsDialog } from '@/features/settings/settingsEvents';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 function SheetScrim({ onClose, children, align = 'top' }: { onClose: () => void; children: ReactNode; align?: 'top' | 'center' }) {
   useEffect(() => {
@@ -153,18 +154,19 @@ export function CanvasCommandPalette() {
 const GROUP_ORDER: CanvasShortcutGroup[] = ['tools', 'edit', 'organize', 'view'];
 
 const GESTURES: Array<{ labelKey: string; keys: string[] }> = [
-  { labelKey: 'rework.canvas.gestures.pan', keys: ['rework.canvas.gestures.panKeys'] },
-  { labelKey: 'rework.canvas.gestures.zoom', keys: ['rework.canvas.gestures.zoomKeys'] },
-  { labelKey: 'rework.canvas.gestures.marquee', keys: ['rework.canvas.gestures.marqueeKeys'] },
   { labelKey: 'rework.canvas.gestures.multi', keys: ['rework.canvas.gestures.multiKeys'] },
   { labelKey: 'rework.canvas.gestures.copyDrag', keys: ['rework.canvas.gestures.copyDragKeys'] },
-  { labelKey: 'rework.canvas.gestures.menu', keys: ['rework.canvas.gestures.menuKeys'] },
-  { labelKey: 'rework.canvas.gestures.add', keys: ['rework.canvas.gestures.addKeys'] },
 ];
 
 /** `?`: every shortcut in four columns plus the mouse/trackpad gestures, filterable. */
 export function CanvasShortcutsSheet() {
   const { t } = useTranslation();
+  const bindings = useSettingsStore((state) => state.canvasMouseBindings);
+  const wheelMode = useSettingsStore((state) => state.canvasWheelMode);
+  const mouseGestures = Object.entries(bindings).map(([slot, action]) => ({
+    labelKey: `settings.canvasInteraction.slots.${slot}`, keys: [`settings.canvasInteraction.actions.${action}`],
+  }));
+  mouseGestures.push({ labelKey: 'settings.canvasInteraction.wheel', keys: [`settings.canvasInteraction.wheelOptions.${wheelMode}`] });
   const setSheet = useCanvasUiStore((state) => state.setSheet);
   const [query, setQuery] = useState('');
   const close = () => setSheet(null);
@@ -204,7 +206,7 @@ export function CanvasShortcutsSheet() {
           })}
           <div>
             <h3>{t('rework.canvas.shortcutGroups.gestures')}</h3>
-            {GESTURES.filter((gesture) => !needle || t(gesture.labelKey).toLowerCase().includes(needle)).map((gesture) => (
+            {[...mouseGestures, ...GESTURES].filter((gesture) => !needle || t(gesture.labelKey).toLowerCase().includes(needle)).map((gesture) => (
               <div key={gesture.labelKey} className="canvas-shortcuts__row">
                 <span>{t(gesture.labelKey)}</span>
                 <span className="text-right text-text-subtle">{gesture.keys.map((key) => t(key)).join(' / ')}</span>

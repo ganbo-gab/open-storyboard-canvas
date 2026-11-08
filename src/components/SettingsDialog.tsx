@@ -1,3 +1,4 @@
+import { CanvasMouseSettingsSection } from '@/features/settings/CanvasMouseSettingsSection';
 import { SidebarResizeHandle, useSidebarWidth } from '@/components/ui/SidebarResizeHandle';
 import { customHttpRequest } from '@/commands/ai';
 import { ImageHostSection } from '@/components/settings/ImageHostSection';
@@ -13,13 +14,13 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import {
   DEFAULT_IMAGE_HOST_SETTINGS,
   useSettingsStore,
-  type CanvasLeftDragMode,
+  type CanvasMouseBindings,
   type CanvasWheelMode,
   type ImageHostSettings,
   type GenerationNetworkRoute,
   type PanoramaControlSensitivity,
 } from '@/stores/settingsStore';
-import { UiButton, UiCheckbox, UiIconButton, UiInput, UiSegmented, UiSelect, UiSlider } from '@/components/ui';
+import { UiButton, UiCheckbox, UiIconButton, UiInput, UiSelect, UiSlider } from '@/components/ui';
 import { UI_CONTENT_OVERLAY_INSET_CLASS, UI_DIALOG_TRANSITION_MS } from '@/components/ui/motion';
 import { useDialogTransition } from '@/components/ui/useDialogTransition';
 import { useModalFocus } from '@/components/ui/useModalFocus';
@@ -151,7 +152,7 @@ export function SettingsDialog({
     showStoryboardGenAdvancedRatioControls,
     useLegacyPanoramaControlDirection,
     panoramaControlSensitivity,
-    canvasLeftDragMode,
+    canvasMouseBindings,
     canvasWheelMode,
     enableCanvasWasdPan,
     canvasWasdPanSensitivity,
@@ -176,7 +177,7 @@ export function SettingsDialog({
     setShowStoryboardGenAdvancedRatioControls,
     setUseLegacyPanoramaControlDirection,
     setPanoramaControlSensitivity,
-    setCanvasLeftDragMode,
+    setCanvasMouseBindings,
     setCanvasWheelMode,
     setEnableCanvasWasdPan,
     setCanvasWasdPanSensitivity,
@@ -241,8 +242,8 @@ export function SettingsDialog({
     useState(useLegacyPanoramaControlDirection);
   const [localPanoramaControlSensitivity, setLocalPanoramaControlSensitivity] =
     useState<PanoramaControlSensitivity>(panoramaControlSensitivity);
-  const [localCanvasLeftDragMode, setLocalCanvasLeftDragMode] =
-    useState<CanvasLeftDragMode>(canvasLeftDragMode);
+  const [localCanvasMouseBindings, setLocalCanvasMouseBindings] =
+    useState<CanvasMouseBindings>(() => ({ ...canvasMouseBindings }));
   const [localCanvasWheelMode, setLocalCanvasWheelMode] =
     useState<CanvasWheelMode>(canvasWheelMode);
   const [localEnableCanvasWasdPan, setLocalEnableCanvasWasdPan] =
@@ -318,7 +319,7 @@ export function SettingsDialog({
     setLocalShowStoryboardGenAdvancedRatioControls(showStoryboardGenAdvancedRatioControls);
     setLocalUseLegacyPanoramaControlDirection(useLegacyPanoramaControlDirection);
     setLocalPanoramaControlSensitivity(panoramaControlSensitivity);
-    setLocalCanvasLeftDragMode(canvasLeftDragMode);
+    setLocalCanvasMouseBindings({ ...canvasMouseBindings });
     setLocalCanvasWheelMode(canvasWheelMode);
     setLocalEnableCanvasWasdPan(enableCanvasWasdPan);
     setLocalCanvasWasdPanSensitivity(canvasWasdPanSensitivity);
@@ -404,7 +405,7 @@ export function SettingsDialog({
       setShowStoryboardGenAdvancedRatioControls(localShowStoryboardGenAdvancedRatioControls);
       setUseLegacyPanoramaControlDirection(localUseLegacyPanoramaControlDirection);
       setPanoramaControlSensitivity(localPanoramaControlSensitivity);
-      setCanvasLeftDragMode(localCanvasLeftDragMode);
+      setCanvasMouseBindings(localCanvasMouseBindings);
       setCanvasWheelMode(localCanvasWheelMode);
       setEnableCanvasWasdPan(localEnableCanvasWasdPan);
       setCanvasWasdPanSensitivity(localCanvasWasdPanSensitivity);
@@ -445,7 +446,7 @@ export function SettingsDialog({
     localShowStoryboardGenAdvancedRatioControls,
     localUseLegacyPanoramaControlDirection,
     localPanoramaControlSensitivity,
-    localCanvasLeftDragMode,
+    localCanvasMouseBindings,
     localCanvasWheelMode,
     localEnableCanvasWasdPan,
     localCanvasWasdPanSensitivity,
@@ -473,7 +474,7 @@ export function SettingsDialog({
     setShowStoryboardGenAdvancedRatioControls,
     setUseLegacyPanoramaControlDirection,
     setPanoramaControlSensitivity,
-    setCanvasLeftDragMode,
+    setCanvasMouseBindings,
     setCanvasWheelMode,
     setEnableCanvasWasdPan,
     setCanvasWasdPanSensitivity,
@@ -726,54 +727,8 @@ export function SettingsDialog({
                       </p>
                     </div>
 
-                    <div className="mb-4 grid gap-4 sm:grid-cols-2">
-                      <fieldset className="min-w-0">
-                        <legend className="mb-2 text-xs font-medium text-text-muted">
-                          {t('settings.canvasInteraction.leftDrag')}
-                        </legend>
-                        <UiSegmented<CanvasLeftDragMode>
-                          value={localCanvasLeftDragMode}
-                          options={(['select', 'pan'] as const).map((mode) => ({
-                            value: mode,
-                            label: t(`settings.canvasInteraction.leftDragOptions.${mode}`),
-                          }))}
-                          onChange={setLocalCanvasLeftDragMode}
-                          aria-label={t('settings.canvasInteraction.leftDrag')}
-                          className="w-full"
-                          size="sm"
-                        />
-                      </fieldset>
-                      <fieldset className="min-w-0">
-                        <legend className="mb-2 text-xs font-medium text-text-muted">
-                          {t('settings.canvasInteraction.wheel')}
-                        </legend>
-                        <UiSegmented<CanvasWheelMode>
-                          value={localCanvasWheelMode}
-                          options={(['auto', 'zoom', 'pan'] as const).map((mode) => ({
-                            value: mode,
-                            label: t(`settings.canvasInteraction.wheelOptions.${mode}`),
-                          }))}
-                          onChange={setLocalCanvasWheelMode}
-                          aria-label={t('settings.canvasInteraction.wheel')}
-                          className="w-full"
-                          size="sm"
-                        />
-                        <p className="mt-2 text-xs text-text-muted">
-                          {t('settings.canvasInteraction.wheelAutoHelp')}
-                        </p>
-                      </fieldset>
-                    </div>
-
-                    <div className="mb-4 rounded-lg border border-[var(--line)] bg-elevated p-3">
-                      <h4 className="mb-2 text-xs font-medium text-text-dark">
-                        {t('settings.canvasInteraction.gesturesTitle')}
-                      </h4>
-                      <ul className="grid list-inside list-disc gap-x-4 gap-y-1 text-xs leading-5 text-text-muted sm:grid-cols-2">
-                        {(['panButtons', 'spacePan', 'trackpad', 'modifierZoom', 'shiftSelect', 'contextMenu', 'addNode', 'tools'] as const).map((gesture) => (
-                          <li key={gesture}>{t(`settings.canvasInteraction.gestures.${gesture}`)}</li>
-                        ))}
-                      </ul>
-                    </div>
+                    <CanvasMouseSettingsSection bindings={localCanvasMouseBindings} wheelMode={localCanvasWheelMode}
+                      onBindingsChange={setLocalCanvasMouseBindings} onWheelModeChange={setLocalCanvasWheelMode} />
 
                     <div className="rounded-lg border border-[var(--line)] bg-elevated p-3">
                       <div className="flex items-start gap-3">

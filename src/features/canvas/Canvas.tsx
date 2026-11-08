@@ -5,7 +5,6 @@ import {
   BackgroundVariant,
   MiniMap,
   ReactFlow,
-  SelectionMode,
   useReactFlow,
   type EdgeChange,
   type NodeChange,
@@ -41,7 +40,7 @@ import { CanvasAssetPanel } from '@/features/canvas/panels/CanvasAssetPanel';
 import { useCanvasUiStore, type FlowPoint } from '@/features/canvas/state/canvasUiStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useProjectStore } from '@/stores/projectStore';
-import { useSettingsStore, type CanvasLeftDragMode } from '@/stores/settingsStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { edgeTypes } from './edges';
 import { nodeTypes } from './nodes';
 import { ImageViewerModal } from './ui/ImageViewerModal';
@@ -57,7 +56,6 @@ const DEFAULT_EDGE_OPTIONS = { type: 'disconnectableEdge' } as const;
 const PRO_OPTIONS = { hideAttribution: true } as const;
 const SNAP_GRID: [number, number] = [16, 16];
 const MULTI_SELECT_KEYS = ['Meta', 'Control', 'Shift'];
-const LEFT_BUTTON_PAN = [0];
 
 /** True while a drag/resize is still in flight: persist once on release, not every frame. */
 function changeIsInFlight(change: NodeChange<CanvasNode>): boolean {
@@ -134,7 +132,6 @@ export function Canvas() {
   const addMenu = useCanvasUiStore((state) => state.addMenu);
   const contextMenu = useCanvasUiStore((state) => state.contextMenu);
   const sheet = useCanvasUiStore((state) => state.sheet);
-  const leftDragMode = useSettingsStore((state) => state.canvasLeftDragMode);
   const imageViewer = useCanvasStore((state) => state.imageViewer);
 
   const quickAdd = useCallback(
@@ -162,8 +159,6 @@ export function Canvas() {
         data-edges-hidden={edgesHidden ? '' : undefined}
       >
         <CanvasFlow
-          tool={tool}
-          leftDragMode={leftDragMode}
           scheduleCanvasPersist={scheduleCanvasPersist}
           clipboard={clipboard}
           onDragOver={materialImport.handleDragOver}
@@ -211,8 +206,6 @@ export function Canvas() {
 }
 
 interface CanvasFlowProps {
-  tool: 'select' | 'hand';
-  leftDragMode: CanvasLeftDragMode;
   scheduleCanvasPersist: (delayMs?: number) => void;
   clipboard: Parameters<typeof useAltDragCopy>[0];
   onDragOver: (event: ReactDragEvent<HTMLElement>) => void;
@@ -226,8 +219,6 @@ interface CanvasFlowProps {
  * roundtrip per drag frame. This assembly only re-renders when interaction configuration changes.
  */
 const CanvasFlow = memo(function CanvasFlow({
-  tool,
-  leftDragMode,
   scheduleCanvasPersist,
   clipboard,
   onDragOver,
@@ -242,7 +233,6 @@ const CanvasFlow = memo(function CanvasFlow({
   const keepAllNodesRendered = useCanvasUiStore((state) => state.zoomRendering.keepAllNodesRendered);
   const connections = useCanvasConnections(scheduleCanvasPersist);
   const altDrag = useAltDragCopy(clipboard, scheduleCanvasPersist);
-  const selecting = tool === 'select';
 
   const handleNodesChange = useCallback((changes: NodeChange<CanvasNode>[]) => {
     useCanvasStore.getState().onNodesChange(changes);
@@ -264,14 +254,6 @@ const CanvasFlow = memo(function CanvasFlow({
       });
   }, [scheduleCanvasPersist]);
 
-  // Double-click on empty canvas opens the add menu there (RF has no pane double-click event).
-  const { screenToFlowPosition } = useReactFlow();
-  const handlePaneClick = useCallback((event: ReactMouseEvent) => {
-    if (event.detail < 2 || useCanvasUiStore.getState().tool !== 'select') return;
-    const point = { x: event.clientX, y: event.clientY };
-    useCanvasUiStore.getState().openAddMenu({ clientX: point.x, clientY: point.y, flowPosition: screenToFlowPosition(point) });
-  }, [screenToFlowPosition]);
-
   const handleMoveEnd = useCallback((_event: unknown, viewport: Viewport) => onMoveEnd(viewport), [onMoveEnd]);
 
   return (
@@ -286,7 +268,6 @@ const CanvasFlow = memo(function CanvasFlow({
       onNodeDrag={altDrag.onNodeDrag}
       onNodeDragStop={altDrag.onNodeDragStop}
       onEdgeDoubleClick={handleEdgeDoubleClick}
-      onPaneClick={handlePaneClick}
       onMoveStart={onMoveStart}
       onMoveEnd={handleMoveEnd}
       onDragOver={onDragOver}
@@ -297,20 +278,19 @@ const CanvasFlow = memo(function CanvasFlow({
       defaultViewport={DEFAULT_VIEWPORT}
       minZoom={0.1}
       maxZoom={8}
-      // Wheel and right/middle drag belong to useCanvasGestures; RF keeps left drag, Space and marquee.
+      // Canvas gestures own blank-space mouse actions; Flow keeps node editing and connections.
       zoomOnScroll={false}
       zoomOnPinch={false}
       panOnScroll={false}
       zoomOnDoubleClick={false}
-      panOnDrag={!selecting || leftDragMode === 'pan' ? LEFT_BUTTON_PAN : false}
-      selectionOnDrag={selecting && leftDragMode === 'select'}
-      selectionKeyCode="Shift"
+      panOnDrag={false}
+      selectionOnDrag={false}
+      selectionKeyCode={null}
       multiSelectionKeyCode={MULTI_SELECT_KEYS}
-      selectionMode={SelectionMode.Partial}
-      panActivationKeyCode="Space"
-      nodesDraggable={selecting}
-      nodesConnectable={selecting}
-      elementsSelectable={selecting}
+      panActivationKeyCode={null}
+      nodesDraggable
+      nodesConnectable
+      elementsSelectable
       snapToGrid={snapToGrid}
       snapGrid={SNAP_GRID}
       deleteKeyCode={null}

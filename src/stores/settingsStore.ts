@@ -1,3 +1,6 @@
+import { DEFAULT_CANVAS_MOUSE_BINDINGS, canvasMouseBindingsSchema, canvasLeftDragModeForBindings, normalizeCanvasMousePreferences, type CanvasMouseBindings, type CanvasLeftDragMode, type CanvasWheelMode } from '@/features/settings/canvasMouseSettings';
+export { DEFAULT_CANVAS_MOUSE_BINDINGS, TRADITIONAL_CANVAS_MOUSE_BINDINGS } from '@/features/settings/canvasMouseSettings';
+export type { CanvasMouseBindings, CanvasMouseBindingSlot, CanvasMouseAction, CanvasMouseClickAction, CanvasMouseDragAction, CanvasMouseBindingPreset, CanvasLeftDragMode, CanvasWheelMode } from '@/features/settings/canvasMouseSettings';
 import { DEFAULT_IMAGE_HOST_SETTINGS, normalizeImageHostSettings, imageHostConfigurationError, retireImageHostStorage, type ImageHostSettings } from '@/features/settings/imageHostSettings';
 import { normalizeWorkspacePreferences, type WorkspacePreferences } from '@/features/settings/workspacePreferences';
 import { create } from 'zustand';
@@ -65,8 +68,6 @@ const accentSourceSchema = z.enum(['theme', 'custom']);
 export const DEFAULT_ACCENT_COLOR = '#3B82F6';
 export type CanvasEdgeRoutingMode = 'spline' | 'orthogonal' | 'smartOrthogonal';
 export type PanoramaControlSensitivity = 'low' | 'medium' | 'high';
-export type CanvasLeftDragMode = 'select' | 'pan';
-export type CanvasWheelMode = 'auto' | 'zoom' | 'pan';
 export type ProviderApiKeys = Record<string, string>;
 export type GenerationNetworkRoute = 'system' | 'direct' | 'custom-proxy';
 export interface GenerationNetworkSettings {
@@ -140,6 +141,7 @@ interface SettingsState {
   showStoryboardGenAdvancedRatioControls: boolean;
   useLegacyPanoramaControlDirection: boolean;
   panoramaControlSensitivity: PanoramaControlSensitivity;
+  canvasMouseBindings: CanvasMouseBindings;
   canvasLeftDragMode: CanvasLeftDragMode;
   canvasWheelMode: CanvasWheelMode;
   enableCanvasWasdPan: boolean;
@@ -185,6 +187,7 @@ interface SettingsState {
   setShowStoryboardGenAdvancedRatioControls: (enabled: boolean) => void;
   setUseLegacyPanoramaControlDirection: (enabled: boolean) => void;
   setPanoramaControlSensitivity: (sensitivity: PanoramaControlSensitivity) => void;
+  setCanvasMouseBindings: (bindings: CanvasMouseBindings) => void;
   setCanvasLeftDragMode: (mode: CanvasLeftDragMode) => void;
   setCanvasWheelMode: (mode: CanvasWheelMode) => void;
   setEnableCanvasWasdPan: (enabled: boolean) => void;
@@ -548,7 +551,8 @@ export const useSettingsStore = create<SettingsState>()(
       showStoryboardGenAdvancedRatioControls: false,
       useLegacyPanoramaControlDirection: false,
       panoramaControlSensitivity: 'medium',
-      canvasLeftDragMode: 'select',
+      canvasMouseBindings: { ...DEFAULT_CANVAS_MOUSE_BINDINGS },
+      canvasLeftDragMode: 'pan',
       canvasWheelMode: 'auto',
       enableCanvasWasdPan: false,
       canvasWasdPanSensitivity: 60,
@@ -636,8 +640,15 @@ export const useSettingsStore = create<SettingsState>()(
         set({ useLegacyPanoramaControlDirection: enabled }),
       setPanoramaControlSensitivity: (sensitivity) =>
         set({ panoramaControlSensitivity: normalizePanoramaControlSensitivity(sensitivity) }),
-      setCanvasLeftDragMode: (mode) =>
-        set({ canvasLeftDragMode: normalizeCanvasLeftDragMode(mode) }),
+      setCanvasMouseBindings: (input) => {
+        const canvasMouseBindings = canvasMouseBindingsSchema.parse(input);
+        set({ canvasMouseBindings, canvasLeftDragMode: canvasLeftDragModeForBindings(canvasMouseBindings) });
+      },
+      setCanvasLeftDragMode: (mode) => set((state) => {
+        const normalized = normalizeCanvasLeftDragMode(mode);
+        return { canvasLeftDragMode: normalized,
+          canvasMouseBindings: { ...state.canvasMouseBindings, leftDrag: normalized === 'pan' ? 'panCanvas' : 'selectionBox' } };
+      }),
       setCanvasWheelMode: (mode) =>
         set({ canvasWheelMode: normalizeCanvasWheelMode(mode) }),
       setEnableCanvasWasdPan: (enabled) => set({ enableCanvasWasdPan: enabled }),
@@ -879,7 +890,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'settings-storage',
-      version: 25,
+      version: 26,
       storage: createJSONStorage(() => settingsCredentialStorage),
       merge: (persistedState, currentState) => {
         const persisted = persistedSettingsSchema.safeParse(persistedState);
@@ -888,7 +899,14 @@ export const useSettingsStore = create<SettingsState>()(
         const accentSource = accentSourceSchema.safeParse(data.accentSource);
         // Before color themes existed every user had an explicit accent; only a changed one stays custom.
         const persistedAccent = typeof data.accentColor === 'string' ? normalizeHexColor(data.accentColor) : null;
-        return { ...currentState, ...data,
+        const { canvasMouseBindingPreset: _legacyMousePreset, ...settings } = data;
+        const hasMouseBindings = ['canvasMouseBindings', 'canvasMouseBindingPreset', 'canvasLeftDragMode'].some((field) => Object.hasOwn(data, field));
+        const mousePreferences = normalizeCanvasMousePreferences({
+          canvasWheelMode: currentState.canvasWheelMode, ...data,
+          ...(!hasMouseBindings ? { canvasMouseBindings: currentState.canvasMouseBindings } : {}),
+        });
+        return { ...currentState, ...settings,
+          ...mousePreferences,
           themeTonePreset: tone.success ? tone.data : currentState.themeTonePreset,
           accentSource: accentSource.success
             ? accentSource.data
@@ -949,11 +967,7 @@ export const useSettingsStore = create<SettingsState>()(
         delete persistedWithoutPricing.usdToCnyRate;
         delete persistedWithoutPricing.preferDiscountedPrice;
         delete persistedWithoutPricing.grsaiCreditTierId;
-        for (const key of Object.keys(persistedWithoutPricing)) {
-          if (/^canvasMouse(?:BindingPreset|Bindings)$/.test(key)) {
-            delete persistedWithoutPricing[key];
-          }
-        }
+        delete persistedWithoutPricing.canvasMouseBindingPreset;
 
         const migratedApiKeys = normalizeApiKeys(state.apiKeys);
         const ignoreAtTagWhenCopyingAndGenerating =
@@ -984,8 +998,7 @@ export const useSettingsStore = create<SettingsState>()(
           }
         );
         const promptPresets = normalizePromptPresets(state.promptPresets);
-        const canvasLeftDragMode = normalizeCanvasLeftDragMode(state.canvasLeftDragMode);
-        const canvasWheelMode = normalizeCanvasWheelMode(state.canvasWheelMode);
+        const mousePreferences = normalizeCanvasMousePreferences(persistedState);
         const textAgents = normalizeTextAgents(state.textAgents);
         const imageHostSettings = normalizeImageHostSettings(state.imageHostSettings);
         if (Object.keys(migratedApiKeys).length > 0) {
@@ -1018,8 +1031,7 @@ export const useSettingsStore = create<SettingsState>()(
             panoramaControlSensitivity: normalizePanoramaControlSensitivity(
               state.panoramaControlSensitivity
             ),
-            canvasLeftDragMode,
-            canvasWheelMode,
+            ...mousePreferences,
             enableCanvasWasdPan: state.enableCanvasWasdPan ?? false,
             canvasWasdPanSensitivity: normalizeCanvasWasdPanSensitivity(
               state.canvasWasdPanSensitivity
@@ -1066,8 +1078,7 @@ export const useSettingsStore = create<SettingsState>()(
           panoramaControlSensitivity: normalizePanoramaControlSensitivity(
             state.panoramaControlSensitivity
           ),
-          canvasLeftDragMode,
-          canvasWheelMode,
+          ...mousePreferences,
           enableCanvasWasdPan: state.enableCanvasWasdPan ?? false,
           canvasWasdPanSensitivity: normalizeCanvasWasdPanSensitivity(
             state.canvasWasdPanSensitivity

@@ -26,6 +26,10 @@ export function readSelectedText(container: HTMLElement): string {
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return '';
   const text = selection.toString().trim();
   if (!text) return '';
+  for (const node of [selection.anchorNode, selection.focusNode]) {
+    const element = node instanceof Element ? node : node?.parentElement;
+    if (element && (isOverlayTarget(element) || element.closest('button, select, [role="button"]'))) return '';
+  }
   for (let index = 0; index < selection.rangeCount; index += 1) {
     if (container.contains(selection.getRangeAt(index).commonAncestorContainer)) return text;
   }

@@ -3,6 +3,10 @@ name: Build Open Storyboard Canvas
 permissions:
   contents: read
 
+concurrency:
+  group: package-${{ github.event.inputs.release_tag || github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_PROFILE_TEST_DEBUG: 0
@@ -303,7 +307,22 @@ jobs:
           cp artifacts/windows/*.exe artifacts/macos/*.dmg release-assets/
           test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 2
           (cd release-assets && sha256sum *.exe *.dmg > SHA256SUMS.txt)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "A release already exists for $TAG; inspect it before rerunning publication."
+            exit 1
+          fi
+          FIRST_LINE=$(head -n 1 release-notes.md)
+          TITLE="Open Storyboard Canvas $TAG"
+          if [[ "$FIRST_LINE" == "# $TAG："* ]]; then
+            TITLE="$TITLE · ${FIRST_LINE#"# $TAG："}"
+          fi
           gh release create "$TAG" release-assets/* --verify-tag --draft \
-            --title "Open Storyboard Canvas $TAG · 全面重构与创作工作流升级" \
+            --title "$TITLE" \
             --notes-file release-notes.md
-          gh release edit "$TAG" --draft=false --latest
+          # Address this one draft directly; a tag lookup can pick an older public
+          # release when a previous run left another draft under the same tag.
+          RELEASE_ID=$(gh api "repos/$GH_REPO/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$TAG\" and .draft == true) | .id")
+          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
+          gh api --method PATCH "repos/$GH_REPO/releases/$RELEASE_ID" \
+            -F draft=false -f make_latest=true --silent

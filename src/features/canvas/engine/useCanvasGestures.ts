@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { useReactFlow, useStoreApi } from '@xyflow/react';
 
 import { useSettingsStore } from '@/stores/settingsStore';
-import { useCanvasStore } from '@/stores/canvasStore';
 import { useCanvasUiStore } from '@/features/canvas/state/canvasUiStore';
 import {
   createWheelClassifier,
@@ -10,24 +9,12 @@ import {
   zoomAround,
   type Viewport,
 } from './viewportMath';
-import { getNodeIdFromTarget, isEditableTarget, isOverlayTarget, readSelectedText } from './domTargets';
+import { isEditableTarget, isOverlayTarget } from './domTargets';
+import { installCanvasPointerGestures } from './canvasPointerGestures';
 import { clearAlignmentSession, setAlignmentSnapDisabled } from './alignment';
 import { IS_MAC } from './shortcuts';
 import { createCanvasViewportGesture, type CanvasViewportGesture } from './canvasViewportGesture';
 import { registerCanvasViewportFlush } from '../application/canvasViewportCommit';
-
-const DRAG_THRESHOLD_PX = 4;
-
-interface PanGesture {
-  pointerId: number;
-  button: number;
-  startX: number;
-  startY: number;
-  lastX: number;
-  lastY: number;
-  moved: boolean;
-  target: EventTarget | null;
-}
 
 /** True when the wheel should scroll a nested element rather than move the canvas. */
 function canScrollNatively(target: EventTarget | null, root: HTMLElement, dx: number, dy: number): boolean {
@@ -56,9 +43,8 @@ function canScrollNatively(target: EventTarget | null, root: HTMLElement, dx: nu
 /**
  * Owns every viewport gesture React Flow does not handle well for a creative canvas:
  * - wheel: trackpad scroll pans, pinch / ⌘-wheel zooms, mouse wheel follows the setting;
- * - right / middle drag pans from anywhere (including over nodes);
- * - a right *click* (no drag) opens the context menu on release, so it never fights panning;
- * - Space toggles the temporary hand cursor (React Flow pans via panActivationKeyCode).
+ * - configurable pointer actions share one owner, separated from native node editing;
+ * - Space provides temporary panning without permanently disabling node controls.
  */
 const noViewportCommit = (_viewport: Viewport) => {};
 const noViewportStart = () => {};
@@ -91,8 +77,10 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>, 
     viewportGestureRef.current = viewportGesture;
     const unregisterViewportFlush = registerCanvasViewportFlush(viewportGesture.finish, viewportGesture.isActive, () => flowStore.getState().paneDragging);
     const currentViewport = viewportGesture.currentViewport;
+    const pointerGestures = installCanvasPointerGestures(wrapper, reactFlow, viewportGesture);
 
     const handleWheel = (event: WheelEvent) => {
+      if (pointerGestures.isActive()) { event.preventDefault(); return; }
       const marker = event.target instanceof Element
         ? event.target.closest('.nowheel, [data-canvas-wheel="native"]')
         : null;
@@ -142,7 +130,6 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>, 
       if (next !== viewport) viewportGesture.schedule(next, true);
     };
 
-    let gesture: PanGesture | null = null;
     let primaryPointer: number | null = null;
 
     const finishPrimaryTransform = (event?: PointerEvent) => {
@@ -151,68 +138,13 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>, 
       primaryPointer = null;
       window.removeEventListener('pointerup', finishPrimaryTransform, true);
       window.removeEventListener('pointercancel', finishPrimaryTransform, true);
-      if (!gesture) delete wrapper.dataset.pointerTransform;
+      if (!pointerGestures.isActive()) delete wrapper.dataset.pointerTransform;
     };
-
-    const endGesture = () => {
-      viewportGesture.finish();
-      window.removeEventListener('pointermove', handlePointerMove, true);
-      window.removeEventListener('pointerup', handlePointerUp, true);
-      window.removeEventListener('pointercancel', handlePointerCancel, true);
-      delete wrapper.dataset.panning;
-      gesture = null;
-      if (primaryPointer === null) delete wrapper.dataset.pointerTransform;
-    };
-
-    const openContextMenuAt = (clientX: number, clientY: number, target: EventTarget | null) => {
-      const nodeId = getNodeIdFromTarget(target);
-      const selectedText = readSelectedText(wrapper);
-      if (nodeId && !selectedText) {
-        const node = useCanvasStore.getState().nodes.find((item) => item.id === nodeId);
-        if (node && !node.selected) useCanvasStore.getState().setSelectedNode(nodeId);
-      }
-      useCanvasUiStore.getState().openContextMenu({
-        clientX,
-        clientY,
-        flowPosition: reactFlow.screenToFlowPosition({ x: clientX, y: clientY }),
-        nodeId,
-        selectedText: selectedText || undefined,
-      });
-    };
-
-    function handlePointerMove(event: PointerEvent) {
-      if (!gesture || event.pointerId !== gesture.pointerId) return;
-      const dx = event.clientX - gesture.lastX;
-      const dy = event.clientY - gesture.lastY;
-      if (!gesture.moved) {
-        const distance = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
-        if (distance < DRAG_THRESHOLD_PX) return;
-        gesture.moved = true;
-        wrapper!.dataset.panning = 'true';
-        useCanvasUiStore.getState().closeMenus();
-      }
-      gesture.lastX = event.clientX;
-      gesture.lastY = event.clientY;
-      const viewport = currentViewport();
-      viewportGesture.schedule({ ...viewport, x: viewport.x + dx, y: viewport.y + dy });
-    }
-
-    function handlePointerUp(event: PointerEvent) {
-      if (!gesture || event.pointerId !== gesture.pointerId) return;
-      const finished = gesture;
-      endGesture();
-      if (!finished.moved && finished.button === 2) {
-        openContextMenuAt(event.clientX, event.clientY, finished.target);
-      }
-    }
-
-    function handlePointerCancel(event: PointerEvent) {
-      if (gesture && event.pointerId === gesture.pointerId) endGesture();
-    }
 
     const handlePointerDown = (event: PointerEvent) => {
       viewportGesture.finish();
       setAlignmentSnapDisabled(IS_MAC ? event.metaKey : event.ctrlKey);
+      if (pointerGestures.isActive()) return;
       if (event.button === 0) {
         const target = event.target instanceof Element ? event.target : null;
         if (!target || isOverlayTarget(target) || isEditableTarget(target)
@@ -225,46 +157,18 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>, 
         window.addEventListener('pointercancel', finishPrimaryTransform, true);
         return;
       }
-      if (event.button !== 1 && event.button !== 2) return;
-      if (isOverlayTarget(event.target)) return;
-      if (event.button === 2 && isEditableTarget(event.target)) return;
-      if (event.button === 1) event.preventDefault(); // no autoscroll / paste
-      wrapper.dataset.pointerTransform = '';
-      gesture = {
-        pointerId: event.pointerId,
-        button: event.button,
-        startX: event.clientX,
-        startY: event.clientY,
-        lastX: event.clientX,
-        lastY: event.clientY,
-        moved: false,
-        target: event.target,
-      };
-      window.addEventListener('pointermove', handlePointerMove, true);
-      window.addEventListener('pointerup', handlePointerUp, true);
-      window.addEventListener('pointercancel', handlePointerCancel, true);
-    };
-
-    const handleContextMenu = (event: MouseEvent) => {
-      // Our menu opens on pointer release; editable fields keep the native menu.
-      if (isEditableTarget(event.target) || isOverlayTarget(event.target)) return;
-      event.preventDefault();
-    };
-
-    const handleAuxClick = (event: MouseEvent) => {
-      if (event.button === 1) event.preventDefault();
     };
 
     const finishPointerInteraction = () => {
       clearAlignmentSession();
       setAlignmentSnapDisabled(false);
-      endGesture();
+      pointerGestures.cancel();
       finishPrimaryTransform();
       delete wrapper.dataset.viewportTransform;
     };
 
     // Flush a pending wheel frame before another control/keyboard action can navigate or fit-view.
-    const flushBeforeAction = () => { if (!gesture) viewportGesture.finish(); };
+    const flushBeforeAction = () => { if (!pointerGestures.isActive()) viewportGesture.finish(); };
 
     const handleAlignmentModifier = (event: PointerEvent | KeyboardEvent) => setAlignmentSnapDisabled(IS_MAC ? event.metaKey : event.ctrlKey);
     window.addEventListener('pointermove', handleAlignmentModifier, true);
@@ -275,11 +179,9 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>, 
     window.addEventListener('pagehide', finishPointerInteraction);
     wrapper.addEventListener('wheel', handleWheel, { capture: true, passive: false });
     wrapper.addEventListener('pointerdown', handlePointerDown, true);
-    wrapper.addEventListener('contextmenu', handleContextMenu, true);
-    wrapper.addEventListener('auxclick', handleAuxClick, true);
     window.addEventListener('blur', finishPointerInteraction);
     return () => {
-      endGesture();
+      pointerGestures.dispose();
       unregisterViewportFlush();
       viewportGesture.dispose();
       delete wrapper.dataset.viewportTransform;
@@ -287,8 +189,6 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>, 
       finishPrimaryTransform();
       wrapper.removeEventListener('wheel', handleWheel, true);
       wrapper.removeEventListener('pointerdown', handlePointerDown, true);
-      wrapper.removeEventListener('contextmenu', handleContextMenu, true);
-      wrapper.removeEventListener('auxclick', handleAuxClick, true);
       window.removeEventListener('blur', finishPointerInteraction);
       clearAlignmentSession();
       window.removeEventListener('pointermove', handleAlignmentModifier, true);
@@ -300,7 +200,7 @@ export function useCanvasGestures(wrapperRef: RefObject<HTMLDivElement | null>, 
     };
   }, [flowStore, onViewportCommit, onViewportStart, reactFlow, wrapperRef]);
 
-  // Space = temporary hand. React Flow performs the pan; we only reflect it in the cursor.
+  // Space is temporary. Pointer ownership is sampled when the next drag begins.
   useEffect(() => {
     const setSpacePan = useCanvasUiStore.getState().setSpacePan;
     const handleKeyDown = (event: KeyboardEvent) => {

@@ -1,3 +1,4 @@
+import { DEFAULT_CANVAS_MOUSE_BINDINGS } from '@/features/settings/canvasMouseSettings';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useCustomProvidersStore, type CustomProviderConfig } from '@/stores/customProvidersStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -138,7 +139,8 @@ describe('settings and channel migration acceptance', () => {
     await vi.waitFor(() => expect(useSettingsStore.getState().isHydrated).toBe(true));
     const settings = useSettingsStore.getState();
     expect(settings).toMatchObject({ promptDefaultLanguage: 'en', enableAiTextStreaming: false,
-      canvasLeftDragMode: 'select', canvasWheelMode: 'auto' });
+      canvasLeftDragMode: 'pan', canvasWheelMode: 'auto',
+      canvasMouseBindings: { ...DEFAULT_CANVAS_MOUSE_BINDINGS, middleDrag: 'none' } });
     for (const [id, value] of Object.entries(expected)) {
       const ref = secretRefFromToken(settings.apiKeys[id]);
       expect(ref).not.toBeNull();
@@ -160,7 +162,7 @@ describe('settings and channel migration acceptance', () => {
     await vi.waitFor(() => {
       const saved = JSON.parse(channelPersistenceStorage.getItem('settings-storage')!) as { state: Record<string, unknown> };
       expect(saved.state).not.toHaveProperty('canvasMouseBindingPreset');
-      expect(saved.state).not.toHaveProperty('canvasMouseBindings');
+      expect(saved.state.canvasMouseBindings).toEqual({ ...DEFAULT_CANVAS_MOUSE_BINDINGS, middleDrag: 'none' });
       expect(saved.state).not.toHaveProperty('showNodePrice');
       expect(saved.state).not.toHaveProperty('priceDisplayCurrencyMode');
     });
@@ -169,6 +171,18 @@ describe('settings and channel migration acceptance', () => {
     migrateAgnesSettingsCredential(useSettingsStore.getState().agnesApiKey);
     expect(useChannelStore.getState().channels).toEqual(channels);
     expect(await revealChannelCredential('settings-agnes-chat')).toBe('OLD_AGNES_PRIVATE_KEY');
+  });
+
+  it('rehydrates every modern mouse slot and wheel choice without changing the configured actions', async () => {
+    const canvasMouseBindings = { ...DEFAULT_CANVAS_MOUSE_BINDINGS, leftClick: 'none', leftDoubleClick: 'fitView',
+      leftDrag: 'selectionBox', rightClick: 'quickCreate', rightDoubleClick: 'nodeMenu', rightDrag: 'none',
+      middleClick: 'selectNode', middleDoubleClick: 'quickCreate', middleDrag: 'none' } as const;
+    channelPersistenceStorage.setItem('settings-storage', JSON.stringify({ version: 26, state: {
+      canvasMouseBindings, canvasWheelMode: 'zoom', canvasLeftDragMode: 'pan',
+    } }));
+    await useSettingsStore.persist.rehydrate();
+    await vi.waitFor(() => expect(useSettingsStore.getState().isHydrated).toBe(true));
+    expect(useSettingsStore.getState()).toMatchObject({ canvasMouseBindings, canvasWheelMode: 'zoom', canvasLeftDragMode: 'select' });
   });
 
   it('describes unclassified older issue records conservatively without exposing legacy field values or mutating records', () => {

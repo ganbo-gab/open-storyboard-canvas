@@ -27,7 +27,6 @@
   }
 
   .canvas-root[data-tool='hand'] .react-flow__pane,
-  .canvas-root[data-tool='hand'] .react-flow__node,
   .canvas-root[data-space-pan] .react-flow__pane,
   .canvas-root[data-space-pan] .react-flow__node {
     cursor: grab;
@@ -47,6 +46,18 @@
   .canvas-root[data-edges-hidden] .react-flow__edgelabel-renderer {
     opacity: 0;
     pointer-events: none;
+  }
+
+  /* Screen-space rectangle: node selection is committed on release. */
+  .canvas-root .canvas-marquee {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 6;
+    pointer-events: none;
+    border: 1px solid rgb(var(--accent-rgb) / 0.7);
+    background: rgb(var(--accent-rgb) / 0.08);
+    border-radius: 4px;
   }
 
   /* Marquee and the box that remains around a multi-selection. */

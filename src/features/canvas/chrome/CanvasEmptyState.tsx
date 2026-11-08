@@ -59,7 +59,7 @@ export function CanvasEmptyState({ materialImport }: { materialImport: MaterialI
           </button>
         </div>
         <div className="canvas-empty__gestures">
-          <span><kbd className="ui-kbd">{t('rework.canvas.emptyGestures.doubleClick')}</kbd>{t('rework.canvas.emptyGestures.add')}</span>
+          <span><kbd className="ui-kbd">{formatChord('tab')}</kbd>{t('rework.canvas.emptyGestures.add')}</span>
           <span><kbd className="ui-kbd">{formatChord('space')}</kbd>{t('rework.canvas.emptyGestures.pan')}</span>
           <span><kbd className="ui-kbd">{shortcutLabel('view.palette')}</kbd>{t('rework.canvas.emptyGestures.search')}</span>
           <span><kbd className="ui-kbd">?</kbd>{t('rework.canvas.emptyGestures.shortcuts')}</span>

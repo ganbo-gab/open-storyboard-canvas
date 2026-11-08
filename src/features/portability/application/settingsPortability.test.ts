@@ -1,3 +1,4 @@
+import { DEFAULT_CANVAS_MOUSE_BINDINGS } from '@/features/settings/canvasMouseSettings';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { useCustomProvidersStore } from '@/stores/customProvidersStore';
 import { usePromptLibraryStore } from '@/stores/promptLibraryStore';
@@ -353,61 +354,86 @@ describe('settings portability security', () => {
     expect(useCustomProvidersStore.getState().providers[0]?.comfyWorkflows).toEqual(comfyWorkflows);
   });
 
-  it.each([
-    ['select', 'auto'],
-    ['pan', 'zoom'],
-    ['select', 'pan'],
-  ] as const)('round-trips canvas gestures %s / %s', (canvasLeftDragMode, canvasWheelMode) => {
-    useSettingsStore.setState({ canvasLeftDragMode, canvasWheelMode });
+  it.each(['auto', 'zoom', 'pan'] as const)('round-trips all nine mouse gestures and %s wheel mode', (canvasWheelMode) => {
+    const canvasMouseBindings = { ...DEFAULT_CANVAS_MOUSE_BINDINGS, leftClick: 'quickCreate', leftDoubleClick: 'fitView',
+      leftDrag: 'none', rightClick: 'selectNode', rightDoubleClick: 'quickCreate', rightDrag: 'panCanvas',
+      middleClick: 'nodeMenu', middleDoubleClick: 'fitView', middleDrag: 'selectionBox' } as const;
+    useSettingsStore.getState().setCanvasMouseBindings(canvasMouseBindings);
+    useSettingsStore.getState().setCanvasWheelMode(canvasWheelMode);
     const bundle = parseSettingsBundle(serializeSettingsBundle());
-    expect(bundle.categories.general).toMatchObject({ canvasLeftDragMode, canvasWheelMode });
-    expect(Object.keys(bundle.categories.general).some((key) => /^canvasMouse/.test(key))).toBe(false);
-
-    useSettingsStore.setState({ canvasLeftDragMode: 'pan', canvasWheelMode: 'pan' });
+    expect(bundle.categories.general).toMatchObject({ canvasMouseBindings, canvasWheelMode });
+    expect(bundle.categories.general).not.toHaveProperty('canvasMouseBindingPreset');
+    useSettingsStore.getState().setCanvasMouseBindings(DEFAULT_CANVAS_MOUSE_BINDINGS);
+    useSettingsStore.getState().setCanvasWheelMode('auto');
     applySettingsBundle(bundle, new Set(['general']));
-    expect(useSettingsStore.getState()).toMatchObject({ canvasLeftDragMode, canvasWheelMode });
+    expect(useSettingsStore.getState()).toMatchObject({ canvasMouseBindings, canvasWheelMode, canvasLeftDragMode: 'select' });
   });
 
   it.each([
-    ['canvasLeftDragMode', 'zoom'],
-    ['canvasLeftDragMode', null],
-    ['canvasLeftDragMode', ['select']],
-    ['canvasWheelMode', 'select'],
-    ['canvasWheelMode', 1],
-    ['canvasWheelMode', ['auto']],
+    ['canvasLeftDragMode', 'zoom'], ['canvasLeftDragMode', null], ['canvasLeftDragMode', ['select']],
+    ['canvasWheelMode', 'select'], ['canvasWheelMode', 1], ['canvasWheelMode', ['auto']],
   ])('rejects invalid canvas enum %s = %j', (field, value) => {
     const bundle = buildSettingsBundle();
     bundle.categories.general[field as string] = value;
     expect(() => applySettingsBundle(bundle, new Set(['general']))).toThrow(/is invalid/);
-    expect(useSettingsStore.getState().canvasLeftDragMode).toBe(originalSettings.canvasLeftDragMode);
+    expect(useSettingsStore.getState().canvasMouseBindings).toEqual(originalSettings.canvasMouseBindings);
     expect(useSettingsStore.getState().canvasWheelMode).toBe(originalSettings.canvasWheelMode);
   });
 
-  it('ignores retired mouse controls in older settings without mapping them or mutating the input', () => {
+  it.each([
+    { ...DEFAULT_CANVAS_MOUSE_BINDINGS, rightDrag: 'nodeMenu' },
+    { ...DEFAULT_CANVAS_MOUSE_BINDINGS, leftClick: 'panCanvas' },
+    { ...DEFAULT_CANVAS_MOUSE_BINDINGS, middleDoubleClick: false },
+    { ...DEFAULT_CANVAS_MOUSE_BINDINGS, unknownSlot: 'none' },
+  ])('rejects malformed bindings before changing any settings', (bindings) => {
     const bundle = buildSettingsBundle();
-    const legacyPrefix = 'canvasMouse';
-    const legacyFields = {
-      [`${legacyPrefix}BindingPreset`]: 'traditional',
-      [`${legacyPrefix}Bindings`]: { leftDrag: 'panCanvas', invalidLegacySlot: 'unused' },
-    };
+    bundle.categories.general.canvasMouseBindings = bindings;
+    bundle.categories.general.useUploadFilenameAsNodeTitle = !originalSettings.useUploadFilenameAsNodeTitle;
+    expect(() => applySettingsBundle(bundle, new Set(['general']))).toThrow();
+    expect(useSettingsStore.getState().canvasMouseBindings).toEqual(originalSettings.canvasMouseBindings);
+    expect(useSettingsStore.getState().useUploadFilenameAsNodeTitle).toBe(originalSettings.useUploadFilenameAsNodeTitle);
+  });
+
+  it('migrates legacy custom bindings without mutating the imported backup', () => {
+    const bundle = buildSettingsBundle();
+    const legacy = { canvasMouseBindingPreset: 'custom', canvasMouseBindings: { leftDrag: 'panCanvas', rightDrag: 'none', middleClick: 'nodeMenu' } };
     delete bundle.categories.general.canvasLeftDragMode;
     delete bundle.categories.general.canvasWheelMode;
-    Object.assign(bundle.categories.general, legacyFields);
+    Object.assign(bundle.categories.general, legacy);
     bundle.categories.general.useUploadFilenameAsNodeTitle = false;
-    useSettingsStore.setState({ canvasLeftDragMode: 'select', canvasWheelMode: 'auto' });
-
     const parsed = parseSettingsBundle(JSON.stringify(bundle));
-    expect(Object.keys(parsed.categories.general).some((key) => /^canvasMouse/.test(key))).toBe(false);
-    expect(bundle.categories.general).toMatchObject(legacyFields);
-    expect(previewSettingsImport(bundle).flatMap((diff) => diff.changedFields)
-      .some((key) => /^canvasMouse/.test(key))).toBe(false);
+    expect(parsed.categories.general).toMatchObject({ canvasMouseBindings: {
+      ...DEFAULT_CANVAS_MOUSE_BINDINGS, rightDrag: 'none', middleClick: 'nodeMenu', middleDrag: 'none',
+    } });
+    expect(parsed.categories.general).not.toHaveProperty('canvasMouseBindingPreset');
+    expect(bundle.categories.general).toMatchObject(legacy);
     applySettingsBundle(bundle, new Set(['general']));
-    expect(useSettingsStore.getState()).toMatchObject({
-      canvasLeftDragMode: 'select',
-      canvasWheelMode: 'auto',
-      useUploadFilenameAsNodeTitle: false,
-    });
-    expect(Object.keys(useSettingsStore.getState()).some((key) => /^canvasMouse/.test(key))).toBe(false);
+    expect(useSettingsStore.getState()).toMatchObject({ canvasLeftDragMode: 'pan', useUploadFilenameAsNodeTitle: false,
+      canvasMouseBindings: { rightDrag: 'none', middleClick: 'nodeMenu', middleDrag: 'none' } });
+  });
+
+  it('preserves current gestures when an older backup contains no mouse settings', () => {
+    const bundle = buildSettingsBundle();
+    delete bundle.categories.general.canvasMouseBindings;
+    delete bundle.categories.general.canvasLeftDragMode;
+    delete bundle.categories.general.canvasWheelMode;
+    bundle.categories.general.useUploadFilenameAsNodeTitle = false;
+    const bindings = { ...DEFAULT_CANVAS_MOUSE_BINDINGS, rightDoubleClick: 'fitView' } as const;
+    useSettingsStore.getState().setCanvasMouseBindings(bindings);
+    useSettingsStore.getState().setCanvasWheelMode('pan');
+    applySettingsBundle(bundle, new Set(['general']));
+    expect(useSettingsStore.getState()).toMatchObject({ canvasMouseBindings: bindings, canvasWheelMode: 'pan', useUploadFilenameAsNodeTitle: false });
+  });
+
+  it('changes only the wheel when that is the only imported mouse field', () => {
+    const bundle = buildSettingsBundle();
+    delete bundle.categories.general.canvasMouseBindings;
+    delete bundle.categories.general.canvasLeftDragMode;
+    bundle.categories.general.canvasWheelMode = 'zoom';
+    const bindings = { ...DEFAULT_CANVAS_MOUSE_BINDINGS, rightDrag: 'none' } as const;
+    useSettingsStore.getState().setCanvasMouseBindings(bindings);
+    applySettingsBundle(bundle, new Set(['general']));
+    expect(useSettingsStore.getState()).toMatchObject({ canvasMouseBindings: bindings, canvasWheelMode: 'zoom' });
   });
 
   it('still rejects unknown general fields rather than treating them as retired controls', () => {

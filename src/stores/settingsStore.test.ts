@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
+import { DEFAULT_CANVAS_MOUSE_BINDINGS, TRADITIONAL_CANVAS_MOUSE_BINDINGS, canvasMouseBindingsSchema } from '@/features/settings/canvasMouseSettings';
 
 import {
   normalizeGenerationNetworkSettings,
@@ -34,16 +35,26 @@ describe('generation network settings', () => {
 });
 
 describe('canvas gesture settings', () => {
-  it('defaults to marquee selection and automatic wheel detection', () => {
+  it('defaults to the recommended nine gestures and automatic wheel detection', () => {
     expect(useSettingsStore.getInitialState()).toMatchObject({
-      canvasLeftDragMode: 'select',
-      canvasWheelMode: 'auto',
+      canvasMouseBindings: DEFAULT_CANVAS_MOUSE_BINDINGS, canvasLeftDragMode: 'pan', canvasWheelMode: 'auto',
     });
   });
 
-  it.each(['select', 'pan'] as const)('sets left-drag mode to %s', (mode) => {
+  it.each(['select', 'pan'] as const)('keeps the legacy left-drag setter synchronized for %s', (mode) => {
     useSettingsStore.getState().setCanvasLeftDragMode(mode);
-    expect(useSettingsStore.getState().canvasLeftDragMode).toBe(mode);
+    expect(useSettingsStore.getState()).toMatchObject({ canvasLeftDragMode: mode,
+      canvasMouseBindings: { leftDrag: mode === 'pan' ? 'panCanvas' : 'selectionBox' } });
+  });
+
+  it('accepts all nine settings and rejects an action assigned to the wrong gesture atomically', () => {
+    const bindings = { ...DEFAULT_CANVAS_MOUSE_BINDINGS, leftDrag: 'none', middleDoubleClick: 'fitView' } as const;
+    useSettingsStore.getState().setCanvasMouseBindings(bindings);
+    expect(useSettingsStore.getState()).toMatchObject({ canvasMouseBindings: bindings, canvasLeftDragMode: 'select' });
+    const invalid = { ...bindings, rightDrag: 'nodeMenu' };
+    expect(canvasMouseBindingsSchema.safeParse(invalid).success).toBe(false);
+    expect(() => useSettingsStore.getState().setCanvasMouseBindings(invalid as typeof bindings)).toThrow();
+    expect(useSettingsStore.getState().canvasMouseBindings).toEqual(bindings);
   });
 
   it.each(['auto', 'zoom', 'pan'] as const)('sets wheel mode to %s', (mode) => {
@@ -51,37 +62,53 @@ describe('canvas gesture settings', () => {
     expect(useSettingsStore.getState().canvasWheelMode).toBe(mode);
   });
 
-  it.each([undefined, null, 'invalid', 42, {}, []])('normalizes unknown gesture values %j', async (value) => {
+  it.each([undefined, null, 'invalid', 42, {}, []])('repairs unknown persisted gesture values %j', async (value) => {
     const settings = useSettingsStore.getState();
     settings.setCanvasLeftDragMode(value as CanvasLeftDragMode);
     settings.setCanvasWheelMode(value as CanvasWheelMode);
     expect(useSettingsStore.getState()).toMatchObject({ canvasLeftDragMode: 'select', canvasWheelMode: 'auto' });
-
-    const migrate = useSettingsStore.persist.getOptions().migrate!;
-    const migrated = await migrate({ canvasLeftDragMode: value, canvasWheelMode: value }, 21);
-    expect(migrated).toMatchObject({ canvasLeftDragMode: 'select', canvasWheelMode: 'auto' });
+    const migrated = await useSettingsStore.persist.getOptions().migrate!({ canvasLeftDragMode: value, canvasWheelMode: value }, 25);
+    expect(migrated).toMatchObject({ canvasMouseBindings: DEFAULT_CANVAS_MOUSE_BINDINGS, canvasLeftDragMode: 'pan', canvasWheelMode: 'auto' });
   });
 
-  it.each([{}, { grsai: 'configured-key' }])('drops retired controls without mapping them for API keys %j', async (apiKeys) => {
-    const legacyPrefix = 'canvasMouse';
-    const legacyFields = {
-      [`${legacyPrefix}BindingPreset`]: 'custom',
-      [`${legacyPrefix}Bindings`]: { leftDrag: 'panCanvas' },
-    };
-    const migrate = useSettingsStore.persist.getOptions().migrate!;
-    const migrated = await migrate({ apiKeys, ...legacyFields }, 21);
-    expect(migrated).toMatchObject({ canvasLeftDragMode: 'select', canvasWheelMode: 'auto' });
-    expect(Object.keys(migrated as object).some((key) => /^canvasMouse/.test(key))).toBe(false);
+  it.each(['default', 'traditional'] as const)('migrates v0.1.27 preset %s with its original six gestures', async (preset) => {
+    const migrated = await useSettingsStore.persist.getOptions().migrate!({ canvasMouseBindingPreset: preset }, 21);
+    expect(migrated).toMatchObject({ canvasMouseBindings: preset === 'traditional'
+      ? TRADITIONAL_CANVAS_MOUSE_BINDINGS : { ...DEFAULT_CANVAS_MOUSE_BINDINGS, middleDrag: 'none' } });
+    expect(migrated).not.toHaveProperty('canvasMouseBindingPreset');
+  });
+
+  it.each([{}, { grsai: 'configured-key' }])('migrates custom legacy slots for API keys %j without discarding preferences', async (apiKeys) => {
+    const migrated = await useSettingsStore.persist.getOptions().migrate!({ apiKeys, canvasMouseBindingPreset: 'custom',
+      canvasMouseBindings: { leftDrag: 'panCanvas', rightDrag: 'none', middleClick: 'nodeMenu', leftClick: 'unsupported' } }, 21);
+    expect(migrated).toMatchObject({ canvasLeftDragMode: 'pan', canvasWheelMode: 'auto', canvasMouseBindings: {
+      ...DEFAULT_CANVAS_MOUSE_BINDINGS, leftClick: 'selectNode', rightDrag: 'none', middleClick: 'nodeMenu', middleDrag: 'none',
+    } });
+    expect(migrated).not.toHaveProperty('canvasMouseBindingPreset');
   });
 
   it.each([
-    ['select', 'auto'],
-    ['pan', 'zoom'],
-    ['pan', 'pan'],
-  ] as const)('preserves persisted gesture choices %s / %s', async (canvasLeftDragMode, canvasWheelMode) => {
-    const migrate = useSettingsStore.persist.getOptions().migrate!;
-    const migrated = await migrate({ canvasLeftDragMode, canvasWheelMode }, 21);
-    expect(migrated).toMatchObject({ canvasLeftDragMode, canvasWheelMode });
+    ['select', 'auto'], ['pan', 'zoom'], ['pan', 'pan'],
+  ] as const)('preserves v0.2.0 choices %s / %s and its right-drag panning', async (canvasLeftDragMode, canvasWheelMode) => {
+    const migrated = await useSettingsStore.persist.getOptions().migrate!({ canvasLeftDragMode, canvasWheelMode }, 25);
+    expect(migrated).toMatchObject({ canvasLeftDragMode, canvasWheelMode,
+      canvasMouseBindings: { leftDrag: canvasLeftDragMode === 'pan' ? 'panCanvas' : 'selectionBox', rightDrag: 'panCanvas' } });
+  });
+
+  it('makes modern bindings authoritative over stale aliases and repairs same-version hydration per slot', () => {
+    const merge = useSettingsStore.persist.getOptions().merge!;
+    const bindings = { ...DEFAULT_CANVAS_MOUSE_BINDINGS, leftDrag: 'none', rightDoubleClick: 'fitView' } as const;
+    expect(merge({ canvasMouseBindings: bindings, canvasMouseBindingPreset: 'traditional', canvasLeftDragMode: 'pan' }, originalSettings))
+      .toMatchObject({ canvasMouseBindings: bindings, canvasLeftDragMode: 'select' });
+    expect(merge({ canvasMouseBindings: { ...bindings, rightDrag: 'nodeMenu' }, canvasWheelMode: 'broken' }, originalSettings))
+      .toMatchObject({ canvasMouseBindings: { ...bindings, rightDrag: 'selectionBox' }, canvasWheelMode: 'auto' });
+  });
+
+  it('keeps current gestures when same-version persisted data has no binding fields', () => {
+    const bindings = { ...DEFAULT_CANVAS_MOUSE_BINDINGS, rightDoubleClick: 'fitView' } as const;
+    const current = { ...originalSettings, canvasMouseBindings: bindings, canvasWheelMode: 'pan' } as const;
+    expect(useSettingsStore.persist.getOptions().merge!({ canvasWheelMode: 'zoom' }, current))
+      .toMatchObject({ canvasMouseBindings: bindings, canvasWheelMode: 'zoom' });
   });
 });
 

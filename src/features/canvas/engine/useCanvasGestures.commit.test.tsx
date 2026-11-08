@@ -4,6 +4,8 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Viewport } from './viewportMath';
 import { useCanvasGestures } from './useCanvasGestures';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { DEFAULT_CANVAS_MOUSE_BINDINGS } from '@/features/settings/canvasMouseSettings';
 
 const state = vi.hoisted(() => ({ viewport: { x: 0, y: 0, zoom: 1 }, start: () => {}, end: (_viewport: Viewport) => {}, commit: vi.fn(), begins: vi.fn() }));
 const flow = vi.hoisted(() => ({
@@ -25,6 +27,7 @@ function Surface() {
   return createElement('div', { ref: wrapper, 'data-testid': 'surface' }, createElement('div', { className: 'react-flow__pane', 'data-testid': 'pane' }));
 }
 beforeEach(() => {
+  useSettingsStore.setState({ canvasMouseBindings: { ...DEFAULT_CANVAS_MOUSE_BINDINGS, rightDrag: 'panCanvas' } });
   vi.useFakeTimers();
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => window.setTimeout(() => callback(16), 16));
   vi.stubGlobal('cancelAnimationFrame', (id: number) => window.clearTimeout(id));
