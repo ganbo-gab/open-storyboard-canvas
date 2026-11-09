@@ -6,6 +6,7 @@ import { CANVAS_NODE_TYPES, type CanvasNode, type CanvasEdge } from '@/features/
 import { collectInputReferences } from '@/features/canvas/application/graphReferenceResolver';
 import type { GenerationDebugContext } from '@/features/canvas/application/generationErrorReport';
 import type { GenerationRequestOptions } from '@/features/canvas/application/generation/types';
+import { readGenerationConfiguration } from '@/features/canvas/domain/generationConfiguration';
 import { recordCanvasGeneration, useGenerationHistoryStore } from './historyStore';
 import type { GenerationHistoryRecord, HistoryAssetReference, HistoryReference } from './history';
 
@@ -95,7 +96,7 @@ export function captureCanvasGeneration(source: CanvasNode, nodes: CanvasNode[],
     }
     const { payloadPreview: _payloadPreview, ...extraParams } = context.extraParams ?? {};
     const record: GenerationHistoryRecord = { id, createdAt, surface: options.historySurface ?? 'canvas', projectId, nodeId: source.id,
-      modelRef: String(data.modelId ?? (typeof data.modelConfig === 'object' && data.modelConfig !== null && 'entryId' in data.modelConfig ? data.modelConfig.entryId : undefined) ?? data.model ?? context.requestModel ?? context.providerId ?? ''),
+      modelRef: context.requestModel?.trim() || readGenerationConfiguration(data).model || '',
       modeId: context.channelModeId ?? (typeof data.channelModeId === 'string' ? data.channelModeId : undefined), prompt: context.prompt ?? String(data.prompt ?? ''),
       ...(context.prompt !== undefined ? { upstreamPrompt: context.prompt } : {}),
       params: { nodeType: source.type, nodeData: data, tool: options.tool, count: options.count, request: { model: context.requestModel, size: context.requestSize, aspectRatio: context.requestAspectRatio, extraParams } },

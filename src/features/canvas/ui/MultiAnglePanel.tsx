@@ -558,21 +558,3 @@ export const MultiAnglePanel = memo(
 );
 
 MultiAnglePanel.displayName = 'MultiAnglePanel';
-
-export function buildMultiAnglePrompt(
-  horizontal: number,
-  vertical: number,
-  shotSize: ShotSizeType,
-  mode: MultiAnglePromptMode = 'universal'
-): string {
-  const segments = resolvePromptSegments(horizontal, vertical, shotSize, mode, 'custom');
-  return buildMultiAnglePromptFromTemplate({
-    template: '{{consistencyPrompt}}, {{horizontalPrompt}}, {{verticalPrompt}}, {{shotSizePrompt}}, {{cameraMeta}}',
-    consistencyPrompt: segments.consistencyPrompt,
-    presetPrompt: '',
-    horizontalPrompt: segments.horizontalPrompt,
-    verticalPrompt: segments.verticalPrompt,
-    shotSizePrompt: segments.shotSizePrompt,
-    cameraMeta: segments.cameraMeta,
-  });
-}

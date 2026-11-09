@@ -3,7 +3,7 @@ import { channelProfileSchema, validateProfile, type ChannelProfileV2, type Json
 import { renderPreview, renderRequest } from '../domain/template';
 import type { JobInput, JobRef } from '../runtime/types';
 import { channelParameterValues } from './channelCatalog';
-import { listModelModes, modeParamDefaults, resolveModelMode, resolveModelModeOrFirst, retainModeState } from './modelModes';
+import { channelNativeCountParam, listModelModes, modeParamDefaults, resolveModelMode, resolveModelModeOrFirst, retainModeState } from './modelModes';
 
 function profile(): ChannelProfileV2 {
   return { version: 2, id: 'modes', name: '多模式', baseUrl: 'https://modes.example', auth: { type: 'none' }, operations: {
@@ -26,6 +26,150 @@ const ref = (slot: string, assetId = slot): JobRef => ({ kind: 'image', slot, as
 function job(): JobInput {
   return { jobId: 'job', channelId: 'modes', modelId: 'video', modeId: 'frames', operation: 'video.generate', prompt: '猫', params: { seconds: 8 }, refs: [ref('first_frame')], count: 1 };
 }
+
+function countProfile(): ChannelProfileV2 {
+  return { version: 2, id: 'counts', name: 'Counts', baseUrl: 'https://count.example', auth: { type: 'none' },
+    operations: { 'image.generate': { method: 'POST', path: '/images', body: 'json',
+      template: { model: '{{model}}', prompt: '{{prompt}}', count: '{{param.n}}' },
+      response: { mode: 'sync', outputs: [{ path: 'data[*].url', as: 'url' }] } } },
+    models: [{ id: 'image', operations: ['image.generate'], params: [{ key: 'n', label: '数量', type: 'number', min: 1, max: 8, default: 1 }] }] };
+}
+const countJob = (params: Record<string, JsonValue>, modeId?: string): JobInput => ({
+  jobId: 'count', channelId: 'counts', modelId: 'image', operation: 'image.generate', prompt: '猫', refs: [], count: 3, params,
+  ...(modeId === undefined ? {} : { modeId }),
+});
+
+describe('native output counts require an effective submission mapping', () => {
+  it.each(['n', 'count', 'num_images', 'num_outputs', 'number_of_images', 'batch_size'])(
+    'recognizes numeric %s only when its value is sent to the upstream request', (key) => {
+      const p = countProfile();
+      p.models[0].params = [{ key, label: '数量', type: 'number', min: 1, max: 8, default: 1 }];
+      p.operations['image.generate']!.template = { prompt: '{{prompt}}', output_count: `{{ param.${key} }}` };
+      expect(channelNativeCountParam(p, 'image')?.key).toBe(key);
+      expect(renderPreview(p, countJob({ [key]: 3 })).body).toEqual({ mode: 'json', json: { prompt: '猫', output_count: 3 } });
+      p.operations['image.generate']!.template = { prompt: '{{prompt}}', output_count: 1 };
+      expect(channelNativeCountParam(p, 'image')).toBeUndefined();
+    },
+  );
+
+  it('does not treat a declaration, literal object key or similarly named parameter as a count mapping', () => {
+    const p = countProfile();
+    p.models[0].params.push({ key: 'n_other', label: 'Other', type: 'number' });
+    p.operations['image.generate']!.template = { '{{param.n}}': 'literal', count: '{{param.n_other}}' };
+    expect(channelNativeCountParam(p, 'image')).toBeUndefined();
+    expect(channelNativeCountParam(p, 'missing')).toBeUndefined();
+  });
+
+  it('requires the selected mode override to send count instead of borrowing another mode mapping', () => {
+    const p = countProfile();
+    p.models[0].modes = [{ id: 'shared', label: 'Shared', operation: 'image.generate' },
+      { id: 'override', label: 'Override', operation: 'image.generate', endpoint: { method: 'POST', path: '/single', body: 'json',
+        template: { prompt: '{{prompt}}' }, response: { mode: 'sync', outputs: [] } } }];
+    expect(channelNativeCountParam(p, 'image', 'shared')?.key).toBe('n');
+    expect(channelNativeCountParam(p, 'image', 'override')).toBeUndefined();
+    p.models[0].modes[1].endpoint!.template = { prompt: '{{prompt}}', count: '{{param.n}}' };
+    expect(channelNativeCountParam(p, 'image', 'override')?.key).toBe('n');
+    p.models[0].modes[1].params = [{ key: 'n', label: 'Count text', type: 'text' }];
+    expect(channelNativeCountParam(p, 'image', 'override')).toBeUndefined();
+  });
+
+  it('uses a mode endpoint when no channel-level operation exists', () => {
+    const p = countProfile();
+    const endpoint = p.operations['image.generate']!;
+    p.models[0].modes = [{ id: 'only', label: 'Only', operation: 'image.generate', endpoint }];
+    delete p.operations['image.generate'];
+    expect(channelNativeCountParam(p, 'image', 'only')?.key).toBe('n');
+  });
+
+  it('requires both legacy image routes to map the same count before disabling client batching', () => {
+    const p = countProfile();
+    p.models[0].operations.push('image.edit');
+    p.operations['image.edit'] = { method: 'POST', path: '/edit', body: 'json', template: { prompt: '{{prompt}}' }, response: { mode: 'sync', outputs: [] } };
+    expect(channelNativeCountParam(p, 'image')).toBeUndefined();
+    p.operations['image.edit']!.template = { prompt: '{{prompt}}', count: '{{param.n}}' };
+    expect(channelNativeCountParam(p, 'image')?.key).toBe('n');
+    delete p.operations['image.edit'];
+    expect(channelNativeCountParam(p, 'image')).toBeUndefined();
+  });
+
+  it('uses the chosen legacy image route when supplied, so one route cannot multiply another route batch', () => {
+    const p = countProfile();
+    p.models[0].operations.push('image.edit');
+    p.operations['image.edit'] = { method: 'POST', path: '/edit', body: 'json', template: { prompt: '{{prompt}}' }, response: { mode: 'sync', outputs: [] } };
+    expect(channelNativeCountParam(p, 'image', undefined, 'image.generate')?.key).toBe('n');
+    expect(channelNativeCountParam(p, 'image', undefined, 'image.edit')).toBeUndefined();
+    p.operations['image.generate']!.template = { prompt: '{{prompt}}' };
+    p.operations['image.edit']!.template = { prompt: '{{prompt}}', count: '{{param.n}}' };
+    expect(channelNativeCountParam(p, 'image', undefined, 'image.generate')).toBeUndefined();
+    expect(channelNativeCountParam(p, 'image', undefined, 'image.edit')?.key).toBe('n');
+    expect(channelNativeCountParam(p, 'image', undefined, 'video.generate')).toBeUndefined();
+  });
+
+  it('keeps an explicit mode endpoint authoritative when a legacy operation hint is also supplied', () => {
+    const p = countProfile();
+    p.models[0].modes = [{ id: 'only', label: 'Only', operation: 'image.generate', endpoint: {
+      ...p.operations['image.generate']!, template: { prompt: '{{prompt}}' },
+    } }];
+    expect(channelNativeCountParam(p, 'image', 'only', 'image.generate')).toBeUndefined();
+    p.models[0].modes[0].endpoint!.template = { prompt: '{{prompt}}', count: '{{param.n}}' };
+    expect(channelNativeCountParam(p, 'image', 'only', 'image.edit')?.key).toBe('n');
+  });
+
+  it.each(['json', 'form-urlencoded', 'multipart'] as const)('recognizes a count sent in a %s body', (body) => {
+    const p = countProfile();
+    Object.assign(p.operations['image.generate']!, { body, ...(body === 'multipart' ? { files: { field: 'image', cardinality: 'repeat' } } : {}) });
+    expect(channelNativeCountParam(p, 'image')?.key).toBe('n');
+    const preview = renderPreview(p, countJob({ n: 3 }));
+    expect(preview.body.mode === 'json' ? preview.body.json : preview.body.mode === 'none' ? null : preview.body.fields)
+      .toEqual(body === 'json' ? { model: 'image', prompt: '猫', count: 3 }
+        : [{ name: 'model', value: 'image' }, { name: 'prompt', value: '猫' }, { name: 'count', value: '3' }]);
+  });
+
+  it('ignores unsent body:none templates while honoring a query mapping', () => {
+    const p = countProfile();
+    Object.assign(p.operations['image.generate']!, { method: 'GET', body: 'none' });
+    expect(channelNativeCountParam(p, 'image')).toBeUndefined();
+    p.operations['image.generate']!.path = '/images?prompt={{prompt}}&count={{param.n}}';
+    expect(channelNativeCountParam(p, 'image')?.key).toBe('n');
+    const preview = renderPreview(p, countJob({ n: 3 }));
+    expect(new URL(preview.url).searchParams.get('count')).toBe('3');
+    expect(preview.body).toEqual({ mode: 'none' });
+  });
+
+  it('does not mistake async query or result-download mapping for a generation count', () => {
+    const p = countProfile();
+    const operation = p.operations['image.generate']!;
+    operation.template = { model: '{{model}}', prompt: '{{prompt}}' };
+    operation.response = { mode: 'async', taskIdPath: 'id', poll: { method: 'GET', path: '/tasks/{{taskId}}?count={{param.n}}',
+      template: { count: '{{param.n}}' }, intervalSec: 1, timeoutMin: 10, success: ['done'], failure: ['failed'],
+      outputs: [{ path: 'url', as: 'url' }], resultRequest: { method: 'GET', path: '/result?count={{param.n}}' } } };
+    expect(channelNativeCountParam(p, 'image')).toBeUndefined();
+    operation.template = { prompt: '{{prompt}}', count: '{{param.n}}' };
+    expect(channelNativeCountParam(p, 'image')?.key).toBe('n');
+  });
+
+  it('keeps numeric enum counts native and leaves text counts to other validation', () => {
+    const p = countProfile();
+    p.models[0].params = [{ key: 'n', label: '数量', type: 'enum', options: [{ label: 'Three', value: 3 }] }];
+    expect(channelNativeCountParam(p, 'image')?.key).toBe('n');
+    p.models[0].params[0].options = [{ label: 'Three', value: '3' }];
+    expect(channelNativeCountParam(p, 'image')).toBeUndefined();
+  });
+
+  it('recognizes declared chat params only when mapped from params rather than an unrelated chat payload', () => {
+    const p = countProfile();
+    const operation = p.operations['image.generate']!;
+    delete p.operations['image.generate'];
+    p.operations.chat = operation;
+    p.models[0].operations = ['chat'];
+    operation.template = { messages: '{{messages}}', count: '{{chatPayload.n}}' };
+    expect(channelNativeCountParam(p, 'image')).toBeUndefined();
+    operation.template = { messages: '{{messages}}', count: '{{param.n}}' };
+    expect(channelNativeCountParam(p, 'image')?.key).toBe('n');
+    const preview = renderPreview(p, { ...countJob({ n: 3 }), operation: 'chat' });
+    expect(preview.body).toEqual({ mode: 'json', json: { messages: [{ role: 'user', content: '猫' }], count: 3 } });
+  });
+});
 
 describe('model modes and strict declarations', () => {
   it('resolves effective params by key, preserves metadata and keeps defaults out of wire fields', () => {

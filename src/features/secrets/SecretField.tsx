@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { UiConfirm } from '@/components/ui/UiConfirm';
 import { UiIconButton, UiInput } from '@/components/ui';
 import { secretRefFromToken, secretStore, useCredentialState, retrySecretAccess } from './secretStore';
+import { credentialFailureMessage } from './credentialFailure';
 
 interface SecretFieldProps {
   /** A transient new value or a saved vault reference token. Tokens are never put in the DOM input. */
@@ -45,10 +46,10 @@ export function SecretField({ value, onChange, id, label, placeholder, className
     try {
       const secret = await secretStore.reveal(reference);
       if (version !== requestVersion.current) return;
-      if (secret === null) throw new Error(t('secrets.state.missing'));
+      if (secret === null) { setError(t('secrets.state.missing')); return; }
       setRevealed({ token: value, value: secret }); setVisible(true);
     } catch (cause) {
-      if (version === requestVersion.current) setError(cause instanceof Error ? cause.message : String(cause));
+      if (version === requestVersion.current) setError(credentialFailureMessage(cause));
     } finally {
       if (version === requestVersion.current) setReading(false);
     }
@@ -74,12 +75,12 @@ export function SecretField({ value, onChange, id, label, placeholder, className
         <UiIconButton disabled={disabled || reading || !value} aria-label={t('secrets.delete')} onClick={() => setDeleting(true)}><Trash2 /></UiIconButton>
       </div>
       {reference && <p className={`text-[11px] leading-5 ${state === 'present' ? 'text-text-muted' : 'text-warning'}`}>{t(`secrets.state.${state}`)}</p>}
-      {reference && <button type="button" className="text-xs text-accent" disabled={disabled || reading} onClick={async () => {
+      {reference && state !== 'present' && <button type="button" className="text-xs text-accent" disabled={disabled || reading} onClick={async () => {
         setReading(true); setError('');
         try { if (!await retrySecretAccess(reference)) setError(t('secrets.state.missing')); }
-        catch { setError('系统凭据授权未完成，请确认系统弹窗后重试。'); }
+        catch (cause) { setError(credentialFailureMessage(cause)); }
         finally { setReading(false); }
-      }}>重新授权系统凭据</button>}
+      }}>重试读取凭据</button>}
       {error && <p role="alert" className="break-words text-xs text-danger">{error}</p>}
       <UiConfirm isOpen={deleting} title={t('secrets.delete')} description={t('secrets.deleteDraftNotice')} onConfirm={() => { onChange(''); setRevealed(null); setVisible(false); }} onClose={() => setDeleting(false)} containerClassName="z-[10010]" />
     </div>

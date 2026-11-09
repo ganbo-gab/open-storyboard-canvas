@@ -1,4 +1,5 @@
-import type { CanvasNode } from '../domain/canvasNodes';
+import { CANVAS_NODE_TYPES, type CanvasNode } from '../domain/canvasNodes';
+import { readGenerationConfiguration } from '../domain/generationConfiguration';
 
 const REDACTED = '[redacted]';
 const MAX_COLLECTION_ITEMS = 100;
@@ -150,6 +151,18 @@ export function projectCanvasReadValue(
 }
 
 export function projectCanvasNodeForRead(node: CanvasNode): unknown {
+  let data: unknown = node.data;
+  if (node.type === CANVAS_NODE_TYPES.imageEdit || node.type === CANVAS_NODE_TYPES.storyboardGen || node.type === CANVAS_NODE_TYPES.aiVideo) {
+    const configuration = readGenerationConfiguration(node.data);
+    const { model: _model, modelId: _modelId, size: _size, resolution: _resolution, aspectRatio,
+      requestAspectRatio: _requestAspectRatio, extraParams: _extraParams, ...remaining } = node.data;
+    // These are draft settings, not proof of an already submitted request. A
+    // node's displayed/input media ratio is a separate fact from output settings.
+    data = { ...remaining, model: configuration.model, size: configuration.size,
+      requestAspectRatio: configuration.aspectRatio, extraParams: configuration.extraParams,
+      displayAspectRatio: node.data.imageUrl || node.data.previewImageUrl ? aspectRatio : undefined,
+      generationConfiguration: { ...configuration, meaning: 'current-configuration' } };
+  }
   return {
     id: node.id,
     type: node.type,
@@ -158,6 +171,6 @@ export function projectCanvasNodeForRead(node: CanvasNode): unknown {
     selected: Boolean(node.selected),
     hidden: Boolean(node.hidden),
     visibility: node.hidden ? 'collapsed-stack-member' : 'visible',
-    data: projectCanvasReadValue(node.data, 'data'),
+    data: projectCanvasReadValue(data, 'data'),
   };
 }

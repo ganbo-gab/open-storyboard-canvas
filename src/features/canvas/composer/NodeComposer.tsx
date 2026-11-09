@@ -38,6 +38,8 @@ interface NodeComposerProps {
   resolvePastedImage?: PastedImageResolver;
   /** Model, ratio, count… for this node kind. */
   params: ReactNode;
+  /** Essential actions stay outside the shrinking model/parameter area. */
+  trailingActions?: ReactNode;
   /** Read at submit time, so it always reflects the latest params. */
   requestOptions?: () => GenerationRequestOptions;
   generateLabel?: string;
@@ -70,6 +72,7 @@ function ActiveNodeComposer({
   onPasteImage,
   resolvePastedImage,
   params,
+  trailingActions,
   requestOptions,
   generateLabel,
   blockedReason,
@@ -233,6 +236,7 @@ function ActiveNodeComposer({
         {notice ? <p className="node-composer__notice" role="status">{notice}</p> : null}
         <div className="node-composer__bar">
           <div className="node-composer__params">{params}</div>
+          {trailingActions && <div className="node-composer__trailing-actions">{trailingActions}</div>}
           <Tooltip label={generateLabel ?? t('canvas.generate')} shortcut={formatChord('mod+enter')} side="top">
             <button
               type="button"

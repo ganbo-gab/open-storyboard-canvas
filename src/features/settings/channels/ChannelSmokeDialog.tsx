@@ -71,7 +71,7 @@ export function ChannelSmokeDialog({ profile, credential, onClose }: Props) {
       if (!model || !choice) throw new Error(t('rework.channels.missingModel'));
       if (references.some(entry => !entry.ref.mime.trim())) throw new Error(t('rework.channels.smoke.mimeRequired'));
       const values = parametersSchema.parse(params);
-      const countParam = channelNativeCountParam(profile, model.id, choice.modeId);
+      const countParam = channelNativeCountParam(profile, model.id, choice.modeId, choice.operation);
       const count = countParam ? values[countParam.key] ?? countParam.default : 1;
       const job: JobInput = { jobId: '', channelId: profile.id, modelId: model.id, operation: choice.operation,
         ...(choice.modeId ? { modeId: choice.modeId } : {}), prompt, params: values, refs: references.map(entry => entry.ref), count: typeof count === 'number' ? count : 1 };

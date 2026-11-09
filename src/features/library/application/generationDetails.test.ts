@@ -68,3 +68,37 @@ it('labels a later conversation association separately from the submission proje
   expect(retained.facts.find((fact) => fact.key === 'project')?.value).toBe('Submitted project');
   expect(retained.facts.find((fact) => fact.key === 'currentProject')?.value).toBe('Current project');
 });
+
+it('projects the frozen selected model instead of obsolete node fields in technical diagnostics', () => {
+  const saved: GenerationHistoryRecord = { ...record, params: { nodeType: 'imageNode', nodeData: {
+    imageUrl: null, prompt: 'Captured prompt',
+    model: 'kie/nano-banana-2', modelId: 'stale-alias', size: '2K', aspectRatio: '1:1',
+    modelConfig: { entryId: 'custom:fixture:gpt-image-2.6', ratio: 'auto', extraParams: { size: '1024x576', n: 1, quality: 'high', apiKey: 'PRIVATE_FIXTURE' } },
+  }, request: { model: 'submitted-model', size: '', aspectRatio: '', extraParams: { size: '1024x576', quality: 'high' } } } };
+  const before = structuredClone(saved);
+  const details = projectGenerationDetails({ record: saved, jobs: [], target: {}, currentJobId: 'later-job' });
+  expect(details.facts).toEqual(expect.arrayContaining([
+    { key: 'model', value: 'submitted-model' }, { key: 'size', value: '1024x576' }, { key: 'ratio', value: '16:9' },
+  ]));
+  expect(JSON.parse(details.diagnostics)).toMatchObject({ record: { params: { node: {
+    generationConfiguration: { source: 'modelConfig', meaning: 'configuration-at-capture', model: 'custom:fixture:gpt-image-2.6', size: '1024x576', aspectRatio: '16:9' },
+  } } } });
+  expect(JSON.parse(details.diagnostics)).not.toHaveProperty('record.params.node.displayAspectRatio');
+  for (const stale of ['kie/nano-banana-2', 'stale-alias', 'PRIVATE_FIXTURE']) expect(details.diagnostics).not.toContain(stale);
+  expect(saved).toEqual(before);
+});
+
+it('uses persisted job evidence before captured configuration and never rewrites old attempts', () => {
+  const historical: GenerationHistoryRecord = { ...record, modelRef: 'incorrect-legacy-label', params: { nodeData: {
+    imageUrl: null, prompt: 'Captured prompt',
+    model: 'legacy-default', size: '2K', aspectRatio: '1:1', modelConfig: { entryId: 'selected-at-capture', ratio: '9:16', extraParams: { size: '576x1024' } },
+  } } };
+  const before = structuredClone(historical);
+  const result = projectGenerationDetails({ record: historical, target: {}, currentJobId: 'new-job', jobs: [{
+    job_id: 'old-job', status: 'succeeded', model_id: 'job-model', poll_descriptor: { version: 2, adapter: 'template', input: { modelId: 'submitted-job-model', params: { size: '1536x1024' } } },
+  }] });
+  expect(result.facts).toEqual(expect.arrayContaining([{ key: 'model', value: 'submitted-job-model' }, { key: 'size', value: '1536x1024' }, { key: 'ratio', value: '3:2' }]));
+  expect(historical).toEqual(before);
+  const legacy = projectGenerationDetails({ record: { ...record, params: { nodeData: { imageUrl: null, prompt: 'Legacy prompt', model: 'legacy-model', size: '4K', requestAspectRatio: '9:16', aspectRatio: '1:1' } } }, jobs: [], target: {} });
+  expect(legacy.facts).toEqual(expect.arrayContaining([{ key: 'size', value: '4K' }, { key: 'ratio', value: '9:16' }]));
+});

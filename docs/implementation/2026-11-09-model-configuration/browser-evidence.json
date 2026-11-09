@@ -1,0 +1,188 @@
+{
+  "query": {
+    "ok": true,
+    "commandType": "canvas.query",
+    "revisionBefore": 2,
+    "revisionAfter": 2,
+    "impact": {
+      "effect": "read",
+      "summary": "canvas.query command.",
+      "affectedNodeIds": [],
+      "affectedEdgeIds": [],
+      "creates": {
+        "nodes": 0,
+        "edges": 0,
+        "groups": 0
+      },
+      "deletes": {
+        "nodes": 0,
+        "edges": 0,
+        "groups": 0
+      },
+      "requiresExternalSideEffect": false
+    },
+    "output": {
+      "references": {
+        "nodeIds": [
+          "119d250e-9417-427c-99ab-ca4753dd6763",
+          "c8250bce-45cd-4093-aaf0-e2930738bbec"
+        ],
+        "edgeIds": [
+          "e-119d250e-9417-427c-99ab-ca4753dd6763-c8250bce-45cd-4093-aaf0-e2930738bbec"
+        ]
+      },
+      "value": {
+        "revision": 2,
+        "nodes": [
+          {
+            "id": "119d250e-9417-427c-99ab-ca4753dd6763",
+            "type": "imageNode",
+            "position": {
+              "x": 150,
+              "y": 170
+            },
+            "parentId": null,
+            "selected": false,
+            "hidden": false,
+            "visibility": "visible",
+            "data": {
+              "displayName": "AI 图片",
+              "imageUrl": null,
+              "previewImageUrl": null,
+              "isSizeManuallyAdjusted": false,
+              "prompt": "原神神里绫华",
+              "isGenerating": false,
+              "generationStartedAt": null,
+              "generationDurationMs": 60000,
+              "selectedFunctionChip": null,
+              "selectedPromptPresetId": null,
+              "modelConfig": {
+                "entryId": "custom:channel-canonical-qa-20261109-image:gpt-image-2.6",
+                "ratio": "auto",
+                "extraParams": {
+                  "size": "1024x576",
+                  "quality": "high"
+                }
+              },
+              "model": "custom:channel-canonical-qa-20261109-image:gpt-image-2.6",
+              "size": "1024x576",
+              "requestAspectRatio": "16:9",
+              "extraParams": {
+                "size": "1024x576",
+                "quality": "high"
+              },
+              "generationConfiguration": {
+                "source": "modelConfig",
+                "model": "custom:channel-canonical-qa-20261109-image:gpt-image-2.6",
+                "size": "1024x576",
+                "aspectRatio": "16:9",
+                "extraParams": {
+                  "size": "1024x576",
+                  "quality": "high"
+                },
+                "meaning": "current-configuration"
+              }
+            }
+          },
+          {
+            "id": "c8250bce-45cd-4093-aaf0-e2930738bbec",
+            "type": "exportImageNode",
+            "position": {
+              "x": 718,
+              "y": 170
+            },
+            "parentId": null,
+            "selected": false,
+            "hidden": false,
+            "visibility": "visible",
+            "data": {
+              "displayName": "img_001_原神神里绫华",
+              "imageUrl": null,
+              "previewImageUrl": null,
+              "aspectRatio": "16:9",
+              "isSizeManuallyAdjusted": false,
+              "resultKind": "generic",
+              "isGenerating": false,
+              "generationStartedAt": null,
+              "generationDurationMs": 60000,
+              "generationJobId": null,
+              "generationProviderId": null,
+              "generationClientSessionId": null,
+              "generationError": null,
+              "generationErrorDetails": null,
+              "generationRetryResultUrl": null,
+              "sourcePrompt": "原神神里绫华",
+              "generatedNamingMode": "default",
+              "generatedSequence": 1,
+              "generatedDateStamp": "20261109",
+              "generatedFileName": "genimg_20261109_0001.png",
+              "batchIndex": 0,
+              "batchTotal": 1,
+              "model": "custom:channel-canonical-qa-20261109-image:gpt-image-2.6",
+              "resolution": "1024x576",
+              "requestAspectRatio": "16:9",
+              "generationDebugContext": {
+                "sourceType": "imageEdit",
+                "providerId": "channel-canonical-qa-20261109-image",
+                "requestModel": "custom:channel-canonical-qa-20261109-image:gpt-image-2.6",
+                "requestSize": "1024x576",
+                "requestAspectRatio": "16:9",
+                "prompt": "原神神里绫华",
+                "extraParams": {
+                  "size": "1024x576",
+                  "quality": "high"
+                },
+                "referenceImageCount": 0,
+                "referenceImagePlaceholders": [],
+                "appVersion": "unknown",
+                "osName": "macOS",
+                "osVersion": "10.15.7",
+                "osBuild": "unknown",
+                "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e-119d250e-9417-427c-99ab-ca4753dd6763-c8250bce-45cd-4093-aaf0-e2930738bbec",
+            "source": "119d250e-9417-427c-99ab-ca4753dd6763",
+            "target": "c8250bce-45cd-4093-aaf0-e2930738bbec"
+          }
+        ]
+      }
+    }
+  },
+  "preview": {
+    "route": "custom",
+    "gatewayRequest": {
+      "prompt": "原神神里绫华",
+      "model": "custom:channel-canonical-qa-20261109-image:gpt-image-2.6",
+      "size": "1024x576",
+      "aspectRatio": "16:9",
+      "referenceImages": [],
+      "extraParams": {
+        "size": "1024x576",
+        "quality": "high"
+      }
+    },
+    "providerRequest": {
+      "providerLabel": "本地配置一致性验收",
+      "providerId": "channel-canonical-qa-20261109-image",
+      "modelId": "custom:channel-canonical-qa-20261109-image:gpt-image-2.6",
+      "modelName": "gpt-image-2.6",
+      "method": "POST",
+      "bodyMode": "json",
+      "url": "http://127.0.0.1:1/images",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "gpt-image-2.6",
+        "prompt": "原神神里绫华",
+        "size": "1024x576",
+        "quality": "high"
+      }
+    }
+  }
+}

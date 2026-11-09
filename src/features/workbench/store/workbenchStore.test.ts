@@ -9,7 +9,7 @@ import { useChannelStore } from '@/features/channels/store/channelStore';
 import { miniMaxVideoProfile } from '@/features/channels/presets/videoModels';
 import { getWorkbenchValidationContext, validateWorkbenchDraft } from '../application/workbenchValidation';
 import { SecretStoreError } from '@/features/secrets/secretStore';
-import { CREDENTIAL_ACCESS_MESSAGE } from '@/features/secrets/credentialFailure';
+import { credentialFailureMessage } from '@/features/secrets/credentialFailure';
 
 const input: WorkbenchSubmitInput = { kind: 'image', prompt: 'A cat at sunset', model: 'custom:test:model', config: { size: '1K', aspectRatio: '1:1' } };
 function fixture(options: { storage?: Pick<Storage, 'getItem' | 'setItem'>; transport?: WorkbenchTransport } = {}) {
@@ -36,7 +36,7 @@ describe('non-canvas workbench', () => {
   it.each(['poll', 'download'])('retains a credential-blocked %s task after reopening and recovers its original result without submission', async (phase) => {
     vi.useFakeTimers();
     const job = { job_id: 'custom-local-channel-job-original', status: 'recoverable_wait' as const, phase, error_category: 'credential',
-      external_task_id: 'original-paid-task', resumable: true, error: CREDENTIAL_ACCESS_MESSAGE };
+      external_task_id: 'original-paid-task', resumable: true, error: credentialFailureMessage({ state: 'locked', code: 'storage_locked' }) };
     const original: WorkbenchTransport = { submit: vi.fn(async () => ({ jobId: job.job_id })), poll: vi.fn(async () => job), recover: vi.fn() };
     const first = fixture({ transport: original });
     const id = await first.store.getState().submit(input);

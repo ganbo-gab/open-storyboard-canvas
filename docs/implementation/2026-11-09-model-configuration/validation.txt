@@ -1,0 +1,8 @@
+2026-11-09 验证完成
+前端：350 个文件，3208 项测试通过（/tmp/storyboard-canonical-final-tests.log）。
+TypeScript + Vite 生产构建：通过，保留原有大分块提示。
+Rust：cargo test --locked --lib ai::tests，39 passed，包含2个registry路由回归与unknown_image_model_is_rejected_before_credential_binding。
+cargo fmt / LF / git diff --check：通过。
+浏览器：Ego31真实UI点击生成，替身提交器停留等待，16:9 / 1024x576；刷新后真实canvas.query与providerRequest.body一致。
+没有真实API付费调用、没有Keychain读取、没有修改用户安装包/真实项目。浏览器替身只存在于该临时页面，刷新释放；测试节点和渠道已移除，工作区关闭。
+临时Rusttarget约1.4GiB已删除；1542独立开发服务收尾停止。

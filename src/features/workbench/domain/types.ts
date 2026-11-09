@@ -1,6 +1,6 @@
 import type { GenerationJobPollStatus } from '@/features/canvas/application/ports';
 import { referenceUrlFailureOf } from '@/features/channels/domain/referenceErrors';
-import { credentialFailureOf, CREDENTIAL_ACCESS_MESSAGE } from '@/features/secrets/credentialFailure';
+import { credentialFailureOf, credentialFailureMessage } from '@/features/secrets/credentialFailure';
 
 export type WorkbenchKind = 'image' | 'video' | 'audio' | 'chat';
 export interface WorkbenchReference {
@@ -81,7 +81,7 @@ export function emptyWorkbenchData(): WorkbenchData {
 }
 
 export function classifyWorkbenchFailure(error: unknown, duringSubmit = false): WorkbenchFailure {
-  if (credentialFailureOf(error)) return { kind: 'authentication', message: CREDENTIAL_ACCESS_MESSAGE };
+  if (credentialFailureOf(error)) return { kind: 'authentication', message: credentialFailureMessage(error) };
   const raw = error instanceof Error ? error.message : String(error);
   // Never echo provider response bodies, credentials, or signed URL queries into persisted history.
   const message = raw.replace(/(Bearer\s+)\S+/gi, '$1[redacted]')

@@ -184,7 +184,7 @@ export function ImageModelControls({
 }
 
 /** "×N": how many results one press produces. */
-export function CountChip({ value, onChange }: { value: number; onChange(next: number): void }) {
+export function CountChip({ value, choices, onChange }: { value: number; choices?: readonly number[]; onChange(next: number): void }) {
   const { t } = useTranslation();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
@@ -206,7 +206,7 @@ export function CountChip({ value, onChange }: { value: number; onChange(next: n
         <PopoverSurface anchor={anchor} width={196} label={t('rework.canvas.composer.count')} onClose={() => setAnchor(null)}>
           <div className="ui-popover__title">{t('rework.canvas.composer.count')}</div>
           <div className="ui-tiles">
-            {COUNT_CHOICES.map((count) => (
+            {(choices ?? COUNT_CHOICES).map((count) => (
               <button
                 key={count}
                 type="button"
@@ -221,7 +221,7 @@ export function CountChip({ value, onChange }: { value: number; onChange(next: n
               </button>
             ))}
           </div>
-          <UiInput
+          {!choices && <UiInput
             className="mt-2"
             type="number"
             min={1}
@@ -232,7 +232,7 @@ export function CountChip({ value, onChange }: { value: number; onChange(next: n
               const next = Math.round(Number(event.target.value));
               if (Number.isFinite(next)) onChange(Math.min(MAX_GENERATION_COUNT, Math.max(1, next)));
             }}
-          />
+          />}
         </PopoverSurface>
       ) : null}
     </>
@@ -243,7 +243,7 @@ export function CountChip({ value, onChange }: { value: number; onChange(next: n
 export function CameraChip({ active, onClick }: { active: boolean; onClick(): void }) {
   const { t } = useTranslation();
   return (
-    <button type="button" className="composer-chip" data-active={active || undefined} onClick={onClick}>
+    <button type="button" className="composer-chip composer-chip--utility" title={t('cameraControl.title')} aria-label={t('cameraControl.title')} data-active={active || undefined} onClick={onClick}>
       <Camera />
       <span className="composer-chip__text">{t('cameraControl.title')}</span>
     </button>

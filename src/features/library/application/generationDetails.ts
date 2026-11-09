@@ -1,4 +1,3 @@
-import { RATIO_PARAM_KEYS, SIZE_PARAM_KEYS } from '@/features/channels/domain/profile';
 import { isTauri } from '@tauri-apps/api/core';
 import { z } from 'zod';
 import { getGenerationJobRecord, normalizeGenerationJobResults, type GenerationJobStatus } from '@/commands/ai';
@@ -11,6 +10,7 @@ import { readBrowserJobRecord, readBrowserJobRecords } from '@/features/channels
 import { getCustomProviderJob } from '@/features/canvas/infrastructure/providerGateway';
 import { sanitizeGenerationDiagnosticText } from '@/features/canvas/application/generationErrorReport';
 import { redactSensitiveValue } from '@/features/canvas/agent/application/agentRedaction';
+import { readGenerationConfiguration } from '@/features/canvas/domain/generationConfiguration';
 
 export interface GenerationDetailsTarget { recordId?: string; jobId?: string; nodeId?: string; taskId?: string }
 export interface GenerationDetailFact { key: string; value?: string | number | null }
@@ -88,6 +88,15 @@ export function projectGenerationDetails({ record, records = [], jobs, target, c
   const params = snapshot?.input?.params ?? {};
   const extras = recordOf(request.extraParams ?? config?.extraParams);
   const nodeSnapshot = record?.params.nodeData;
+  // Read only this attempt's frozen evidence. Current canvas/catalog settings
+  // cannot repair or overwrite a historical request.
+  const capturedConfiguration = readGenerationConfiguration(nodeSnapshot);
+  const requestConfiguration = readGenerationConfiguration({ modelConfig: {
+    entryId: 'recorded-request', extraParams: extras,
+    ratio: scalar(request.aspectRatio) ?? scalar(config?.aspectRatio),
+    resolution: scalar(request.size) ?? scalar(config?.size),
+  } });
+  const jobConfiguration = readGenerationConfiguration({ modelConfig: { entryId: 'recorded-job', extraParams: params } });
   const declared = (keys: readonly string[]) => { for (const values of [extras, params]) for (const key of keys) { const value = scalar(values[key]); if (value !== undefined) return value; } return undefined; };
   const prompt = typeof record?.params.nodeData?.prompt === 'string' ? record.params.nodeData.prompt : record?.prompt;
   // Only canvas capture records explicitly tagged assembled request context can
@@ -114,10 +123,10 @@ export function projectGenerationDetails({ record, records = [], jobs, target, c
     { key: 'source', value: record?.surface }, { key: 'project', value: record?.projectAttribution === 'current-conversation' ? undefined : projectName ?? record?.projectId }, { key: 'node', value: scalar(nodeSnapshot?.displayName) ?? record?.nodeId ?? target.nodeId },
     ...(record?.conversationId ? [{ key: 'currentProject', value: record.currentProjectId === null ? null : currentProjectName ?? record.currentProjectId ?? (record.projectAttribution === 'current-conversation' ? projectName ?? record.projectId : undefined) }] : []),
     { key: 'currentNode', value: currentNodeName },
-    { key: 'channel', value: snapshot?.profile?.name ?? job?.provider_id }, { key: 'model', value: scalar(request.model) ?? snapshot?.input?.modelId ?? record?.modelRef ?? job?.model_id ?? undefined },
+    { key: 'channel', value: snapshot?.profile?.name ?? job?.provider_id }, { key: 'model', value: scalar(request.model) ?? scalar(snapshot?.input?.modelId) ?? scalar(job?.model_id) ?? scalar(record?.modelRef) ?? capturedConfiguration.model },
     { key: 'mode', value: snapshot?.input?.modeId ?? record?.modeId },
-    { key: 'ratio', value: scalar(request.aspectRatio ?? config?.aspectRatio ?? declared(RATIO_PARAM_KEYS) ?? nodeSnapshot?.aspectRatio) },
-    { key: 'size', value: scalar(request.size ?? config?.size ?? declared(SIZE_PARAM_KEYS) ?? nodeSnapshot?.resolution) },
+    { key: 'ratio', value: requestConfiguration.aspectRatio ?? jobConfiguration.aspectRatio ?? capturedConfiguration.aspectRatio },
+    { key: 'size', value: requestConfiguration.size ?? jobConfiguration.size ?? capturedConfiguration.size },
     { key: 'duration', value: scalar(config?.seconds ?? declared(['duration', 'seconds'])) },
     { key: 'count', value: scalar(record?.params.count ?? extras.count ?? extras.n ?? snapshot?.input?.count) },
     { key: 'quality', value: scalar(params.quality ?? extras.quality) }, { key: 'seed', value: scalar(params.seed ?? extras.seed) },
@@ -130,7 +139,8 @@ export function projectGenerationDetails({ record, records = [], jobs, target, c
   const diagnostics = redactGenerationDetails({ record: record && { id: record.id, createdAt: record.createdAt, surface: record.surface, projectId: record.projectId, projectAttribution: record.projectAttribution, currentProjectId: record.currentProjectId, nodeId: record.nodeId,
     taskId: record.taskId, model: record.modelRef, mode: record.modeId,
     params: { config: record.params.config, count: record.params.count, tool: record.params.tool, request: record.params.request,
-      node: nodeSnapshot && { nodeType: record.params.nodeType, model: nodeSnapshot.model, modelId: nodeSnapshot.modelId, size: nodeSnapshot.size, resolution: nodeSnapshot.resolution, aspectRatio: nodeSnapshot.aspectRatio } },
+      node: nodeSnapshot && { nodeType: record.params.nodeType, displayAspectRatio: nodeSnapshot.imageUrl || nodeSnapshot.previewImageUrl ? nodeSnapshot.aspectRatio : undefined,
+        generationConfiguration: { ...capturedConfiguration, meaning: 'configuration-at-capture' } } },
     references: record.references.map(({ source: _source, ...ref }) => ref) },
     jobs: jobs.map((entry) => ({ jobId: entry.job_id, upstreamTaskId: entry.external_task_id, status: entry.status, phase: entry.phase, provider: entry.provider_id,
       model: entry.model_id, route: entry.network_route, attempts: entry.submit_attempts, updatedAt: entry.updated_at, error: entry.error, upstreamError: entry.error_raw })), errors: combinedErrors });

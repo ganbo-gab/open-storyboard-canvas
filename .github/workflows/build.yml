@@ -27,6 +27,11 @@ on:
         description: 'Release notes shown on GitHub Release. Optional when using tag push.'
         required: false
         type: string
+      macos_adhoc:
+        description: 'Explicitly allow an ad-hoc Mac build or release: not notarized; updates can prompt for each saved credential.'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build-windows:
@@ -154,6 +159,18 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Test macOS signing policy
+        run: node --test scripts/mac-signing.node-tests.mjs
+
+      - name: Require a deliberate macOS signing identity
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          MACOS_ALLOW_ADHOC: ${{ github.event.inputs.macos_adhoc == 'true' && '1' || '0' }}
+          MACOS_ALLOW_ADHOC_RELEASE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.macos_adhoc == 'true' && '1' || '0' }}
+        run: node scripts/mac-signing.mjs check
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -210,8 +227,19 @@ jobs:
         env:
           CC: ""
           CXX: ""
-          APPLE_SIGNING_IDENTITY: "-"
-        run: npx tauri build --target universal-apple-darwin --bundles dmg --ci
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          MACOS_ALLOW_ADHOC: ${{ github.event.inputs.macos_adhoc == 'true' && '1' || '0' }}
+          MACOS_ALLOW_ADHOC_RELEASE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.macos_adhoc == 'true' && '1' || '0' }}
+        run: node scripts/mac-signing.mjs build --target universal-apple-darwin --bundles app,dmg --ci
+
+      - name: Verify macOS signature identity for every architecture
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          MACOS_ALLOW_ADHOC: ${{ github.event.inputs.macos_adhoc == 'true' && '1' || '0' }}
+          MACOS_ALLOW_ADHOC_RELEASE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.macos_adhoc == 'true' && '1' || '0' }}
+        run: node scripts/mac-signing.mjs verify "src-tauri/target/universal-apple-darwin/release/bundle/macos/Open Storyboard Canvas.app"
 
       - name: Verify lockfiles and generated sources stayed clean
         run: git diff --exit-code
@@ -309,6 +337,22 @@ jobs:
           (cd release-assets && sha256sum *.exe *.dmg > SHA256SUMS.txt)
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "A release already exists for $TAG; inspect it before rerunning publication."
+            exit 1
+          fi
+          # The run's GITHUB_TOKEN creates a missing tag only after both builds
+          # pass. Its push event does not start a second workflow run.
+          TAG_REF=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" \
+            --jq ".[] | select(.ref == \"refs/tags/$TAG\") | .ref")
+          if [[ -z "$TAG_REF" ]]; then
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
+          fi
+          # Fetch the exact remote tag and peel annotated tags. Never publish
+          # artifacts from this run under a tag pointing at another commit.
+          git fetch --no-tags origin "refs/tags/$TAG"
+          TAG_COMMIT=$(git rev-parse --verify 'FETCH_HEAD^{commit}')
+          if [[ "$TAG_COMMIT" != "$GITHUB_SHA" ]]; then
+            echo "Release tag does not point at this build's commit."
             exit 1
           fi
           FIRST_LINE=$(head -n 1 release-notes.md)

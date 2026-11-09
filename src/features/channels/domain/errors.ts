@@ -1,5 +1,5 @@
 import type { ChannelError, ChannelErrorCategory } from '../runtime/types';
-import { credentialFailureOf, CREDENTIAL_ACCESS_MESSAGE } from '@/features/secrets/credentialFailure';
+import { credentialFailureOf, credentialFailureMessage } from '@/features/secrets/credentialFailure';
 
 const moderationPattern = /content[_ -]?(policy|filter|safety)|safety[_ -]?(filter|system|violation)|moderation|nsfw|responsible[_ -]?ai|色情|违规|内容审核|安全策略|敏感内容/i;
 /** Status and upstream text are preserved separately from the Chinese explanation. */
@@ -18,7 +18,7 @@ export function normalizeChannelError(status: number | undefined, upstreamMessag
 }
 /** Only explicit pre-send evidence permits a retry; unknown transport failures are ambiguous. */
 export function classifyTransportError(error: unknown): { beforeSend: boolean; error: ChannelError } {
-  if (credentialFailureOf(error)) return { beforeSend: true, error: { category: 'credential', message: CREDENTIAL_ACCESS_MESSAGE, retryable: false } };
+  if (credentialFailureOf(error)) return { beforeSend: true, error: { category: 'credential', message: credentialFailureMessage(error), retryable: false } };
   const record = error && typeof error === 'object' ? error as Record<string, unknown> : {};
   const message = error instanceof Error ? error.message : typeof error === 'string' ? error : String(record.message ?? '网络连接异常');
   const code = String(record.code ?? '').toUpperCase();

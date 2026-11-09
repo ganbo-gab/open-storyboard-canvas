@@ -145,6 +145,27 @@ describe('render-independent canvas generation', () => {
     expect(mocks.image.mock.calls[0][0]).toMatchObject({ extraParams: { n: expected } });
     expect(preview).toMatchObject({ gatewayRequest: { extraParams: { n: expected } } });
   });
+  it('uses the actual legacy route for native batching when edit and generate map count differently', async () => {
+    const profile = structuredClone(openAIStandardProfile);
+    profile.operations['image.edit']!.template = { model: '{{model}}', prompt: '{{prompt}}', image: '{{image}}' };
+    useChannelStore.setState({ channels: [{ origin: 'native', profile, migrationIssues: [], createdAt: 1, updatedAt: 1 }] });
+    mocks.imageModel.mockReturnValue({ ...mocks.imageModel(), entryId: 'custom:openai-standard:gpt-image-1',
+      modelForGateway: 'custom:openai-standard:gpt-image-1', providerId: 'openai-standard', extraParams: { n: 2 } });
+    const id = source(CANVAS_NODE_TYPES.imageEdit, { prompt: 'A crane' });
+    const result = await submitNodeGeneration(id, { count: 3 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.resultNodeIds).toHaveLength(3);
+    expect(mocks.image).toHaveBeenCalledOnce();
+    expect(mocks.image.mock.calls[0][0]).toMatchObject({ extraParams: { n: 3 } });
+    // Adding an image selects the edit route, which needs three independent submissions.
+    mocks.image.mockClear();
+    const upload = source(CANVAS_NODE_TYPES.upload, { imageUrl: 'data:image/png;base64,AA==' });
+    useCanvasStore.getState().addEdge(upload, id);
+    const edit = await submitNodeGeneration(id, { count: 3 });
+    expect(edit.ok).toBe(true);
+    expect(mocks.image).toHaveBeenCalledTimes(3);
+  });
 
   it('returns busy for both stored generation state and overlapping submit calls', async () => {
     const busy = source(CANVAS_NODE_TYPES.aiVideo, {isGenerating: true});
@@ -284,7 +305,7 @@ describe('render-independent canvas generation', () => {
     const imageNode = useCanvasStore.getState().nodes.find(node => node.id === id)!;
     const common = { useCanvasStore, useSettingsStore, useCustomProvidersStore, collectInputReferences, buildReferenceContextPrompt, normalizeReferenceTokensForSubmission, t, setError: vi.fn(), showErrorDialog: vi.fn(), flushPromptDraft: vi.fn(), normalizeImageRequestGeometry, appendGenerationParameterConstraints };
     const capturedImage = await captureNodeAssembler('ImageEditNode.tsx', {
-      ...common, id, data: imageNode.data, promptDraftRef: {current: 'A crane at sunset'}, isImageEditNode, effectiveExtraParams: {}, selectedResolution: resolveImageModelResolution(getImageModel(''), undefined), nodeModelConfig: null,
+      ...common, id, data: imageNode.data, promptDraftRef: {current: 'A crane at sunset'}, isImageEditNode, effectiveExtraParams: {}, selectedResolution: resolveImageModelResolution(getImageModel('kie/nano-banana-2')!, undefined), nodeModelConfig: null,
       resolveActiveModelForPanel: mocks.imageModel, customCount: '', generateCount: 3, getLocalDateStamp, resolveNextGeneratedMediaSequence, setShowCountPicker: vi.fn(),
     });
     await submitNodeGeneration(id, {count: 3});

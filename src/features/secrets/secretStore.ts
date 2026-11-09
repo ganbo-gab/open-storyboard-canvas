@@ -1,5 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { create } from 'zustand';
+import { z } from 'zod';
+import { credentialFailureOf, isTransientCredentialFailure } from './credentialFailure';
 
 export const secretNamespaces = ['channel', 'provider', 'settings', 'image-host', 'agent-model', 'comfyui'] as const;
 export type SecretNamespace = typeof secretNamespaces[number];
@@ -51,12 +53,11 @@ export function secretRefFromToken(value: string): SecretRef | null {
 }
 function safeError(error: unknown): SecretStoreError {
   if (error instanceof SecretStoreError) return error;
+  const known = credentialFailureOf(error);
+  if (known) return new SecretStoreError(known.state, known.code);
   let value: unknown = error;
   if (typeof value === 'string') { try { value = JSON.parse(value); } catch { value = null; } }
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    if (record.state === 'locked') return new SecretStoreError('locked', 'vault-locked');
-  }
+  if (z.object({ state: z.literal('locked') }).safeParse(value).success) return new SecretStoreError('locked', 'vault-locked');
   return new SecretStoreError('error', 'vault-operation-failed');
 }
 const nativeBackend: SecretBackend = {
@@ -91,13 +92,15 @@ export function createSecretStore(backend: SecretBackend): SecretStore {
   const pending = new Map<string, Promise<void>>();
   const probes = new Map<string, Promise<boolean>>();
   const revisions = new Map<string, number>();
+  const failures = new Map<string, SecretStoreError>();
   const advance = (ref: SecretRef) => {
     const key = refKey(ref);
     revisions.set(key, (revisions.get(key) ?? 0) + 1);
   };
   async function operation<T>(ref: SecretRef, run: () => Promise<T>): Promise<T> {
     assertRef(ref);
-    try { return await run(); } catch (error) { const safe = safeError(error); setState(ref, safe.state); throw safe; }
+    try { const result = await run(); failures.delete(refKey(ref)); return result; }
+    catch (error) { const safe = safeError(error); failures.set(refKey(ref), safe); setState(ref, safe.state); throw safe; }
   }
   const store = {
     get: (ref: SecretRef): Promise<string | null> => operation(ref, async () => {
@@ -138,12 +141,17 @@ export function createSecretStore(backend: SecretBackend): SecretStore {
           if (revision === (revisions.get(key) ?? 0)) {
             // Existence metadata does not prove that a previously denied secret is readable.
             const state = credentialState(ref);
-            if (!present || (state !== 'locked' && state !== 'error')) setState(ref, present ? 'present' : 'missing');
+            // A recovered availability probe may clear a transient storage error, but never
+            // a denied read or failed write verification just because an entry exists.
+            if (!present || (state !== 'locked' && (state !== 'error' || isTransientCredentialFailure(failures.get(key))))) {
+              failures.delete(key);
+              setState(ref, present ? 'present' : 'missing');
+            }
           }
           return present;
         } catch (error) {
           const safe = safeError(error);
-          if (revision === (revisions.get(key) ?? 0)) setState(ref, safe.state);
+          if (revision === (revisions.get(key) ?? 0)) { failures.set(key, safe); setState(ref, safe.state); }
           throw safe;
         }
       })();

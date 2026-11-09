@@ -58,13 +58,20 @@ fn existence_query(reference: &SecretRef, keychain: CFType) -> CFDictionary<CFSt
 }
 
 pub(super) fn is_access_denied_status(status: i32) -> bool {
-    matches!(status, -128 | -25291 | -25293 | -25308 | -25315)
+    matches!(status, -128 | -25293 | -25308 | -25315)
+}
+
+pub(super) fn is_storage_unavailable_status(status: i32) -> bool {
+    status == -25291 // errSecNotAvailable is a storage availability error, not a user denial.
 }
 
 fn presence_from_status(status: i32) -> Result<bool, SecretError> {
     match status {
         0 => Ok(true),
         -25300 => Ok(false), // errSecItemNotFound
+        unavailable if is_storage_unavailable_status(unavailable) => {
+            Err(SecretError::error("storage_unavailable"))
+        }
         denied if is_access_denied_status(denied) => Err(SecretError::locked()),
         _ => Err(SecretError::error("storage_failed")),
     }
@@ -121,9 +128,13 @@ mod tests {
     fn denied_probes_are_locked_not_missing() {
         assert_eq!(presence_from_status(0), Ok(true));
         assert_eq!(presence_from_status(-25300), Ok(false));
-        for status in [-128, -25291, -25293, -25308, -25315] {
+        for status in [-128, -25293, -25308, -25315] {
             assert_eq!(presence_from_status(status), Err(SecretError::locked()));
         }
+        assert_eq!(
+            presence_from_status(-25291),
+            Err(SecretError::error("storage_unavailable"))
+        );
         assert_eq!(
             presence_from_status(-50),
             Err(SecretError::error("storage_failed"))

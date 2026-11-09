@@ -16,6 +16,8 @@ import { validateImageModel, pickClosestAspectRatio, generateGridImageDataUrl } 
 import { buildImageModelCatalog } from '../modelCatalog';
 import { getChannelCatalogProviders } from '@/features/channels/application/channelCatalog';
 import { resolveNativeChannelModel } from '@/features/channels/application/channelService';
+import { readGenerationConfiguration } from '../../domain/generationConfiguration';
+import { describeImageGenerationRequest, mapImageChannelGenerationParameters } from './channelParameters';
 
 export async function assembleStoryboardRequest(id: string, options: GenerationRequestOptions): Promise<ImageGenerationPlan> {
   const state = useCanvasStore.getState();
@@ -43,7 +45,11 @@ export async function assembleStoryboardRequest(id: string, options: GenerationR
   const supported = resolved.supportedRatios.filter(ratio => ratio !== 'auto');
   const overallRatio = ratioMode === 'overall' ? controlRatio : controlRatio * cols / rows;
   const requestRatio = pickClosestAspectRatio(overallRatio, supported.length ? supported : ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9', '9:21', '3:2', '2:3', '5:4', '4:5']);
-  const resolution = String(resolved.extraParams.resolutionType ?? resolved.extraParams.size ?? nodeModelConfig?.extraParams?.resolutionType ?? nodeModelConfig?.extraParams?.size ?? data.size ?? '2K');
+  const configured = readGenerationConfiguration({ modelConfig: { entryId: resolved.entryId, ratio: resolved.ratio,
+    extraParams: { ...(!data.modelConfig ? data.extraParams : {}), ...resolved.extraParams } } });
+  // Local grid rendering still needs a concrete canvas size. This fallback is
+  // never supplied as a parameter to a native channel with its own declarations.
+  const resolution = configured.size ?? (!data.modelConfig ? data.size : undefined) ?? '2K';
   const geometry = normalizeImageRequestGeometry({ selectedResolution: resolution, selectedAspectRatio: resolved.ratio, referenceAspectRatio: requestRatio, supportedAspectRatios: resolved.supportedRatios, fallbackResolution: '2K' });
   const directives = [`生成一张${data.gridRows}×${data.gridCols}的${data.gridRows * data.gridCols}宫格分镜图`];
   if (settings.storyboardGenKeepStyleConsistent) directives.push('图片风格与参考图保持一致');
@@ -55,7 +61,16 @@ export async function assembleStoryboardRequest(id: string, options: GenerationR
     else if (settings.storyboardGenAutoInferEmptyFrame) parts.push(`分镜${index + 1}：依据之前的内容进行推测`);
   });
   const grid = generateGridImageDataUrl(requestRatio, rows, cols, resolution);
-  const prompt = appendGenerationParameterConstraints(parts.join('\n'), { enabled: settings.appendParameterConstraintsToPrompt, aspectRatio: geometry.promptAspectRatio, resolution: geometry.resolutionLabel, count: options.count ?? 1 });
+  const native = resolveNativeChannelModel(resolved.modelForGateway);
+  const payload = mapImageChannelGenerationParameters({ prompt: parts.join('\n'), model: resolved.modelForGateway,
+    size: native ? native.model.modes ? '' : configured.size ?? '' : geometry.requestSize,
+    aspectRatio: native ? native.model.modes ? '' : configured.aspectRatio ?? '' : geometry.requestAspectRatio,
+    channelModeId: data.channelModeId, referenceSlots: data.referenceSlots, referenceImages: [...referenceImages, grid],
+    extraParams: { ...configured.extraParams, ...(!native ? { resolutionType: geometry.resolutionLabel } : {}) } });
+  const submitted = describeImageGenerationRequest(payload);
+  const prompt = appendGenerationParameterConstraints(payload.prompt, { enabled: settings.appendParameterConstraintsToPrompt,
+    aspectRatio: native ? submitted.aspectRatio : geometry.promptAspectRatio,
+    resolution: native ? submitted.size : geometry.resolutionLabel, count: options.count ?? 1 });
   return {
     resolved,
     sourceType: 'storyboardGen' as const,
@@ -63,11 +78,12 @@ export async function assembleStoryboardRequest(id: string, options: GenerationR
     resultPatch: {
       displayName: EXPORT_RESULT_DISPLAY_NAME.storyboardGenOutput,
       resultKind: 'storyboardGenOutput' as const,
-      prompt: '', model: resolved.modelForGateway, size: geometry.requestSize,
-      requestAspectRatio: geometry.requestAspectRatio,
+      prompt: '', model: resolved.modelForGateway, size: submitted.size,
+      requestAspectRatio: submitted.aspectRatio,
+      ...(options.tool?.id === 'gridPreview' ? { aspectRatio: requestRatio } : {}),
       generationStoryboardMetadata: { gridRows: rows, gridCols: cols, frameNotes: data.frames.slice(0, rows * cols).map(frame => sanitizeStoryboardText(frame.description, settings.ignoreAtTagWhenCopyingAndGenerating)) },
     },
-    gatewayPayload: { prompt, model: resolved.modelForGateway, size: resolveNativeChannelModel(resolved.modelForGateway)?.model.modes ? '' : geometry.requestSize, aspectRatio: resolveNativeChannelModel(resolved.modelForGateway)?.model.modes ? '' : geometry.requestAspectRatio, channelModeId: data.channelModeId, referenceSlots: data.referenceSlots, referenceImages: [...referenceImages, grid], extraParams: { ...data.extraParams, ...nodeModelConfig?.extraParams, ...resolved.extraParams, resolutionType: geometry.resolutionLabel } },
+    gatewayPayload: { ...payload, prompt, ...(native ? { extraParams: submitted.extraParams } : {}) },
     gridPreview: options.tool?.id === 'gridPreview' ? grid : undefined,
   };
 }
@@ -104,7 +120,8 @@ export async function assemblePanelRequest(id: string, options: GenerationReques
   if (preset && ['dreamina:upscale', 'dreamina:3.0', 'dreamina:3.1'].includes(resolved.entryId)) throw new GenerationInputError('unsupported', '当前模型不支持提示词预设图片引用');
   const fallback = resolved.builtinModel ? resolveImageModelResolution(resolved.builtinModel, resolved.builtinModel.defaultResolution).value : '2K';
   const ratio = isPanorama ? selectPanoramaRequestRatio(resolved.supportedRatios, projection) : resolved.ratio;
-  const geometry = normalizeImageRequestGeometry({ selectedResolution: resolved.extraParams.resolutionType ?? resolved.extraParams.size ?? fallback, selectedAspectRatio: ratio, referenceAspectRatio: String(data.aspectRatio ?? '1:1'), supportedAspectRatios: resolved.supportedRatios, fallbackResolution: fallback });
+  const configured = readGenerationConfiguration({ modelConfig: { entryId: resolved.entryId, ratio, extraParams: resolved.extraParams } });
+  const geometry = normalizeImageRequestGeometry({ selectedResolution: configured.size ?? fallback, selectedAspectRatio: ratio, referenceAspectRatio: String(data.aspectRatio ?? '1:1'), supportedAspectRatios: resolved.supportedRatios, fallbackResolution: fallback });
   const images: string[] = [];
   if (isPanorama && (params.smartBase ?? data.smartBase) !== false) images.push(createWhite2x1DataUrl(2048));
   if (tool?.id === 'blueprint' && params.mode === 'panorama' && ownImage) images.push(ownImage);
@@ -120,12 +137,21 @@ export async function assemblePanelRequest(id: string, options: GenerationReques
   }
   const referenceImages = tool?.id === 'blueprint' ? dedupeBlueprintReferenceUrls(images) : images;
   const requestModel = resolved.builtinModel ? resolved.builtinModel.resolveRequest({ referenceImageCount: referenceImages.length }).requestModel : resolved.modelForGateway;
-  const promptForRequest = appendGenerationParameterConstraints(prompt.trim(), { enabled: settings.appendParameterConstraintsToPrompt, aspectRatio: geometry.promptAspectRatio, resolution: geometry.resolutionLabel, count: options.count ?? 1 });
+  const native = resolveNativeChannelModel(requestModel);
+  const payload = mapImageChannelGenerationParameters({ prompt: prompt.trim(), model: requestModel,
+    size: native ? native.model.modes ? '' : configured.size ?? '' : geometry.requestSize,
+    aspectRatio: native ? native.model.modes ? '' : configured.aspectRatio ?? '' : geometry.requestAspectRatio,
+    referenceImages: referenceImages.length ? referenceImages : undefined,
+    extraParams: { ...configured.extraParams, ...(!native ? { resolutionType: geometry.resolutionLabel } : {}) } });
+  const submitted = describeImageGenerationRequest(payload);
+  const promptForRequest = appendGenerationParameterConstraints(payload.prompt, { enabled: settings.appendParameterConstraintsToPrompt,
+    aspectRatio: native ? submitted.aspectRatio : geometry.promptAspectRatio,
+    resolution: native ? submitted.size : geometry.resolutionLabel, count: options.count ?? 1 });
   return {
     resolved,
     sourceType: 'imageEdit' as const,
     resultType: isPanorama ? CANVAS_NODE_TYPES.panorama : CANVAS_NODE_TYPES.exportImage,
     resultPatch: isPanorama ? { displayName: `全景 · ${prompt.trim().slice(0, 20) || '未命名'}`, sourceMode: 'text', sourcePrompt: prompt, projection, aspectRatio: ratio } : { aspectRatio: preset ? geometry.requestAspectRatio : String(data.aspectRatio ?? '1:1') },
-    gatewayPayload: { prompt: promptForRequest, model: requestModel, size: resolveNativeChannelModel(requestModel)?.model.modes ? '' : geometry.requestSize, aspectRatio: resolveNativeChannelModel(requestModel)?.model.modes ? '' : geometry.requestAspectRatio, referenceImages: referenceImages.length ? referenceImages : undefined, extraParams: { ...resolved.extraParams, resolutionType: geometry.resolutionLabel } },
+    gatewayPayload: { ...payload, prompt: promptForRequest, ...(native ? { extraParams: submitted.extraParams } : {}) },
   };
 }

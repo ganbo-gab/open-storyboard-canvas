@@ -12,6 +12,9 @@ const references = vi.hoisted(() => ({ current: { all: [], pickable: [] } as Nod
 vi.mock('./useNodeReferences', () => ({ useNodeReferences: () => references.current }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 import { NativeImageControls } from './NativeImageControls';
+import { useState } from 'react';
+import { useImageGenerationCount } from './useImageGenerationCount';
+import { CountChip } from './ImageParams';
 
 const profile: ChannelProfileV2 = { version: 2, id: 'native-image-controls-fixture', name: 'Native image controls fixture', baseUrl: 'https://fixture.invalid', auth: { type: 'none' },
   operations: {
@@ -27,6 +30,15 @@ let nodeId: string;
 function Surface() {
   const value = useCanvasStore(state => { const node = state.nodes.find(node => node.id === nodeId); return node && isImageEditNode(node) ? node.data.modelConfig : undefined; });
   return <NativeImageControls nodeId={nodeId} value={value ?? modelValue} onChange={modelConfig => useCanvasStore.getState().updateNodeData(nodeId, { modelConfig })} />;
+}
+function BatchSurface({ onSubmit }: { onSubmit(count: number | undefined): void }) {
+  const value = useCanvasStore(state => { const node = state.nodes.find(node => node.id === nodeId); return node && isImageEditNode(node) ? node.data.modelConfig : undefined; });
+  const [fallback, setFallback] = useState(1);
+  const change = (modelConfig: ModelConfigValue) => useCanvasStore.getState().updateNodeData(nodeId, { modelConfig });
+  const batch = useImageGenerationCount(nodeId, value ?? modelValue, fallback, change, setFallback);
+  return <><NativeImageControls nodeId={nodeId} value={value ?? modelValue} onChange={change} />
+    <CountChip value={batch.count} choices={batch.choices} onChange={batch.setCount} />
+    <button onClick={() => onSubmit(batch.requestCount)}>Submit fixture</button></>;
 }
 function graphImages(count: number): NodeReferences {
   const all: NodeReferences['all'] = Array.from({ length: count }, (_, index) => ({ kind: 'image', sourceNodeId: `image-${index}`, label: `图${index + 1}`, token: `@图${index + 1}`,
@@ -47,6 +59,39 @@ beforeEach(() => {
 afterEach(() => { cleanup(); useCanvasStore.getState().setCanvasData([], []); useChannelStore.setState({ channels: [] }); vi.unstubAllGlobals(); });
 
 describe('native image controls', () => {
+  it('shares native quantity between the full parameter panel, count shortcut and submit options', () => {
+    const configured = structuredClone(profile);
+    configured.operations['image.generate']!.template = { prompt: '{{prompt}}', n: '{{param.n}}' };
+    configured.models[0].params = [{ key: 'n', label: '数量', type: 'number', default: 2, min: 1, max: 4 }];
+    useChannelStore.setState({ channels: [{ profile: configured, origin: 'native', migrationIssues: [], createdAt: 1, updatedAt: 1 }] });
+    const submit = vi.fn();
+    const view = render(<BatchSurface onSubmit={submit} />);
+    expect(screen.getByRole('button', { name: '×2' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '2 · Text size' }));
+    const panel = screen.getByRole('dialog', { name: 'ui.workbench.parameters' });
+    fireEvent.change(within(panel).getByRole('spinbutton'), { target: { value: '3' } });
+    expect(screen.getByRole('button', { name: '×3' })).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit fixture' }));
+    // A panel choice reaches generation as native n=3, with no stale outer ×1 override.
+    expect(submit).toHaveBeenLastCalledWith(undefined);
+    expect(useCanvasStore.getState().nodes.find(node => node.id === nodeId)?.data.modelConfig).toMatchObject({ extraParams: { n: 3 } });
+    fireEvent.click(screen.getByRole('button', { name: '×3' }));
+    const counts = screen.getByRole('dialog', { name: 'rework.canvas.composer.count' });
+    expect(within(counts).queryByRole('button', { name: '5' })).toBeNull();
+    fireEvent.click(within(counts).getByRole('button', { name: '4' }));
+    fireEvent.click(screen.getByRole('button', { name: '4 · Text size' }));
+    expect((within(screen.getByRole('dialog')).getByRole('spinbutton') as HTMLInputElement).value).toBe('4');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    // The edit route has no count mapping: it uses independent batching, not an ignored n.
+    references.current = graphImages(1); view.rerender(<BatchSurface onSubmit={submit} />);
+    fireEvent.click(screen.getByRole('button', { name: '×1' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '3' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit fixture' }));
+    expect(submit).toHaveBeenLastCalledWith(3);
+    references.current = graphImages(0); view.rerender(<BatchSurface onSubmit={submit} />);
+    expect(screen.getByRole('button', { name: '×4' })).toBeTruthy();
+  });
   it('reacts to graph image references with automatic text/edit mode and the matching parameter default summary', () => {
     const view = render(<Surface />);
     expect(screen.getByRole('button', { name: 'ui.channels.autoImage.auto · Text mode' })).toBeTruthy();

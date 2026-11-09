@@ -14,6 +14,7 @@ import { GenerationInputError, type GenerationRequestOptions, type GenerationSub
 export type { GenerationKind, GenerationRequestOptions, GenerationSubmitOutcome } from './types';
 import { resolveNativeChannelModel } from '@/features/channels/application/channelService';
 import { channelNativeCountParam } from '@/features/channels/application/modelModes';
+import { imageModeReferenceCount } from '@/features/channels/application/imageModeSelection';
 import { resolveParamValue } from '@/features/channels/domain/template';
 import { referenceUrlFailureOf } from '@/features/channels/domain/referenceErrors';
 import { hostChannelReferenceSlot } from '@/features/channels/application/referenceHosting';
@@ -21,7 +22,7 @@ import { normalizeChannelGenerationFields } from '@/features/channels/applicatio
 import type { GenerateImagePayload } from '../ports';
 import { captureCanvasGeneration } from '@/features/library/history/canvasHistoryCapture';
 import { generationCanvasMutations } from './canvasMutations';
-import { mapImageChannelGenerationParameters } from './channelParameters';
+import { describeImageGenerationRequest, mapImageChannelGenerationParameters } from './channelParameters';
 
 /** Node types that generate from their own data (no tool); the canvas, toolbar and Agents all submit through here. */
 export const GENERATION_NODE_TYPES = [
@@ -51,7 +52,9 @@ function imageBatchPlan(payload: GenerateImagePayload, requestedCount?: number) 
   payload = mapImageChannelGenerationParameters(payload);
   let count = Math.min(10, Math.max(1, Math.floor(requestedCount ?? 1) || 1));
   const native = resolveNativeChannelModel(payload.model);
-  const nativeCount = native ? channelNativeCountParam(native.profile, native.model.id, payload.channelModeId) : undefined;
+  const imageCount = native ? imageModeReferenceCount(native.model, payload.referenceImages, payload.referenceSlots) : 0;
+  const operation = imageCount && native?.model.operations.includes('image.edit') ? 'image.edit' : 'image.generate';
+  const nativeCount = native ? channelNativeCountParam(native.profile, native.model.id, payload.channelModeId, operation) : undefined;
   if (nativeCount) {
     const value = requestedCount === undefined ? payload.extraParams?.[nativeCount.key] ?? nativeCount.default ?? 1 : count;
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new GenerationInputError('invalid-input', '生成数量必须为正整数');
@@ -148,12 +151,13 @@ export async function submitNodeGeneration(nodeId: string, options: GenerationRe
       } else {
         const { resolved } = plan;
         const { count, nativeCount, payload } = imageBatchPlan(plan.gatewayPayload, options.count);
+        const submittedConfig = describeImageGenerationRequest(payload);
         if (resolved.builtinModel && resolved.apiKey) await canvasAiGateway.setApiKey(resolved.providerId, resolved.apiKey);
         const batchId = count > 1 ? `batch-${Date.now()}` : undefined;
         const firstSequence = resolveNextGeneratedMediaSequence('image', useCanvasStore.getState().nodes);
         const date = getLocalDateStamp();
         const positions = state.findNodePositions(nodeId, count, EXPORT_RESULT_NODE_DEFAULT_WIDTH, EXPORT_RESULT_NODE_LAYOUT_HEIGHT);
-        context = { sourceType: plan.sourceType, providerId: resolved.providerId, requestModel: payload.model, requestSize: payload.size, requestAspectRatio: payload.aspectRatio, channelModeId: payload.channelModeId, prompt: payload.prompt, extraParams: payload.extraParams, referenceImageCount: payload.referenceImages?.length ?? 0, referenceImagePlaceholders: createReferenceImagePlaceholders(payload.referenceImages?.length ?? 0), ...await getRuntimeDiagnostics() };
+        context = { sourceType: plan.sourceType, providerId: resolved.providerId, requestModel: payload.model, requestSize: submittedConfig.size, requestAspectRatio: submittedConfig.aspectRatio, channelModeId: payload.channelModeId, prompt: payload.prompt, extraParams: payload.extraParams, referenceImageCount: payload.referenceImages?.length ?? 0, referenceImagePlaceholders: createReferenceImagePlaceholders(payload.referenceImages?.length ?? 0), ...await getRuntimeDiagnostics() };
         for (let index = 0; index < count; index++) {
           const sequence = firstSequence + index;
           const patch = {
@@ -161,6 +165,11 @@ export async function submitNodeGeneration(nodeId: string, options: GenerationRe
             resultKind: 'generic' as const, displayName: resolveDefaultGeneratedImageDisplayName(sequence, payload.prompt), sourcePrompt: payload.prompt,
             generatedNamingMode: 'default' as const, generatedSequence: sequence, generatedDateStamp: date, generatedFileName: `${resolveDefaultGeneratedImageFileStem(sequence, date)}.png`,
             batchId, batchIndex: index, batchTotal: count, ...plan.resultPatch,
+            // Result placeholders describe this submission, not the factory's square defaults.
+            model: payload.model, resolution: submittedConfig.size,
+            aspectRatio: (plan.gridPreview ? plan.resultPatch.aspectRatio : submittedConfig.aspectRatio) || plan.resultPatch.aspectRatio || 'auto',
+            requestAspectRatio: submittedConfig.aspectRatio || 'auto',
+            generationDebugContext: context,
             ...(plan.gridPreview ? {imageUrl: plan.gridPreview, previewImageUrl: plan.gridPreview} : {}),
           };
           // A panorama node regenerates itself (its own composer, or the `panorama` tool aimed at it); it keeps its name.

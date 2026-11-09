@@ -1605,8 +1605,24 @@
     flex: 1;
     align-items: center;
     gap: 4px;
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-wrap: nowrap;
+  }
+
+  .node-composer__params > .composer-chip {
+    min-width: 64px;
+    max-width: min(180px, 100%);
+    flex: 1 1 0;
+  }
+
+  .node-composer__params > .composer-chip--utility {
+    flex: none;
+  }
+
+  .node-composer__trailing-actions {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
   }
 
   .node-composer__send {

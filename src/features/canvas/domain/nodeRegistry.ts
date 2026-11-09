@@ -2,7 +2,6 @@ import {
   AUTO_REQUEST_ASPECT_RATIO,
   CANVAS_NODE_TYPES,
   DEFAULT_ASPECT_RATIO,
-  type ImageSize,
   type AiAudioNodeData,
   type AiTextNodeData,
   type AiVideoNodeData,
@@ -25,7 +24,6 @@ import {
   fitStoryboardFrames,
 } from './canvasNodes';
 import { DEFAULT_NODE_DISPLAY_NAME } from './nodeDisplay';
-import { DEFAULT_IMAGE_MODEL_ID } from '../models';
 
 export type MenuIconKey = 'upload' | 'sparkles' | 'layout' | 'text' | 'video' | 'audio' | 'tag' | 'tagGroup';
 export type CanvasNodeSelectionToolbarMode = 'full' | 'deleteOnly' | 'none';
@@ -115,8 +113,6 @@ const imageEditNodeDefinition: CanvasNodeDefinition<ImageEditNodeData> = {
     isSizeManuallyAdjusted: false,
     requestAspectRatio: AUTO_REQUEST_ASPECT_RATIO,
     prompt: '',
-    model: DEFAULT_IMAGE_MODEL_ID,
-    size: '2K' as ImageSize,
     extraParams: {},
     isGenerating: false,
     generationStartedAt: null,
@@ -565,8 +561,6 @@ const storyboardGenNodeDefinition: CanvasNodeDefinition<StoryboardGenNodeData> =
     gridCols: 2,
     frames: fitStoryboardFrames([], 4),
     ratioControlMode: 'cell',
-    model: DEFAULT_IMAGE_MODEL_ID,
-    size: '2K' as ImageSize,
     requestAspectRatio: AUTO_REQUEST_ASPECT_RATIO,
     extraParams: {},
     imageUrl: null,

@@ -32,6 +32,7 @@ import { getAgentGenerationNetworkRevision, getAgentProviderRevision } from './a
 import { canvasAgentBudgetLedger } from './agentBudget';
 import { canvasCommandRegistry } from '@/features/canvas/application/canvasCommandService';
 import { buildCanvasAssetCatalog } from '@/features/canvas/application/canvasAssetCatalog';
+import { readGenerationConfiguration } from '@/features/canvas/domain/generationConfiguration';
 import { CANVAS_COMMAND_TYPES, CANVAS_COMMAND_VERSION, type CanvasCommand } from '@/features/canvas/domain/canvasCommands';
 import { useProjectStore } from '@/stores/projectStore';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -150,12 +151,12 @@ function generationApprovalDetails(nodeIds: unknown): { model?: string; summary:
     const modelConfig = data.modelConfig && typeof data.modelConfig === 'object' && !Array.isArray(data.modelConfig)
       ? data.modelConfig as Record<string, unknown>
       : undefined;
-    const model = [modelConfig?.entryId, modelConfig?.modelId, data.modelId, data.model]
-      .find((value): value is string => typeof value === 'string' && Boolean(value.trim()));
+    const configured = readGenerationConfiguration(data);
+    const model = configured.model;
     if (model) models.add(model);
     for (const [label, value] of [
-      ['ratio', modelConfig?.aspectRatio ?? modelConfig?.ratio ?? data.aspectRatio ?? data.requestAspectRatio],
-      ['resolution', modelConfig?.resolution ?? data.resolution],
+      ['ratio', configured.aspectRatio],
+      ['resolution', configured.size],
       ['duration', modelConfig?.duration ?? data.durationSeconds],
     ] as const) {
       if ((typeof value === 'string' && value.trim()) || (typeof value === 'number' && Number.isFinite(value))) {

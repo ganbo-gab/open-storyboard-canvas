@@ -151,4 +151,28 @@ describe('generation history', () => {
       expect(source.data).not.toHaveProperty('channelModeId');
     } finally { useCanvasStore.setState(original, true); }
   });
+  it('records the assembled request model despite stale aliases and later source selection changes', async () => {
+    const original = useCanvasStore.getState();
+    try {
+      const source: CanvasNode = { id: 'capture-conflicting-models', type: CANVAS_NODE_TYPES.imageEdit, position: { x: 0, y: 0 }, data: {
+        prompt: 'Saved prompt', model: 'kie/legacy-default', modelId: 'stale-model-alias', size: '2K', aspectRatio: '1:1',
+        modelConfig: { entryId: 'custom:fixture:selected-at-capture', ratio: 'auto', extraParams: { size: '1024x576' } },
+      } };
+      const frozen = structuredClone(source.data);
+      useCanvasStore.setState({ nodes: [source], edges: [] });
+      const capture = captureCanvasGeneration(source, [source], [], 900, {});
+      source.data.modelConfig = { entryId: 'custom:fixture:later-selection', ratio: '1:1' };
+      capture({ context: { sourceType: 'imageEdit', requestModel: 'custom:fixture:actually-submitted' }, resultNodeIds: [], jobIds: ['captured-original-job'] });
+      await expect.poll(() => useGenerationHistoryStore.getState().records.find(item => item.nodeId === source.id)).toBeDefined();
+      const saved = useGenerationHistoryStore.getState().records.find(item => item.nodeId === source.id)!;
+      expect(saved.modelRef).toBe('custom:fixture:actually-submitted');
+      expect(saved.params.nodeData).toEqual(frozen);
+      expect(saved.params.request).toMatchObject({ model: 'custom:fixture:actually-submitted' });
+
+      const fallback = { ...source, id: 'capture-configuration-fallback', data: frozen };
+      captureCanvasGeneration(fallback, [fallback], [], 901, {})({ context: { sourceType: 'imageEdit' }, resultNodeIds: [], jobIds: [] });
+      await expect.poll(() => useGenerationHistoryStore.getState().records.find(item => item.nodeId === fallback.id)?.modelRef).toBe('custom:fixture:selected-at-capture');
+      expect(saved.modelRef).toBe('custom:fixture:actually-submitted');
+    } finally { useCanvasStore.setState(original, true); }
+  });
 });

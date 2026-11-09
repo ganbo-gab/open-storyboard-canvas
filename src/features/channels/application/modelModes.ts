@@ -1,4 +1,4 @@
-import type { ChannelProfileV2, JsonValue, ModeSpec, ModelSpec, OperationKind, OperationSpec, ParamSpec, RefSlot } from '../domain/profile';
+import { templateVariables, type ChannelProfileV2, type JsonValue, type ModeSpec, type ModelSpec, type OperationKind, type OperationSpec, type ParamSpec, type RefSlot } from '../domain/profile';
 
 export interface ResolvedMode {
   mode: ModeSpec;
@@ -36,13 +36,26 @@ export function modeParamDefaults(resolved: ResolvedMode): Record<string, JsonVa
   return Object.fromEntries(resolved.params.flatMap((param) => param.default === undefined ? [] : [[param.key, param.default]]));
 }
 
-/** Count is native only when the effective mode declares a numeric wire parameter. */
-export function channelNativeCountParam(profile: ChannelProfileV2, modelId: string, modeId?: string): ParamSpec | undefined {
+/** Count is native only when a declared numeric parameter reaches the initial submission. */
+export function channelNativeCountParam(profile: ChannelProfileV2, modelId: string, modeId?: string, operationKind?: OperationKind): ParamSpec | undefined {
   const model = profile.models.find((entry) => entry.id === modelId);
   if (!model) return undefined;
+  const resolved = resolveModelMode(model, modeId);
+  if (!model.modes && operationKind !== undefined && !model.operations.includes(operationKind)) return undefined;
+  const imageOperations = model.operations.filter(operation => operation === 'image.generate' || operation === 'image.edit');
+  // Legacy models choose generate/edit from their references later. Without an
+  // actual operation, native count must work on every possible image submission.
+  // Callers with the chosen route avoid both an ignored count and multiplied batches.
+  const legacyOperations = operationKind === undefined ? imageOperations.length ? imageOperations : [resolved.operation] : [operationKind];
+  const operations = model.modes ? [resolved.operationSpec ?? profile.operations[resolved.operation]]
+    : legacyOperations.map(operation => profile.operations[operation]);
+  if (operations.some(operation => operation === undefined)) return undefined;
+  // Poll/result parameters cannot request more outputs after a task is accepted.
+  // A body:none template is never sent by the shared request renderer.
+  const used = operations.map(operation => [...templateVariables(operation?.path),
+    ...(operation?.body === 'none' ? [] : templateVariables(operation?.template))]);
   const keys = ['n', 'count', 'num_images', 'num_outputs', 'number_of_images', 'batch_size'];
-  const params = resolveModelMode(model, modeId).params;
-  return keys.flatMap((key) => params.filter((param) => param.key === key && (param.type === 'number'
+  return keys.flatMap((key) => resolved.params.filter((param) => param.key === key && used.every(variables => variables.includes(`param.${key}`)) && (param.type === 'number'
     || (param.type === 'enum' && param.options?.every((option) => typeof option.value === 'number')))))[0];
 }
 

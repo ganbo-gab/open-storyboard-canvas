@@ -18,7 +18,7 @@ import { formatChannelError, safeChannelError, redactChannelErrorText, classifyT
 import { credentialFailureOf } from '@/features/secrets/credentialFailure';
 import { importGeneratedModelOutput, ModelDownloadError } from '@/features/stage/application/imageTo3dMaterialization';
 import { previewChannelSmokeRequest } from './channelSmokeRequest';
-import { secretRefFromToken, retrySecretAccess } from '@/features/secrets/secretStore';
+import { secretRefFromToken, retrySecretAccess, SecretStoreError } from '@/features/secrets/secretStore';
 import { planCredentialMigration } from '@/features/secrets/credentialMigration';
 import { StoredResultMissingError } from './storedResult';
 import { readBrowserJobRecords, readBrowserJobRecord } from './browserJobRecords';
@@ -145,7 +145,7 @@ export function channelJobFromRequest(profile: ChannelProfileV2, modelId: string
     const option = optionFor(param, hint, true);
     if (option) params[param.key] = option.value;
   }
-  const countParam = channelNativeCountParam(profile, modelId, resolved.mode.id);
+  const countParam = channelNativeCountParam(profile, modelId, resolved.mode.id, operation);
   if (countParam && request.count !== undefined) params[countParam.key] = request.count;
   if (model.modes) for (const param of resolved.params) resolveParamValue(param, params[param.key]);
   return { jobId: '', channelId: profile.id, modelId, ...(model.modes || resolvedModeId ? { modeId: resolved.mode.id } : {}), operation, prompt: request.prompt, params, refs,
@@ -421,8 +421,8 @@ export async function authorizeChannelJob(id: string): Promise<void> {
   const key = jobCredentials.get(id) ?? getChannelCredential(snapshot.profile.id);
   const refs = planCredentialMigration({ apiKey: key, ...snapshot.profile }, 'channel', snapshot.profile.id).refs;
   const unique = refs.filter((ref, i) => refs.findIndex((other) => other.namespace === ref.namespace && other.id === ref.id) === i);
-  if (!unique.length) throw new Error('没有可重新授权的系统凭据，请到渠道设置中补充 API Key。');
-  for (const ref of unique) if (!await retrySecretAccess(ref)) throw new Error('系统凭据已不存在，请到渠道设置中重新填写 API Key。');
+  if (!unique.length) throw new SecretStoreError('error', 'credential-missing');
+  for (const ref of unique) if (!await retrySecretAccess(ref)) throw new SecretStoreError('error', 'credential-missing');
 }
 /** Query/materialize only; never submits. A reloaded transient job requires an explicit replacement credential. */
 export async function recoverChannelJob(id: string, signal?: AbortSignal, credential?: string): Promise<GenerationJobStatus> {

@@ -44,7 +44,9 @@ describe('shared channel execution safety', () => {
   });
   it('maps requested native count exactly once instead of retaining a conflicting default', () => {
     const config = profile(); config.models[0].params = [{ key: 'n', label: 'Count', type: 'number', min: 1, max: 10, default: 2 }];
+    config.operations['video.generate']!.template = { content: '{{seedanceContent}}', n: '{{param.n}}' };
     const input = channelJobFromRequest(config, 'video', { model: 'video', prompt: 'move', size: '', aspect_ratio: '', count: 3, extra_params: { n: 2 } }, 'video');
     expect(input).toMatchObject({ count: 3, params: { n: 3 } });
+    expect(renderPreview(config, input).body).toMatchObject({ mode: 'json', json: { n: 3 } });
   });
 });

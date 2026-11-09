@@ -1,11 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { credentialFailureOf } from './credentialFailure';
+import { credentialFailureOf, credentialFailureMessage } from './credentialFailure';
 import { SecretStoreError } from './secretStore';
 import { classifyTransportError } from '@/features/channels/domain/errors';
 import { classifyWorkbenchFailure } from '@/features/workbench/domain/types';
 import { ModelDownloadError } from '@/features/stage/application/imageTo3dMaterialization';
 
 describe('credential failures at request boundaries', () => {
+  it('distinguishes storage availability, missing keys and actual denial without assuming a submitted job', () => {
+    const unavailable = { state: 'error', code: 'storage_unavailable' };
+    const missing = { state: 'error', code: 'credential_missing' };
+    const denied = { state: 'locked', code: 'storage_locked' };
+    expect(credentialFailureMessage(unavailable)).toContain('暂时无法读取');
+    expect(credentialFailureMessage(unavailable)).not.toContain('授权');
+    expect(credentialFailureMessage(missing)).toContain('重新填写');
+    expect(credentialFailureMessage(denied)).toContain('系统阻止');
+    expect(credentialFailureMessage(denied)).not.toContain('原任务');
+    expect(classifyTransportError(unavailable)).toMatchObject({ beforeSend: true,
+      error: { message: credentialFailureMessage(unavailable), retryable: false } });
+    expect(classifyWorkbenchFailure(missing).message).toBe(credentialFailureMessage(missing));
+  });
   it.each([
     { state: 'locked', code: 'storage_locked' },
     '{"state":"locked","code":"storage_locked"}',

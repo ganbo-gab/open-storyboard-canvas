@@ -8,13 +8,14 @@ import { buildReferenceContextPrompt, collectInputReferences, normalizeReference
 import { detectAspectRatio } from '../imageData';
 import { appendGenerationParameterConstraints } from '../generationPromptConstraints';
 import { normalizeImageRequestGeometry } from '../imageRequestGeometry';
-import { DEFAULT_IMAGE_MODEL_ID, getImageModel, resolveImageModelResolution } from '../../models';
-import { GRSAI_NANO_BANANA_PRO_MODEL_ID } from '../../models/image/grsai/nanoBananaPro';
 import { resolveActiveModelForPanel } from '../resolveActiveModelForPanel';
 import { buildCameraPrompt } from '../cameraPromptLibrary';
 import { resolvePromptTemplateText, type PromptTemplateId, type PromptTemplateSettingsSnapshot } from '../promptTemplates';
 import { GenerationInputError, type GenerationRequestOptions } from './types';
 import { resolveNativeChannelModel } from '@/features/channels/application/channelService';
+import { automaticImageParameters, imageModeReferenceCount, resolveImageMode } from '@/features/channels/application/imageModeSelection';
+import { channelNativeCountParam, modeParamDefaults } from '@/features/channels/application/modelModes';
+import { readGenerationConfiguration } from '../../domain/generationConfiguration';
 
 const MULTI_FUNCTION_ITEMS = ['multiCameraGrid', 'plotDeduction', 'continuousStoryboard', 'lightingCorrection', 'characterThreeView', 'predictNext', 'predictPrevious'].map(id => ({ id }));
 type MultiFunctionType = string;
@@ -29,9 +30,6 @@ export async function assembleImageRequest(id: string, options: GenerationReques
     if (!latestNode || !isImageEditNode(latestNode)) throw new GenerationInputError('unsupported', 'Not an image generation node');
     const latestData = latestNode.data;
     const currentPromptDraft = latestData.prompt ?? '';
-    const selectedModel = getImageModel(latestData.model ?? DEFAULT_IMAGE_MODEL_ID);
-    const effectiveExtraParams = { ...(latestData.extraParams ?? {}), ...(selectedModel.id === GRSAI_NANO_BANANA_PRO_MODEL_ID ? { grsai_pro_model: useSettingsStore.getState().grsaiNanoBananaProModel } : {}) };
-    const selectedResolution = resolveImageModelResolution(selectedModel, latestData.size, { extraParams: effectiveExtraParams });
     const firstEntry = buildImageModelCatalog({ customProviders: getChannelCatalogProviders(), dreaminaStatus: useSettingsStore.getState().dreaminaStatus }).find(entry => entry.usable);
     const nodeModelConfig = firstEntry ? {entryId: firstEntry.id, ratio: firstEntry.supportedRatios[0] ?? 'auto', extraParams: {}} : null;
     const latestSettings = useSettingsStore.getState();
@@ -123,7 +121,7 @@ export async function assembleImageRequest(id: string, options: GenerationReques
     }
     if (!resolved.usable) throw new GenerationInputError('missing-model', '当前模型不可用');
 
-    const effectiveCount = Math.min(10, Math.max(1, Math.floor(options.count ?? 1) || 1));
+    let effectiveCount = Math.min(10, Math.max(1, Math.floor(options.count ?? 1) || 1));
 
 
     let referenceAspectRatio: string | undefined;
@@ -137,17 +135,24 @@ export async function assembleImageRequest(id: string, options: GenerationReques
       }
     }
 
-    const effectiveExtraParamsRecord = effectiveExtraParams as Record<string, unknown>;
-    const requestResolutionLabel =
-      resolved.extraParams?.['resolutionType'] ??
-      resolved.extraParams?.['size'] ??
-      effectiveExtraParamsRecord['resolutionType'] ??
-      effectiveExtraParamsRecord['size'] ??
-      selectedResolution.value ??
-      '2K';
+    const native = resolveNativeChannelModel(resolved.modelForGateway);
+    const imageCount = native ? imageModeReferenceCount(native.model, latestIncomingImages, latestData.referenceSlots) : latestIncomingImages.length;
+    const mode = native ? resolveImageMode(native.model, imageCount, latestData.channelModeId) : undefined;
+    const effectiveExtraParams = latestData.modelConfig ? {} : latestData.extraParams ?? {};
+    const selectedParams = { ...effectiveExtraParams, ...resolved.extraParams };
+    const declaredParams = mode ? (latestData.channelModeId === undefined
+      ? automaticImageParameters(mode, selectedParams) : { ...modeParamDefaults(mode), ...selectedParams }) : selectedParams;
+    const configured = readGenerationConfiguration({ modelConfig: { entryId: resolved.entryId,
+      ratio: resolved.ratio, extraParams: declaredParams } });
+    const operation = imageCount && native?.model.operations.includes('image.edit') ? 'image.edit' : 'image.generate';
+    const nativeCount = native ? channelNativeCountParam(native.profile, native.model.id, mode?.mode.id, operation) : undefined;
+    if (options.count === undefined && nativeCount && typeof declaredParams[nativeCount.key] === 'number') {
+      effectiveCount = Number(declaredParams[nativeCount.key]);
+    }
+    const requestResolutionLabel = configured.size ?? (native ? '' : latestData.modelConfig ? '2K' : latestData.size ?? '2K');
     const geometry = normalizeImageRequestGeometry({
       selectedResolution: requestResolutionLabel,
-      selectedAspectRatio: resolved.ratio,
+      selectedAspectRatio: configured.aspectRatio,
       referenceAspectRatio,
       supportedAspectRatios: resolved.supportedRatios,
       fallbackResolution: '2K',
@@ -159,17 +164,16 @@ export async function assembleImageRequest(id: string, options: GenerationReques
       : prompt;
     const promptForRequest = appendGenerationParameterConstraints(promptWithReferenceContext, {
       enabled: latestSettings.appendParameterConstraintsToPrompt,
-      aspectRatio: geometry.promptAspectRatio,
-      resolution: geometry.resolutionLabel,
+      aspectRatio: native ? configured.aspectRatio : geometry.promptAspectRatio,
+      resolution: native ? configured.size : geometry.resolutionLabel,
       count: effectiveCount,
     });
 
     const extraParams = {
       ...effectiveExtraParams,
-      ...resolved.extraParams,
-      resolutionType: geometry.resolutionLabel,
+      ...declaredParams,
+      ...(!native ? { resolutionType: geometry.resolutionLabel } : {}),
     };
-    const nativeMode = resolveNativeChannelModel(resolved.modelForGateway)?.model.modes;
     return {
       promptForRequest,
       requestSize,
@@ -180,8 +184,8 @@ export async function assembleImageRequest(id: string, options: GenerationReques
       gatewayPayload: {
         prompt: promptForRequest,
         model: resolved.modelForGateway,
-        size: nativeMode ? '' : requestSize,
-        aspectRatio: nativeMode ? '' : resolvedRequestAspectRatio,
+        size: native ? native.model.modes ? '' : configured.size ?? '' : requestSize,
+        aspectRatio: native ? native.model.modes ? '' : configured.aspectRatio ?? '' : resolvedRequestAspectRatio,
         referenceImages: latestIncomingImages,
         channelModeId: latestData.channelModeId,
         referenceSlots: latestData.referenceSlots,

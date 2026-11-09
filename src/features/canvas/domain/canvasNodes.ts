@@ -244,8 +244,9 @@ export interface JsonCardNodeData extends NodeDisplayData {
 
 export interface ImageEditNodeData extends NodeImageData {
   prompt: string;
-  model: string;
-  size: ImageSize;
+  /** Legacy selection only. New generators use modelConfig; absence means no legacy selection. */
+  model?: string;
+  size?: ImageSize;
   requestAspectRatio?: string;
   channelModeId?: string;
   referenceSlots?: Record<string, string[]>;
@@ -465,8 +466,9 @@ export interface StoryboardGenNodeData {
   gridCols: number;
   frames: StoryboardGenFrameItem[];
   ratioControlMode?: StoryboardRatioControlMode;
-  model: string;
-  size: ImageSize;
+  /** Legacy selection, absent on newly created generators. */
+  model?: string;
+  size?: ImageSize;
   requestAspectRatio: string;
   channelModeId?: string;
   referenceSlots?: Record<string, string[]>;

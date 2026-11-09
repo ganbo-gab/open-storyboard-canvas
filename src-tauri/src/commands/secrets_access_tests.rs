@@ -2,6 +2,7 @@
 use super::*;
 use crate::commands::http::{custom_http_request_with_resolver, HttpRequestDto};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const TEST_SECRET: &str = "fixture-credential-only";
@@ -11,7 +12,9 @@ struct CountingBackend {
     values: Mutex<HashMap<SecretRef, String>>,
     reads: AtomicUsize,
     deny_reads: AtomicBool,
+    fail_reads: AtomicBool,
     deny_mutations: AtomicBool,
+    fail_mutations: AtomicBool,
     discard_writes: AtomicBool,
 }
 
@@ -21,6 +24,9 @@ impl SecretBackend for CountingBackend {
         if self.deny_reads.load(Ordering::SeqCst) {
             return Err(SecretError::locked());
         }
+        if self.fail_reads.load(Ordering::SeqCst) {
+            return Err(SecretError::error("storage_failed"));
+        }
         Ok(self.values.lock().unwrap().get(reference).cloned())
     }
     fn has(&self, reference: &SecretRef) -> Result<bool, SecretError> {
@@ -29,6 +35,9 @@ impl SecretBackend for CountingBackend {
     fn set(&self, reference: &SecretRef, value: &str) -> Result<(), SecretError> {
         if self.deny_mutations.load(Ordering::SeqCst) {
             return Err(SecretError::locked());
+        }
+        if self.fail_mutations.load(Ordering::SeqCst) {
+            return Err(SecretError::error("storage_failed"));
         }
         if !self.discard_writes.load(Ordering::SeqCst) {
             self.values
@@ -41,6 +50,9 @@ impl SecretBackend for CountingBackend {
     fn delete(&self, reference: &SecretRef) -> Result<(), SecretError> {
         if self.deny_mutations.load(Ordering::SeqCst) {
             return Err(SecretError::locked());
+        }
+        if self.fail_mutations.load(Ordering::SeqCst) {
+            return Err(SecretError::error("storage_failed"));
         }
         self.values.lock().unwrap().remove(reference);
         Ok(())
@@ -73,14 +85,6 @@ fn required(
         .ok_or_else(|| SecretError::error("credential_missing"))
 }
 
-fn expire(vault: &SecretVault<CountingBackend>) {
-    let mut access = vault.access.lock().unwrap();
-    let Some(CredentialAccess::Granted { last_used, .. }) = access.get_mut(&reference()) else {
-        panic!("fixture must have authorized access");
-    };
-    *last_used = SystemTime::now() - CREDENTIAL_IDLE_TIMEOUT;
-}
-
 #[test]
 fn concurrent_requests_authorize_once_and_reuse_the_process_cache() {
     let vault = vault();
@@ -99,7 +103,7 @@ fn denial_is_sticky_across_reads_and_metadata_until_explicit_retry() {
     vault.backend.deny_reads.store(true, Ordering::SeqCst);
     for _ in 0..5 {
         assert_eq!(vault.get(&reference()), Err(SecretError::locked()));
-        assert_eq!(vault.has(&reference()), Ok(true));
+        assert_eq!(vault.has(&reference()), Err(SecretError::locked()));
     }
     vault.backend.deny_reads.store(false, Ordering::SeqCst);
     assert_eq!(vault.get(&reference()), Err(SecretError::locked()));
@@ -110,29 +114,151 @@ fn denial_is_sticky_across_reads_and_metadata_until_explicit_retry() {
 }
 
 #[test]
-fn idle_expiry_blocks_automatic_requests_without_reopening_authorization() {
+fn cached_access_survives_unrelated_credential_operations_and_metadata_refresh() {
     let vault = vault();
     required(&vault, &reference()).unwrap();
-    expire(&vault);
-    assert_eq!(vault.get(&reference()), Err(SecretError::locked()));
-    assert_eq!(vault.backend.reads.load(Ordering::SeqCst), 1);
-    assert_eq!(vault.retry_access(&reference()), Ok(true));
+    let second = SecretRef {
+        namespace: "provider".into(),
+        id: "other-fixture".into(),
+    };
+    vault.set(&second, "second-fixture").unwrap();
+    assert_eq!(vault.has(&second), Ok(true));
+    vault.delete(&second).unwrap();
+    assert_eq!(vault.has(&second), Ok(false));
+    vault.backend.deny_reads.store(true, Ordering::SeqCst);
+    assert_eq!(vault.has(&reference()), Ok(true));
     assert_eq!(required(&vault, &reference()).unwrap(), TEST_SECRET);
     assert_eq!(vault.backend.reads.load(Ordering::SeqCst), 2);
 }
 
 #[test]
-fn clock_rollback_cannot_extend_credential_authorization() {
-    let vault = vault();
-    required(&vault, &reference()).unwrap();
-    {
-        let mut access = vault.access.lock().unwrap();
-        if let Some(CredentialAccess::Granted { last_used, .. }) = access.get_mut(&reference()) {
-            *last_used = SystemTime::now() + Duration::from_secs(60);
+fn transient_storage_errors_do_not_poison_the_process_cache() {
+    let backend = CountingBackend::default();
+    backend
+        .values
+        .lock()
+        .unwrap()
+        .insert(reference(), TEST_SECRET.into());
+    backend.fail_reads.store(true, Ordering::SeqCst);
+    let vault = SecretVault::new(backend);
+    assert_eq!(
+        vault.get(&reference()),
+        Err(SecretError::error("storage_failed"))
+    );
+    vault.backend.fail_reads.store(false, Ordering::SeqCst);
+    assert_eq!(required(&vault, &reference()).unwrap(), TEST_SECRET);
+    assert_eq!(vault.backend.reads.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn windows_logon_session_unavailability_recovers_without_reauthorizing_or_restarting() {
+    struct LogonSessionBackend {
+        available: AtomicBool,
+        reads: AtomicUsize,
+    }
+    impl SecretBackend for LogonSessionBackend {
+        fn get(&self, _: &SecretRef) -> Result<Option<String>, SecretError> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            if self.available.load(Ordering::SeqCst) {
+                Ok(Some(TEST_SECRET.into()))
+            } else {
+                // The pinned Windows backend wraps error 1312 in NoStorageAccess.
+                // The concrete platform error is private; this fixture reproduces
+                // its public variant without accessing the Windows credential store.
+                let error = keyring::Error::NoStorageAccess(Box::new(std::io::Error::other(
+                    "fixture: login session unavailable",
+                )));
+                Err(map_keyring_error_for_platform(&error, true))
+            }
+        }
+        fn set(&self, _: &SecretRef, _: &str) -> Result<(), SecretError> {
+            unreachable!()
+        }
+        fn delete(&self, _: &SecretRef) -> Result<(), SecretError> {
+            unreachable!()
         }
     }
-    assert_eq!(vault.get(&reference()), Err(SecretError::locked()));
+    let vault = SecretVault::new(LogonSessionBackend {
+        available: AtomicBool::new(false),
+        reads: AtomicUsize::new(0),
+    });
+    assert_eq!(
+        vault.get(&reference()),
+        Err(SecretError::error("storage_unavailable"))
+    );
+    vault.backend.available.store(true, Ordering::SeqCst);
+    assert_eq!(vault.get(&reference()), Ok(Some(TEST_SECRET.into())));
+    assert_eq!(vault.has(&reference()), Ok(true));
+    assert_eq!(vault.backend.reads.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn non_windows_storage_denials_stay_locked_and_unknown_platform_faults_fail_closed() {
+    let denial = keyring::Error::NoStorageAccess(Box::new(std::io::Error::other("fixture denial")));
+    assert_eq!(
+        map_keyring_error_for_platform(&denial, false),
+        SecretError::locked()
+    );
+    let platform_failure =
+        keyring::Error::PlatformFailure(Box::new(std::io::Error::from_raw_os_error(5)));
+    assert_eq!(
+        map_keyring_error_for_platform(&platform_failure, true),
+        SecretError::error("storage_failed")
+    );
+}
+
+#[test]
+fn a_windows_style_probe_uses_known_session_state_without_reading_again() {
+    struct ReadProbeBackend {
+        reads: AtomicUsize,
+    }
+    impl SecretBackend for ReadProbeBackend {
+        fn get(&self, _: &SecretRef) -> Result<Option<String>, SecretError> {
+            if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(Some(TEST_SECRET.into()))
+            } else {
+                Err(SecretError::locked())
+            }
+        }
+        // No has override: this reproduces Windows' get-based existence probe.
+        fn set(&self, _: &SecretRef, _: &str) -> Result<(), SecretError> {
+            unreachable!()
+        }
+        fn delete(&self, _: &SecretRef) -> Result<(), SecretError> {
+            unreachable!()
+        }
+    }
+    let vault = SecretVault::new(ReadProbeBackend {
+        reads: AtomicUsize::new(0),
+    });
+    assert_eq!(vault.get(&reference()), Ok(Some(TEST_SECRET.into())));
+    for _ in 0..3 {
+        assert_eq!(vault.has(&reference()), Ok(true));
+    }
     assert_eq!(vault.backend.reads.load(Ordering::SeqCst), 1);
+    assert_eq!(vault.retry_access(&reference()), Err(SecretError::locked()));
+    assert_eq!(vault.has(&reference()), Err(SecretError::locked()));
+    assert_eq!(vault.get(&reference()), Err(SecretError::locked()));
+    assert_eq!(vault.backend.reads.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn transient_mutation_failures_invalidate_values_without_sticking_until_restart() {
+    let vault = vault();
+    required(&vault, &reference()).unwrap();
+    vault.backend.fail_mutations.store(true, Ordering::SeqCst);
+    assert_eq!(
+        vault.set(&reference(), "not-written"),
+        Err(SecretError::error("storage_failed"))
+    );
+    assert_eq!(required(&vault, &reference()).unwrap(), TEST_SECRET);
+    assert_eq!(vault.backend.reads.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        vault.delete(&reference()),
+        Err(SecretError::error("storage_failed"))
+    );
+    assert_eq!(required(&vault, &reference()).unwrap(), TEST_SECRET);
+    assert_eq!(vault.backend.reads.load(Ordering::SeqCst), 3);
 }
 
 #[test]
@@ -180,7 +306,7 @@ fn delete_failures_clear_cached_credentials_and_success_removes_them() {
 #[cfg(target_os = "macos")]
 #[test]
 fn macos_keyring_platform_denials_remain_recognizable_as_locked() {
-    for status in [-128, -25291, -25293, -25308, -25315] {
+    for status in [-128, -25293, -25308, -25315] {
         let error = keyring::Error::PlatformFailure(Box::new(
             security_framework::base::Error::from_code(status),
         ));
@@ -192,6 +318,23 @@ fn macos_keyring_platform_denials_remain_recognizable_as_locked() {
         map_keyring_error(&error),
         SecretError::error("storage_failed")
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_keychain_unavailability_is_not_an_authorization_denial() {
+    let unavailable = || Box::new(security_framework::base::Error::from_code(-25291));
+    // apple-native maps errSecNotAvailable to NoStorageAccess; some callers
+    // provide PlatformFailure instead. Both describe the same availability fault.
+    for error in [
+        keyring::Error::NoStorageAccess(unavailable()),
+        keyring::Error::PlatformFailure(unavailable()),
+    ] {
+        assert_eq!(
+            map_keyring_error(&error),
+            SecretError::error("storage_unavailable")
+        );
+    }
 }
 
 fn request(url: String, method: &str, body: Option<Value>) -> HttpRequestDto {

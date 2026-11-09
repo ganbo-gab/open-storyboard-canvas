@@ -2700,9 +2700,8 @@ pub async fn submit_generate_image_job(
     let registry = get_registry();
     let provider = registry
         .resolve_provider_for_model(&request.model)
-        .or_else(|| registry.get_default_provider())
         .cloned()
-        .ok_or_else(|| "Provider not found".to_string())?;
+        .ok_or_else(|| "Unknown image model; request was not submitted".to_string())?;
     let credential_ref = bind_request_credential(provider.as_ref(), &mut request).await?;
 
     let req = GenerateRequest {
@@ -2944,8 +2943,7 @@ pub async fn generate_image(mut request: GenerateRequestDto) -> Result<String, S
     let registry = get_registry();
     let provider = registry
         .resolve_provider_for_model(&request.model)
-        .or_else(|| registry.get_default_provider())
-        .ok_or_else(|| "Provider not found".to_string())?;
+        .ok_or_else(|| "Unknown image model; request was not submitted".to_string())?;
     bind_request_credential(provider.as_ref(), &mut request).await?;
 
     let req = GenerateRequest {
@@ -2972,6 +2970,23 @@ mod contract_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn unknown_image_model_is_rejected_before_credential_binding() {
+        let result = generate_image(GenerateRequestDto {
+            prompt: "Routing fixture".into(),
+            model: "unknown-provider/image-model".into(),
+            size: "1024x576".into(),
+            aspect_ratio: "16:9".into(),
+            reference_images: None,
+            extra_params: None,
+        })
+        .await;
+        assert_eq!(
+            result,
+            Err("Unknown image model; request was not submitted".to_string())
+        );
+    }
 
     #[test]
     fn missing_result_recovery_requires_missing_bytes_original_handle_and_never_allows_resubmit() {

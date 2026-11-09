@@ -1,0 +1,17 @@
+{
+  "sameIdentifier": "com.ganbo-gab.open-storyboard-canvas",
+  "builds": [
+    {
+      "version": 1,
+      "requirement": "cdhash H\"126be8b0792eabd86a6de1ec1b50cde06eae725f\""
+    },
+    {
+      "version": 2,
+      "requirement": "cdhash H\"18d1e596d58b768060bde1cf11ca60d12ef1674f\""
+    }
+  ],
+  "oldRequirementMatchesOldBuild": true,
+  "oldRequirementMatchesUpdatedBuild": false,
+  "updatedBuildResult": "test-requirement: code failed to satisfy specified code requirement(s)",
+  "systemKeychainTouched": false
+}

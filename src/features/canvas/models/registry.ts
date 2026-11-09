@@ -31,8 +31,6 @@ const imageModelMap = new Map<string, ImageModelDefinition>(
   imageModels.map((model) => [model.id, model])
 );
 
-export const DEFAULT_IMAGE_MODEL_ID = 'kie/nano-banana-2';
-
 const imageModelAliasMap = new Map<string, string>([
   ['gemini-3.1-flash', 'ppio/gemini-3.1-flash'],
   ['gemini-3.1-flash-edit', 'ppio/gemini-3.1-flash'],
@@ -46,9 +44,9 @@ export function listModelProviders(): ModelProviderDefinition[] {
   return providers;
 }
 
-export function getImageModel(modelId: string): ImageModelDefinition {
+export function getImageModel(modelId: string): ImageModelDefinition | undefined {
   const resolvedModelId = imageModelAliasMap.get(modelId) ?? modelId;
-  return imageModelMap.get(resolvedModelId) ?? imageModelMap.get(DEFAULT_IMAGE_MODEL_ID)!;
+  return imageModelMap.get(resolvedModelId);
 }
 
 export function resolveImageModelResolutions(

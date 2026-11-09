@@ -4,6 +4,7 @@ import { RATIO_PARAM_KEYS, SIZE_PARAM_KEYS, type JsonValue, type ParamSpec } fro
 import { resolveParamValue } from '@/features/channels/domain/template';
 import { automaticImageParameters, imageModeReferenceCount, resolveImageMode } from '@/features/channels/application/imageModeSelection';
 import type { GenerateImagePayload } from '../ports';
+import { readGenerationConfiguration } from '../../domain/generationConfiguration';
 
 /** Select before projecting parameters, so defaults and the request use the same image mode. */
 export function mapImageChannelGenerationParameters(input: GenerateImagePayload): GenerateImagePayload {
@@ -13,6 +14,21 @@ export function mapImageChannelGenerationParameters(input: GenerateImagePayload)
   const mode = resolveImageMode(native.model, count, input.channelModeId);
   return mapChannelGenerationParameters({ ...input, channelModeId: mode.mode.id,
     extraParams: input.channelModeId === undefined ? automaticImageParameters(mode, input.extraParams) : input.extraParams });
+}
+
+/** Describe the assembled request, including mode defaults, without sending or reading credentials. */
+export function describeImageGenerationRequest(input: GenerateImagePayload) {
+  const native = resolveNativeChannelModel(input.model);
+  const mode = native ? resolveImageMode(native.model,
+    imageModeReferenceCount(native.model, input.referenceImages, input.referenceSlots), input.channelModeId) : undefined;
+  const effective = mode ? Object.fromEntries(mode.params.flatMap(param => {
+    const hint = SIZE_PARAM_KEYS.includes(param.key) ? input.size || undefined
+      : RATIO_PARAM_KEYS.includes(param.key) ? input.aspectRatio || undefined : undefined;
+    const value = input.extraParams?.[param.key] ?? hint ?? param.default;
+    return value === undefined ? [] : [[param.key, value]];
+  })) : input.extraParams ?? {};
+  return readGenerationConfiguration({ modelConfig: { entryId: input.model,
+    ratio: input.aspectRatio || undefined, resolution: input.size || undefined, extraParams: effective } });
 }
 
 interface GenerationParameterInput {

@@ -17,7 +17,6 @@ import { ModelConfigPicker } from './ModelConfigPicker';
 import {
   resolvePromptTemplateText,
   type PromptTemplateId,
-  type PromptTemplateSettingsSnapshot,
 } from '@/features/canvas/application/promptTemplates';
 import { useSettingsStore } from '@/stores/settingsStore';
 
@@ -183,17 +182,3 @@ export const MultiFunctionPanel = memo(({ isOpen, onClose, onApply, buttonRect }
 });
 
 MultiFunctionPanel.displayName = 'MultiFunctionPanel';
-
-// Helper function to build multi-function prompt
-export function buildMultiFunctionPrompt(functionType: MultiFunctionType): string {
-  const item = MULTI_FUNCTION_ITEMS.find((i) => i.id === functionType);
-  return item ? resolvePromptTemplateText(item.promptTemplateId, useSettingsStore.getState()) : '';
-}
-
-export function buildMultiFunctionPromptFromSettings(
-  functionType: MultiFunctionType,
-  settings: PromptTemplateSettingsSnapshot
-): string {
-  const item = MULTI_FUNCTION_ITEMS.find((i) => i.id === functionType);
-  return item ? resolvePromptTemplateText(item.promptTemplateId, settings) : '';
-}

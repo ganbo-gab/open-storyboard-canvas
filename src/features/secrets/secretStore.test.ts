@@ -100,6 +100,24 @@ describe('system credential vault contract', () => {
     expect(await store.reveal(ref)).toBe('EXPLICIT_RECOVERY');
     expect(credentialState(ref)).toBe('present');
   });
+  it('preserves safe native codes and recovers a temporary probe failure without restarting', async () => {
+    const { backend, store } = memoryBackend();
+    vi.mocked(backend.has).mockRejectedValueOnce('{"state":"error","code":"storage_unavailable","detail":"PRIVATE"}').mockResolvedValue(true);
+    await expect(store.has(ref)).rejects.toMatchObject({ state: 'error', code: 'storage_unavailable' });
+    expect(credentialState(ref)).toBe('error');
+    expect(await store.has(ref)).toBe(true);
+    expect(credentialState(ref)).toBe('present');
+    expect(backend.get).not.toHaveBeenCalled();
+    expect(JSON.stringify(useSecretStatusStore.getState())).not.toContain('PRIVATE');
+  });
+  it('does not hide failed write verification with a successful existence probe', async () => {
+    const { backend, store } = memoryBackend();
+    vi.mocked(backend.get).mockResolvedValue(null);
+    await expect(store.set(ref, 'NOT_READ_BACK')).rejects.toMatchObject({ code: 'read-back-mismatch' });
+    vi.mocked(backend.has).mockResolvedValue(true);
+    expect(await store.has(ref)).toBe(true);
+    expect(credentialState(ref)).toBe('error');
+  });
   it('ignores stale metadata when a later credential operation has changed its status', async () => {
     const { backend, store } = memoryBackend();
     const probe = Promise.withResolvers<boolean>();

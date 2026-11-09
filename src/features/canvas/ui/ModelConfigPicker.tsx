@@ -70,9 +70,7 @@ export const ModelConfigPicker = memo(({
   const setPanelModelConfig = useSettingsStore((s) => s.setPanelModelConfig);
 
   const firstUsable = catalog.find((e) => e.usable);
-  const persistedEntry = persisted ? catalog.find((e) => e.id === persisted.entryId) : undefined;
-  const persistedUsableConfig = persisted && persistedEntry?.usable ? persisted : undefined;
-  const current: ModelConfigValue = value ?? (onChange ? undefined : persistedUsableConfig) ?? (firstUsable
+  const current: ModelConfigValue = value ?? (onChange ? undefined : persisted) ?? (firstUsable
     ? {
       entryId: firstUsable.id,
       ratio: resolvePreferredRatio(firstUsable.supportedRatios, preferredRatio, undefined, {
@@ -120,14 +118,14 @@ export const ModelConfigPicker = memo(({
   }, [onChange, panelKey, setPanelModelConfig]);
 
   useEffect(() => {
-    if (onChange || persistedUsableConfig || !firstUsable) return;
+    if (onChange || value || persisted || !firstUsable) return;
     setPanelModelConfig(panelKey, {
       entryId: firstUsable.id,
       ratio: resolvePreferredRatio(firstUsable.supportedRatios, preferredRatio, undefined, {
         preferAutoFallback: Boolean(preferredRatio),
       }),
     });
-  }, [firstUsable, onChange, panelKey, persistedUsableConfig, preferredRatio, setPanelModelConfig]);
+  }, [firstUsable, onChange, panelKey, persisted, preferredRatio, setPanelModelConfig, value]);
 
   useEffect(() => {
     const nextPreferredRatio = preferredRatio ?? null;
@@ -414,43 +412,3 @@ export const ModelConfigPicker = memo(({
 });
 
 ModelConfigPicker.displayName = 'ModelConfigPicker';
-
-interface ModelConfigButtonProps {
-  panelKey: string;
-}
-
-/**
- * Compact "⚙ 配置模型" button that opens a small popover containing the same
- * provider / model / ratio chips as ModelConfigPicker. Used by panels whose
- * body is too narrow to inline the chips (multi-function, edit).
- */
-export const ModelConfigButton = memo(({ panelKey }: ModelConfigButtonProps) => {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <UiButton variant="secondary"
-        type="button"
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="h-auto gap-1 rounded-md px-2 py-0.5 text-[10px]"
-        title="配置当前面板使用的模型"
-      >
-        <Settings2 className="h-3 w-3" />
-        配置模型
-      </UiButton>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-900" onClick={() => setOpen(false)} />
-          <div
-            className="nowheel absolute bottom-full left-0 z-1000 mb-1 rounded-lg border border-(--canvas-node-field-border) bg-(--canvas-node-menu-bg) p-2 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-            onWheelCapture={stopPickerWheel}
-          >
-            <ModelConfigPicker panelKey={panelKey} />
-          </div>
-        </>
-      )}
-    </div>
-  );
-});
-
-ModelConfigButton.displayName = 'ModelConfigButton';

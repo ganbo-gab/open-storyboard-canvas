@@ -85,34 +85,23 @@ pub trait AIProvider: Send + Sync {
 
 pub struct ProviderRegistry {
     providers: HashMap<String, Arc<dyn AIProvider>>,
-    default_provider: Option<String>,
 }
 
 impl ProviderRegistry {
     pub fn new() -> Self {
         Self {
             providers: HashMap::new(),
-            default_provider: None,
         }
     }
 
     pub fn register_provider(&mut self, provider: Arc<dyn AIProvider>) {
         let name = provider.name().to_string();
         info!("Registering AI provider: {}", name);
-        self.providers.insert(name.clone(), provider);
-        if self.default_provider.is_none() {
-            self.default_provider = Some(name);
-        }
+        self.providers.insert(name, provider);
     }
 
     pub fn get_provider(&self, name: &str) -> Option<&Arc<dyn AIProvider>> {
         self.providers.get(name)
-    }
-
-    pub fn get_default_provider(&self) -> Option<&Arc<dyn AIProvider>> {
-        self.default_provider
-            .as_ref()
-            .and_then(|name| self.providers.get(name))
     }
 
     pub fn list_providers(&self) -> Vec<String> {
@@ -161,5 +150,40 @@ impl ProviderRegistry {
 impl Default for ProviderRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn undeclared_models_do_not_choose_the_first_registered_provider() {
+        let mut registry = ProviderRegistry::new();
+        for provider in providers::build_default_providers() {
+            registry.register_provider(provider);
+        }
+        for model in ["", "unknown-image-model", "unknown-provider/image-model"] {
+            assert!(registry.resolve_provider_for_model(model).is_none());
+        }
+    }
+
+    #[test]
+    fn declared_compatibility_models_keep_their_provider_route() {
+        let providers = providers::build_default_providers();
+        let mut registry = ProviderRegistry::new();
+        for provider in &providers {
+            registry.register_provider(provider.clone());
+        }
+        for provider in providers {
+            for model in provider.list_models() {
+                assert_eq!(
+                    registry
+                        .resolve_provider_for_model(&model)
+                        .map(|resolved| resolved.name()),
+                    Some(provider.name())
+                );
+            }
+        }
     }
 }

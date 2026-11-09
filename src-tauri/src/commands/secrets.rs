@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{LazyLock, Mutex};
-use std::time::{Duration, SystemTime};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -17,7 +16,6 @@ mod macos;
 const SERVICE_PREFIX: &str = "com.storyboard-copilot.credentials";
 const TOKEN_PREFIX: &str = "__SC_SECRET_";
 const TOKEN_SUFFIX: &str = "__";
-const CREDENTIAL_IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// Public, non-secret identity. Namespace and id are validated before backend access.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -111,7 +109,26 @@ struct KeyringBackend;
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn map_keyring_error(error: &keyring::Error) -> SecretError {
+    map_keyring_error_for_platform(error, cfg!(target_os = "windows"))
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn map_keyring_error_for_platform(error: &keyring::Error, windows_native: bool) -> SecretError {
     match error {
+        #[cfg(target_os = "macos")]
+        keyring::Error::NoStorageAccess(error) | keyring::Error::PlatformFailure(error)
+            if error
+                .downcast_ref::<security_framework::base::Error>()
+                .is_some_and(|error| macos::is_storage_unavailable_status(error.code())) =>
+        {
+            SecretError::error("storage_unavailable")
+        }
+        // windows-native-keyring-store 1.1.0 emits this variant only for
+        // ERROR_NO_SUCH_LOGON_SESSION (1312), not an authorization refusal.
+        // A temporarily unavailable login session must not poison the process.
+        keyring::Error::NoStorageAccess(_) if windows_native => {
+            SecretError::error("storage_unavailable")
+        }
         keyring::Error::NoStorageAccess(_) => SecretError::locked(),
         #[cfg(target_os = "macos")]
         keyring::Error::PlatformFailure(error)
@@ -193,11 +210,10 @@ impl SecretBackend for KeyringBackend {
 }
 
 // Native process memory only. Neither this state nor its values implement Debug/Serialize.
+// Authorization follows this process session, not an application idle timer or wall clock.
+// Explicit replacement/deletion/retry clears this ref; real OS denials remain blocked.
 enum CredentialAccess {
-    Granted {
-        value: String,
-        last_used: SystemTime,
-    },
+    Granted { value: String },
     Blocked(SecretError),
 }
 
@@ -221,21 +237,8 @@ impl<B: SecretBackend> SecretVault<B> {
             .access
             .lock()
             .map_err(|_| SecretError::error("storage_failed"))?;
-        let now = SystemTime::now();
-        // Expired entries fail closed; a background poll must not open authorization UI again.
-        // Wall time includes system sleep; a clock rollback also expires access conservatively.
-        for entry in access.values_mut() {
-            if matches!(entry, CredentialAccess::Granted { last_used, .. }
-                if now.duration_since(*last_used).unwrap_or(CREDENTIAL_IDLE_TIMEOUT) >= CREDENTIAL_IDLE_TIMEOUT)
-            {
-                *entry = CredentialAccess::Blocked(SecretError::locked());
-            }
-        }
         match access.get_mut(reference) {
-            Some(CredentialAccess::Granted { value, last_used }) => {
-                *last_used = now;
-                Ok(Some(value.clone()))
-            }
+            Some(CredentialAccess::Granted { value }) => Ok(Some(value.clone())),
             Some(CredentialAccess::Blocked(error)) => Err(*error),
             None => self.read_and_remember(reference, &mut access),
         }
@@ -253,21 +256,26 @@ impl<B: SecretBackend> SecretVault<B> {
                     reference.clone(),
                     CredentialAccess::Granted {
                         value: value.clone(),
-                        last_used: SystemTime::now(),
                     },
                 );
             }
             Ok(None) => {
                 access.remove(reference);
             }
-            Err(error) => {
+            // A real OS denial is sticky until the user explicitly retries. Other
+            // storage failures are transient and must be retried on the next
+            // explicit request instead of poisoning this process session.
+            Err(error) if error.state == SecretErrorState::Locked => {
                 access.insert(reference.clone(), CredentialAccess::Blocked(*error));
+            }
+            Err(_) => {
+                access.remove(reference);
             }
         }
         result
     }
 
-    // Only an explicit user recovery action crosses this boundary after a denial/expiry.
+    // Only an explicit user recovery action crosses this boundary after a denial.
     fn retry_access(&self, reference: &SecretRef) -> Result<bool, SecretError> {
         reference.validate()?;
         let mut access = self
@@ -287,11 +295,17 @@ impl<B: SecretBackend> SecretVault<B> {
             .map_err(|_| SecretError::error("storage_failed"))?;
         access.remove(reference);
         if let Err(error) = self.backend.set(reference, value) {
-            access.insert(reference.clone(), CredentialAccess::Blocked(error));
+            if error.state == SecretErrorState::Locked {
+                access.insert(reference.clone(), CredentialAccess::Blocked(error));
+            } else {
+                access.remove(reference);
+            }
             return Err(error);
         }
         if self.read_and_remember(reference, &mut access)?.as_deref() != Some(value) {
             let error = SecretError::error("verification_failed");
+            // A successful write whose read-back cannot be verified is not safe
+            // to use implicitly; require an explicit retry instead.
             access.insert(reference.clone(), CredentialAccess::Blocked(error));
             return Err(error);
         }
@@ -307,17 +321,29 @@ impl<B: SecretBackend> SecretVault<B> {
         access.remove(reference);
         let result = self.backend.delete(reference);
         if let Err(error) = result {
-            access.insert(reference.clone(), CredentialAccess::Blocked(error));
+            if error.state == SecretErrorState::Locked {
+                access.insert(reference.clone(), CredentialAccess::Blocked(error));
+            } else {
+                access.remove(reference);
+            }
         }
         result
     }
 
     fn has(&self, reference: &SecretRef) -> Result<bool, SecretError> {
         reference.validate()?;
-        let _access = self
+        let access = self
             .access
             .lock()
             .map_err(|_| SecretError::error("storage_failed"))?;
+        // Windows' default probe reads the credential. Reuse known session state
+        // so metadata refresh cannot re-open access or overwrite a successful
+        // read with a transient storage failure. A probe never unblocks a denial.
+        match access.get(reference) {
+            Some(CredentialAccess::Granted { .. }) => return Ok(true),
+            Some(CredentialAccess::Blocked(error)) => return Err(*error),
+            None => {}
+        }
         self.backend.has(reference)
     }
 }

@@ -13,7 +13,7 @@ it('waits for explicit authorization before querying the original task and preve
   vi.mocked(authorizeChannelJob).mockReturnValue(authorization.promise);
   const query = vi.fn(async () => undefined);
   render(<CredentialRecoveryControl jobId="original-job" canQuery onAuthorized={query} />);
-  const button = screen.getByRole('button', { name: '重新授权并查询原结果' });
+  const button = screen.getByRole('button', { name: '重试读取凭据并查询原结果' });
   fireEvent.click(button); fireEvent.click(button);
   expect(authorizeChannelJob).toHaveBeenCalledExactlyOnceWith('original-job');
   expect(button.hasAttribute('disabled')).toBe(true); expect(query).not.toHaveBeenCalled();
@@ -26,10 +26,10 @@ it('keeps a denied authorization paused and allows a later explicit retry', asyn
   vi.mocked(authorizeChannelJob).mockRejectedValueOnce(new Error('denied')).mockResolvedValue(undefined);
   const query = vi.fn(async () => undefined);
   render(<CredentialRecoveryControl jobId="original-job" canQuery onAuthorized={query} />);
-  fireEvent.click(screen.getByRole('button', { name: '重新授权并查询原结果' }));
+  fireEvent.click(screen.getByRole('button', { name: '重试读取凭据并查询原结果' }));
   expect((await screen.findByRole('status')).textContent).toContain('已停止查询');
   expect(query).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '重新授权并查询原结果' }));
+  fireEvent.click(screen.getByRole('button', { name: '重试读取凭据并查询原结果' }));
   await waitFor(() => expect(query).toHaveBeenCalledOnce());
   expect(authorizeChannelJob).toHaveBeenCalledTimes(2);
 });
@@ -38,8 +38,20 @@ it('authorizes a pre-submit failure without generating or querying a nonexistent
   vi.mocked(authorizeChannelJob).mockResolvedValue(undefined);
   const query = vi.fn(async () => undefined);
   render(<CredentialRecoveryControl jobId="unsent-local-job" canQuery={false} onAuthorized={query} />);
-  fireEvent.click(screen.getByRole('button', { name: '重新授权系统凭据' }));
+  fireEvent.click(screen.getByRole('button', { name: '重试读取凭据' }));
   expect((await screen.findByRole('status')).textContent).toContain('此前请求尚未发出');
   expect(authorizeChannelJob).toHaveBeenCalledExactlyOnceWith('unsent-local-job');
   expect(query).not.toHaveBeenCalled();
+});
+
+it('does not blame credentials for an upstream query failure after credentials recovered', async () => {
+  vi.mocked(authorizeChannelJob).mockResolvedValue(undefined);
+  const query = vi.fn().mockRejectedValue(new Error('upstream timeout PRIVATE'));
+  render(<CredentialRecoveryControl jobId="original-job" canQuery onAuthorized={query} />);
+  fireEvent.click(screen.getByRole('button', { name: '重试读取凭据并查询原结果' }));
+  const status = await screen.findByRole('status');
+  expect(status.textContent).toContain('凭据已可用');
+  expect(status.textContent).toContain('查询未完成');
+  expect(status.textContent).not.toMatch(/授权|PRIVATE/);
+  expect(query).toHaveBeenCalledOnce();
 });

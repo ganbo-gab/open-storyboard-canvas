@@ -2,37 +2,23 @@ import { useRef, useState } from 'react';
 import { ChevronDown, Layers, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { PopoverSurface, anchorAbove, type MenuAnchor } from '@/components/ui';
-import { resolveNativeChannelModel } from '@/features/channels/application/channelService';
-import { automaticImageParameters, imageModeReferenceCount, resolveImageMode } from '@/features/channels/application/imageModeSelection';
-import { listModelModes, modeParamDefaults, retainModeState } from '@/features/channels/application/modelModes';
+import { modeParamDefaults, retainModeState } from '@/features/channels/application/modelModes';
 import { ComposerParameterPanel } from '@/features/workbench/ui/ComposerParameterPanel';
 import { parameterSummary } from '@/features/channels/ui/parameterPresentation';
 import { useCanvasStore } from '@/stores/canvasStore';
 import type { ModelConfigValue } from '@/features/canvas/ui/ModelConfigPicker';
 import { ChannelModeSections } from './ChannelModeSections';
-import { useNodeReferences } from './useNodeReferences';
-import { isImageEditNode, isStoryboardGenNode } from '@/features/canvas/domain/canvasNodes';
+import { useNativeImageMode } from './useNativeImageMode';
 
 export function NativeImageControls({ nodeId, value, onChange }: { nodeId: string; value: ModelConfigValue; onChange(value: ModelConfigValue): void }) {
   const { t } = useTranslation();
-  const node = useCanvasStore(state => state.nodes.find(item => item.id === nodeId));
-  const data = node && (isImageEditNode(node) || isStoryboardGenNode(node)) ? node.data : undefined;
   const updateNodeData = useCanvasStore(state => state.updateNodeData);
-  const references = useNodeReferences(nodeId);
-  const native = resolveNativeChannelModel(value.entryId);
+  const resolved = useNativeImageMode(nodeId, value);
   const trigger = useRef<HTMLButtonElement>(null);
   const [panel, setPanel] = useState<{ kind: 'mode' | 'params'; anchor: MenuAnchor } | null>(null);
-  if (!native || !data) return null;
-  const requested = data.channelModeId;
-  const slots = data.referenceSlots;
-  const count = imageModeReferenceCount(native.model, [...references.all.flatMap(ref => ref.kind === 'image' && ref.imageUrl ? [ref.imageUrl] : []), ...(node && isStoryboardGenNode(node) ? ['storyboard-grid-reference'] : [])], slots);
-  let error = '';
-  let active = listModelModes(native.model)[0];
-  try { active = resolveImageMode(native.model, count, requested); }
-  catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
-  const modes = listModelModes(native.model);
+  if (!resolved) return null;
+  const { native, requested, slots, count, active, modes, params, references, error } = resolved;
   const auto = requested === undefined;
-  const params = auto ? automaticImageParameters(active, value.extraParams) : value.extraParams ?? {};
   const modeLabel = native.model.modes ? active.mode.label : count && native.model.operations.includes('image.edit') ? t('ui.channels.autoImage.edit') : t('ui.channels.autoImage.generate');
   const open = (kind: 'mode' | 'params', element: HTMLElement) => setPanel(current => current?.kind === kind ? null : { kind, anchor: anchorAbove(element) });
   const choose = (id: string | undefined) => {
@@ -46,7 +32,7 @@ export function NativeImageControls({ nodeId, value, onChange }: { nodeId: strin
   };
   return <>
     <button type="button" className="composer-chip" onClick={event => open('mode', event.currentTarget)} title={error || t('ui.channels.autoImage.hint')}><Layers /><span className="composer-chip__text">{error ? t('ui.channels.autoImage.choose') : `${auto ? `${t('ui.channels.autoImage.auto')} · ` : ''}${modeLabel}`}</span><ChevronDown /></button>
-    <button ref={trigger} type="button" className="composer-chip" onClick={event => open('params', event.currentTarget)}><SlidersHorizontal /><span className="composer-chip__text">{parameterSummary(active.params, params).join(' · ') || t('ui.workbench.parameters')}</span><ChevronDown /></button>
+    <button ref={trigger} type="button" className="composer-chip" title={parameterSummary(active.params, params).join(' · ') || t('ui.workbench.parameters')} onClick={event => open('params', event.currentTarget)}><SlidersHorizontal /><span className="composer-chip__text">{parameterSummary(active.params, params).join(' · ') || t('ui.workbench.parameters')}</span><ChevronDown /></button>
     {panel && <PopoverSurface anchor={panel.anchor} width={420} label={t(panel.kind === 'mode' ? 'channelModes.mode' : 'ui.workbench.parameters')} onClose={() => setPanel(null)}>
       {panel.kind === 'params' ? <ComposerParameterPanel params={active.params} values={params} onChange={extraParams => onChange({ ...value, extraParams })} /> : <>
         <button type="button" className="ui-menu__item" onClick={() => choose(undefined)}>{t('ui.channels.autoImage.auto')}</button>

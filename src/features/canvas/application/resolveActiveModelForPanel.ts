@@ -1,8 +1,6 @@
 import {
-  DEFAULT_IMAGE_MODEL_ID,
   getModelProvider,
   getImageModel,
-  listImageModels,
   type ImageModelDefinition,
 } from '@/features/canvas/models';
 import {
@@ -94,6 +92,7 @@ function resolveBuiltinModel(
 ): ResolvedPanelModel {
   const settings = useSettingsStore.getState();
   const model = getImageModel(modelId);
+  if (!model) return unavailableModel(`builtin:${modelId}`, ratio, extraParams);
   const apiKey = settings.apiKeys[model.providerId] ?? '';
   const provider = getModelProvider(model.providerId);
   return {
@@ -212,14 +211,13 @@ function resolvePanelModelConfig(
     return resolveCustomModel(entryId, ratio, extraParams, customProviders, catalog, resolvedByFallback);
   }
 
-  // Unknown prefix: preserve the old behavior as the last-resort candidate,
-  // but let the caller's fallback pass replace it first when possible.
-  return resolveBuiltinModel(DEFAULT_IMAGE_MODEL_ID, ratio, extraParams, resolvedByFallback);
+  return unavailableModel(entryId, ratio, extraParams);
 }
 
-function pickFirstConfiguredBuiltinModel(): ImageModelDefinition | null {
-  const apiKeys = useSettingsStore.getState().apiKeys;
-  return listImageModels().find((model) => hasText(apiKeys[model.providerId])) ?? null;
+function unavailableModel(entryId = '', ratio = 'auto', extraParams: Record<string, unknown> = {}): ResolvedPanelModel {
+  return { entryId, modelForGateway: entryId, providerId: '', providerLabel: '', ratio,
+    builtinModel: null, apiKey: '', requiresApiKey: false, usable: false, resolvedByFallback: false,
+    extraParams, supportedRatios: [] };
 }
 
 /**
@@ -231,7 +229,7 @@ function pickFirstConfiguredBuiltinModel(): ImageModelDefinition | null {
  * Keeping this resolution in one place lets every panel honour the user's
  * per-panel pick (ModelConfigPicker writes to
  * `settingsStore.lastModelConfigByPanel[panelKey]`) instead of hard-coding
- * DEFAULT_IMAGE_MODEL_ID.
+ * a provider that the user never selected.
  */
 export function resolveActiveModelForPanel(
   panelKey: string,
@@ -248,7 +246,8 @@ export function resolveActiveModelForPanel(
     ? resolvePanelModelConfig(requested, customProviders, catalog, false)
     : null;
 
-  if (requestedResolved?.usable) {
+  // A stored panel selection is also an explicit choice, even after its provider disappears.
+  if (requestedResolved) {
     return requestedResolved;
   }
 
@@ -267,24 +266,5 @@ export function resolveActiveModelForPanel(
     );
   }
 
-  const firstConfiguredBuiltin = pickFirstConfiguredBuiltinModel();
-  if (firstConfiguredBuiltin) {
-    return resolveBuiltinModel(
-      firstConfiguredBuiltin.id,
-      normalizeRatioValue(requested?.ratio ?? 'auto') || 'auto',
-      {},
-      true
-    );
-  }
-
-  if (requestedResolved) {
-    return requestedResolved;
-  }
-
-  return resolveBuiltinModel(
-    DEFAULT_IMAGE_MODEL_ID,
-    'auto',
-    {},
-    true
-  );
+  return unavailableModel();
 }

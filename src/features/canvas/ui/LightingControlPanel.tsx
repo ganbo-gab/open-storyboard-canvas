@@ -429,25 +429,3 @@ export const LightingControlPanel = memo(
 );
 
 LightingControlPanel.displayName = 'LightingControlPanel';
-
-export function buildLightingPromptFromOptions(options: LightingControlOptions): string {
-  const presetPrompt = options.stylePreset
-    ? (STYLE_PRESETS.find((p) => p.id === options.stylePreset)?.prompt ?? '')
-    : '';
-  const consistencyPrompt = [
-    'this is a lighting-only edit of the reference image: same scene, same people, same action, same clothing, same background, only the lighting changes',
-    'do not add any lamp, spotlight, light fixture, reflector, softbox, torch, candle, or photography equipment into the image',
-    'preserve identity, face, outfit, hairstyle, body pose, and the background layout from the input image',
-  ].join(', ');
-  return buildLightingPromptFromTemplate({
-    template: '{{consistencyPrompt}}, {{presetPrompt}}, {{lightDirectionPrompt}}, {{brightnessPrompt}}, {{rimLightPrompt}}, {{lightColorPrompt}}, {{lightingMeta}}',
-    consistencyPrompt,
-    presetPrompt,
-    smartDesc: '',
-    lightDirectionPrompt: `main key light from azimuth ${options.azimuth} degrees, elevation ${options.elevation} degrees`,
-    brightnessPrompt: options.brightness === 50 ? '' : `brightness ${options.brightness}%`,
-    rimLightPrompt: options.rimLight ? 'add clear rim light and edge highlight along the silhouette' : '',
-    lightColorPrompt: options.lightColor !== '#ffffff' ? `key light color tinted toward ${options.lightColor}` : '',
-    lightingMeta: `[lighting azimuth:${options.azimuth}° elevation:${options.elevation}° brightness:${options.brightness}%]`,
-  });
-}
