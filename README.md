@@ -7,7 +7,7 @@
 **Local-first AI Storyboard & Infinite Canvas Desktop App**  
 把多模型渠道、参考素材、无限节点画布、三维导演台与多作用域 Agent 连接起来的本地桌面 AI 分镜创作工具。
 
-[下载最新版](https://github.com/ganbo-gab/open-storyboard-canvas/releases/latest) · [使用文档](docs/) · [问题反馈](https://github.com/ganbo-gab/open-storyboard-canvas/issues)
+[下载最新版](https://github.com/ganbo-gab/open-storyboard-canvas/releases/latest) · [使用文档](docs/) · [加入 QQ 群](#交流与反馈) · [问题反馈](https://github.com/ganbo-gab/open-storyboard-canvas/issues)
 
 简体中文 | [English](README.en.md)
 
