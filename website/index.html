@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Open Storyboard Canvas — Local-First AI Storyboard &amp; 3D Director Studio</title>
+  <meta name="description" content="Local-first AI storyboard infinite canvas desktop app with 3D Director Studio, multi-provider models, node workflows, and scoped AI agents for macOS &amp; Windows." />
+  <meta name="keywords" content="Open Storyboard Canvas, AI storyboard, infinite canvas, local-first, 3D Director Studio, Tauri, React, ComfyUI, storyboarding, 开源画布, AI分镜, 节点画布" />
+  <meta name="theme-color" content="#060A10" />
+
+  <!-- Open Graph / Social Preview -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://ganbo-gab.github.io/open-storyboard-canvas/" />
+  <meta property="og:title" content="Open Storyboard Canvas — Local-First AI Storyboard &amp; Infinite Canvas" />
+  <meta property="og:description" content="Connect multi-provider AI models, infinite node workflows, 3D Director Studio previs, and scoped agents in one local desktop workspace." />
+  <meta property="og:image" content="https://ganbo-gab.github.io/open-storyboard-canvas/assets/brand/social-preview.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Open Storyboard Canvas — Local-First AI Storyboard Desktop App" />
+  <meta name="twitter:description" content="Infinite Node Canvas · 3D Director Studio · Multi-Provider AI · Scoped Agents for macOS &amp; Windows." />
+  <meta name="twitter:image" content="https://ganbo-gab.github.io/open-storyboard-canvas/assets/brand/social-preview.png" />
+
+  <link rel="icon" type="image/png" href="assets/brand/open-storyboard-canvas-icon.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Skip link for keyboard navigation -->
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
+  <!-- CinemaScope 2.39:1 Letterbox Bars (optional toggle) -->
+  <div class="letterbox-bar letterbox-top" aria-hidden="true"></div>
+  <div class="letterbox-bar letterbox-bottom" aria-hidden="true"></div>
+
+  <!-- Minimal Corner Viewfinder HUD (quiet, stays out of the way) -->
+  <div class="viewfinder-hud" aria-hidden="true">
+    <span class="vf-corner vf-tl"></span>
+    <span class="vf-corner vf-tr"></span>
+    <span class="vf-corner vf-bl"></span>
+    <span class="vf-corner vf-br"></span>
+    <div class="vf-telemetry vf-bottom-left">
+      <span class="rec-dot"></span>
+      <span id="hud-scene">SCENE 01 · WIDE</span>
+      <span class="vf-sep">/</span>
+      <span id="hud-lens">24mm</span>
+    </div>
+    <div class="vf-telemetry vf-bottom-right">
+      <span id="hud-tc">TC 00:00:00:00</span>
+      <span class="vf-sep">/</span>
+      <span id="hud-ratio">16:9</span>
+    </div>
+  </div>
+
+  <!-- Top Navigation -->
+  <header class="top-nav" id="top-nav">
+    <div class="nav-inner">
+      <a class="brand" href="#hero" aria-label="Open Storyboard Canvas Home">
+        <img src="assets/brand/open-storyboard-canvas-icon.png" alt="" class="brand-icon" />
+        <div class="brand-text">
+          <span class="brand-title">Open Storyboard Canvas</span>
+          <span class="brand-sub" data-i18n="brandSub">开源画布 · v0.2.2</span>
+        </div>
+      </a>
+
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#cinema-sequence" data-i18n="navWorkflow">创作链路</a>
+        <a href="#stage-playground" data-i18n="navPlayground">3D 运镜试玩</a>
+        <a href="#features" data-i18n="navFeatures">核心能力</a>
+        <a href="#gallery" data-i18n="navGallery">实机画面</a>
+        <a href="#download" data-i18n="navDownload">下载</a>
+      </nav>
+
+      <div class="nav-actions">
+        <button class="icon-btn" id="scope-toggle" type="button" aria-pressed="false" title="切换 2.39:1 宽银幕遮幅">
+          <span>2.39:1</span>
+        </button>
+        <button class="icon-btn" id="lang-toggle" type="button" aria-label="Switch language">
+          <span id="lang-label">EN</span>
+        </button>
+        <a class="btn-nav-github" href="https://github.com/ganbo-gab/open-storyboard-canvas" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.17 1.18a10.98 10.98 0 0 1 5.77 0c2.2-1.49 3.16-1.18 3.16-1.18.63 1.58.24 2.75.12 3.04.74.8 1.18 1.83 1.18 3.08 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.06.78 2.14 0 1.55-.01 2.8-.01 3.18 0 .31.21.68.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content">
+    <!-- =====================================================
+         HERO: Opening Camera Push-In + Real Product Showcase
+    ====================================================== -->
+    <section class="hero" id="hero">
+      <canvas id="hero-canvas" aria-hidden="true"></canvas>
+      <div class="hero-vignette" aria-hidden="true"></div>
+
+      <div class="hero-content">
+        <div class="hero-copy">
+          <div class="hero-eyebrow hero-enter">
+            <span class="eyebrow-dot"></span>
+            <span data-i18n="heroBadge">本地优先 · MIT 开源 · macOS &amp; Windows</span>
+          </div>
+
+          <h1 class="hero-title hero-enter">
+            <span class="line-plain" data-i18n="heroTitle1">节点画布与三维导演台</span>
+            <span class="line-gradient" data-i18n="heroTitle2">装进同一个本地桌面</span>
+          </h1>
+
+          <p class="hero-desc hero-enter" data-i18n="heroDesc">
+            在工作台试完模型，直接拉进节点画布组合迭代；需要定构图和人物走位，切进三维预演台拍四视图送回画布。项目、历史与素材默认存在你自己的硬盘里。
+          </p>
+
+          <div class="hero-ctas hero-enter">
+            <a class="btn btn-primary" id="hero-download-btn" href="https://github.com/ganbo-gab/open-storyboard-canvas/releases/latest" target="_blank" rel="noopener noreferrer">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+              <span id="hero-download-label" data-i18n="heroCtaDownload">下载 v0.2.2 安装包</span>
+            </a>
+            <a class="btn btn-secondary" href="#stage-playground">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span data-i18n="heroCtaTry">试玩 3D 运镜</span>
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/ganbo-gab/open-storyboard-canvas" target="_blank" rel="noopener noreferrer">
+              <span data-i18n="heroCtaStar">源码仓库</span>
+              <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+
+          <p class="hero-foot-note hero-enter" data-i18n="heroFootNote">
+            基于 Tauri 2、React 19、TypeScript、Rust 与 Three.js · 支持多模型中转站、ComfyUI 与即梦 CLI
+          </p>
+        </div>
+
+        <!-- Clean, Full-Focus Product Frame -->
+        <div class="hero-stage-wrap hero-enter" id="hero-tilt-wrap">
+          <div class="hero-stage-card" id="hero-tilt-card">
+            <div class="stage-chrome">
+              <div class="chrome-dots" aria-hidden="true">
+                <span class="c-dot r"></span>
+                <span class="c-dot y"></span>
+                <span class="c-dot g"></span>
+              </div>
+              <div class="chrome-title">
+                <span class="rec-pill">● 3D PREVIS → CANVAS</span>
+                <span>Open Storyboard Canvas</span>
+              </div>
+              <button class="chrome-expand" type="button" data-lightbox-src="assets/media/stage-canvas.gif" data-lightbox-caption="桌面实机演示：三维预演台播放人物路线与动作 → 拍摄四视图 → 查看器核对 → 回流节点画布并保留来源连线" aria-label="全屏查看演示">
+                ⤢
+              </button>
+            </div>
+            <div class="stage-viewport">
+              <img src="assets/media/stage-canvas.gif" alt="Open Storyboard Canvas 三维预演台播放走位、四视图取景并回流节点画布演示" class="stage-media" />
+            </div>
+            <div class="stage-caption-bar">
+              <span class="mono-mini" data-i18n="heroShotNote">看懂这张画面：预演台拍出四视图，直接连回画布节点</span>
+              <span class="mono-mini accent">v0.2.2</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <a class="scroll-cue" href="#cinema-sequence" aria-label="向下滚动浏览创作链路">
+        <span data-i18n="scrollCue">向下滚动 · 按镜头浏览完整流程</span>
+        <span class="scroll-line"></span>
+      </a>
+    </section>
+
+    <!-- =====================================================
+         GSAP SCROLLTRIGGER: 4-ACT CINEMA CAMERA SEQUENCE
+    ====================================================== -->
+    <section class="cinema-sequence" id="cinema-sequence">
+      <div class="cinema-pinned" id="cinema-pinned">
+        <div class="cinema-header">
+          <div>
+            <span class="section-tag">01 — WORKFLOW SEQUENCE</span>
+            <h2 class="section-title" data-i18n="seqTitle">顺着一条镜头，看完创作全流程</h2>
+          </div>
+          <div class="camera-rig-readout" aria-live="polite">
+            <div class="rig-item">
+              <span class="rig-k">CAMERA</span>
+              <span class="rig-v" id="rig-move">DOLLY IN</span>
+            </div>
+            <div class="rig-item">
+              <span class="rig-k">LENS</span>
+              <span class="rig-v" id="rig-focal">24mm</span>
+            </div>
+            <div class="rig-item">
+              <span class="rig-k">SHOT</span>
+              <span class="rig-v" id="rig-act">01 / 04</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="cinema-grid">
+          <!-- Left: Synchronized Storyboard Beat Panel -->
+          <div class="cinema-beats">
+            <article class="beat-card is-active" data-act="0">
+              <div class="beat-index" data-i18n="act1Tag">SHOT 01 · 24mm 推轨进入</div>
+              <h3 data-i18n="act1Title">生成工作台：先试出满意的底图与素材</h3>
+              <p data-i18n="act1Desc">
+                图片、视频、音频和文本对话都在同一个工作台里。输入区打 <code>@</code> 引用素材，打 <code>/</code> 选预设；每次提交都记下当时的模型、参数和原任务 ID，查旧结果不会误点重扣费。
+              </p>
+              <ul class="beat-points">
+                <li data-i18n="act1P1">尺寸支持像素与“比例 + 分辨率”切换，底层仍按渠道真实值提交</li>
+                <li data-i18n="act1P2">同一批多张结果可直接对比、下载、设为参考或送进画布</li>
+              </ul>
+            </article>
+
+            <article class="beat-card" data-act="1">
+              <div class="beat-index" data-i18n="act2Tag">SHOT 02 · 35mm 水平横摇</div>
+              <h3 data-i18n="act2Title">无限节点画布：把零散结果接成工作流</h3>
+              <p data-i18n="act2Desc">
+                把文本、参考图、生成、分镜、全景和导演台节点连起来持续迭代。独立摄像机弹窗可调机身、焦距和光圈，不随画布缩放；裁剪标注后存成新副本，保留原图和来源连线。
+              </p>
+              <ul class="beat-points">
+                <li data-i18n="act2P1">鼠标左/中/右键共 9 项操作独立可配，提供左拖平移推荐预设</li>
+                <li data-i18n="act2P2">大画布做过视口裁剪与矢量连线缓存，缩放拖动更跟手</li>
+              </ul>
+            </article>
+
+            <article class="beat-card" data-act="2">
+              <div class="beat-index" data-i18n="act3Tag">SHOT 03 · 50mm 三维环绕</div>
+              <h3 data-i18n="act3Title">三维导演台与预演台：把机位和走位摆明白</h3>
+              <p data-i18n="act3Desc">
+                在三维空间或全景背景里放人物、道具、灯光和摄影机，在地面直接画走位路线、在时间轴调关键帧。随时拍单张或四视图送回画布，也支持用实验性舞台 Agent 搭出可编辑草稿。
+              </p>
+              <ul class="beat-points">
+                <li data-i18n="act3P1">摄影机支持跟随人物、看向固定点与自由旋转</li>
+                <li data-i18n="act3P2">支持 GLB/glTF 导入、录制以及按渠道能力调用图生 3D</li>
+              </ul>
+            </article>
+
+            <article class="beat-card" data-act="3">
+              <div class="beat-index" data-i18n="act4Tag">SHOT 04 · 85mm 焦点锁定</div>
+              <h3 data-i18n="act4Title">三端 Agent 与多模型渠道：可控、可查、不盲跑</h3>
+              <p data-i18n="act4Desc">
+                首页、画布和舞台各自带一个懂当前上下文的助手，支持请求确认、辅助执行、完全执行三种权限。渠道同时管单模型、中转站、ComfyUI 和即梦 CLI，API Key 交给系统钥匙串独立保管。
+              </p>
+              <ul class="beat-points">
+                <li data-i18n="act4P1">单回合 96 次调用 / 30 分钟保护，出错可续接，不乱重发付费任务</li>
+                <li data-i18n="act4P2">支持挂载本地 Markdown / Obsidian 目录当项目知识库</li>
+              </ul>
+            </article>
+          </div>
+
+          <!-- Right: 3D Camera-Driven Stage Monitor -->
+          <div class="cinema-viewport-shell">
+            <div class="cinema-stage-3d" id="cinema-stage-3d">
+              <div class="cinema-frame is-active" data-frame="0">
+                <img src="assets/media/workbench-trace.gif" alt="生成工作台操作演示" loading="lazy" />
+                <div class="frame-badge">01 · WORKBENCH</div>
+              </div>
+              <div class="cinema-frame" data-frame="1">
+                <img src="assets/media/canvas-tools-repaired.gif" alt="节点画布工具栏演示" loading="lazy" />
+                <div class="frame-badge">02 · NODE CANVAS</div>
+              </div>
+              <div class="cinema-frame" data-frame="2">
+                <img src="assets/media/stage-agent-user-test.png" alt="2026-11-07 舞台 Agent 实测截图" loading="lazy" />
+                <div class="frame-badge">03 · 3D DIRECTOR STAGE</div>
+              </div>
+              <div class="cinema-frame" data-frame="3">
+                <img src="assets/media/agent-approval.gif" alt="Agent 审批卡演示" loading="lazy" />
+                <div class="frame-badge">04 · SCOPED AGENTS</div>
+              </div>
+
+              <!-- Subtle Rule-of-Thirds Guides -->
+              <div class="monitor-hud" aria-hidden="true">
+                <span class="mh-crosshair"></span>
+                <span class="mh-grid-v1"></span>
+                <span class="mh-grid-v2"></span>
+                <span class="mh-grid-h1"></span>
+                <span class="mh-grid-h2"></span>
+              </div>
+            </div>
+
+            <!-- Interactive Timeline Scrub Bar -->
+            <div class="cinema-timeline">
+              <div class="timeline-track">
+                <div class="timeline-progress" id="timeline-progress"></div>
+              </div>
+              <div class="timeline-tabs" role="tablist" aria-label="切换镜头段落">
+                <button class="tl-tab is-active" type="button" role="tab" aria-selected="true" data-jump-act="0">
+                  <span class="tl-num">01</span>
+                  <span data-i18n="tab1">生成工作台</span>
+                </button>
+                <button class="tl-tab" type="button" role="tab" aria-selected="false" data-jump-act="1">
+                  <span class="tl-num">02</span>
+                  <span data-i18n="tab2">节点画布</span>
+                </button>
+                <button class="tl-tab" type="button" role="tab" aria-selected="false" data-jump-act="2">
+                  <span class="tl-num">03</span>
+                  <span data-i18n="tab3">三维导演台</span>
+                </button>
+                <button class="tl-tab" type="button" role="tab" aria-selected="false" data-jump-act="3">
+                  <span class="tl-num">04</span>
+                  <span data-i18n="tab4">Agent 与渠道</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =====================================================
+         INTERACTIVE 3D DIRECTOR CAMERA RIG PLAYGROUND
+    ====================================================== -->
+    <section class="playground-section" id="stage-playground">
+      <div class="container">
+        <div class="section-head split">
+          <div>
+            <span class="section-tag">02 — INTERACTIVE 3D PREVIS</span>
+            <h2 class="section-title" data-i18n="playTitle">先在这里试一下导演台的运镜与机位</h2>
+            <p class="section-sub" data-i18n="playSub">
+              左键拖动就能环绕舞台，滚轮缩放焦距；点右侧 5 种经典机位，虚拟摄影机会沿着轨道飞过去，右下角画中画同步显示镜头拍到的构图。
+            </p>
+          </div>
+          <div class="play-presets" role="group" aria-label="切换摄影机运镜预设">
+            <button class="preset-btn is-active" type="button" data-cam-preset="wide" data-i18n="camWide">24mm 建立广角</button>
+            <button class="preset-btn" type="button" data-cam-preset="dolly" data-i18n="camDolly">50mm 推轨特写</button>
+            <button class="preset-btn" type="button" data-cam-preset="orbit" data-i18n="camOrbit">360° 环绕运镜</button>
+            <button class="preset-btn" type="button" data-cam-preset="crane" data-i18n="camCrane">摇臂俯拍</button>
+            <button class="preset-btn" type="button" data-cam-preset="fourview" data-i18n="camFour">四视图连拍</button>
+          </div>
+        </div>
+
+        <div class="playground-shell">
+          <div class="playground-canvas-wrap">
+            <canvas id="director-stage-canvas" aria-label="交互式三维导演台运镜画布"></canvas>
+            <div class="stage-overlay-top">
+              <span class="stage-pill" data-i18n="stageDragHint">拖动环绕 · 滚轮推拉</span>
+              <span class="stage-pill accent" id="play-status">24mm · 建立广角</span>
+            </div>
+            <div class="stage-overlay-bottom">
+              <button class="play-ctrl-btn" id="play-toggle-motion" type="button">
+                <span id="play-motion-icon">⏸</span>
+                <span id="play-motion-text" data-i18n="playPause">暂停走位</span>
+              </button>
+              <div class="play-scrub">
+                <span class="mono-mini" id="play-time-label">00.0s / 12.0s</span>
+                <input type="range" id="play-timeline-slider" min="0" max="1000" value="0" aria-label="拖动预演时间轴" />
+              </div>
+            </div>
+          </div>
+
+          <aside class="playground-inspector">
+            <div class="pip-card">
+              <div class="pip-header">
+                <span class="rec-dot"></span>
+                <span data-i18n="pipTitle">机位画中画 · LIVE LENS</span>
+                <span class="mono-mini" id="pip-focal">24mm</span>
+              </div>
+              <canvas id="director-pip-canvas" width="320" height="180" aria-label="摄影机实时取景画面"></canvas>
+              <div class="pip-footer">
+                <span id="pip-angle">AZ 38° · EL 24°</span>
+                <span id="pip-target">LOCK: ACTOR A/B</span>
+              </div>
+            </div>
+
+            <div class="inspector-metrics">
+              <div class="metric-row">
+                <span class="m-label" data-i18n="mExplainLabel">看懂这张图</span>
+                <span class="m-val" data-i18n="mExplainVal">青色视锥体代表虚拟摄影机，虚线是人物 12 秒相遇走位，点击“四视图连拍”可看到多机位轮切。</span>
+              </div>
+              <div class="metric-row">
+                <span class="m-label" data-i18n="mExport">桌面端联动</span>
+                <span class="m-val" data-i18n="mExportVal">真实桌面版基于 Three.js，支持 GLB 导入、全景背景、关键帧录制，并直接把四视图送回节点画布。</span>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- =====================================================
+         CORE CAPABILITIES (CLEAN 5-MODULE MATRIX)
+    ====================================================== -->
+    <section class="features-section" id="features">
+      <div class="container">
+        <div class="section-head">
+          <span class="section-tag">03 — CORE CAPABILITIES</span>
+          <h2 class="section-title" data-i18n="featTitle">五大模块，全部按真实桌面源码整理</h2>
+          <p class="section-sub" data-i18n="featSub">
+            不夸大、不画饼，以下每一项能力都对应当前 v0.2.2 仓库里的实际功能。
+          </p>
+        </div>
+
+        <div class="bento-grid">
+          <article class="bento-card span-2 spotlight">
+            <div class="bento-kicker">01 · GENERATION WORKBENCH</div>
+            <h3 data-i18n="f1Title">生成工作台与历史追溯</h3>
+            <p data-i18n="f1Desc">
+              图像、视频、音频和文本对话集中在同一工作台。按创作会话归档，支持 <code>@</code> 引用素材与 <code>/</code> 预设；任务中心分开展示进行中与异常暂停项，查询原任务与再次生成严格隔离。
+            </p>
+            <div class="bento-tags">
+              <span>Multimodal Sessions</span>
+              <span>Ratio + Resolution</span>
+              <span>Original Task Polling</span>
+            </div>
+          </article>
+
+          <article class="bento-card spotlight">
+            <div class="bento-kicker">02 · INFINITE CANVAS</div>
+            <h3 data-i18n="f2Title">无限节点画布</h3>
+            <p data-i18n="f2Desc">
+              文本、媒体、生成、分镜、全景与导演台节点自由连接；独立摄像机弹窗、9 项鼠标键位自定义，图片与音视频编辑均存衍生副本并保留来源连线。
+            </p>
+            <div class="bento-tags">
+              <span>React Flow</span>
+              <span>Camera Modal</span>
+              <span>9-Way Mouse</span>
+            </div>
+          </article>
+
+          <article class="bento-card spotlight">
+            <div class="bento-kicker">03 · 3D DIRECTOR STUDIO</div>
+            <h3 data-i18n="f3Title">三维导演台与预演台</h3>
+            <p data-i18n="f3Desc">
+              在 3D 场景或全景背景里摆人物、道具、灯光与机位，画路线调关键帧；拍单张或四视图直接送回画布，并支持实验性舞台 Agent 搭建可编辑草稿。
+            </p>
+            <div class="bento-tags">
+              <span>Three.js</span>
+              <span>4-View Capture</span>
+              <span>GLB / glTF</span>
+            </div>
+          </article>
+
+          <article class="bento-card span-2 spotlight">
+            <div class="bento-kicker">04 · SCOPED AGENTS &amp; KNOWLEDGE</div>
+            <h3 data-i18n="f4Title">首页 / 画布 / 舞台三端 Agent 与本地知识库</h3>
+            <p data-i18n="f4Desc">
+              三个入口各自读取当前页面上下文，提供请求确认、辅助执行和完全执行三种模式；共享 96 次调用 / 30 分钟保护、失败续接与脱敏统计，不开放任意系统命令。可直接挂本地 Markdown / Obsidian 目录检索笔记。
+            </p>
+            <div class="bento-tags">
+              <span>Approval Cards</span>
+              <span>4 API Protocols</span>
+              <span>Obsidian Compatible</span>
+              <span>Sandboxed Tools</span>
+            </div>
+          </article>
+
+          <article class="bento-card span-3 spotlight wide-card">
+            <div class="wide-left">
+              <div class="bento-kicker">05 · CHANNELS &amp; CREDENTIAL ISOLATION</div>
+              <h3 data-i18n="f5Title">单模型、综合中转站与 ComfyUI 统一接入</h3>
+              <p data-i18n="f5Desc">
+                支持协议模板、让 AI 读接口文档生成配置、或直接粘贴配置 JSON；免费拉取模型列表与计费试运行严格分开，支持批量“统一配置”、ComfyUI 多工作流 AI 绑定分析与 Dreamina（即梦）CLI。所有 API Key 单独保存在 macOS 系统钥匙串或 Windows 凭据管理器里。
+              </p>
+            </div>
+            <div class="wide-right">
+              <div class="stack-pill-grid">
+                <div class="stack-pill"><strong>Chat / Responses</strong><span>OpenAI &amp; Relays</span></div>
+                <div class="stack-pill"><strong>Anthropic / Gemini</strong><span>Tool Calling Ready</span></div>
+                <div class="stack-pill"><strong>ComfyUI</strong><span>Multi-Workflow AI Bind</span></div>
+                <div class="stack-pill"><strong>Dreamina CLI</strong><span>Dedicated Support</span></div>
+                <div class="stack-pill"><strong>OS Keyring</strong><span>Keychain / Cred Manager</span></div>
+                <div class="stack-pill"><strong>Audio &amp; Custom Host</strong><span>Unified Schema</span></div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- =====================================================
+         REAL SCREENSHOT & GIF GALLERY (WITH LIGHTBOX)
+    ====================================================== -->
+    <section class="gallery-section" id="gallery">
+      <div class="container">
+        <div class="section-head split">
+          <div>
+            <span class="section-tag">04 — REAL FOOTAGE</span>
+            <h2 class="section-title" data-i18n="galTitle">桌面端真实画面</h2>
+            <p class="section-sub" data-i18n="galSub">
+              点击任意卡片打开大图查看器，按 Esc 或点空白处关闭。演示使用本地测试素材与模拟接口，用于展示真实界面与操作流程。
+            </p>
+          </div>
+          <div class="gallery-filters" role="tablist" aria-label="筛选演示类型">
+            <button class="filter-btn is-active" type="button" data-filter="all" data-i18n="galAll">全部</button>
+            <button class="filter-btn" type="button" data-filter="gif" data-i18n="galGif">操作动图</button>
+            <button class="filter-btn" type="button" data-filter="static" data-i18n="galStatic">静态界面</button>
+          </div>
+        </div>
+
+        <div class="gallery-grid" id="gallery-grid">
+          <button class="gallery-card" type="button" data-kind="gif" data-lightbox-src="assets/media/channels-models.gif" data-lightbox-caption="渠道与模型广场：按类别筛选、卡片/列表切换并展开模型支持的参数槽位">
+            <div class="gal-thumb">
+              <img src="assets/media/channels-models.gif" alt="渠道与模型广场演示" loading="lazy" />
+              <span class="gal-badge">GIF</span>
+            </div>
+            <div class="gal-meta">
+              <strong data-i18n="g1T">渠道与模型广场</strong>
+              <span data-i18n="g1D">按模态筛选、切换视图、查看参数槽位</span>
+            </div>
+          </button>
+
+          <button class="gallery-card" type="button" data-kind="gif" data-lightbox-src="assets/media/workbench-trace.gif" data-lightbox-caption="生成工作台：输入参数、查看多张结果并打开当次提交详情追溯提示词与模型">
+            <div class="gal-thumb">
+              <img src="assets/media/workbench-trace.gif" alt="生成工作台历史追溯演示" loading="lazy" />
+              <span class="gal-badge">GIF</span>
+            </div>
+            <div class="gal-meta">
+              <strong data-i18n="g2T">工作台生成与追溯</strong>
+              <span data-i18n="g2D">保留提交模型、参数与原任务快照</span>
+            </div>
+          </button>
+
+          <button class="gallery-card" type="button" data-kind="gif" data-lightbox-src="assets/media/agent-approval.gif" data-lightbox-caption="Agent 审批流程：先看清助手准备调用的工具与参数，再决定批准或拒绝">
+            <div class="gal-thumb">
+              <img src="assets/media/agent-approval.gif" alt="Agent 审批卡演示" loading="lazy" />
+              <span class="gal-badge">GIF</span>
+            </div>
+            <div class="gal-meta">
+              <strong data-i18n="g3T">Agent 审批与权限</strong>
+              <span data-i18n="g3D">先看清工具操作，再点批准或拒绝</span>
+            </div>
+          </button>
+
+          <button class="gallery-card" type="button" data-kind="gif" data-lightbox-src="assets/media/workspace-width-project.gif" data-lightbox-caption="工作区自由调节：拖动分隔线改侧栏宽度、双击复位并切换会话关联项目">
+            <div class="gal-thumb">
+              <img src="assets/media/workspace-width-project.gif" alt="工作区宽度调整与项目归属演示" loading="lazy" />
+              <span class="gal-badge">GIF</span>
+            </div>
+            <div class="gal-meta">
+              <strong data-i18n="g4T">可调工作区与项目归属</strong>
+              <span data-i18n="g4D">分隔线拖宽、双击复位并记住尺寸</span>
+            </div>
+          </button>
+
+          <button class="gallery-card" type="button" data-kind="static" data-lightbox-src="assets/media/stage-agent-user-test.png" data-lightbox-caption="2026-11-07 舞台 Agent 用户实测截图：建筑场景、双人相遇、15 秒时间轴与多段镜头编排（实验功能，不代表每次都能复现相同效果）">
+            <div class="gal-thumb">
+              <img src="assets/media/stage-agent-user-test.png" alt="舞台 Agent 实际测试截图" loading="lazy" />
+              <span class="gal-badge static">PNG</span>
+            </div>
+            <div class="gal-meta">
+              <strong data-i18n="g5T">舞台 Agent 实测（实验中）</strong>
+              <span data-i18n="g5D">2026-11-07 实测：建筑与 15 秒镜头编排</span>
+            </div>
+          </button>
+
+          <button class="gallery-card" type="button" data-kind="static" data-lightbox-src="assets/media/stage.png" data-lightbox-caption="预演台界面：人物走位路线、相对跟踪摄影机画中画与时间轴关键帧">
+            <div class="gal-thumb">
+              <img src="assets/media/stage.png" alt="三维预演台与时间轴截图" loading="lazy" />
+              <span class="gal-badge static">PNG</span>
+            </div>
+            <div class="gal-meta">
+              <strong data-i18n="g6T">预演台与时间轴</strong>
+              <span data-i18n="g6D">地面路径、机位跟踪与实时画中画</span>
+            </div>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- =====================================================
+         SMART DOWNLOAD & HONEST BOUNDARIES
+    ====================================================== -->
+    <section class="download-section" id="download">
+      <div class="container">
+        <div class="download-panel spotlight">
+          <div class="download-left">
+            <span class="section-tag">05 — DOWNLOAD v0.2.2</span>
+            <h2 class="section-title" data-i18n="dlTitle">下载桌面版，免费开源</h2>
+            <p class="section-sub" data-i18n="dlSub">
+              已自动识别你的系统并高亮推荐安装包；桌面安装程序统一从 GitHub Releases 下载。
+            </p>
+
+            <div class="dl-cards">
+              <a class="dl-card" id="dl-mac" href="https://github.com/ganbo-gab/open-storyboard-canvas/releases/latest" target="_blank" rel="noopener noreferrer">
+                <div class="dl-os">
+                  <span class="os-name">macOS</span>
+                  <span class="os-badge" id="badge-mac" data-i18n="osUniversal">Apple Silicon &amp; Intel</span>
+                </div>
+                <div class="dl-file">open-storyboard-canvas_0.2.2_universal.dmg</div>
+                <div class="dl-hint" data-i18n="macHint">macOS 11.0+ · 首次打开若被系统拦截，请在“隐私与安全性”允许打开</div>
+              </a>
+
+              <a class="dl-card" id="dl-win" href="https://github.com/ganbo-gab/open-storyboard-canvas/releases/latest" target="_blank" rel="noopener noreferrer">
+                <div class="dl-os">
+                  <span class="os-name">Windows</span>
+                  <span class="os-badge" id="badge-win">x64 Setup</span>
+                </div>
+                <div class="dl-file">open-storyboard-canvas_0.2.2_x64-setup.exe</div>
+                <div class="dl-hint" data-i18n="winHint">Windows x64 · 如提示缺少 WebView 请安装 Edge WebView2 Runtime</div>
+              </a>
+            </div>
+
+            <div class="dl-secondary-row">
+              <a class="text-link" href="https://github.com/ganbo-gab/open-storyboard-canvas/releases" target="_blank" rel="noopener noreferrer" data-i18n="dlAllReleases">全部版本与更新日志 ↗</a>
+              <span class="dot-sep">·</span>
+              <a class="text-link" href="https://github.com/ganbo-gab/open-storyboard-canvas/blob/main/README.md" target="_blank" rel="noopener noreferrer" data-i18n="dlDocs">完整使用文档 ↗</a>
+              <span class="dot-sep">·</span>
+              <a class="text-link" href="https://github.com/ganbo-gab/open-storyboard-canvas/discussions" target="_blank" rel="noopener noreferrer">GitHub Discussions ↗</a>
+            </div>
+          </div>
+
+          <div class="download-right">
+            <div class="honest-box">
+              <h3 data-i18n="honestTitle">先说在前面的边界</h3>
+              <ul>
+                <li data-i18n="honest1"><strong>macOS 签名：</strong>目前是临时签名，更新版本后钥匙串可能再次要求确认，不承诺零弹窗。</li>
+                <li data-i18n="honest2"><strong>实验功能：</strong>内置 Agent 与舞台 Agent 仍在持续打磨，不同中转站协议与复杂编排可能遇到兼容问题。</li>
+                <li data-i18n="honest3"><strong>数据与费用：</strong>项目与素材存在本机；生成请求按你的配置发往第三方供应商或本地工具，费用以供应商为准。</li>
+              </ul>
+              <div class="qq-box">
+                <div>
+                  <span class="qq-label" data-i18n="qqLabel">中文交流与反馈 QQ 群</span>
+                  <strong class="qq-num">1025837759</strong>
+                </div>
+                <button class="copy-qq-btn" id="copy-qq-btn" type="button" data-i18n="copyQq">复制群号</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="assets/brand/open-storyboard-canvas-icon.png" alt="" width="34" height="34" />
+        <div>
+          <strong>Open Storyboard Canvas</strong>
+          <p data-i18n="footerAttr">
+            基于 <a href="https://github.com/henjicc/Storyboard-Copilot" target="_blank" rel="noopener noreferrer">henjicc / 痕继痕迹 — Storyboard-Copilot</a> 获书面授权二次开发 · 新增代码按 MIT License 开源。
+          </p>
+        </div>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/ganbo-gab/open-storyboard-canvas" target="_blank" rel="noopener noreferrer">Repository</a>
+        <a href="https://github.com/ganbo-gab/open-storyboard-canvas/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+        <a href="https://github.com/ganbo-gab/open-storyboard-canvas/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
+        <a href="https://github.com/ganbo-gab/open-storyboard-canvas/blob/main/SECURITY.md" target="_blank" rel="noopener noreferrer">Security</a>
+        <a href="https://github.com/ganbo-gab/open-storyboard-canvas/blob/main/NOTICE" target="_blank" rel="noopener noreferrer">NOTICE</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Unified Media Viewer Lightbox -->
+  <div class="lightbox" id="lightbox" hidden aria-modal="true" role="dialog" aria-label="媒体预览">
+    <div class="lightbox-backdrop" id="lightbox-backdrop"></div>
+    <div class="lightbox-dialog">
+      <button class="lightbox-close" id="lightbox-close" type="button" aria-label="关闭预览">✕</button>
+      <img id="lightbox-img" alt="" />
+      <div class="lightbox-caption" id="lightbox-caption"></div>
+    </div>
+  </div>
+
+  <!-- GSAP 3 + ScrollTrigger (with graceful native fallback if offline) -->
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.7/dist/gsap.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.7/dist/ScrollTrigger.min.js" defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
